@@ -1,0 +1,440 @@
+/* ═══════════════════════════════════════════════════════════
+   Talent Pool — Agent template library panel + tree + dialogs
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Overlay ── */
+.tp-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 500;
+}
+
+/* ── Panel (right drawer) ── */
+.tp-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 320px;
+  height: 100%;
+  background: var(--color-surface);
+  border-left: 1px solid var(--color-bubble-sent);
+  z-index: 501;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.25s ease;
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.3);
+}
+
+.tp-panel.tp-open {
+  transform: translateX(0);
+}
+
+/* ── Header ── */
+.tp-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--color-bubble-sent);
+  flex-shrink: 0;
+}
+
+.tp-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.tp-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.tp-close-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-tertiary);
+  font-size: 22px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.tp-close-btn:hover {
+  color: var(--color-text-primary);
+}
+
+.tp-search {
+  margin-bottom: 8px;
+}
+
+.tp-search-input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--color-bubble-sent);
+  border-radius: 6px;
+  background: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  box-sizing: border-box;
+  outline: none;
+}
+
+.tp-search-input:focus {
+  border-color: var(--color-nav-active);
+}
+
+.tp-add-group-btn {
+  width: 100%;
+  padding: 6px;
+  border: 1px dashed var(--color-text-quaternary);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-info);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.tp-add-group-btn:hover {
+  background: var(--color-info-soft);
+  border-color: var(--color-info);
+}
+
+/* ── Body / Tree ── */
+.tp-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.tp-empty {
+  text-align: center;
+  color: var(--color-text-quaternary);
+  padding: 40px 16px;
+  font-size: 13px;
+}
+
+.tp-empty-small {
+  text-align: center;
+  color: var(--color-text-quaternary);
+  padding: 8px;
+  font-size: 12px;
+}
+
+.tp-tree {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Group ── */
+.tp-group {
+  border-bottom: 1px solid var(--color-bubble-sent);
+}
+
+.tp-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.1s;
+  border-left: 3px solid transparent;
+}
+
+.tp-group-header:hover {
+  background: var(--color-info-soft);
+}
+
+/* Domain group accent colors via data attribute */
+.tp-group[data-domain="se"] .tp-group-header { border-left-color: var(--color-token-system-prompt); }
+.tp-group[data-domain="ds"] .tp-group-header { border-left-color: var(--color-success); }
+.tp-group[data-domain="mkt"] .tp-group-header { border-left-color: var(--color-warning); }
+.tp-group[data-domain="biz"] .tp-group-header { border-left-color: var(--color-info); }
+.tp-group[data-domain="fin"] .tp-group-header { border-left-color: var(--color-success); }
+.tp-group[data-domain="legal"] .tp-group-header { border-left-color: var(--color-token-system-tools); }
+.tp-group[data-domain="edu"] .tp-group-header { border-left-color: var(--color-token-system-prompt); }
+.tp-group[data-domain="creative"] .tp-group-header { border-left-color: var(--color-warning); }
+.tp-group[data-domain="hr"] .tp-group-header { border-left-color: var(--color-info); }
+.tp-group[data-domain="cs"] .tp-group-header { border-left-color: var(--color-success); }
+
+/* Domain colored dot indicator */
+.tp-group-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tp-group-toggle {
+  font-size: 9px;
+  color: var(--color-text-quaternary);
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.tp-group-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.tp-group-name {
+  font-size: 13px;
+  color: var(--color-text-primary);
+  font-weight: 500;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tp-group-count {
+  font-size: 11px;
+  color: var(--color-text-quaternary);
+  background: var(--color-surface-elevated);
+  padding: 1px 7px;
+  border-radius: 10px;
+}
+
+/* ── Group children (expandable) ── */
+.tp-group-children {
+  display: none;
+  padding-bottom: 4px;
+}
+
+.tp-expanded > .tp-group-children {
+  display: block;
+}
+
+/* ── Template item ── */
+.tp-template {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px 6px 38px;
+  cursor: pointer;
+  transition: background 0.1s;
+  border-radius: 4px;
+  margin: 1px 6px;
+}
+
+.tp-template:hover {
+  background: var(--color-info-soft);
+}
+
+.tp-template.tp-selected {
+  background: var(--color-info-soft);
+  outline: 1px solid var(--color-info);
+}
+
+/* Role dot: Manager=purple, Member=blue */
+.tp-tpl-role-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tp-tpl-role-dot.manager { background: #8b5cf6; }
+.tp-tpl-role-dot.member { background: var(--color-info); }
+
+.tp-tpl-name {
+  font-size: 12px;
+  color: var(--color-text-primary);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tp-tpl-stars {
+  font-size: 9px;
+  color: var(--color-warning);
+  flex-shrink: 0;
+  letter-spacing: -1px;
+}
+
+.tp-tpl-role-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--color-info-soft);
+  color: var(--color-info);
+  flex-shrink: 0;
+  font-weight: 500;
+}
+.tp-tpl-role-badge.manager {
+  background: rgba(139, 92, 246, 0.15);
+  color: #a78bfa;
+}
+
+/* ── Footer ── */
+.tp-footer {
+  padding: 10px 16px;
+  border-top: 1px solid var(--color-bubble-sent);
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--color-text-quaternary);
+  flex-shrink: 0;
+}
+
+/* ── Talent Pool button in AgentsPage ── */
+.ag-talent-btn {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  z-index: 100;
+  padding: 6px 12px;
+  border: 1px solid var(--color-bubble-sent);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s;
+}
+
+.ag-talent-btn:hover {
+  background: var(--color-info-soft);
+  border-color: var(--color-info);
+  color: var(--color-text-primary);
+}
+
+.ag-talent-btn.active {
+  background: var(--color-info-soft);
+  border-color: var(--color-info);
+  color: var(--color-info);
+}
+
+/* ── Preview Modal ── */
+.tp-preview-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.tp-preview-modal {
+  background: var(--color-surface);
+  border-radius: 12px;
+  width: 520px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.tp-preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--color-bubble-sent);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.tp-preview-close {
+  background: none;
+  border: none;
+  color: var(--color-text-tertiary);
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.tp-preview-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.tp-preview-section {
+  margin-bottom: 12px;
+}
+
+.tp-preview-section label {
+  display: block;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.tp-preview-section > span {
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+
+.tp-preview-prompt {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-bubble-sent);
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.tp-preview-tag {
+  display: inline-block;
+  padding: 1px 7px;
+  background: var(--color-info-soft);
+  color: var(--color-info);
+  border-radius: 4px;
+  font-size: 11px;
+  margin: 2px 3px 2px 0;
+}
+
+.tp-preview-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tp-preview-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--color-bubble-sent);
+}
+
+.tp-preview-hire-btn {
+  padding: 7px 18px;
+  border: none;
+  border-radius: 6px;
+  background: var(--color-info);
+  color: #000;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.tp-preview-hire-btn:hover {
+  opacity: 0.9;
+}
+
+.tp-preview-close-btn {
+  padding: 7px 18px;
+  border: 1px solid var(--color-bubble-sent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  font-size: 13px;
+}

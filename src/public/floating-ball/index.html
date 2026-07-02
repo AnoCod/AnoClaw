@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=400,height=400">
+<title>AnoClaw</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Satellites fixed to full window, appear on hover -->
+  <div id="satellites" class="satellites"></div>
+
+  <!-- The ball, centered. html is draggable via -webkit-app-region -->
+  <div class="ball-wrap">
+    <div class="ball">
+      <svg class="icon" viewBox="0 0 512 512">
+        <polygon points="370,44 52,460 468,460" fill="#FF2800"/>
+        <polygon points="370,44 52,460 260,460" fill="#FF4422" opacity="0.35"/>
+      </svg>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

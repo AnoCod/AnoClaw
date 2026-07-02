@@ -1,0 +1,29 @@
+{
+  "name": "anoclaw-meeting",
+  "displayName": "Meeting",
+  "version": "4.0.0",
+  "description": "Multi-agent meeting system with LLM orchestration — round-robin/moderator/auto modes, live transcripts, action item extraction, configurable delay, pagination, edit/update",
+  "publisher": "anoclaw",
+  "main": "extension.js",
+  "activationEvents": ["onStartup"],
+  "contributes": {
+    "tools": [{ "name": "LaunchMeeting" }],
+    "pages": [{ "id": "meeting", "title": "Meet", "order": 8, "html": "frontend/index.html" }],
+    "apiRoutes": [
+      { "method": "GET", "path": "/api/v1/meetings" },
+      { "method": "POST", "path": "/api/v1/meetings" },
+      { "method": "GET", "path": "/api/v1/meetings/:id" },
+      { "method": "PUT", "path": "/api/v1/meetings/:id" },
+      { "method": "DELETE", "path": "/api/v1/meetings/:id" },
+      { "method": "POST", "path": "/api/v1/meetings/:id/start" },
+      { "method": "POST", "path": "/api/v1/meetings/:id/stop" },
+      { "method": "GET", "path": "/api/v1/plugins/meeting/agents" },
+      { "method": "GET", "path": "/api/v1/plugins/meeting/diagnose/llm" },
+      { "method": "GET", "path": "/api/v1/meetings/seq" },
+      { "method": "GET", "path": "/api/v1/meetings/templates" },
+      { "method": "GET", "path": "/api/v1/meetings/search" },
+      { "method": "GET", "path": "/api/v1/meetings/:id/export" }
+    ]
+  },
+  "engines": { "anoclaw": ">=2.1.0" }
+}

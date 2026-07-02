@@ -1,0 +1,29 @@
+{
+  "name": "anoclaw-mcp",
+  "displayName": "MCP",
+  "version": "2.1.0",
+  "description": "Model Context Protocol — connect external tools, resources, and prompts from MCP servers. Full spec support with auto-reconnect, health monitoring, and dynamic tool proxy.",
+  "publisher": "anoclaw",
+  "main": "extension.js",
+  "activationEvents": ["onStartup"],
+  "contributes": {
+    "pages": [
+      {
+        "id": "mcp",
+        "title": "MCP",
+        "order": 10,
+        "html": "frontend/index.html"
+      }
+    ],
+    "apiRoutes": [
+      { "method": "GET", "path": "/api/mcp/servers" },
+      { "method": "POST", "path": "/api/mcp/servers" },
+      { "method": "GET", "path": "/api/mcp/servers/:id" },
+      { "method": "DELETE", "path": "/api/mcp/servers/:id" },
+      { "method": "PUT", "path": "/api/mcp/servers/:id" },
+      { "method": "POST", "path": "/api/mcp/servers/:id/reconnect" },
+      { "method": "GET", "path": "/api/mcp/logs" }
+    ]
+  },
+  "engines": { "anoclaw": ">=2.1.0" }
+}

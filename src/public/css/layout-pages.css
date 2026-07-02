@@ -1,0 +1,377 @@
+/* AnoClaw Layout Pages — Overview tab and Plan tab styles.
+   Files tab, file preview, context menu are in layout-page-extras.css. */
+
+/* ============================================================
+   OverviewTab
+   ============================================================ */
+
+.tab-overview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--space-sm) 10px;
+  gap: 10px;
+}
+
+.overview-placeholder {
+  padding: var(--space-lg);
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption-sm);
+}
+
+.tab-overview-section {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-overlay-hover);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+.tab-overview-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 8px;
+}
+
+/* Agent section — more prominent */
+.tab-overview-section.agent-section {
+  border-color: var(--color-hairline);
+  padding: 14px 12px;
+}
+.tab-overview-section.agent-section .tab-overview-label {
+  font-size: 14px;
+  font-weight: 600;
+}
+.tab-overview-section.agent-section .tab-overview-badge {
+  font-size: 11px;
+  padding: 3px 10px;
+}
+
+.tab-overview-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tab-overview-label {
+  font-size: var(--font-size-caption-md);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+.tab-overview-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-md);
+  text-transform: capitalize;
+}
+
+.tab-overview-badge-success {
+  color: var(--color-success);
+  background: var(--color-success-soft);
+}
+
+.tab-overview-badge-error {
+  color: var(--color-error);
+  background: var(--color-error-soft);
+}
+
+.tab-overview-badge-warning {
+  color: var(--color-warning);
+  background: var(--color-warning-soft);
+}
+
+.tab-overview-badge-info {
+  color: #7c3aed;
+  background: rgba(124,58,237,0.15);
+}
+
+.tab-overview-todo-item {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 12px;
+  padding: 3px 0;
+}
+
+.tab-overview-todo-icon {
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+
+.tab-overview-todo-text-completed {
+  color: var(--color-text-primary);
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+.tab-overview-todo-text {
+  color: var(--color-text-primary);
+  line-height: 1.4;
+}
+
+.tab-overview-ref-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.tab-overview-ref-name {
+  flex: 1;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-overview-ref-bar-track {
+  flex: 2;
+  height: 5px;
+  background: var(--color-hairline);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.tab-overview-ref-bar-fill {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.tab-overview-ref-count {
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+  font-size: 11px;
+  min-width: 24px;
+  text-align: right;
+}
+
+.tab-overview-stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.tab-overview-stat-cell {
+  padding: 8px 8px;
+}
+
+.tab-overview-stat-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  line-height: 1.2;
+}
+
+.tab-overview-stat-label {
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-top: 2px;
+}
+
+.tab-overview-skill-tag {
+  font-size: 11px;
+  color: var(--color-text-primary);
+}
+
+.tab-overview-memory-tag {
+  font-size: 11px;
+  color: var(--color-text-primary);
+}
+
+.tab-overview-supervision-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.tab-overview-subsession-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.tab-overview-task-label {
+  font-size: 12px;
+  color: var(--color-text-primary);
+  margin-bottom: 6px;
+}
+
+.tab-overview-progress-track {
+  height: 6px;
+  background: var(--color-hairline);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.tab-overview-progress-fill {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.tab-overview-task-text {
+  font-size: var(--font-size-caption-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-relaxed);
+}
+
+.tab-overview-todo-summary {
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  margin-bottom: 8px;
+}
+
+.tab-overview-session-id {
+  color: var(--color-text-primary);
+  font-size: 11px;
+}
+
+/* ============================================================
+   PlanTab
+   ============================================================ */
+
+.tab-plan {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--space-sm);
+}
+
+.tab-plan-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xl) var(--space-lg);
+  text-align: center;
+  flex: 1;
+}
+.tab-plan-empty-text {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.tab-plan-empty-hint {
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  max-width: 180px;
+}
+
+.tab-plan-header {
+  margin-bottom: var(--space-md);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--color-hairline);
+}
+
+.tab-plan-icon-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-xs);
+}
+
+.tab-plan-title {
+  font-size: var(--font-size-body-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.tab-plan-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.tab-plan-progress-bar {
+  flex: 1;
+  height: 4px;
+  background: var(--color-hairline);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.tab-plan-progress-fill {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.tab-plan-progress-text {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.tab-plan-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tab-plan-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid transparent;
+  transition: background var(--transition-slow);
+}
+
+.tab-plan-step[data-status="in_progress"] {
+  background: rgba(124,58,237,0.08);
+  border-color: rgba(124,58,237,0.2);
+}
+
+.tab-plan-step-icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.tab-plan-step-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.tab-plan-step-number {
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+
+.tab-plan-step-desc {
+  font-size: 12px;
+  color: var(--color-text-primary);
+  line-height: 1.5;
+}
+
+.tab-plan-step-desc-completed {
+  text-decoration: line-through;
+  opacity: 0.45;
+}

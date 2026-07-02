@@ -1,0 +1,1172 @@
+/* AnoClaw Cinema — Sessions page minimalism layout (B direction: Ferrari × Apple) */
+
+/* ========================================
+   Global cinema overrides — zero out old CSS chrome
+   ======================================== */
+
+/* Override old .titlebar class — it's applied to #titlebar from old layout-core.css */
+#app-root #titlebar,
+#titlebar.titlebar,
+#titlebar {
+  height: auto !important;
+  min-height: 0 !important;
+  background: transparent !important;
+  border-bottom: none !important;
+  border: none !important;
+  padding: 0 !important;
+}
+
+/* Undo old .page-container flex row so cinema-page fills viewport naturally.
+   SessionsPage is always visible in #sessions-panel — no :has() gating needed. */
+#sessions-panel {
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+/* ========================================
+   Page canvas — pure black, no chrome
+   ======================================== */
+
+.cinema-page {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  min-height: 0;
+  background: var(--color-cinema-canvas);
+}
+.cinema-page.page-enter {
+  animation: page-enter 0.18s ease forwards;
+}
+
+/* ========================================
+   Left edge bar (48px) — session dots
+   ======================================== */
+
+.cinema-edge-left {
+  width: 48px;
+  min-width: 48px;
+  background: var(--cinema-bg-subtle);
+  border-right: 1px solid var(--hairline-cinema);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 28px;
+  gap: 10px;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.cinema-edge-left .edge-search {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--cinema-bg-search);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--cinema-text-edge);
+  transition: background 0.15s;
+}
+.cinema-edge-left .edge-search:hover {
+  background: rgba(255,255,255,0.14);
+}
+.cinema-edge-left .edge-search.active {
+  color: var(--color-accent-cinema);
+  background: var(--cinema-text-dim);
+}
+
+.cinema-edge-left .edge-label {
+  font-size: 7px;
+  color: var(--cinema-text-welcome-desc);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  transform: rotate(-90deg);
+  margin: 8px 0;
+  white-space: nowrap;
+}
+
+.session-dot {
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+  flex-shrink: 0;
+}
+.session-dot:hover {
+  transform: scale(1.3);
+}
+.session-dot.active {
+  background: var(--color-accent-cinema);
+  box-shadow: 0 0 10px var(--color-accent-cinema-glow);
+}
+.session-dot.child {
+  margin-left: 4px;
+}
+
+.cinema-edge-left .edge-new-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--cinema-text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--cinema-text-muted);
+  cursor: pointer;
+  background: transparent;
+  transition: border-color 0.15s, color 0.15s;
+  margin-top: auto;
+  margin-bottom: 16px;
+}
+.cinema-edge-left .edge-new-btn:hover {
+  border-color: var(--cinema-text-welcome);
+  color: var(--cinema-text-btn);
+}
+
+/* Session tree overlay (hover popup from left bar dots)
+   Positioned dynamically via JS — no hardcoded left/top here. */
+.cinema-tree-overlay {
+  position: fixed;
+  width: 220px;
+  max-height: calc(100vh - 80px);
+  background: var(--cinema-overfly-bg);
+  border: 1px solid var(--hairline-cinema-bar);
+  border-radius: 6px;
+  padding: 8px;
+  overflow-y: auto;
+  z-index: var(--z-tooltip, 1000);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  animation: compaction-fade-in 0.1s ease;
+}
+.cinema-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--cinema-text-overlay);
+  transition: background 0.1s, color 0.1s;
+}
+.cinema-tree-row:hover {
+  background: var(--cinema-bg-hover);
+  color: var(--cinema-text-btn-hover);
+}
+.cinema-tree-row.active {
+  color: var(--cinema-text-btn-strong);
+  background: var(--cinema-bg-active);
+}
+.cinema-tree-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.cinema-tree-del-btn {
+  opacity: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--cinema-text-muted);
+  padding: 2px;
+  margin-left: auto;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+.cinema-tree-row:hover .cinema-tree-del-btn {
+  opacity: 1;
+}
+.cinema-tree-del-btn:hover {
+  color: var(--color-error, #f44747);
+  background: rgba(255,70,70,0.12);
+}
+
+/* ========================================
+   Center column — flow + pinned input
+   ======================================== */
+
+.cinema-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ========================================
+   Conversation flow (center, max 780px)
+   ======================================== */
+
+.cinema-flow {
+  flex: 1;
+  overflow-y: auto;
+  padding: 32px clamp(16px, 5.5vw, 56px) 16px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  min-height: 0;
+}
+.cinema-flow-inner {
+  width: 100%;
+  max-width: 780px;
+}
+
+/* Session header */
+.cinema-session-header {
+  font-size: 9px;
+  color: var(--cinema-text-muted);
+  letter-spacing: 2px;
+  margin-bottom: 32px;
+  display: flex;
+  gap: 16px;
+}
+
+/* User message block */
+.cinema-user-block {
+  margin-bottom: var(--cinema-gap-block, 40px);
+}
+/* Fade-in for message blocks */
+.cinema-user-block,
+.cinema-agent-block,
+.cinema-system-block,
+.cinema-askuser-card,
+.cinema-subsession-line {
+  animation: compaction-fade-in 0.15s ease;
+}
+.cinema-user-text {
+  font-size: var(--font-editorial, 18px);
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: -0.2px;
+  color: var(--cinema-text-primary);
+  margin-bottom: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* System notification — server restart resume, checkpoints */
+.cinema-system-block {
+  margin: 0 auto 32px;
+  max-width: 780px;
+  border: 1px solid var(--hairline-cinema);
+  border-left: 2px solid var(--cinema-text-dim);
+  border-radius: 4px;
+  padding: 12px 16px;
+  background: var(--cinema-bg-card);
+}
+.cinema-system-text {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--cinema-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.cinema-system-text p { margin: 0 0 6px; }
+.cinema-system-text p:last-child { margin-bottom: 0; }
+
+.cinema-label {
+  font-size: 10px;
+  color: var(--cinema-text-muted);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+/* AI reply block */
+.cinema-agent-block {
+  margin: 0 0 var(--cinema-gap-block, 40px) -24px;
+  padding: 0 0 0 24px;
+  border-left: 1px solid var(--hairline-cinema-bar);
+}
+
+/* Think indicator */
+.cinema-think-indicator {
+  font-size: 9px;
+  color: var(--cinema-text-muted);
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.1s ease;
+}
+.cinema-think-indicator:hover {
+  color: var(--cinema-text-tertiary);
+}
+.cinema-pulse-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--cinema-text-welcome);
+  animation: cinema-pulse 2s ease-in-out infinite;
+}
+@keyframes cinema-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+.cinema-think-body {
+  font-size: 12px;
+  color: var(--cinema-text-tertiary);
+  font-style: italic;
+  line-height: 1.6;
+  padding: 8px 0;
+  margin-bottom: 12px;
+  white-space: pre-wrap;
+  border-bottom: 1px solid var(--hairline-cinema);
+}
+
+/* Message body */
+.cinema-message-body {
+  font-size: var(--font-cinema-body, 13px);
+  line-height: 1.7;
+  color: var(--cinema-text-body);
+}
+.cinema-message-body p {
+  margin: 0 0 var(--cinema-gap-para, 20px) 0;
+}
+.cinema-message-body p:last-child {
+  margin-bottom: 0;
+}
+
+/* Tool annotations */
+.cinema-tool-annotations {
+  padding: 8px 0;
+  border-top: 1px solid var(--hairline-cinema);
+  border-bottom: 1px solid var(--hairline-cinema);
+  margin-bottom: 16px;
+}
+.cinema-tool-row {
+  font-size: var(--font-cinema-annotation, 8px);
+  color: var(--cinema-text-muted);
+  letter-spacing: 0.5px;
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
+  align-items: center;
+}
+.cinema-tool-dot {
+  width: 20px;
+  flex-shrink: 0;
+  font-size: 6px;
+}
+.cinema-tool-dot.running { color: var(--color-accent-cinema); }
+.cinema-tool-dot.done { color: var(--color-success); }
+.cinema-tool-dot.error { color: var(--color-error); }
+.cinema-tool-subject {
+  width: 60px;
+  text-transform: uppercase;
+}
+.cinema-tool-name {
+  width: 70px;
+  font-family: var(--font-mono);
+}
+.cinema-tool-scene {
+  width: 60px;
+}
+.cinema-tool-time {
+  opacity: 0.4;
+}
+
+/* Sub-session line */
+.cinema-subsession-line {
+  margin-bottom: var(--cinema-gap-block, 40px);
+  padding: 6px 0;
+  font-size: 10px;
+  color: var(--cinema-text-muted);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.cinema-subsession-line .cinema-label {
+  color: var(--cinema-text-dim);
+}
+
+/* AskUser card (cinema variant) */
+.cinema-askuser-card {
+  margin-bottom: var(--cinema-gap-block, 40px);
+  padding: 20px;
+  border: 1px solid rgba(124,58,237,0.15);
+  border-radius: 4px;
+  background: rgba(124,58,237,0.04);
+}
+.cinema-askuser-card .cinema-label {
+  color: rgba(124,58,237,0.5);
+}
+
+/* ========================================
+   Input area
+   ======================================== */
+
+.cinema-input-area {
+  flex-shrink: 0;
+  padding: 0 clamp(16px, 5.5vw, 56px) 24px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 780px;
+  margin: 0 auto;
+}
+
+.cinema-textarea {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  padding: 12px 0;
+  color: var(--color-text-primary);
+  font-size: 15px;
+  outline: none;
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  letter-spacing: -0.1px;
+  resize: none;
+  transition: border-color 0.3s, opacity 0.15s;
+  flex: none;
+  min-height: 48px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.cinema-textarea:focus {
+  border-bottom-color: var(--color-accent-cinema);
+}
+.cinema-textarea[disabled] {
+  opacity: 0.3;
+  border-bottom-color: transparent;
+}
+
+/* Unified button bar */
+
+.cinema-input-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.cinema-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: transparent;
+  border: 1px solid var(--cinema-bg-search);
+  border-radius: 4px;
+  color: var(--cinema-text-overlay);
+  cursor: pointer;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  flex-shrink: 0;
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.cinema-tool-btn:hover {
+  border-color: var(--cinema-text-muted);
+  color: var(--cinema-text-btn-hover);
+  background: var(--cinema-bg-raised);
+}
+.cinema-tool-btn.is-primary {
+  border-color: var(--cinema-text-muted);
+  color: var(--cinema-text-btn-hover);
+  padding: 6px 20px;
+}
+.cinema-tool-btn.is-primary:hover {
+  border-color: var(--cinema-text-tertiary);
+  color: var(--cinema-text-btn-strong);
+}
+.cinema-tool-btn.is-stop {
+  border-color: var(--color-accent-cinema);
+  color: var(--color-accent-cinema);
+}
+
+/* Active press state for cinema buttons */
+.cinema-tool-btn:active,
+.cinema-btn:active,
+.cinema-edge-icon:active,
+.edge-search:active,
+.edge-new-btn:active {
+  transform: scale(0.97);
+  transition: transform 0.06s ease;
+}
+
+.cinema-edge-right {
+  width: 48px;
+  min-width: 48px;
+  background: var(--cinema-bg-subtle);
+  border-left: 1px solid var(--hairline-cinema);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 28px;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.cinema-edge-icon {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--cinema-text-edge);
+  transition: background 0.1s, color 0.1s;
+  position: relative;
+  background: transparent;
+  border: none;
+}
+.cinema-edge-icon:hover {
+  background: var(--cinema-bg-edge-icon);
+  color: var(--cinema-text-btn);
+}
+.cinema-edge-icon.active {
+  background: var(--color-accent-cinema-subtle);
+  color: var(--color-accent-cinema);
+}
+.cinema-edge-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-accent-cinema);
+  font-size: 6px;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+/* Overfly panel (from right bar) */
+.cinema-overfly {
+  position: fixed;
+  right: 56px;
+  top: 36px;
+  width: 280px;
+  max-height: calc(100vh - 80px);
+  background: var(--cinema-overfly-bg);
+  border: 1px solid var(--hairline-cinema-bar);
+  border-radius: 6px;
+  padding: 12px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  z-index: var(--z-dropdown, 1000);
+  animation: compaction-fade-in 0.15s ease;
+}
+.cinema-overfly-title {
+  font-size: 9px;
+  color: var(--cinema-text-muted);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+.cinema-overfly-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.cinema-overfly-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  cursor: default;
+  border-radius: 3px;
+  transition: background 0.1s;
+}
+.cinema-overfly-row:hover {
+  background: var(--cinema-bg-active);
+}
+
+/* ========================================
+   Top bar (28px, replaces dock)
+   ======================================== */
+
+.topbar-cinema {
+  height: var(--topbar-height, 28px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  background: var(--cinema-bg-card);
+  border-bottom: 1px solid var(--hairline-cinema);
+  flex-shrink: 0;
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: var(--cinema-text-edge);
+  text-transform: uppercase;
+  -webkit-app-region: drag;
+}
+.topbar-cinema .topbar-page-name {
+  color: var(--cinema-text-tertiary);
+}
+.topbar-cinema .topbar-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  -webkit-app-region: no-drag;
+}
+.topbar-cinema .topbar-page-switcher {
+  cursor: pointer;
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  color: var(--cinema-text-muted);
+  background: none;
+  border: none;
+  font-family: var(--font-sans);
+  text-transform: uppercase;
+  transition: color 0.15s;
+  padding: 4px 8px;
+}
+.topbar-cinema .topbar-page-switcher:hover {
+  color: var(--cinema-text-btn);
+}
+
+/* Page switcher dropdown */
+.page-switcher-menu {
+  position: fixed;
+  top: 32px;
+  right: 8px;
+  width: 160px;
+  background: var(--cinema-overfly-bg);
+  border: 1px solid var(--hairline-cinema-bar);
+  border-radius: 6px;
+  padding: 4px;
+  z-index: var(--z-dropdown, 1000);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.page-switcher-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--cinema-text-welcome);
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: var(--font-sans);
+  text-align: left;
+  transition: background 0.1s, color 0.1s;
+}
+.page-switcher-item:hover {
+  background: var(--cinema-bg-hover);
+  color: var(--cinema-text-btn-hover);
+}
+
+.page-switcher-divider {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--cinema-bg-search);
+}
+
+/* Code blocks in cinema flow */
+.cinema-code-block {
+  background: var(--cinema-bg-raised);
+  border: 1px solid var(--hairline-cinema);
+  border-radius: 4px;
+  padding: 12px 14px;
+  margin: 8px 0 16px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--cinema-text-code);
+  white-space: pre;
+}
+.cinema-inline-code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: var(--cinema-text-btn);
+  background: var(--cinema-bg-hover);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+/* ========================================
+   Welcome empty state
+   ======================================== */
+
+.cinema-welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 24px;
+  text-align: center;
+  gap: 12px;
+}
+.cinema-welcome-icon {
+  opacity: 0.08;
+  margin-bottom: 8px;
+}
+.cinema-welcome-title {
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--cinema-text-welcome);
+  letter-spacing: -0.1px;
+}
+.cinema-welcome-desc {
+  font-size: 11px;
+  color: var(--cinema-text-welcome-desc);
+  max-width: 320px;
+  line-height: 1.6;
+}
+
+/* ========================================
+   Cinema static pages (non-Sessions pages)
+   Full-width black canvas with centered content.
+   ======================================== */
+
+.cinema-static-page {
+  flex: 1;
+  background: var(--color-cinema-canvas);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.cinema-static-page .cinema-static-inner {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+/* Cinema form input — underline style shared across all cinema pages */
+.cinema-static-page input[type="text"],
+.cinema-static-page input[type="password"],
+.cinema-static-page input[type="number"],
+.cinema-static-page select,
+.cinema-static-page textarea {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--cinema-bg-search);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  padding: 8px 0;
+  outline: none;
+  transition: border-color 0.2s;
+  width: 100%;
+}
+.cinema-static-page input:focus,
+.cinema-static-page select:focus,
+.cinema-static-page textarea:focus {
+  border-bottom-color: var(--hairline-cinema-focus);
+}
+
+/* Cinema section card */
+.cinema-section {
+  border: 1px solid var(--hairline-cinema);
+  border-radius: 6px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.cinema-section-legend {
+  font-size: 9px;
+  color: var(--cinema-text-muted);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+/* Cinema button variants */
+.cinema-btn {
+  background: transparent;
+  border: 1px solid var(--cinema-text-dim);
+  color: var(--cinema-text-btn);
+  padding: 8px 20px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 1.5px;
+  cursor: pointer;
+  text-transform: uppercase;
+  font-family: var(--font-sans);
+  border-radius: 4px;
+  transition: border-color 0.15s, color 0.15s;
+}
+.cinema-btn:hover {
+  border-color: var(--cinema-text-welcome);
+  color: var(--cinema-text-btn-hover);
+}
+.cinema-btn-primary {
+  border-color: var(--color-accent-cinema);
+  color: var(--color-accent-cinema);
+}
+.cinema-btn-primary:hover {
+  background: var(--color-accent-cinema-subtle);
+}
+
+/* Cinema list item */
+.cinema-list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+  font-size: 12px;
+  color: var(--cinema-text-btn);
+}
+.cinema-list-item:hover {
+  background: var(--cinema-bg-active);
+  color: var(--cinema-text-btn-hover);
+}
+.cinema-list-item.active {
+  color: var(--cinema-text-btn-strong);
+  background: var(--cinema-bg-active);
+}
+
+/* Cinema toggle (replaces old toggle-switch in cinema context) */
+.cinema-toggle {
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--cinema-text-dim);
+  cursor: pointer;
+  position: relative;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+.cinema-toggle.on {
+  background: var(--color-accent-cinema-subtle);
+  border: 1px solid var(--color-accent-cinema);
+}
+.cinema-toggle-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--cinema-thumb-off);
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: left 0.2s, background 0.2s;
+}
+.cinema-toggle.on .cinema-toggle-thumb {
+  left: 18px;
+  background: var(--color-accent-cinema);
+}
+
+/* Cinema filter bar */
+.cinema-filter {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.cinema-filter-input {
+  flex: 1;
+  min-width: 140px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--cinema-bg-edge-icon);
+  color: var(--cinema-text-btn);
+  font-size: 12px;
+  padding: 6px 0;
+  outline: none;
+  font-family: var(--font-sans);
+}
+.cinema-filter-input:focus {
+  border-bottom-color: var(--hairline-cinema-focus);
+}
+.cinema-filter-select {
+  background: var(--cinema-bg-active);
+  border: 1px solid var(--cinema-bg-search);
+  color: var(--cinema-text-overlay);
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: background 0.1s ease, border-color 0.1s ease, color 0.1s ease;
+}
+.cinema-filter-select:hover {
+  background: var(--cinema-bg-hover);
+  border-color: var(--cinema-btn-hover-border);
+  color: var(--cinema-text-btn-hover);
+}
+
+/* Cinema card grid (for Skills, Gateway) */
+.cinema-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.cinema-card {
+  border: 1px solid var(--hairline-cinema);
+  border-radius: 6px;
+  padding: 16px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  background: var(--cinema-bg-card);
+}
+.cinema-card:hover {
+  border-color: var(--cinema-text-dim);
+  background: var(--cinema-bg-card);
+}
+.cinema-card-disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* ========================================
+   Compaction overlay — full-screen blocking animation
+   ======================================== */
+
+.compaction-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog, 10000);
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  animation: compaction-fade-in 0.2s ease;
+  cursor: default;
+}
+
+.compaction-overlay--done {
+  animation: compaction-fade-out 0.4s ease forwards;
+}
+
+@keyframes compaction-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes compaction-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+.compaction-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--hairline-cinema-bar);
+  border-top-color: var(--color-accent-cinema, #fff);
+  border-radius: 50%;
+  animation: compaction-spin 0.8s linear infinite;
+}
+
+@keyframes compaction-spin {
+  to { transform: rotate(360deg); }
+}
+
+.compaction-text {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  letter-spacing: 0.02em;
+}
+
+.compaction-sub {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  text-align: center;
+  max-width: 320px;
+  line-height: 1.5;
+}
+
+/* ========================================
+   Context tooltip popover — token breakdown
+   ======================================== */
+
+.context-tooltip-popover {
+  position: fixed;
+  width: 280px;
+  background: var(--cinema-overfly-bg);
+  border: 1px solid var(--hairline-cinema-bar);
+  border-radius: 8px;
+  padding: 14px;
+  z-index: var(--z-tooltip, 1000);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  pointer-events: auto;
+}
+
+.context-tooltip-popover table {
+  font-size: 11px;
+}
+
+.context-tooltip-popover .context-compact-btn:hover {
+  background: var(--cinema-bg-hover) !important;
+}
+
+/* ========================================
+   Evolution Dashboard — Settings page
+   ======================================== */
+
+.evo-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.evo-stat-card {
+  background: var(--cinema-bg-active);
+  border: 1px solid var(--hairline-cinema);
+  border-radius: 6px;
+  padding: 10px;
+  text-align: center;
+}
+
+.evo-stat-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-cinema-text-primary);
+  line-height: 1.2;
+}
+
+.evo-stat-label {
+  font-size: 9px;
+  color: var(--color-cinema-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 2px;
+}
+
+.evo-tool-table {
+  width: 100%;
+  font-size: 11px;
+  border-collapse: collapse;
+  margin-top: 6px;
+}
+
+.evo-tool-table th {
+  text-align: left;
+  color: var(--color-cinema-text-tertiary);
+  font-weight: 500;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--hairline-cinema);
+}
+
+.evo-tool-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--hairline-cinema-bar);
+  color: var(--color-cinema-text-secondary);
+}
+
+.evo-tool-table tr:hover td {
+  background: var(--cinema-bg-hover);
+}
+
+.evo-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-cinema-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin: 12px 0 6px;
+}
+
+.evo-empty {
+  font-size: 11px;
+  color: var(--color-cinema-text-tertiary);
+  font-style: italic;
+  padding: 4px 0;
+}
+
+.evo-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--hairline-cinema);
+  border-top-color: var(--color-accent-cinema);
+  border-radius: 50%;
+  animation: evo-spin 0.6s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+@keyframes evo-spin {
+  to { transform: rotate(360deg); }
+}
+
+.evo-success-bar {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--cinema-bg-active);
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+.evo-success-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--color-accent-cinema);
+  transition: width 0.3s ease;
+}
+
+/* ========================================
+   Session Tree Tags
+   ======================================== */
+
+.stn-tags {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: 6px;
+  overflow: hidden;
+}
+
+.stn-tag {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.stn-tag--auto {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.stn-tag--user {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.stn-tag-more {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.3);
+}

@@ -1,0 +1,40 @@
+{
+  "name": "anoclaw-comfyui",
+  "displayName": "ComfyUI",
+  "version": "3.0.0",
+  "description": "ComfyUI image generation integration — inspect workflows, generate images (txt2img/img2img), check dependencies, download from GitHub, manage ComfyUI process, WebSocket real-time progress, output gallery, visual frontend",
+  "publisher": "anoclaw",
+  "main": "extension.js",
+  "activationEvents": ["onStartup"],
+  "contributes": {
+    "tools": [
+      { "name": "Comfy" },
+      { "name": "startComfyUI" },
+      { "name": "stopComfyUI" },
+      { "name": "getComfyUIStatus" },
+      { "name": "getQueueStatus" }
+    ],
+    "pages": [
+      { "id": "comfyui", "title": "ComfyUI", "html": "frontend/index.html", "order": 7 }
+    ],
+    "apiRoutes": [
+      { "method": "GET", "path": "/api/v1/plugins/comfyui/image" },
+      { "method": "POST", "path": "/api/v1/plugins/comfyui/process/start" },
+      { "method": "POST", "path": "/api/v1/plugins/comfyui/process/stop" },
+      { "method": "GET", "path": "/api/v1/plugins/comfyui/process/status" },
+      { "method": "GET", "path": "/api/v1/plugins/comfyui/process/logs" },
+      { "method": "GET", "path": "/api/v1/plugins/comfyui/gallery" },
+      { "method": "POST", "path": "/api/v1/plugins/comfyui/upload" }
+    ],
+    "configuration": {
+      "title": "ComfyUI Settings",
+      "properties": {
+        "serverUrl": { "type": "string", "default": "http://127.0.0.1:8188", "description": "ComfyUI server URL" },
+        "pythonPath": { "type": "string", "default": "C:/Users/Administrator/AppData/Local/Programs/Python/Python312/python.exe", "description": "Python executable path" },
+        "comfyDir": { "type": "string", "default": "F:/ComfyUI", "description": "ComfyUI directory" },
+        "timeout": { "type": "number", "default": 300, "description": "Generation timeout in seconds" }
+      }
+    }
+  },
+  "engines": { "anoclaw": ">=2.1.0" }
+}

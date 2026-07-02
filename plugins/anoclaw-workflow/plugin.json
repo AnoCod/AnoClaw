@@ -1,0 +1,24 @@
+{
+  "name": "anoclaw-workflow",
+  "displayName": "Workflow",
+  "version": "3.0.0",
+  "description": "Visual workflow editor and execution engine with 14 node types, node grouping, import/export, search, snap-to-grid, Raycast dark UI, execution status colors, and flow animation",
+  "publisher": "anoclaw",
+  "main": "extension.js",
+  "activationEvents": ["onStartup"],
+  "contributes": {
+    "pages": [{ "id": "workflow", "title": "Workflow", "order": 9, "html": "frontend/index.html" }],
+    "apiRoutes": [
+      { "method": "GET", "path": "/api/v1/workflows" },
+      { "method": "POST", "path": "/api/v1/workflows" },
+      { "method": "GET", "path": "/api/v1/workflows/:id" },
+      { "method": "PUT", "path": "/api/v1/workflows/:id" },
+      { "method": "DELETE", "path": "/api/v1/workflows/:id" },
+      { "method": "POST", "path": "/api/v1/workflows/:id/start" },
+      { "method": "POST", "path": "/api/v1/workflows/:id/stop" },
+      { "method": "POST", "path": "/api/v1/workflows/:id/approve" },
+      { "method": "GET", "path": "/api/v1/workflows/:id/logs" }
+    ]
+  },
+  "engines": { "anoclaw": ">=2.1.0" }
+}

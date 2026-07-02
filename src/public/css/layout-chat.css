@@ -1,0 +1,88 @@
+/* AnoClaw Layout Chat — Tab header bar and supervision controls. */
+
+/* ========================================
+   Tab Header — Raycast pill chips
+   ======================================== */
+
+.tab-header {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 0;
+  padding: 4px 6px 6px 28px;
+  border-bottom: 1px solid var(--color-hairline);
+  position: relative;
+}
+.tab-btn {
+  background: transparent;
+  border: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: background 0.12s, color 0.12s;
+  position: relative;
+}
+.tab-btn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-elevated);
+}
+.tab-btn.active {
+  color: var(--color-text-primary);
+  background: var(--color-surface-elevated);
+  font-weight: 600;
+}
+
+/* Dot indicator — shows when tab has content */
+.tab-btn .tab-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  opacity: 0;
+  transform: scale(0);
+  transition: opacity 0.15s, transform 0.15s;
+  flex-shrink: 0;
+}
+.tab-btn .tab-dot.has-content {
+  opacity: 1;
+  transform: scale(1);
+}
+.tab-btn.active .tab-dot.has-content {
+  background: var(--color-accent);
+  opacity: 0.9;
+}
+
+/* ── Tab content ── */
+.tab-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.tab-pane {
+  display: none;
+  height: 100%;
+}
+.tab-pane.active {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ========================================
+   Supervision controls
+   ======================================== */
+
+.supervision-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius);
+  font-size: 12px;
+}

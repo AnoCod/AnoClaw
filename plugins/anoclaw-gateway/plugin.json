@@ -1,0 +1,40 @@
+{
+  "name": "anoclaw-gateway",
+  "displayName": "Gateway",
+  "version": "2.1.0",
+  "description": "External platform integration — Telegram, WeChat, Feishu adapters with health monitoring, image support, and real-time updates",
+  "publisher": "anoclaw",
+  "main": "extension.js",
+  "activationEvents": ["onStartup"],
+  "contributes": {
+    "pages": [{ "id": "gateway", "title": "Gateway", "order": 11, "html": "frontend/index.html" }],
+    "apiRoutes": [
+      { "method": "GET", "path": "/api/gateway/platforms" },
+      { "method": "GET", "path": "/api/gateway/connections" },
+      { "method": "POST", "path": "/api/gateway/connections" },
+      { "method": "DELETE", "path": "/api/gateway/connections/:id" },
+      { "method": "POST", "path": "/api/gateway/connections/:id/toggle" },
+      { "method": "GET", "path": "/api/gateway/inbox" },
+      { "method": "DELETE", "path": "/api/gateway/inbox" },
+      { "method": "GET", "path": "/api/gateway/health" },
+      { "method": "POST", "path": "/api/gateway/send" },
+      { "method": "GET", "path": "/api/gateway/search" },
+      { "method": "GET", "path": "/api/gateway/templates" },
+      { "method": "POST", "path": "/api/gateway/templates" },
+      { "method": "DELETE", "path": "/api/gateway/templates/:id" },
+      { "method": "POST", "path": "/api/gateway/templates/:id/apply" },
+      { "method": "GET", "path": "/api/gateway/retry-queue" },
+      { "method": "DELETE", "path": "/api/gateway/retry-queue" },
+      { "method": "DELETE", "path": "/api/gateway/retry-queue/:id" },
+      { "method": "POST", "path": "/api/gateway/telegram/webhook" },
+      { "method": "POST", "path": "/api/gateway/telegram/webhook/setup" }
+    ],
+    "configuration": {
+      "title": "Gateway Settings",
+      "properties": {
+        "apiKey": { "type": "string", "default": "", "description": "API key for authenticating gateway HTTP routes. Leave empty for open access." }
+      }
+    }
+  },
+  "engines": { "anoclaw": ">=2.1.0" }
+}

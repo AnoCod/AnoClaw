@@ -1,0 +1,197 @@
+/* AnoClaw Motion — Raycast micro-interactions: page enter, keycap bevel, surface hover */
+
+/* -- Typography voice: Raycast ss03 alternate 'g' glyph -- */
+body {
+  font-feature-settings: "calt", "kern", "liga", "ss03";
+}
+
+/* -- Focus ring: hairline brightening, no colored glow -- */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 1px solid rgba(255,255,255,0.16);
+  outline-offset: 0px;
+}
+
+[data-theme="light"] input:focus-visible,
+[data-theme="light"] textarea:focus-visible,
+[data-theme="light"] select:focus-visible {
+  outline: 1px solid rgba(0,0,0,0.16);
+}
+
+/* -- Active press: system-wide micro-interaction -- */
+.btn:active,
+.stn-row:active,
+.dock-item:active {
+  transform: scale(0.97);
+  transition: transform 0.06s ease;
+}
+
+/* -- Keycap shortcut hint: subtle physical-key bevel -- */
+.keycap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, var(--color-surface-card) 0%, var(--color-surface) 100%);
+  border: 1px solid var(--color-hairline);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  user-select: none;
+}
+
+[data-theme="light"] .keycap {
+  background: linear-gradient(180deg, #e5e5e5 0%, #d4d4d4 100%);
+  border: 1px solid rgba(0,0,0,0.10);
+  color: #4b4b4d;
+}
+
+/* -- Page enter: subtle lift + fade -- */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.page-enter {
+  animation: page-enter 0.18s ease forwards;
+  pointer-events: auto;
+}
+
+/* -- Toast enter -- */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.toast-enter {
+  animation: toast-in 0.18s ease;
+}
+
+/* -- Toast container + items -- */
+.toast-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: var(--z-toast, 9999);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+  max-width: 380px;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-hairline);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  line-height: 1.45;
+  pointer-events: auto;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+}
+
+.toast-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast-hiding {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.toast-success {
+  border-left: 3px solid var(--color-success, #22c55e);
+}
+
+.toast-error {
+  border-left: 3px solid var(--color-error, #ef4444);
+}
+
+.toast-info {
+  border-left: 3px solid var(--color-info, #57c1ff);
+}
+
+.toast-close {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+  margin-left: auto;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.toast-close:hover {
+  background: var(--color-hairline);
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] .toast {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+}
+
+/* -- Skeleton shimmer for loading states -- */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg,
+    var(--color-surface) 25%,
+    var(--color-surface-elevated) 50%,
+    var(--color-surface) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 6px;
+}
+
+[data-theme="light"] .skeleton {
+  background: linear-gradient(90deg,
+    var(--color-surface) 25%,
+    rgba(0,0,0,0.04) 50%,
+    var(--color-surface) 75%
+  );
+  background-size: 200% 100%;
+}
+
+/* -- Surface hover: consistent 0.1s transition across all interactive surfaces -- */
+.dock-item,
+.stn-row,
+.stn-arrow,
+.stn-action-btn,
+.tab-btn,
+.btn,
+.log-entry,
+.file-row {
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+@keyframes minimizeFlash {
+  0%   { opacity: 1; }
+  100% { opacity: 0; }
+}

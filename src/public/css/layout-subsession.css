@@ -1,0 +1,156 @@
+/* AnoClaw Layout — Sub-session cards & log panel
+   Extracted from layout-chat.css to stay under the 500-line cap.
+   Covers: delegate/sub-session cards and the floating log panel. */
+
+/* ========================================
+   Sub-session cards
+   ======================================== */
+
+@keyframes sub-session-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.delegate-sub-session {
+  margin: 6px 0;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--color-surface-elevated);
+}
+
+.sub-session-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  transition: background 0.1s;
+  user-select: none;
+  cursor: pointer;
+}
+
+.sub-session-header:hover {
+  background: var(--color-surface-card);
+}
+
+.sub-session-arrow {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  transition: transform 0.15s;
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+}
+
+.sub-session-status {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sub-session-status.running {
+  background: var(--color-warning);
+  animation: sub-session-pulse 1s linear infinite;
+}
+
+.sub-session-status.completed {
+  background: var(--color-success);
+}
+
+.sub-session-status.error {
+  background: var(--color-error);
+}
+
+.sub-session-agent {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.sub-session-desc {
+  flex: 1;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sub-session-count {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  background: var(--color-surface-card);
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.sub-session-body {
+  border-top: 1px solid var(--color-hairline);
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.sub-session-messages {
+  padding: 8px 12px;
+}
+
+.sub-msg {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--color-hairline);
+}
+
+.sub-msg:last-child {
+  border-bottom: none;
+}
+
+.sub-msg-agent {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 2px;
+}
+
+.sub-msg-text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+}
+
+.sub-msg-user {
+  color: var(--color-text-secondary);
+}
+
+.sub-msg-think {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  font-style: italic;
+  margin-bottom: 4px;
+  opacity: 0.7;
+}
+
+.sub-msg-tools {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  margin-top: 2px;
+  opacity: 0.6;
+}
+
+.sub-session-view-link {
+  padding: 8px 0 4px;
+  text-align: center;
+}
+
+.sub-session-view-link a {
+  color: var(--color-text-primary);
+  font-size: 12px;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.sub-session-view-link a:hover {
+  opacity: 0.7;
+}

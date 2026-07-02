@@ -1,0 +1,516 @@
+/* AnoClaw Layout Page Components — SkillsPage card grid, toggle switch,
+   editor/import modals, and shared modal title/close components. */
+
+/* ============================================================
+   SkillsPage — Skill cards grid + editor/import modals
+   ============================================================ */
+
+.skills-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  flex-shrink: 0;
+}
+
+.skills-header-title {
+  font-size: var(--font-size-heading-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.skills-btn-row {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.skill-btn-create {
+  background: var(--color-overlay-hover);
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  padding: 8px 16px;
+  font-size: var(--font-size-caption-md);
+}
+
+.skill-btn-create:hover {
+  background: var(--color-overlay-pressed);
+}
+
+.skill-btn-import {
+  background: var(--color-overlay-hover);
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 8px 16px;
+  font-size: var(--font-size-caption-md);
+}
+
+.skill-btn-import:hover {
+  background: var(--color-overlay-pressed);
+}
+
+.skills-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-lg);
+  flex: 1;
+  align-content: start;
+}
+
+.skill-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  transition: border-color var(--transition-normal), box-shadow var(--transition-normal), opacity var(--transition-normal);
+  position: relative;
+}
+
+.skill-card:hover {
+  border-color: var(--color-hairline-strong);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+}
+
+.skill-card-disabled {
+  opacity: 0.45;
+}
+
+.skill-card-disabled:hover {
+  opacity: 0.65;
+}
+
+.skill-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.skill-card-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.skill-card-name-group {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.skill-card-name {
+  font-size: var(--font-size-body-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-card-status {
+  font-size: 11px;
+  color: var(--color-success);
+}
+
+.skill-card-status-off {
+  color: var(--color-text-quaternary);
+}
+
+.skill-card-description {
+  font-size: var(--font-size-caption-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+  line-height: var(--line-height-normal);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.skill-card-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: auto;
+  justify-content: flex-end;
+}
+
+.skill-card-edit-btn {
+  background: var(--color-overlay-hover);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-caption-sm);
+  padding: 4px 14px;
+  transition: background var(--transition-normal);
+}
+
+.skill-card-edit-btn:hover {
+  background: var(--color-hairline);
+}
+
+/* Skills toggle switch */
+.skill-toggle {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.skill-toggle-input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.skill-toggle-track {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: var(--color-overlay-pressed);
+  border-radius: var(--radius-full);
+  transition: background var(--transition-slow);
+}
+
+.skill-toggle-track-on {
+  background: var(--color-accent);
+  box-shadow: 0 0 8px rgba(255,255,255,0.15);
+}
+
+.skill-toggle-thumb {
+  position: absolute;
+  height: 16px;
+  width: 16px;
+  bottom: 3px;
+  background: #ffffff;
+  border-radius: 50%;
+  transition: left var(--transition-slow);
+}
+
+.skill-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.skill-modal {
+  background: var(--color-surface);
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--radius-xl);
+  width: 560px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+}
+
+.skill-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-lg) 20px;
+  border-bottom: 1px solid var(--color-overlay-hover);
+  flex-shrink: 0;
+}
+
+.skill-modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.skill-modal-footer {
+  display: flex;
+  gap: var(--space-sm);
+  justify-content: flex-end;
+  padding: 14px 20px;
+  border-top: 1px solid var(--color-overlay-hover);
+}
+
+.skill-form-label {
+  display: block;
+  font-size: var(--font-size-caption-sm);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-xs);
+}
+
+.skill-form-input {
+  width: 100%;
+  background: var(--color-bg);
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-caption-md);
+  margin-bottom: 12px;
+  box-sizing: border-box;
+}
+
+.skill-form-textarea {
+  width: 100%;
+  background: var(--color-bg);
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-caption-md);
+  resize: vertical;
+  box-sizing: border-box;
+  font-family: var(--font-mono);
+}
+
+.skill-form-btn-cancel {
+  background: var(--color-overlay-hover);
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  padding: 8px 20px;
+  font-size: var(--font-size-caption-md);
+}
+
+.skill-form-btn-save {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 20px;
+  cursor: pointer;
+  font-size: var(--font-size-caption-md);
+  font-weight: var(--font-weight-semibold);
+}
+
+.skill-import-desc {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption-md);
+  margin: 0 0 16px 0;
+}
+
+.skill-import-file-input {
+  display: block;
+  width: 100%;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-caption-md);
+}
+
+.skill-import-status {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption-sm);
+  margin-top: 12px;
+}
+
+.skill-import-success {
+  color: var(--color-tool-success-icon);
+}
+
+.skill-import-error {
+  color: var(--color-tool-error-icon);
+}
+
+.skill-empty-state {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 48px 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body-sm);
+}
+
+/* Shared modal title and close button (used by SkillsPage + GatewayPage modals) */
+.modal-title {
+  font-size: var(--font-size-heading-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.modal-close-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 18px;
+  padding: 4px;
+}
+
+/* ============================================================
+   MemoryPage — Card grid, type tabs, modal
+   ============================================================ */
+
+.mem-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  flex-shrink: 0;
+}
+
+.mem-header-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.mem-type-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+  flex-shrink: 0;
+}
+
+.mem-type-tab {
+  background: var(--color-overlay-hover);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-caption-sm);
+  padding: 4px 12px;
+  transition: background var(--transition-normal), border-color var(--transition-normal), color var(--transition-normal);
+}
+
+.mem-type-tab:hover {
+  background: var(--color-hairline);
+}
+
+.mem-type-tab.active {
+  background: var(--color-overlay-pressed);
+  border-color: var(--color-hairline-strong);
+  color: var(--color-text-primary);
+}
+
+.mem-card {
+  cursor: pointer;
+}
+
+.mem-card-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.mem-card-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 15px;
+  font-weight: var(--font-weight-semibold);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.mem-card-name-group {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mem-card-title {
+  font-size: var(--font-size-body-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mem-type-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: var(--font-weight-semibold);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  align-self: flex-start;
+}
+
+.mem-type-user {
+  background: rgba(66, 165, 245, 0.15);
+  color: #42a5f5;
+}
+
+.mem-type-feedback {
+  background: rgba(255, 183, 77, 0.15);
+  color: #ffb74d;
+}
+
+.mem-type-project {
+  background: rgba(102, 187, 106, 0.15);
+  color: #66bb6a;
+}
+
+.mem-type-reference {
+  background: rgba(171, 71, 188, 0.15);
+  color: #ab47bc;
+}
+
+.mem-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 10px;
+}
+
+.mem-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-tertiary);
+}
+
+.mem-scope-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+
+.mem-card-time {
+  color: var(--color-text-quaternary);
+  font-size: 10px;
+}
+
+.mem-card-snippet {
+  font-size: var(--font-size-caption-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+  line-height: var(--line-height-normal);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.mem-empty-state {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 48px 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body-sm);
+}

@@ -1,0 +1,117 @@
+/* AnoClaw Layout Delegate Cards — Card-style message delegates:
+   think, todo, plan, system, and delegation activity.
+   Note: Plan, Todo, System, Delegation, and AskUser delegates
+   now use inline cinema styles. Only think and status styles remain CSS-based. */
+
+/* --- Think delegate --- */
+
+.delegate-think {
+  margin-bottom: var(--space-sm);
+  border-radius: var(--radius-md);
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.05);
+  overflow: hidden;
+  transition: max-height var(--transition-slow);
+}
+
+.think-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--transition-normal);
+}
+.think-header:hover {
+  background: var(--color-overlay-hover);
+}
+
+.think-icon {
+  flex-shrink: 0;
+}
+
+.think-label {
+  font-size: var(--font-size-caption-sm);
+  color: var(--color-text-secondary);
+  font-style: italic;
+  flex: 1;
+}
+
+.think-timer-icon {
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+
+.think-timer {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+  min-width: 40px;
+}
+
+.think-body {
+  overflow: hidden;
+  transition: max-height var(--transition-slow);
+}
+
+.think-content {
+  padding: 0 var(--space-md) var(--space-md) 36px;
+  font-size: var(--font-size-caption-md);
+  color: var(--color-text-secondary);
+  font-style: italic;
+  line-height: var(--line-height-relaxed);
+  white-space: pre-wrap;
+}
+
+/* ========================================
+   Status Delegate — compaction / idle indicator
+   ======================================== */
+
+.delegate-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  margin: 2px 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  animation: status-fade-in 0.3s ease;
+  transition: opacity 0.3s ease;
+}
+
+.status-spinner-svg {
+  flex-shrink: 0;
+  animation: status-spin 1.2s linear infinite;
+}
+
+.status-spinner-arc {
+  stroke: var(--color-text-secondary);
+  transition: stroke var(--transition-fast);
+}
+
+.status-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  animation: status-pulse 2s ease-in-out infinite;
+}
+
+/* Spinner rotation keyframe (used by .status-spinner-svg above) */
+@keyframes status-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Background Tasks Panel */
+.task-panel-card[data-status="running"] { border-left-color: #60a5fa; }
+.task-panel-card[data-status="completed"] { border-left-color: #4ade80; }
+.task-panel-card[data-status="failed"] { border-left-color: #f87171; }
+.task-panel-card[data-status="killed"] { border-left-color: #fbbf24; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}

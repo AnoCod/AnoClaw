@@ -1,0 +1,257 @@
+/* AnoClaw — Agents Page (SVG dots + force simulation, Logseq-style) */
+
+/* ============================================================
+   SVG graph
+   ============================================================ */
+.ag-svg {
+  display: block;
+  background: #0d0d11;
+  background-image:
+    radial-gradient(circle at 50% 50%, rgba(124,58,237,0.04) 0%, transparent 60%),
+    radial-gradient(circle at 80% 20%, rgba(139,92,246,0.03) 0%, transparent 50%);
+}
+
+/* Edges */
+.ag-edge {
+  stroke: #3a3a4a;
+  stroke-width: 1;
+  stroke-linecap: round;
+  opacity: 0.5;
+}
+.ag-edge.ceo-edge {
+  stroke: var(--color-accent, #7c3aed);
+  stroke-width: 2;
+  opacity: 0.6;
+}
+.ag-edge.mgr-edge {
+  stroke: #6d4db8;
+  stroke-width: 1.5;
+  opacity: 0.5;
+}
+
+/* Node circles */
+.ag-node {
+  stroke-width: 2;
+  transition: r .15s ease, opacity .15s ease;
+  cursor: pointer;
+}
+.ag-node:hover {
+  opacity: 0.9;
+  filter: brightness(1.3);
+}
+.ag-node.selected {
+  stroke: #fff;
+  stroke-width: 3;
+  filter: brightness(1.5) !important;
+}
+
+/* Ghost (add) nodes */
+.ag-node-ghost {
+  fill: none;
+  stroke: #555;
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  cursor: pointer;
+}
+.ag-node-ghost:hover {
+  stroke: var(--color-accent, #7c3aed);
+  stroke-dasharray: 0;
+}
+
+/* Labels */
+.ag-node-label {
+  fill: #888;
+  font-size: 11px;
+  font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+  pointer-events: none;
+  user-select: none;
+}
+
+.ag-node-plus {
+  fill: #666;
+  font-size: 16px;
+  font-weight: 300;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ============================================================
+   Floating edit panel
+   ============================================================ */
+.ag-edit-panel {
+  position: absolute; top: 20px; right: 20px;
+  width: 340px; max-height: calc(100% - 40px);
+  background: var(--color-surface);
+  border: 1px solid var(--color-hairline-strong);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+  z-index: 20;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  animation: agSlideIn .2s ease;
+}
+@keyframes agSlideIn {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.ag-edit-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(128,128,128,0.08);
+  flex-shrink: 0;
+}
+.ag-edit-header h3 {
+  margin: 0; font-size: 15px; font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.ag-edit-close {
+  background: none; border: none;
+  color: var(--color-text-secondary);
+  font-size: 20px; cursor: pointer; padding: 0 4px; line-height: 1;
+}
+.ag-edit-close:hover { color: var(--color-text-primary); }
+
+.ag-edit-body {
+  padding: 16px; overflow-y: auto; flex: 1;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.ag-edit-body label {
+  font-size: 11px; color: var(--color-text-secondary);
+  text-transform: uppercase; letter-spacing: 0.5px;
+  margin-top: 6px;
+}
+.ag-edit-body label:first-of-type { margin-top: 0; }
+.ag-edit-body input,
+.ag-edit-body select,
+.ag-edit-body textarea {
+  width: 100%;
+  padding: 7px 10px;
+  background: var(--color-bg);
+  border: 1px solid rgba(128,128,128,0.15);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-family: var(--font-sans);
+  box-sizing: border-box;
+  outline: none;
+}
+.ag-edit-body input:focus,
+.ag-edit-body select:focus,
+.ag-edit-body textarea:focus {
+  border-color: var(--color-accent);
+}
+.ag-edit-body textarea {
+  resize: vertical; min-height: 60px;
+  font-family: var(--font-mono); font-size: 12px;
+}
+
+.ag-edit-footer {
+  display: flex; gap: 8px; justify-content: flex-end;
+  padding: 12px 16px;
+  border-top: 1px solid rgba(128,128,128,0.08);
+  flex-shrink: 0;
+}
+
+.ag-edit-btn-save {
+  background: var(--color-accent); color: #fff; border: none;
+  border-radius: 6px; padding: 7px 20px; cursor: pointer;
+  font-size: 13px; font-weight: 600;
+}
+.ag-edit-btn-save:hover { opacity: 0.9; }
+
+.ag-edit-btn-cancel {
+  background: rgba(128,128,128,0.08); color: var(--color-text-primary);
+  border: 1px solid rgba(128,128,128,0.12); border-radius: 6px;
+  padding: 7px 16px; cursor: pointer; font-size: 13px;
+}
+.ag-edit-btn-cancel:hover { background: rgba(128,128,128,0.14); }
+
+.ag-edit-btn-delete {
+  background: none; color: #e05545; border: 1px solid rgba(224,85,69,0.25);
+  border-radius: 6px; padding: 7px 16px; cursor: pointer;
+  font-size: 13px; margin-right: auto;
+}
+.ag-edit-btn-delete:hover { background: rgba(224,85,69,0.1); }
+
+/* Tool checkbox groups in edit panel */
+.ag-tool-groups {
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 260px; overflow-y: auto;
+}
+.ag-tool-group {
+  border: 1px solid rgba(128,128,128,0.1);
+  border-radius: 6px; padding: 8px 10px;
+  margin: 0;
+}
+.ag-tool-group legend {
+  font-size: 11px; color: var(--color-text-secondary);
+  text-transform: uppercase; letter-spacing: 0.5px;
+  padding: 0 4px;
+}
+.ag-tool-item {
+  display: flex; align-items: baseline; gap: 6px;
+  font-size: 12px; padding: 3px 0; cursor: pointer;
+  color: var(--color-text-primary);
+}
+.ag-tool-item:hover { color: var(--color-text-primary); }
+.ag-tool-item input[type="checkbox"] {
+  width: auto; margin: 0; flex-shrink: 0;
+  accent-color: var(--color-accent);
+}
+.ag-tool-name {
+  font-weight: 500; white-space: nowrap;
+  min-width: 90px; flex-shrink: 0;
+}
+.ag-tool-desc {
+  color: var(--color-text-secondary);
+  font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ============================================================
+   Zoom controls
+   ============================================================ */
+.ag-zoom-controls {
+  position: absolute; bottom: 20px; right: 20px; display: flex; gap: 4px; z-index: 10;
+}
+.ag-zoom-btn {
+  height: 34px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-hairline);
+  border-radius: 4px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: 12px;
+}
+.ag-zoom-btn.ico { width: 34px; font-size: 16px; line-height: 1; }
+.ag-zoom-btn.reset { padding: 0 12px; color: var(--color-text-secondary); }
+.ag-zoom-btn:hover { background: var(--color-surface-elevated); }
+
+/* ============================================================
+   Context menu
+   ============================================================ */
+.ag-ctx-menu {
+  position: fixed; z-index: 1001;
+  background: var(--color-surface); border: 1px solid var(--color-hairline-strong);
+  border-radius: 6px; padding: 4px; min-width: 160px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+.ag-ctx-item {
+  padding: 7px 14px; border-radius: 4px; cursor: pointer; font-size: 12px;
+  color: var(--color-text-primary); white-space: nowrap;
+}
+.ag-ctx-item:hover { background: rgba(128,128,128,0.1); }
+.ag-ctx-sep { height: 1px; margin: 4px 8px; background: var(--color-hairline); }
+
+/* ============================================================
+   Empty state
+   ============================================================ */
+.ag-empty {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 5;
+  flex-direction: column; gap: 12px; color: var(--color-text-secondary); font-size: 14px;
+}
+.ag-empty-btn {
+  background: var(--color-accent); color: #fff; border: none; border-radius: 6px;
+  padding: 8px 22px; cursor: pointer; font-size: 13px; font-weight: 600;
+}

@@ -1,0 +1,250 @@
+// AgentHandlers — agent CRUD HTTP handlers extracted from ApiServer
+// Handles: list, get, create, update, delete agents
+// Part of the AnoClaw v2.0 rewrite: Gateway system (SA-10)
+
+import * as http from 'http';
+import { AgentRegistry } from '../../core/agent/AgentRegistry.js';
+import { loadAgentConfig, saveAgentConfig, defaultConfig } from '../../core/agent/AgentConfig.js';
+import { Agent } from '../../core/agent/Agent.js';
+import { TypedEventBus } from '../../core/events/TypedEventBus.js';
+import { requireWsAny } from '../WsRequired.js';
+import type { AgentConfig } from '../../../shared/types/agent.js';
+
+// ---------------------------------------------------------------------------
+// Utility types
+// ---------------------------------------------------------------------------
+
+type SendJson = (res: http.ServerResponse, statusCode: number, data: Record<string, unknown>) => void;
+type ReadBody = (req: http.IncomingMessage) => Promise<Record<string, unknown>>;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Serialize Agent object to API response format */
+function serializeAgent(a: Agent): Record<string, unknown> {
+  return {
+    id: a.id,
+    name: a.name,
+    role: a.role,
+    parentAgentId: a.parentAgentId,
+    level: a.level,
+    teamName: a.teamName,
+    provider: a.provider,
+    apiUrl: a.apiUrl,
+    apiKey: a.apiKey,
+    model: a.modelName,
+    contextWindow: a.contextWindow,
+    preferredLanguage: a.preferredLanguage,
+    conversationLanguage: a.conversationLanguage,
+    agentPrompt: a.agentPrompt,
+    allowedTools: a.allowedTools(),
+    enabledSkills: a.enabledSkills(),
+    isActive: a.isActive,
+    state: a.state,
+    createdAt: a.createdAt,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Exported handler functions
+// ---------------------------------------------------------------------------
+
+/** GET /api/v1/agents */
+export function handleListAgents(
+  res: http.ServerResponse,
+  sendJson: SendJson,
+): void {
+  const registry = AgentRegistry.getInstance();
+  const agents = registry.allAgents();
+
+  sendJson(res, 200, {
+    agents: agents.map((a) => serializeAgent(a)),
+    total: agents.length,
+  });
+}
+
+/** GET /api/v1/agents/:id */
+export function handleGetAgent(
+  agentId: string,
+  res: http.ServerResponse,
+  sendJson: SendJson,
+): void {
+  const registry = AgentRegistry.getInstance();
+  const agent = registry.agent(agentId);
+
+  if (!agent) {
+    sendJson(res, 404, { error: 'Not Found', message: `Agent '${agentId}' not found` });
+    return;
+  }
+
+  sendJson(res, 200, serializeAgent(agent));
+}
+
+/** POST /api/v1/agents — Create new agent */
+export async function handleCreateAgent(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  sendJson: SendJson,
+  readBody: ReadBody,
+): Promise<void> {
+  if (!requireWsAny(res, sendJson)) return;
+
+  const body = await readBody(req);
+  try {
+    const config = defaultConfig(body as Partial<AgentConfig>);
+    await saveAgentConfig(config);
+    const agent = new Agent(config);
+    AgentRegistry.getInstance().registerAgent(agent);
+
+    TypedEventBus.emit('agent:registered', {
+      agentId: agent.id,
+      role: agent.role,
+      name: agent.name,
+    });
+
+    const { apiKey, ...safeConfig } = config;
+    sendJson(res, 201, safeConfig as unknown as Record<string, unknown>);
+  } catch (err) {
+    sendJson(res, 400, { error: 'Bad Request', message: (err as Error).message });
+  }
+}
+
+/** PATCH /api/v1/agents/:id — Update agent config */
+export async function handleUpdateAgent(
+  agentId: string,
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  sendJson: SendJson,
+  readBody: ReadBody,
+): Promise<void> {
+  if (!requireWsAny(res, sendJson)) return;
+
+  const body = await readBody(req);
+  try {
+    const existingConfig = await loadAgentConfig(agentId);
+    // Preserve existing apiKey when incoming value is empty or all-asterisk (masked)
+    const incomingApiKey = (body as any).apiKey;
+    if (!incomingApiKey || /^\*+$/.test(incomingApiKey)) {
+      delete (body as any).apiKey;
+    }
+    const updated = { ...existingConfig, ...body, id: agentId };
+    await saveAgentConfig(updated);
+
+    // Update agent in memory
+    const registry = AgentRegistry.getInstance();
+    const existing = registry.agent(agentId);
+    if (existing) {
+      registry.unregisterAgent(agentId);
+    }
+    const agent = new Agent(updated);
+    registry.registerAgent(agent);
+
+    TypedEventBus.emit('agent:config_updated', {
+      agentId,
+      role: agent.role,
+      name: agent.name,
+    });
+
+    sendJson(res, 200, {
+      status: 'saved',
+      agentId,
+      file: `data/agents/${agentId}.json`,
+    });
+  } catch (err) {
+    if ((err as Error).message.includes('not found')) {
+      sendJson(res, 404, { error: 'Not Found', message: (err as Error).message });
+    } else {
+      sendJson(res, 400, { error: 'Bad Request', message: (err as Error).message });
+    }
+  }
+}
+
+/** DELETE /api/v1/agents/:id — Delete agent (MainAgent cannot be deleted).
+ *  Query param: ?cascade=true recursively delete all descendant agents. */
+export async function handleDeleteAgent(
+  agentId: string,
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  sendJson: SendJson,
+  host: string,
+): Promise<void> {
+  if (!requireWsAny(res, sendJson)) return;
+
+  try {
+    const registry = AgentRegistry.getInstance();
+    const agent = registry.agent(agentId);
+
+    // First check: agent must exist
+    if (!agent) {
+      sendJson(res, 404, { error: 'Not Found', message: `Agent '${agentId}' not found` });
+      return;
+    }
+
+    if (agent.role === 'MainAgent') {
+      sendJson(res, 403, { error: 'Forbidden', message: 'MainAgent cannot be deleted' });
+      return;
+    }
+
+    const url = new URL(req.url || '/', `http://${host}`);
+    const cascade = url.searchParams.get('cascade') === 'true';
+    const fsp = await import('fs/promises');
+
+    if (cascade) {
+      // Recursively delete all descendant agents
+      const allAgents = registry.allAgents();
+      const descendantIds = new Set<string>();
+      const queue = [agentId];
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        for (const a of allAgents) {
+          if (a.parentAgentId === current && !descendantIds.has(a.id)) {
+            descendantIds.add(a.id);
+            queue.push(a.id);
+          }
+        }
+      }
+      for (const id of descendantIds) {
+        registry.unregisterAgent(id);
+        await fsp.unlink(`data/agents/${id}.json`).catch(() => {});
+        await fsp.rm(`memory/agents/${id}/`, { recursive: true, force: true }).catch(() => {});
+      }
+    }
+
+    registry.unregisterAgent(agentId);
+    await fsp.unlink(`data/agents/${agentId}.json`).catch(() => {});
+    await fsp.rm(`memory/agents/${agentId}/`, { recursive: true, force: true }).catch(() => {});
+    sendJson(res, 200, { status: 'deleted', agentId, cascade });
+  } catch (err) {
+    sendJson(res, 400, { error: 'Bad Request', message: (err as Error).message });
+  }
+}
+
+/** GET /api/v1/agents/:id/status */
+export function handleAgentStatus(
+  agentId: string,
+  res: http.ServerResponse,
+  sendJson: (res: http.ServerResponse, code: number, data: Record<string, unknown>) => void,
+): void {
+  const registry = AgentRegistry.getInstance();
+  const agent = registry.agent(agentId);
+
+  if (!agent) {
+    sendJson(res, 404, { error: 'Not Found', message: `Agent '${agentId}' not found` });
+    return;
+  }
+
+  const statusMap: Record<string, string> = {};
+  for (const [sid, status] of agent.allSessionStatuses()) {
+    statusMap[sid] = status;
+  }
+
+  sendJson(res, 200, {
+    agentId: agent.id,
+    name: agent.name,
+    isActive: agent.isActive,
+    state: agent.state,
+    sessionCount: agent.servingSessionCount,
+    sessionStatuses: statusMap,
+  });
+}

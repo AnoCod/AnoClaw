@@ -1,0 +1,589 @@
+/* AnoClaw Layout Core — Raycast: zero-shadow, hairline borders, surface-ladder elevation */
+
+/* -- Full-viewport layout -- */
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+}
+
+#app-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  will-change: transform;
+}
+
+/* -- Layout variables -- */
+:root {
+  --sidebar-width: 240px;
+  --tab-panel-width: 280px;
+
+  /* Hairline vars moved to theme.css for centralization */
+
+  /* Chart / org-chart colors */
+  --color-chart-line: rgba(255,255,255,0.08);
+  --color-chart-card-border: rgba(255,255,255,0.08);
+  --color-chart-card-border-hover: rgba(255,255,255,0.16);
+  --color-chart-add-btn-border: rgba(255,255,255,0.16);
+  --color-chart-add-btn-border-hover: rgba(255,255,255,0.32);
+
+  /* Backward-compat aliases */
+  --color-border-layout: var(--color-hairline);
+  --color-border-panel: var(--color-hairline);
+  --color-border-input: var(--color-hairline);
+}
+
+[data-theme="light"] {
+  /* Hairline overrides moved to theme.css */
+  --color-chart-line: rgba(0,0,0,0.08);
+  --color-chart-card-border: rgba(0,0,0,0.08);
+  --color-chart-card-border-hover: rgba(0,0,0,0.16);
+  --color-chart-add-btn-border: rgba(0,0,0,0.14);
+  --color-chart-add-btn-border-hover: rgba(0,0,0,0.28);
+}
+
+/* ---- Title bar ---- */
+.titlebar {
+  height: var(--titlebar-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-lg);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-hairline);
+  flex-shrink: 0;
+  -webkit-app-region: drag;
+  user-select: none;
+  position: relative;
+  z-index: 10;
+}
+
+.titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.titlebar-text {
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-caption-md);
+  color: var(--color-text-primary);
+  letter-spacing: 0.3px;
+}
+
+.titlebar-version {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  background: var(--color-overlay-hover);
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+}
+
+.connection-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--color-text-quaternary);
+  flex-shrink: 0;
+  transition: background-color 0.3s ease;
+  -webkit-app-region: no-drag;
+  cursor: default;
+}
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.connection-status-dot.pulse {
+  animation: status-pulse 1.2s ease-in-out infinite;
+}
+
+/* ---- Window controls (Electron frameless) ---- */
+.win-controls {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  -webkit-app-region: no-drag;
+}
+.win-btn {
+  width: 46px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, color 0.12s;
+  font-family: var(--font-sans);
+}
+.win-btn:hover {
+  background: var(--color-hairline);
+  color: var(--color-text-primary);
+}
+.win-close:hover {
+  background: var(--color-error, #e81123);
+  color: #fff;
+}
+
+/* ---- Page container ---- */
+.page-container {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+}
+
+#page-area {
+  flex: 0 0 50%;
+  min-width: 360px;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+}
+
+#sessions-panel {
+  flex: 1;
+  min-width: 420px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ---- Split resize handle ---- */
+.layout-split-handle {
+  width: 4px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s;
+  z-index: 5;
+}
+.layout-split-handle:hover,
+.layout-split-handle.active {
+  background: var(--color-accent);
+}
+
+/* ---- Page layout: two-column ---- */
+.page-split {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ---- Page layout: SessionsPage three-column ---- */
+.page-row {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ---- Column classes ---- */
+.page-col-left {
+  width: var(--sidebar-width);
+  flex-shrink: 0;
+  overflow-y: auto;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-hairline);
+  padding: var(--space-sm);
+  position: relative;
+}
+
+.page-col-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+html.is-resizing .page-col-center {
+  will-change: transform;
+}
+
+.page-col-right {
+  position: relative;
+  width: var(--tab-panel-width);
+  flex-shrink: 0;
+  overflow-y: auto;
+  background: var(--color-surface);
+  border-left: 1px solid var(--color-hairline);
+  padding: var(--space-sm);
+}
+
+/* ---- Section semantic classes ---- */
+.tree-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.page-col-left.tree-section {
+  padding: 0;
+  overflow: hidden;
+}
+
+.tree-section h3 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0;
+}
+
+.detail-section {
+  flex: 1;
+  padding: var(--space-lg);
+  overflow-y: auto;
+}
+
+/* ---- Panel collapse ---- */
+.sidebar-expand-btn {
+  position: fixed;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 64px;
+  border: 1px solid var(--color-hairline);
+  border-left: none;
+  border-radius: 0 6px 6px 0;
+  background: var(--color-surface);
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  padding: 0;
+  transition: color 0.12s, background 0.12s;
+}
+
+.sidebar-expand-btn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-elevated);
+}
+
+/* ── Panel collapse button ── */
+.panel-collapse-btn {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  font-size: 10px;
+  padding: 0;
+  transition: color 0.12s, background 0.12s;
+}
+.panel-collapse-btn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-elevated);
+}
+.panel-collapse-btn .collapse-arrow {
+  transition: transform 0.2s;
+}
+
+.panel-collapse-btn.right {
+  top: 6px;
+  left: 6px;
+}
+
+/* Collapsed states */
+.page-col-left.collapsed {
+  width: 0 !important;
+  min-width: 0 !important;
+  padding: 0;
+  overflow: visible !important;
+  border-right: none;
+}
+
+.page-col-right.collapsed {
+  width: 0 !important;
+  min-width: 0 !important;
+  padding: 0;
+  overflow: visible !important;
+  border-left: none;
+}
+.page-col-right.collapsed > .panel-collapse-btn.right {
+  top: 50%;
+  left: auto;
+  right: 0;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 64px;
+  border-radius: 6px 0 0 6px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-hairline);
+  border-right: none;
+}
+.page-col-right.collapsed .collapse-arrow {
+  transform: rotate(180deg);
+}
+.page-col-right.collapsed > .panel-collapse-btn.right:hover {
+  background: var(--color-surface-elevated);
+}
+
+/* ---- Resize handles ---- */
+.resize-handle {
+  position: relative;
+  flex-shrink: 0;
+  z-index: 5;
+  cursor: col-resize;
+  width: 4px;
+  background: transparent;
+  transition: background 0.15s;
+}
+.resize-handle:hover,
+.resize-handle.active {
+  background: var(--color-accent);
+}
+
+.resizing {
+  user-select: none;
+  pointer-events: none;
+}
+
+/* ---- Scrollbar ---- */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-hairline-strong);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.28);
+}
+
+/* Light scrollbar handled in layout-theme.css */
+
+/* ========================================
+   Navigation Dock — Raycast icon-only
+   ======================================== */
+
+.navigation-dock {
+  height: var(--dock-height);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-hairline);
+  flex-shrink: 0;
+  padding: 0 4px;
+}
+
+.dock-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 4px 10px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: color 0.12s, background 0.12s;
+  font-size: 11px;
+  font-weight: 500;
+  min-width: unset;
+  height: 32px;
+}
+
+.dock-item:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface-elevated);
+}
+
+.dock-item.active {
+  color: var(--color-text-primary);
+  background: var(--color-surface-elevated);
+}
+
+.dock-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+}
+
+/* Dock "More" overflow menu */
+.dock-more-menu {
+  position: fixed;
+  min-width: 168px;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-dropdown);
+  z-index: var(--z-dropdown);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dock-more-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-caption-sm);
+  font-weight: var(--font-weight-medium);
+  font-family: var(--font-sans);
+  transition: background 0.1s ease, color 0.1s ease;
+  text-align: left;
+  width: 100%;
+}
+
+.dock-more-item:hover {
+  background: var(--color-hairline);
+  color: var(--color-text-primary);
+}
+
+/* Unified empty state — centered with icon, title, description, optional CTA */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-xxl) var(--space-lg);
+  text-align: center;
+  color: var(--color-text-tertiary);
+}
+.empty-state-icon {
+  opacity: 0.25;
+  margin-bottom: var(--space-xs);
+}
+.empty-state-title {
+  font-size: var(--font-size-body-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+}
+.empty-state-desc {
+  font-size: var(--font-size-caption-sm);
+  max-width: 280px;
+  line-height: var(--line-height-relaxed);
+}
+.empty-state-action {
+  margin-top: var(--space-sm);
+}
+
+/* ========================================
+   Legacy layout classes
+   ======================================== */
+
+.sidebar {
+  width: var(--sidebar-width);
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-hairline);
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: var(--space-sm);
+}
+
+.conversation {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.message-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-lg);
+}
+
+.input-panel {
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-hairline);
+  padding: var(--space-sm) var(--space-lg);
+  flex-shrink: 0;
+}
+
+
+.welcome-message {
+  text-align: center;
+  padding: 48px 16px;
+}
+
+.welcome-message h2 {
+  font-size: 22px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--color-text-primary);
+}
+
+.welcome-message p {
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+
+.new-msg-btn,
+.new-messages-btn {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  padding: 8px 16px;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  border: none;
+  border-radius: 9999px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  z-index: 10;
+}
+
+.new-messages-btn {
+  opacity: 0.9;
+  transition: opacity 0.12s, transform 0.12s;
+  white-space: nowrap;
+  line-height: 1.4;
+  user-select: none;
+}
+
+.new-messages-btn:hover {
+  opacity: 1;
+  transform: scale(1.03);
+}
+
+/* ---- Loading overlay ---- */
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}

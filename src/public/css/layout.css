@@ -1,0 +1,5 @@
+/* AnoClaw Layout — split into:
+   layout-core.css    (variables, page structure, legacy, scrollbar)
+   layout-chat.css    (session tree, sub-session, chat header, context ring, log panel)
+   layout-panels.css  (shared components, agent card, file row)
+   See index.html for load order. */

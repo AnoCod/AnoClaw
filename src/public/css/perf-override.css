@@ -1,0 +1,101 @@
+/* ============================================
+   Performance — containment & GPU compositing
+   Loaded last to override all other layout CSS.
+   ============================================ */
+
+/* Kill all transitions & animations only during resize for max performance */
+html.is-resizing * { transition: none !important; animation: none !important; }
+
+/* ── Root & major containers — scope layout/paint ── */
+#app-root {
+  contain: layout style;
+}
+.page-container {
+  contain: layout style;
+}
+#page-area {
+  contain: layout style;
+}
+.page-split {
+  contain: layout style;
+}
+.page-row {
+  contain: layout style;
+}
+.conversation {
+  contain: layout style;
+}
+.input-panel {
+  contain: layout style;
+}
+.tree-section {
+  contain: layout style;
+}
+
+/* ── Cinema layout containment ── */
+.cinema-page {
+  contain: layout style;
+}
+.cinema-center {
+  contain: layout style;
+}
+.cinema-edge-left,
+.cinema-edge-right {
+  contain: layout style;
+}
+.cinema-flow-inner {
+  contain: layout style paint;
+}
+
+/* ── Content-visibility: only render visible children ── */
+.message-list {
+  contain: layout style paint;
+  content-visibility: auto;
+}
+.cinema-flow {
+  contain: layout style paint;
+  content-visibility: auto;
+}
+.page-col-left,
+.page-col-right,
+.detail-section {
+  contain: layout style;
+  content-visibility: auto;
+}
+
+/* ── Cinema static pages (非Sessions页) ── */
+.cinema-static-page {
+  contain: layout style;
+}
+.cinema-static-inner {
+  contain: layout style paint;
+  content-visibility: auto;
+}
+
+/* ── AgentsPage — org chart canvas ── */
+.ag-viewport {
+  contain: layout style paint;
+}
+
+/* ── 列表/卡片页 — 跳过视口外的元素渲染 ── */
+.skill-card,
+.mem-card,
+.plg-card,
+.ag-card,
+.form-section {
+  contain: layout style;
+}
+
+/* ── Message delegates — scope layout/paint per-card ── */
+.msg-delegate-wrapper {
+  contain: layout style;
+}
+
+/* ── GPU composite layer during resize ── */
+html.is-resizing .page-col-center {
+  will-change: transform;
+}
+html.is-resizing .cinema-center,
+html.is-resizing .cinema-static-page {
+  will-change: transform;
+}

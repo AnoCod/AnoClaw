@@ -150,6 +150,13 @@ export class AgentRuntime extends EventEmitter {
       };
 
       if (shouldStopForTaskResolution(taskResolution)) {
+        if (taskResolution.result.nextAction === 'recommend_plugin') {
+          yield {
+            type: SSEEventType.TaskResolution,
+            taskResolution: summarizeTaskResolution(taskResolution.result),
+            agentMissingTools: taskResolution.agentMissingTools,
+          };
+        }
         yield {
           type: SSEEventType.Text,
           content: this._formatTaskResolutionResponse(taskResolution),

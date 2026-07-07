@@ -167,6 +167,10 @@ class App {
       ClientLogger.app.info('Plugins changed — reloading plugin list');
       this._pluginVM.load().catch(() => {});
     });
+    window.addEventListener('anoclaw:plugins-changed', () => {
+      ClientLogger.app.info('Plugin action completed — reloading plugin list');
+      this._pluginVM.load().catch(() => {});
+    });
 
     // Navigate to page from URL hash, default to workspace (sessions always visible on right)
     this._setupHashNav();

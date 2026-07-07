@@ -6,7 +6,7 @@
 
 import { EventEmitter } from '../EventEmitter.js';
 import { SessionState } from './SessionState.js';
-import type { ArtifactRecord, Message, TokenBreakdown, TodoItem } from '../types.js';
+import type { ArtifactRecord, Message, TaskResolutionSummary, TokenBreakdown, TodoItem } from '../types.js';
 import { MessageListModel } from './MessageListModel.js';
 import { ClientLogger } from '../ClientLogger.js';
 import { ToastManager } from '../ToastManager.js';
@@ -379,6 +379,25 @@ export function onWake(agent: SessionAgent, content?: string): void {
   }
 }
 
+export function onTaskResolution(agent: SessionAgent, data: Record<string, unknown>): void {
+  const taskResolution = data.taskResolution as TaskResolutionSummary | undefined;
+  if (!taskResolution?.bestCapability?.id) return;
+
+  const msgId = `task-resolution-${taskResolution.bestCapability.id}-${Date.now().toString(36)}`;
+  const msg: Message = {
+    id: msgId,
+    sessionId: agent.sessionId,
+    type: 'task_resolution',
+    content: JSON.stringify(taskResolution),
+    taskResolution,
+    agentId: agent.agentId,
+    timestamp: Date.now(),
+  };
+
+  agent.state.messages.appendMessage(msg);
+  agent.emit('messageAdded', msg);
+}
+
 export function onArtifactEvent(agent: SessionAgent, data: Record<string, unknown>): void {
   const artifact = data.artifact as ArtifactRecord | undefined;
   if (!artifact?.id) return;
@@ -457,6 +476,7 @@ export class SessionAgent extends EventEmitter {
         case 'delegation_progress': onDelegationProgress(this, data); break;
         case 'delegation_status': onDelegationStatus(this, data); break;
         case 'task_notification': onTaskNotification(this, data); break;
+        case 'task_resolution': onTaskResolution(this, data); break;
         case 'status': onStatus(this, data.content as string | undefined); break;
         case 'sleep': onSleep(this, data.content as string | undefined); break;
         case 'wake': onWake(this, data.content as string | undefined); break;

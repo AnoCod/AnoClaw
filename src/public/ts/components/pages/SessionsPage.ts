@@ -20,6 +20,7 @@ import { StreamingMessageDelegate } from '../conversation/delegates/StreamingMes
 import { SubSessionCardDelegate } from '../conversation/delegates/SubSessionCardDelegate.js';
 import { DelegationActivityDelegate } from '../conversation/delegates/DelegationActivityDelegate.js';
 import { TaskNotificationDelegate } from '../conversation/delegates/TaskNotificationDelegate.js';
+import { TaskResolutionDelegate } from '../conversation/delegates/TaskResolutionDelegate.js';
 import { TodoWriteDelegate } from '../conversation/delegates/TodoWriteDelegate.js';
 import { PlanIndicator } from '../conversation/delegates/PlanIndicator.js';
 import { SystemMessageDelegate } from '../conversation/delegates/SystemMessageDelegate.js';
@@ -801,6 +802,11 @@ export class SessionsPage implements Page {
         });
         break;
       }
+      case 'task_resolution': {
+        const taskResolution = msg.taskResolution || safeParseJson(msg.content);
+        delegate = new TaskResolutionDelegate({ taskResolution });
+        break;
+      }
       case 'todo_write':
         delegate = new TodoWriteDelegate({ type: 'todo_write', todos: msg.todos || [] });
         break;
@@ -1067,6 +1073,7 @@ export class SessionsPage implements Page {
     if (type === 'think') return 'think';
     if (type === 'tool_call') return 'tool';
     if (type === 'todo_write') return 'todo';
+    if (type === 'task_resolution') return 'delegate';
     if (type === 'delegation_activity' || type === 'task_notification' || type === 'sub_session') return 'delegate';
     if (type === 'plan_enter' || type === 'plan_exit') return 'plan';
     if (type === 'error') return 'error';
@@ -1241,5 +1248,14 @@ export class SessionsPage implements Page {
   }
 }
 
+
+function safeParseJson(value: unknown): any {
+  if (typeof value !== 'string') return {};
+  try {
+    return JSON.parse(value);
+  } catch {
+    return {};
+  }
+}
 
 

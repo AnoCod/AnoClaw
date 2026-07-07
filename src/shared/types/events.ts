@@ -190,6 +190,7 @@ export enum WsMessageType {
   DelegationStatus = 'delegation_status',
   // Task notification (background task completion/failure)
   TaskNotification = 'task_notification',
+  TaskResolution = 'task_resolution',
   CommandResult = 'command_result',
   StatusInfo  = 'status',
   // Agent lifecycle events
@@ -262,6 +263,7 @@ export type WsTypedMessage =
   | { type: WsMessageType.DelegationProgress; content?: string; [key: string]: unknown }
   | { type: WsMessageType.DelegationStatus; content?: string; [key: string]: unknown }
   | { type: WsMessageType.TaskNotification; taskStatus?: string; taskSummary?: string; taskResult?: string; [key: string]: unknown }
+  | { type: WsMessageType.TaskResolution; taskResolution?: unknown; [key: string]: unknown }
   | { type: WsMessageType.CommandResult; content?: string; [key: string]: unknown }
   | { type: WsMessageType.StatusInfo; content?: string; [key: string]: unknown }
   | { type: WsMessageType.AgentStatus; agentId?: string; name?: string; [key: string]: unknown }

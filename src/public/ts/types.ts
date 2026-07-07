@@ -27,6 +27,7 @@ export type MessageType =
   | 'error'
   | 'delegation_activity'
   | 'task_notification'
+  | 'task_resolution'
   | 'status';
 
 export type MessageStatus = 'pending' | 'success' | 'error';
@@ -67,6 +68,8 @@ export interface Message {
   taskStatus?: string;
   taskSummary?: string;
   taskResult?: string;
+  // Task resolution specific
+  taskResolution?: TaskResolutionSummary;
 }
 
 /** Alias for clarity — the frontend display message type. */
@@ -298,6 +301,62 @@ export interface PluginInfo {
   };
 }
 
+export type CapabilityPluginRecommendationStatus =
+  | 'activated'
+  | 'installed'
+  | 'missing'
+  | 'error'
+  | 'unknown';
+
+export type CapabilityPluginRecommendationAction =
+  | 'none'
+  | 'activate'
+  | 'install'
+  | 'reload'
+  | 'inspect';
+
+export interface CapabilityPluginRecommendation {
+  pluginName: string;
+  displayName: string;
+  status: CapabilityPluginRecommendationStatus;
+  action: CapabilityPluginRecommendationAction;
+  reason?: string;
+  source?: string;
+  installable: boolean;
+  missingTools: string[];
+  version?: string;
+  publisher?: string;
+  description?: string;
+  installUrl?: string;
+  installRoute?: string;
+  activateRoute?: string;
+  errorMessage?: string;
+}
+
+export interface TaskResolutionSummary {
+  intent?: string;
+  query?: string;
+  userMode?: UserMode;
+  locale?: string;
+  confidence?: number;
+  nextAction?: string;
+  canStart?: boolean;
+  bestCapability?: {
+    id?: string;
+    title?: string;
+    domain?: string;
+    status?: string;
+    source?: string;
+    sourceName?: string;
+    pluginName?: string;
+  };
+  missingInputs?: Array<{ name?: string; label?: string; type?: string }>;
+  missingTools?: string[];
+  recommendedPlugins?: string[];
+  pluginRecommendations?: CapabilityPluginRecommendation[];
+  reason?: string;
+}
+
 export interface PluginPageContribution {
   id: string;
   title: string;
@@ -339,6 +398,7 @@ export type StreamEventType =
   | 'loop_completed' | 'compaction_triggered'
   | 'quality_score_ack' | 'quality_score_error'
   | 'task_notification'
+  | 'task_resolution'
   | 'task_list_update';
 
 // ── Talent Pool types (frontend copy) ──

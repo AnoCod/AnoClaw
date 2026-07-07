@@ -307,6 +307,9 @@ describe('AgentRuntime', () => {
       expect(events[0].type).toBe(SSEEventType.StatusInfo);
       expect(events[0].taskResolution.bestCapability.id).toBe('presentation.create');
       expect(events[0].agentMissingTools).toEqual([]);
+      const taskResolutionEvent = events.find((event) => event.type === SSEEventType.TaskResolution);
+      expect(taskResolutionEvent?.taskResolution.bestCapability.id).toBe('presentation.create');
+      expect(taskResolutionEvent?.taskResolution.pluginRecommendations[0].pluginName).toBe('anoclaw-office');
       expect(events.some((event) => event.type === SSEEventType.Text && String(event.content).includes('office'))).toBe(true);
       expect(events.at(-1)?.type).toBe(SSEEventType.Done);
     });

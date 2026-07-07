@@ -110,7 +110,7 @@ Writes content to a file. Overwrites existing files. Requires reading the file f
 
 ### EditTool — `Edit`
 
-Performs exact string replacements in files. Requires reading the file first.
+Performs exact string replacements in files. Requires reading the file first. Provides replacement-count checks, dry-run validation, line-ending normalization, and diagnostics for ambiguous matches.
 
 | Property | Value |
 |---|---|
@@ -124,6 +124,8 @@ Performs exact string replacements in files. Requires reading the file first.
 | `old_string` | string | ✓ | The text to find and replace |
 | `new_string` | string | ✓ | Replacement text |
 | `replace_all` | boolean | | Replace all occurrences (default false) |
+| `expected_replacements` | number | | Fail unless exactly this many replacements would be made |
+| `dry_run` | boolean | | Validate and report replacement metadata without writing |
 
 ---
 

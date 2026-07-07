@@ -77,7 +77,7 @@ Executes shell commands with confirmation, timeout, background-task, working-dir
 
 ### ReadTool — `Read`
 
-Reads files from the local filesystem or lists directories. Supports text, streamed line ranges for large files, image/binary summaries, and PDF text extraction with page ranges.
+Reads files from the local filesystem or lists directories. Supports text, streamed line ranges, tail reads for large logs, optional line numbers, image/binary summaries, and PDF text extraction with page ranges.
 
 | Property | Value |
 |---|---|
@@ -94,6 +94,15 @@ Reads files from the local filesystem or lists directories. Supports text, strea
 | `offset` | number | | Starting line number |
 | `limit` | number | | Max lines to read |
 | `pages` | string | | PDF page range (e.g., "1-5") |
+| `tail` | number | | Read the last N lines of a text file; max 5000; cannot be combined with `offset`/`limit` |
+| `line_numbers` | boolean | | Prefix returned text lines with 1-based line numbers |
+| `max_chars` | number | | Max characters returned by the tool, default/max 80000 |
+
+**Behavior notes:**
+- Invalid range values are rejected instead of silently clamped.
+- Text output is truncated inside the tool with metadata before pipeline truncation.
+- `tail` streams the file and keeps only the requested trailing lines in memory.
+- Results include structured metadata for file kind, size, line ranges, truncation, and directory counts.
 
 ---
 

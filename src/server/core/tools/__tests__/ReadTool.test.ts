@@ -55,6 +55,92 @@ describe('ReadTool', () => {
     });
   });
 
+  it('adds line numbers to requested ranges for precise references', async () => {
+    const workspace = await makeWorkspace();
+    const file = path.join(workspace, 'numbered.txt');
+    await writeFile(file, ['alpha', 'beta target', 'gamma'].join('\n'));
+
+    const result = await new ReadTool().execute(
+      { file_path: file, offset: 2, limit: 2, line_numbers: true },
+      ctx(workspace),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('2| beta target');
+    expect(result.content).toContain('3| gamma');
+    expect(result.structured).toMatchObject({
+      lineNumbers: true,
+      lineStart: 2,
+      lineEnd: 3,
+    });
+  });
+
+  it('reads the tail of large text files without requiring a known offset', async () => {
+    const workspace = await makeWorkspace();
+    const file = path.join(workspace, 'app.log');
+    const lines = Array.from({ length: 9000 }, (_unused, index) => `log line ${index + 1}`);
+    await writeFile(file, lines.join('\n'));
+
+    const result = await new ReadTool().execute(
+      { file_path: file, tail: 3, line_numbers: true },
+      ctx(workspace),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('8998| log line 8998');
+    expect(result.content).toContain('9000| log line 9000');
+    expect(result.content).not.toContain('8997| log line 8997');
+    expect(result.structured).toMatchObject({
+      mode: 'tail',
+      lineStart: 8998,
+      lineEnd: 9000,
+      linesRead: 3,
+      totalLines: 9000,
+      truncatedByLimit: true,
+    });
+  });
+
+  it('applies max_chars before returning full text content', async () => {
+    const workspace = await makeWorkspace();
+    const file = path.join(workspace, 'small-but-chatty.txt');
+    await writeFile(file, `${'abcde'.repeat(80)}\nkeep-out`);
+
+    const result = await new ReadTool().execute(
+      { file_path: file, max_chars: 120 },
+      ctx(workspace),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.wasTruncated).toBe(true);
+    expect(result.content.length).toBeLessThan(200);
+    expect(result.content).toContain('Read output truncated at 120 characters');
+    expect(result.content).not.toContain('keep-out');
+    expect(result.structured).toMatchObject({
+      mode: 'full',
+      maxChars: 120,
+      truncatedByChars: true,
+    });
+  });
+
+  it('rejects ambiguous or invalid range parameters instead of silently clamping', async () => {
+    const workspace = await makeWorkspace();
+    const file = path.join(workspace, 'sample.txt');
+    await writeFile(file, 'hello\nworld');
+    const tool = new ReadTool();
+
+    const badOffset = await tool.execute({ file_path: file, offset: 0 }, ctx(workspace));
+    expect(badOffset.success).toBe(false);
+    expect(badOffset.errorMessage).toContain('offset must be at least 1');
+
+    const mixedTail = await tool.execute({ file_path: file, tail: 1, limit: 1 }, ctx(workspace));
+    expect(mixedTail.success).toBe(false);
+    expect(mixedTail.errorMessage).toContain('tail cannot be combined');
+
+    const badLineNumbers = await tool.execute({ file_path: file, line_numbers: 'yes' }, ctx(workspace));
+    expect(badLineNumbers.success).toBe(false);
+    expect(badLineNumbers.errorMessage).toContain('line_numbers must be a boolean');
+  });
+
   it('rejects full reads of very large text files with actionable guidance', async () => {
     const workspace = await makeWorkspace();
     const file = path.join(workspace, 'large.txt');

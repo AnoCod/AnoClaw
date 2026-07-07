@@ -16,6 +16,9 @@ const MAX_SIZE_BYTES = 256 * 1024;
 
 /** Maximum character output for text files. */
 const MAX_OUTPUT_CHARS = 80000;
+const MIN_OUTPUT_CHARS = 100;
+const MAX_TAIL_LINES = 5000;
+const MAX_LIMIT_LINES = 10000;
 const MAX_DIRECTORY_ENTRIES = 500;
 const BINARY_SAMPLE_BYTES = 4096;
 const DEFAULT_PDF_MAX_PAGES = 10;
@@ -67,6 +70,21 @@ export class ReadTool extends Tool {
           description:
             'Page range for PDF files (e.g., "1-5", "3", "10-20"). Defaults to the first pages.',
         },
+        tail: {
+          type: 'number',
+          description:
+            `Read the last N lines of a text file. Useful for logs. Max ${MAX_TAIL_LINES}. Cannot be combined with offset/limit.`,
+        },
+        line_numbers: {
+          type: 'boolean',
+          description:
+            'Prefix returned text lines with 1-based line numbers for precise references. Default false.',
+        },
+        max_chars: {
+          type: 'number',
+          description:
+            `Maximum characters returned by this tool. Default ${MAX_OUTPUT_CHARS}, min ${MIN_OUTPUT_CHARS}, max ${MAX_OUTPUT_CHARS}.`,
+        },
       },
       required: ['file_path'],
     };
@@ -101,12 +119,33 @@ export class ReadTool extends Tool {
     ctx: ExecutionContext,
   ): Promise<ToolResult> {
     const filePath = params.file_path as string;
-    const offset = params.offset as number | undefined;
-    const limit = params.limit as number | undefined;
     const pages = params.pages as string | undefined;
+    const offsetResult = normalizeOptionalInteger(params.offset, 'offset', 1, Number.MAX_SAFE_INTEGER);
+    if (offsetResult.error) return this.makeError(offsetResult.error);
+    const offset = offsetResult.value;
+
+    const limitResult = normalizeOptionalInteger(params.limit, 'limit', 1, MAX_LIMIT_LINES);
+    if (limitResult.error) return this.makeError(limitResult.error);
+    const limit = limitResult.value;
+
+    const tailResult = normalizeOptionalInteger(params.tail, 'tail', 1, MAX_TAIL_LINES);
+    if (tailResult.error) return this.makeError(tailResult.error);
+    const tail = tailResult.value;
+
+    const lineNumbersResult = normalizeBoolean(params.line_numbers, 'line_numbers', false);
+    if (lineNumbersResult.error) return this.makeError(lineNumbersResult.error);
+    const lineNumbers = lineNumbersResult.value as boolean;
+
+    const maxCharsResult = normalizeInteger(params.max_chars, 'max_chars', MAX_OUTPUT_CHARS, MIN_OUTPUT_CHARS, MAX_OUTPUT_CHARS);
+    if (maxCharsResult.error) return this.makeError(maxCharsResult.error);
+    const maxChars = maxCharsResult.value as number;
 
     if (!filePath || typeof filePath !== 'string') {
       return this.makeError('file_path is required');
+    }
+
+    if (tail !== undefined && (offset !== undefined || limit !== undefined)) {
+      return this.makeError('tail cannot be combined with offset or limit');
     }
 
     const startedAt = Date.now();
@@ -130,7 +169,17 @@ export class ReadTool extends Tool {
 
       if (stat.isDirectory()) {
         const listing = await listDirectory(resolved, ctx.signal);
-        return this.makeResult(listing.content, { startedAt, wasTruncated: listing.wasTruncated });
+        return this.makeResult(listing.content, {
+          startedAt,
+          wasTruncated: listing.wasTruncated,
+          structured: {
+            path: resolved,
+            kind: 'directory',
+            entries: listing.entries,
+            shownEntries: listing.shownEntries,
+            truncatedByEntries: listing.wasTruncated,
+          },
+        });
       }
 
       if (ctx.signal?.aborted) {
@@ -141,11 +190,14 @@ export class ReadTool extends Tool {
       const ext = path.extname(resolved).toLowerCase();
 
       if (ext === '.pdf') {
-        const pdf = await readPdfText(resolved, pages, ctx.signal);
+        const pdf = await readPdfText(resolved, pages, maxChars, ctx.signal);
         return this.makeResult(pdf.content, {
           startedAt,
           wasTruncated: pdf.wasTruncated,
           structured: {
+            path: resolved,
+            kind: 'pdf',
+            sizeBytes: stat.size,
             pageCount: pdf.pageCount,
             selectedPages: pdf.selectedPages,
             truncatedByPages: pdf.truncatedByPages,
@@ -158,15 +210,54 @@ export class ReadTool extends Tool {
       if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'].includes(ext)) {
         return this.makeResult(
           `[Image file: ${path.basename(resolved)}]\nSize: ${formatBytes(stat.size)}\nPath: ${resolved}`,
-          { startedAt }
+          {
+            startedAt,
+            structured: {
+              path: resolved,
+              kind: 'image',
+              sizeBytes: stat.size,
+              extension: ext,
+            },
+          }
         );
       }
 
       if (await looksBinary(resolved)) {
         return this.makeResult(
           `[Binary file: ${path.basename(resolved)}]\nSize: ${formatBytes(stat.size)}\nPath: ${resolved}`,
-          { startedAt }
+          {
+            startedAt,
+            structured: {
+              path: resolved,
+              kind: 'binary',
+              sizeBytes: stat.size,
+              extension: ext,
+            },
+          }
         );
+      }
+
+      if (tail !== undefined) {
+        const range = await readTextTail(resolved, tail, maxChars, lineNumbers, ctx.signal);
+        return this.makeResult(range.content, {
+          startedAt,
+          wasTruncated: range.wasTruncated,
+          structured: {
+            path: resolved,
+            kind: 'text',
+            mode: 'tail',
+            sizeBytes: stat.size,
+            lineStart: range.lineStart,
+            lineEnd: range.lineEnd,
+            linesRead: range.linesRead,
+            totalLines: range.totalLines,
+            requestedTail: tail,
+            lineNumbers,
+            maxChars,
+            truncatedByLimit: range.truncatedByLimit,
+            truncatedByChars: range.truncatedByChars,
+          },
+        });
       }
 
       // Check file size for full reads. Line ranges are streamed below.
@@ -179,15 +270,20 @@ export class ReadTool extends Tool {
       }
 
       if (offset !== undefined || limit !== undefined) {
-        const range = await readTextLineRange(resolved, offset, limit, ctx.signal);
-        const wasTruncated = range.wasTruncated || range.content.length > MAX_OUTPUT_CHARS;
+        const range = await readTextLineRange(resolved, offset, limit, maxChars, lineNumbers, ctx.signal);
         return this.makeResult(range.content, {
           startedAt,
-          wasTruncated,
+          wasTruncated: range.wasTruncated,
           structured: {
+            path: resolved,
+            kind: 'text',
+            mode: 'range',
+            sizeBytes: stat.size,
             lineStart: range.lineStart,
             lineEnd: range.lineEnd,
             linesRead: range.linesRead,
+            lineNumbers,
+            maxChars,
             truncatedByLimit: range.truncatedByLimit,
             truncatedByChars: range.truncatedByChars,
           },
@@ -202,14 +298,38 @@ export class ReadTool extends Tool {
         // Binary file fallback
         return this.makeResult(
           `[Binary file: ${path.basename(resolved)}]\nSize: ${formatBytes(stat.size)}`,
-          { startedAt }
+          {
+            startedAt,
+            structured: {
+              path: resolved,
+              kind: 'binary',
+              sizeBytes: stat.size,
+              extension: ext,
+            },
+          }
         );
       }
 
-      // Apply character limit - pipeline normalizes via outputLimit: 80000
-      const wasTruncated = content.length > MAX_OUTPUT_CHARS;
+      const prepared = lineNumbers
+        ? addLineNumbers(content.split(/\r?\n/), 1)
+        : content;
+      const truncated = truncateText(prepared, maxChars);
 
-      return this.makeResult(content, { startedAt, wasTruncated });
+      return this.makeResult(truncated.content, {
+        startedAt,
+        wasTruncated: truncated.wasTruncated,
+        structured: {
+          path: resolved,
+          kind: 'text',
+          mode: 'full',
+          sizeBytes: stat.size,
+          lineNumbers,
+          maxChars,
+          charsRead: content.length,
+          returnedChars: truncated.content.length,
+          truncatedByChars: truncated.wasTruncated,
+        },
+      });
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       return this.makeError(errMsg);
@@ -244,10 +364,63 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function normalizeInteger(
+  value: unknown,
+  name: string,
+  defaultValue: number,
+  min: number,
+  max: number,
+): { value: number; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: defaultValue };
+  if (typeof value !== 'number' || !Number.isFinite(value)) return { error: `${name} must be a finite number` };
+  const integer = Math.trunc(value);
+  if (integer < min) return { error: `${name} must be at least ${min}` };
+  if (integer > max) return { error: `${name} must be ${max} or less` };
+  return { value: integer };
+}
+
+function normalizeOptionalInteger(
+  value: unknown,
+  name: string,
+  min: number,
+  max: number,
+): { value?: number; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: undefined };
+  if (typeof value !== 'number' || !Number.isFinite(value)) return { error: `${name} must be a finite number` };
+  const integer = Math.trunc(value);
+  if (integer < min) return { error: `${name} must be at least ${min}` };
+  if (integer > max) return { error: `${name} must be ${max} or less` };
+  return { value: integer };
+}
+
+function normalizeBoolean(
+  value: unknown,
+  name: string,
+  defaultValue: boolean,
+): { value: boolean; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: defaultValue };
+  if (typeof value !== 'boolean') return { error: `${name} must be a boolean` };
+  return { value };
+}
+
+function truncateText(content: string, maxChars: number): { content: string; wasTruncated: boolean } {
+  if (content.length <= maxChars) return { content, wasTruncated: false };
+  return {
+    content: `${content.slice(0, maxChars).trimEnd()}\n\n... Read output truncated at ${maxChars} characters.`,
+    wasTruncated: true,
+  };
+}
+
+function addLineNumbers(lines: string[], startLine: number): string {
+  const endLine = startLine + Math.max(0, lines.length - 1);
+  const width = String(Math.max(endLine, 1)).length;
+  return lines.map((line, index) => `${String(startLine + index).padStart(width, ' ')}| ${line}`).join('\n');
+}
+
 async function listDirectory(
   dirPath: string,
   signal?: AbortSignal,
-): Promise<{ content: string; wasTruncated: boolean }> {
+): Promise<{ content: string; wasTruncated: boolean; entries: number; shownEntries: number }> {
   if (signal?.aborted) throw new Error('Read cancelled by user');
   const entries = await fs.readdir(dirPath, { withFileTypes: true });
   entries.sort((a, b) => {
@@ -285,6 +458,8 @@ async function listDirectory(
   return {
     content: lines.join('\n').trimEnd(),
     wasTruncated: entries.length > MAX_DIRECTORY_ENTRIES,
+    entries: entries.length,
+    shownEntries: visible.length,
   };
 }
 
@@ -311,6 +486,7 @@ interface TextRangeResult {
   lineStart: number;
   lineEnd: number;
   linesRead: number;
+  totalLines?: number;
   wasTruncated: boolean;
   truncatedByLimit: boolean;
   truncatedByChars: boolean;
@@ -320,10 +496,12 @@ async function readTextLineRange(
   filePath: string,
   offset: number | undefined,
   limit: number | undefined,
+  maxChars: number,
+  lineNumbers: boolean,
   signal?: AbortSignal,
 ): Promise<TextRangeResult> {
-  const startLine = clampPositiveInt(offset, 1);
-  const maxLines = limit === undefined ? undefined : clampPositiveInt(limit, 1);
+  const startLine = offset ?? 1;
+  const maxLines = limit;
   const endLine = maxLines === undefined ? Number.POSITIVE_INFINITY : startLine + maxLines - 1;
   const lines: string[] = [];
   let currentLine = 0;
@@ -351,7 +529,7 @@ async function readTextLineRange(
       }
       lines.push(line);
       collectedChars += line.length + (lines.length > 1 ? 1 : 0);
-      if (collectedChars > MAX_OUTPUT_CHARS) {
+      if (collectedChars > maxChars) {
         truncatedByChars = true;
         break;
       }
@@ -362,16 +540,66 @@ async function readTextLineRange(
     stream.destroy();
   }
 
-  const content = lines.join('\n');
+  const content = lineNumbers ? addLineNumbers(lines, startLine) : lines.join('\n');
+  const truncated = truncateText(content, maxChars);
   const actualEnd = lines.length > 0 ? startLine + lines.length - 1 : startLine - 1;
   return {
-    content: content || '(no content in requested range)',
+    content: truncated.content || '(no content in requested range)',
     lineStart: startLine,
     lineEnd: actualEnd,
     linesRead: lines.length,
-    wasTruncated: truncatedByLimit || truncatedByChars,
+    wasTruncated: truncatedByLimit || truncatedByChars || truncated.wasTruncated,
     truncatedByLimit,
-    truncatedByChars,
+    truncatedByChars: truncatedByChars || truncated.wasTruncated,
+  };
+}
+
+async function readTextTail(
+  filePath: string,
+  tail: number,
+  maxChars: number,
+  lineNumbers: boolean,
+  signal?: AbortSignal,
+): Promise<TextRangeResult> {
+  const ring: Array<{ lineNumber: number; text: string }> = [];
+  let currentLine = 0;
+
+  const stream = createReadStream(filePath, { encoding: 'utf-8' });
+  const rl = createInterface({ input: stream, crlfDelay: Infinity });
+  const abort = () => {
+    rl.close();
+    stream.destroy(new Error('Read cancelled by user'));
+  };
+
+  if (signal?.aborted) abort();
+  signal?.addEventListener('abort', abort, { once: true });
+  try {
+    for await (const line of rl) {
+      if (signal?.aborted) throw new Error('Read cancelled by user');
+      currentLine++;
+      ring.push({ lineNumber: currentLine, text: line });
+      if (ring.length > tail) ring.shift();
+    }
+  } finally {
+    signal?.removeEventListener('abort', abort);
+    rl.close();
+    stream.destroy();
+  }
+
+  const firstLine = ring[0]?.lineNumber ?? Math.max(1, currentLine + 1);
+  const rawLines = ring.map(item => item.text);
+  const content = lineNumbers ? addLineNumbers(rawLines, firstLine) : rawLines.join('\n');
+  const truncated = truncateText(content, maxChars);
+
+  return {
+    content: truncated.content || '(file is empty)',
+    lineStart: ring.length ? firstLine : 0,
+    lineEnd: ring.length ? ring[ring.length - 1].lineNumber : 0,
+    linesRead: ring.length,
+    totalLines: currentLine,
+    wasTruncated: currentLine > ring.length || truncated.wasTruncated,
+    truncatedByLimit: currentLine > ring.length,
+    truncatedByChars: truncated.wasTruncated,
   };
 }
 
@@ -387,6 +615,7 @@ interface PdfReadResult {
 async function readPdfText(
   filePath: string,
   pagesSpec?: string,
+  maxChars = MAX_OUTPUT_CHARS,
   signal?: AbortSignal,
 ): Promise<PdfReadResult> {
   if (signal?.aborted) throw new Error('Read cancelled by user');
@@ -422,7 +651,7 @@ async function readPdfText(
       const content = await page.getTextContent();
       const text = textContentToString(content);
       const pageBlock = [`--- Page ${pageNumber} ---`, text || '(no extractable text on this page)', ''].join('\n');
-      const remaining = MAX_OUTPUT_CHARS - totalChars;
+      const remaining = maxChars - totalChars;
       if (remaining <= 0) {
         truncatedByChars = true;
         break;
@@ -439,7 +668,7 @@ async function readPdfText(
       lines.push(`... ${pdf.numPages - selectedPages.length} more pages omitted. Pass pages to read a specific range.`);
     }
     if (truncatedByChars) {
-      lines.push('... PDF text truncated at the Read output limit.');
+      lines.push(`... PDF text truncated at ${maxChars} characters.`);
     }
 
     return {

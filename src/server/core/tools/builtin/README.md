@@ -15,7 +15,7 @@
 | `GlobTool.ts` | `Glob` | File & Code | Safe | SubAgent |
 | `GrepTool.ts` | `Grep` | File & Code | Safe | SubAgent |
 | `NotebookEditTool.ts` | `NotebookEdit` | File & Code | Medium | SubAgent |
-| `WebFetchTool.ts` | `WebFetch` | Search & Web | Medium | SubAgent |
+| `WebFetchTool.ts` | `WebFetch` | Search & Web | Low | SubAgent |
 | `WebSearchTool.ts` | `WebSearch` | Search & Web | Low | SubAgent |
 | `SleepTool.ts` | `Sleep` | Planning & Communication | Safe | SubAgent |
 | `EnterPlanModeTool.ts` | `EnterPlanMode` | Planning & Communication | Safe | SubAgent |
@@ -214,18 +214,30 @@ Edits Jupyter notebook cells (`.ipynb` files). Supports replace, insert, and del
 
 ### WebFetchTool — `WebFetch`
 
-Fetches content from a URL, converts HTML to markdown, and processes it with an AI model. Has a 15-minute self-cleaning cache.
+Fetches content from a URL, converts HTML/JSON/text to readable text, and returns bounded output with cache, timeout, focused-excerpt, and structured failure metadata.
 
 | Property | Value |
 |---|---|
-| Risk | `Medium` |
+| Risk | `Low` |
 | Is read-only | Yes |
+| Timeout | 60s internal default, configurable via `timeout_ms` up to 90s |
+| Cache | 15-minute URL cache, bypassable with `use_cache: false` |
 
 **Parameters:**
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `url` | string | ✓ | URL to fetch (HTTP upgraded to HTTPS) |
-| `prompt` | string | ✓ | What information to extract from the page |
+| `prompt` | string | | Optional focus prompt; returned excerpts prioritize matching terms |
+| `max_content_chars` | number | | Max content chars returned, default 15000, max 80000 |
+| `timeout_ms` | number | | Total fetch timeout, default 60000, max 90000 |
+| `retry_attempts` | number | | Network attempts, default 2, max 3 |
+| `use_cache` | boolean | | Use cached fetched text when available, default true |
+
+**Behavior notes:**
+- Applies the output character cap before returning content, rather than relying only on pipeline truncation.
+- Returns structured status for `ok`, `cached`, `http_error`, `timeout`, `aborted`, and `failed`.
+- User interrupts cancel active fetches and retry backoff.
+- SSRF protection checks literal IPs and DNS lookup results for IPv4 and IPv6 private/internal ranges.
 
 ---
 

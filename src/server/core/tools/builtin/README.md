@@ -320,7 +320,7 @@ Asks the user a question and waits for a response. Pauses the agent loop until t
 
 ### TodoWriteTool — `TodoWrite`
 
-Creates and manages a structured task list for the current session. Tracks progress with `pending`, `in_progress`, and `completed` states.
+Creates and manages a normalized structured task list for the current session. Tracks progress with `pending`, `in_progress`, and `completed` states, emits todo update events for the UI, and rejects ambiguous list state.
 
 | Property | Value |
 |---|---|
@@ -330,7 +330,12 @@ Creates and manages a structured task list for the current session. Tracks progr
 **Parameters:**
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `todos` | array | ✓ | Array of `{ content, status, activeForm }` items |
+| `todos` | array | ✓ | Complete replacement list of `{ content, status, activeForm }` items; max 50. Empty array clears the visible list |
+
+**Behavior notes:**
+- Whitespace is normalized before emitting/persisting todos.
+- At most one todo may be `in_progress`; duplicate task content is rejected.
+- `content` is capped at 300 chars and `activeForm` at 160 chars.
 
 ---
 

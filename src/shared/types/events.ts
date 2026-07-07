@@ -91,6 +91,19 @@ export interface CoreEventMap {
   'tool:execution_completed': { sessionId: string; agentId: string; toolName: string; success: boolean; durationMs: number; tokensUsed: number };
   'tool:executed': { toolName: string; sessionId: string; agentId: string; params: Record<string, unknown> };
   'tool:error': { toolName: string; sessionId: string; agentId: string; error: string };
+  'todo:updated': {
+    sessionId: string;
+    agentId: string;
+    summary: {
+      total: number;
+      pending: number;
+      in_progress: number;
+      completed: number;
+      activeTask: string | null;
+      completionRatio: number;
+    };
+    todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'completed'; activeForm: string }>;
+  };
 
   // loop
   'loop:completed': { sessionId: string; agentId: string; turnCount: number; totalTokens: number };

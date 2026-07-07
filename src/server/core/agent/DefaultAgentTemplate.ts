@@ -45,6 +45,7 @@ export const DEFAULT_CEO_TOOLS = [
   'SubAgentDelete',
   'ApiCall',
   'office.create_pptx',
+  'office.create_docx',
 ];
 
 export const DEFAULT_MANAGER_TOOLS = [

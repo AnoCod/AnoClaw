@@ -139,6 +139,32 @@ describe('TaskResolver', () => {
     expect(result.missingInputs).toEqual([]);
     expect(result.nextAction).toBe('execute_capability');
   });
+
+  it('treats document titles as supplied by the user message', async () => {
+    ToolRegistry.getInstance().registerTool(new CreateDocFixtureTool(), 'Office', { source: 'plugin', pluginName: 'office' });
+    const registry = CapabilityRegistry.getInstance();
+    registry.registerRuntimeCapabilities('office', [
+      {
+        id: 'document.create',
+        title: 'Create a document',
+        domain: 'office',
+        kind: 'artifact',
+        triggers: ['report', '报告'],
+        inputs: [{ name: 'title', type: 'string', required: true }],
+        requiredTools: ['office.create_docx'],
+        outputs: [{ type: 'file', extension: 'docx', artifactType: 'document' }],
+      },
+    ], { source: 'plugin', pluginName: 'office', pluginStatus: 'activated' });
+
+    const result = await new TaskResolver(registry).resolve({
+      message: '帮我写一份公司年终总结报告',
+      userMode: 'office',
+    });
+
+    expect(result.bestCapability?.id).toBe('document.create');
+    expect(result.missingInputs).toEqual([]);
+    expect(result.nextAction).toBe('execute_capability');
+  });
 });
 
 class CreatePptFixtureTool extends Tool {
@@ -156,6 +182,18 @@ class CreatePptFixtureTool extends Tool {
 class GenerateQrFixtureTool extends Tool {
   name(): string { return 'generateQRCode'; }
   description(): string { return 'Generate a QR code.'; }
+  parametersSchema(): Record<string, unknown> {
+    return { type: 'object', properties: {}, required: [] };
+  }
+  riskLevel(): RiskLevel { return RiskLevel.Safe; }
+  async execute(_params: Record<string, unknown>, _ctx: ExecutionContext): Promise<ToolResult> {
+    return this.makeResult('ok');
+  }
+}
+
+class CreateDocFixtureTool extends Tool {
+  name(): string { return 'office.create_docx'; }
+  description(): string { return 'Create a DOCX file.'; }
   parametersSchema(): Record<string, unknown> {
     return { type: 'object', properties: {}, required: [] };
   }

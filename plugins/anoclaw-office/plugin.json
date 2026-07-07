@@ -11,7 +11,8 @@
   },
   "contributes": {
     "tools": [
-      { "name": "office.create_pptx" }
+      { "name": "office.create_pptx" },
+      { "name": "office.create_docx" }
     ],
     "capabilities": [
       {
@@ -39,6 +40,33 @@
         "artifactTypes": ["presentation", "pptx"],
         "recommendedPlugins": ["anoclaw-office"],
         "priority": 100
+      },
+      {
+        "id": "document.create",
+        "title": "Create a document",
+        "description": "Generate a Word .docx document with a preview and downloadable artifact.",
+        "domain": "office",
+        "kind": "artifact",
+        "triggers": ["document", "docx", "word", "report", "proposal", "contract draft", "合同", "报告", "文档", "申请书", "简历"],
+        "examples": [
+          "帮我写一份公司年终总结报告",
+          "Create a contract draft from these notes"
+        ],
+        "inputs": [
+          { "name": "title", "label": "Title", "type": "string", "required": true, "aliases": ["主题", "标题", "topic"] },
+          { "name": "documentType", "label": "Document type", "type": "string", "required": false, "defaultValue": "document", "aliases": ["类型"] },
+          { "name": "audience", "label": "Audience", "type": "string", "required": false, "defaultValue": "general audience", "aliases": ["受众"] },
+          { "name": "style", "label": "Style", "type": "string", "required": false, "defaultValue": "clear and professional", "aliases": ["风格"] },
+          { "name": "content", "label": "Source content", "type": "string", "required": false, "aliases": ["资料", "内容"] }
+        ],
+        "outputs": [
+          { "type": "file", "label": "Word document", "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "extension": "docx", "artifactType": "document" },
+          { "type": "preview", "label": "Markdown preview", "mimeType": "text/markdown", "artifactType": "document" }
+        ],
+        "requiredTools": ["office.create_docx"],
+        "artifactTypes": ["document", "docx"],
+        "recommendedPlugins": ["anoclaw-office"],
+        "priority": 96
       }
     ]
   }

@@ -297,7 +297,7 @@ function normalize(value: string): string {
 }
 
 function isPrimaryFreeformInput(name: string): boolean {
-  return ['topic', 'content', 'query', 'text', 'prompt', 'description'].includes(name);
+  return ['topic', 'title', 'subject', 'content', 'query', 'text', 'prompt', 'description'].includes(name);
 }
 
 function unique(values: string[]): string[] {

@@ -21,21 +21,21 @@ export class PlanIndicator {
       font-size: 9px; letter-spacing: 1px;
       display: flex; gap: 6px; align-items: center;
       user-select: none; margin-bottom: 12px;
-      color: ${isEnter ? 'rgba(167,139,250,0.3)' : 'var(--cinema-text-muted)'};
+      color: ${isEnter ? 'var(--cinema-text-muted)' : 'var(--cinema-text-muted)'};
     `;
 
     // Pulse dot
     const dot = document.createElement('span');
     dot.style.cssText = `
       width: 4px; height: 4px; border-radius: 50%; flex-shrink: 0;
-      background: ${isEnter ? 'rgba(167,139,250,0.4)' : 'var(--cinema-text-muted)'};
+      background: ${isEnter ? '#fff' : 'var(--cinema-text-muted)'};
     `;
     indicator.appendChild(dot);
 
     // Label
     const label = document.createElement('span');
     label.textContent = isEnter ? 'PLAN MODE' : 'PLAN ENDED';
-    label.style.cssText = `color: ${isEnter ? 'rgba(167,139,250,0.25)' : 'var(--cinema-text-edge)'};`;
+    label.style.cssText = `color: ${isEnter ? 'var(--cinema-text-edge)' : 'var(--cinema-text-edge)'};`;
     indicator.appendChild(label);
 
     // Separator

@@ -29,7 +29,9 @@
     "pino": "^8.21.0",
     "playwright-core": "^1.61.1",
     "pptxgenjs": "^4.0.1",
+    "pyright": "^1.1.411",
     "rotating-file-stream": "^3.2.9",
+    "typescript": "^5.9.3",
     "ws": "^8.21.0",
     "yaml": "^2.6.0",
     "zod": "^3.23.0"
@@ -50,7 +52,6 @@
     "onnxruntime-node": "^1.27.0",
     "png-to-ico": "^3.0.1",
     "sql.js": "^1.14.1",
-    "typescript": "^5.6.0",
     "vitest": "^2.1.0"
   }
 }

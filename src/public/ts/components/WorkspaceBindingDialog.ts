@@ -33,8 +33,8 @@ export class WorkspaceBindingDialog {
     this._dialog = document.createElement('div');
     this._dialog.className = 'dialog';
     this._dialog.style.cssText = `
-      background: var(--color-surface); border-radius: 12px; padding: 24px;
-      width: 460px; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+      background: var(--color-surface); border: 1px solid var(--color-hairline);
+      border-radius: 10px; padding: 24px; width: 460px; box-shadow: none;
     `;
     this._overlay.appendChild(this._dialog);
     this._overlay.addEventListener('click', (e) => {
@@ -53,12 +53,12 @@ export class WorkspaceBindingDialog {
 
   private _build(currentPath?: string): void {
     const isSwitch = !!currentPath;
-    const accent = 'var(--color-accent)';
-    const onAccent = 'var(--color-on-accent, #000)';
+    const primary = 'var(--color-primary, #ffffff)';
+    const onPrimary = 'var(--color-on-primary, #000000)';
     const text = 'var(--color-text-primary)';
     const textSec = 'var(--color-text-secondary)';
-    const bg = 'var(--color-bg)';
-    const border = 'rgba(255,255,255,0.1)';
+    const bg = 'var(--color-surface-elevated)';
+    const border = 'var(--color-hairline)';
 
     this._dialog.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
@@ -68,7 +68,7 @@ export class WorkspaceBindingDialog {
       <form id="workspace-dialog-form" style="display:flex;flex-direction:column;gap:12px;">
         ${isSwitch ? `
         <div style="font-size:11px;color:${textSec};margin-bottom:-4px;">
-          Current: <span style="color:${accent};font-family:var(--font-mono,monospace);font-size:10px;">${esc(currentPath!)}</span>
+          Current: <span style="color:${text};font-family:var(--font-mono,monospace);font-size:10px;">${esc(currentPath!)}</span>
         </div>` : ''}
         <div>
           <label style="font-size:12px;color:${textSec};display:block;margin-bottom:4px;">${isSwitch ? 'New Workspace Path' : 'Workspace Path'}</label>
@@ -91,7 +91,7 @@ export class WorkspaceBindingDialog {
             style="padding:8px 20px;background:transparent;border:1px solid ${border};border-radius:6px;color:${text};cursor:pointer;font-size:13px;">
             Cancel</button>
           <button type="submit"
-            style="padding:8px 20px;background:${accent};border:none;border-radius:6px;color:${onAccent};cursor:pointer;font-size:13px;font-weight:500;">
+            style="padding:8px 20px;background:${primary};border:1px solid ${primary};border-radius:8px;color:${onPrimary};cursor:pointer;font-size:13px;font-weight:500;">
             ${isSwitch ? 'Switch' : 'Bind'}</button>
         </div>
       </form>

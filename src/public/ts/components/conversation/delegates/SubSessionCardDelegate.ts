@@ -51,7 +51,7 @@ export class SubSessionCardDelegate {
     dot.className = 'cinema-tool-dot';
     dot.style.cssText = `width:6px;height:6px;border-radius:50%;flex-shrink:0;`;
     const statusColors: Record<string, string> = {
-      running: 'var(--color-accent-cinema)',
+      running: 'var(--color-warning, #ffc533)',
       completed: 'var(--color-success)',
       error: 'var(--color-error)',
     };
@@ -98,7 +98,7 @@ export class SubSessionCardDelegate {
     if (this._data.status === status) return;
     this._data.status = status;
     const colors: Record<string, string> = {
-      running: 'var(--color-accent-cinema)',
+      running: 'var(--color-warning, #ffc533)',
       completed: 'var(--color-success)',
       error: 'var(--color-error)',
     };

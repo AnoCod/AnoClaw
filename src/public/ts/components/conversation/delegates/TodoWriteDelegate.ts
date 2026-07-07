@@ -98,7 +98,7 @@ export class TodoWriteDelegate {
 
     const statusColors: Record<TodoStatus, string> = {
       pending: 'var(--cinema-text-muted)',
-      in_progress: 'var(--color-accent)',
+      in_progress: 'var(--color-warning, #ffc533)',
       completed: 'rgba(89,212,153,0.5)',
     };
     const icons: Record<TodoStatus, string> = { pending: '[ ]', in_progress: '[~]', completed: '[x]' };

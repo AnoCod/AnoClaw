@@ -86,8 +86,8 @@
 }
 
 .tab-overview-badge-info {
-  color: #7c3aed;
-  background: rgba(124,58,237,0.15);
+  color: var(--color-info, #57c1ff);
+  background: var(--color-info-soft, rgba(87,193,255,0.15));
 }
 
 .tab-overview-todo-item {
@@ -140,7 +140,7 @@
 
 .tab-overview-ref-bar-fill {
   height: 100%;
-  background: var(--color-accent);
+  background: var(--color-primary, #ffffff);
   border-radius: 3px;
   transition: width 0.3s ease;
 }
@@ -217,7 +217,7 @@
 
 .tab-overview-progress-fill {
   height: 100%;
-  background: var(--color-accent);
+  background: var(--color-primary, #ffffff);
   border-radius: 3px;
   transition: width 0.3s ease;
 }
@@ -308,7 +308,7 @@
 
 .tab-plan-progress-fill {
   height: 100%;
-  background: var(--color-accent);
+  background: var(--color-primary, #ffffff);
   border-radius: 2px;
   transition: width 0.3s ease;
 }
@@ -337,8 +337,8 @@
 }
 
 .tab-plan-step[data-status="in_progress"] {
-  background: rgba(124,58,237,0.08);
-  border-color: rgba(124,58,237,0.2);
+  background: var(--color-surface-card, #121212);
+  border-color: var(--color-hairline-strong, rgba(255,255,255,0.16));
 }
 
 .tab-plan-step-icon {

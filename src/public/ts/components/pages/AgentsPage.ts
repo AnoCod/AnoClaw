@@ -19,9 +19,9 @@ declare const d3: any;
 const STORAGE_KEY = 'anoclaw-agents-positions-v4';
 
 const ROLE_STYLES: Record<string, { r: number; fill: string; stroke: string }> = {
-  MainAgent: { r: 22, fill: '#c94b3a', stroke: '#e05545' },
-  Manager:   { r: 16, fill: '#8b5cf6', stroke: '#a378f9' },
-  Member:    { r: 12, fill: '#4b89ff', stroke: '#6ba3ff' },
+  MainAgent: { r: 22, fill: '#ff6161', stroke: '#ff8a8a' },
+  Manager:   { r: 16, fill: '#57c1ff', stroke: '#9bdcff' },
+  Member:    { r: 12, fill: '#59d499', stroke: '#9be8c3' },
 };
 const DEFAULT_STYLE = ROLE_STYLES['Member'];
 const GHOST_R = 8;
@@ -358,16 +358,6 @@ export class AgentsPage implements Page {
     };
     (svg as any)._panCleanup = this._panCleanup;
 
-    // Defs — glow filters
-    const defs = document.createElementNS(svgNS, 'defs');
-    for (const [role, st] of Object.entries(ROLE_STYLES)) {
-      const filter = document.createElementNS(svgNS, 'filter');
-      filter.setAttribute('id', `glow-${role}`);
-      filter.innerHTML = `<feGaussianBlur stdDeviation="4" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>`;
-      defs.appendChild(filter);
-    }
-    svg.appendChild(defs);
-
     // Edge group
     this._edgeGroup = document.createElementNS(svgNS, 'g');
     this._edgeGroup.setAttribute('class', 'ag-edges');
@@ -491,7 +481,6 @@ export class AgentsPage implements Page {
         circle.setAttribute('class', `ag-node ag-node-${n.agent?.role || 'Member'}`);
         circle.setAttribute('fill', style.fill);
         circle.setAttribute('stroke', style.stroke);
-        circle.setAttribute('filter', `url(#glow-${n.agent?.role || 'Member'})`);
         if (n.id === this._selectedId) {
           circle.classList.add('selected');
           g.classList.add('ag-node-g--selected');

@@ -101,7 +101,7 @@ select:focus-visible {
   opacity: 0;
   transform: translateY(8px);
   transition: opacity 0.2s ease, transform 0.2s ease;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  box-shadow: none;
 }
 
 .toast-visible {
@@ -150,7 +150,7 @@ select:focus-visible {
 }
 
 [data-theme="light"] .toast {
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+  box-shadow: none;
 }
 
 /* -- Skeleton shimmer for loading states -- */

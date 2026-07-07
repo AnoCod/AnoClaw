@@ -69,13 +69,13 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
-  transition: border-color var(--transition-normal), box-shadow var(--transition-normal), opacity var(--transition-normal);
+  transition: border-color var(--transition-normal), background var(--transition-normal), opacity var(--transition-normal);
   position: relative;
 }
 
 .skill-card:hover {
   border-color: var(--color-hairline-strong);
-  box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+  background: var(--color-surface-elevated);
 }
 
 .skill-card-disabled {
@@ -187,18 +187,24 @@
 }
 
 .skill-toggle-track-on {
-  background: var(--color-accent);
-  box-shadow: 0 0 8px rgba(255,255,255,0.15);
+  background: var(--color-primary, #ffffff);
+  box-shadow: none;
 }
 
 .skill-toggle-thumb {
   position: absolute;
   height: 16px;
   width: 16px;
+  left: 3px;
   bottom: 3px;
-  background: #ffffff;
+  background: var(--color-text-tertiary);
   border-radius: 50%;
   transition: left var(--transition-slow);
+}
+
+.skill-toggle-track-on .skill-toggle-thumb {
+  left: 21px;
+  background: var(--color-on-primary, #000000);
 }
 
 .skill-modal-overlay {
@@ -214,13 +220,13 @@
 .skill-modal {
   background: var(--color-surface);
   border: 1px solid var(--color-hairline-strong);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-lg);
   width: 560px;
   max-width: 90vw;
   max-height: 80vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+  box-shadow: none;
 }
 
 .skill-modal-header {
@@ -289,10 +295,10 @@
 }
 
 .skill-form-btn-save {
-  background: var(--color-accent);
-  color: var(--color-on-accent);
-  border: none;
-  border-radius: var(--radius-sm);
+  background: var(--color-primary, #ffffff);
+  color: var(--color-on-primary, #000000);
+  border: 1px solid var(--color-primary, #ffffff);
+  border-radius: var(--radius-md);
   padding: 8px 20px;
   cursor: pointer;
   font-size: var(--font-size-caption-md);

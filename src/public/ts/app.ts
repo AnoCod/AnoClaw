@@ -353,14 +353,16 @@ class App {
     console.log('[App] _applyTheme: theme=' + this._settings.theme + ', accent=' + this._settings.accentColor);
     const root = document.documentElement;
     root.setAttribute('data-theme', this._settings.theme);
-    // Accent color attribute and variable override
     const accentName = this._getAccentName(this._settings.accentColor);
     root.setAttribute('data-accent', accentName);
-    root.style.setProperty('--color-accent', this._settings.accentColor);
-    root.style.setProperty('--color-icon-active', this._settings.accentColor);
-    root.style.setProperty('--color-accent-cinema', this._settings.accentColor);
-    root.style.setProperty('--color-accent-cinema-subtle', `${this._settings.accentColor}1A`);
-    root.style.setProperty('--color-accent-cinema-glow', `${this._settings.accentColor}26`);
+    root.style.setProperty('--user-accent', this._settings.accentColor);
+    root.style.removeProperty('--color-accent');
+    root.style.removeProperty('--color-accent-hover');
+    root.style.removeProperty('--color-on-accent');
+    root.style.removeProperty('--color-icon-active');
+    root.style.removeProperty('--color-accent-cinema');
+    root.style.removeProperty('--color-accent-cinema-subtle');
+    root.style.removeProperty('--color-accent-cinema-glow');
     window.dispatchEvent(new CustomEvent('theme-changed', {
       detail: { theme: this._settings.theme, accent: accentName },
     }));
@@ -380,10 +382,13 @@ class App {
   private _getAccentName(hex: string): string {
     const map: Record<string, string> = {
       '#ffffff': 'white',
+      '#ff6161': 'red',
       '#da291c': 'red',
-      '#7c3aed': 'purple',
+      '#57c1ff': 'blue',
       '#0984E3': 'blue',
+      '#59d499': 'green',
       '#00B894': 'green',
+      '#ffc533': 'orange',
       '#E17055': 'orange',
     };
     return map[hex] || 'white';

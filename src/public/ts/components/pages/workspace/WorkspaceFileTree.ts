@@ -153,6 +153,29 @@ export class WorkspaceFileTree {
     } catch { console.debug('WorkspaceFileTree: refreshDirectory failed for', dirPath); }
   }
 
+  async revealPath(filePath: string): Promise<void> {
+    if (!this._sessionId || !filePath) return;
+    const normalized = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!normalized) return;
+    const parts = normalized.split('/').filter(Boolean);
+    let parent = '';
+    for (let i = 0; i < parts.length - 1; i++) {
+      parent = parent ? `${parent}/${parts[i]}` : parts[i];
+      this._expandedPaths.add(parent);
+    }
+    await this._doLoadRoot();
+    const target = this._nodeMap.get(normalized);
+    if (!target) return;
+    const row = target.classList.contains('ws-tree-node')
+      ? target
+      : target.firstElementChild as HTMLElement | null;
+    if (!row || !row.classList.contains('ws-tree-node')) return;
+    this._treeBody.querySelectorAll('.ws-tree-node.selected').forEach(el => el.classList.remove('selected'));
+    row.classList.add('selected');
+    this._selectedPath = normalized;
+    row.scrollIntoView({ block: 'center' });
+  }
+
   // Restore expanded state after a full tree rebuild (polling / refreshAll).
   // Uses iterative deepening: expand parent dirs first, then children become available.
   private async _restoreExpandedState(): Promise<void> {
@@ -392,6 +415,6 @@ const _SVG_CSS = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" st
 const _SVG_HTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e44d26" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
 const _SVG_MD = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#59d499" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
 const _SVG_PY = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ffd43b" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
-const _SVG_IMAGE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`;
+const _SVG_IMAGE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#57c1ff" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`;
 const _SVG_REFRESH = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 16v5h5"/><path d="M3 12A9 9 0 0 1 18.5 5.7L21 8"/><path d="M21 8V3h-5"/></svg>`;
 const _SVG_CHEVRON_RIGHT = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>`;

@@ -8,7 +8,7 @@
   var NODE_DEFS = {
     agent_task: {
       label: "Agent Task",
-      color: "#8b5cf6",
+      color: "#57c1ff",
       group: "AI Orchestration",
       inputs: 1,
       outputs: 1,
@@ -91,7 +91,7 @@
     },
     condition: {
       label: "Condition",
-      color: "#ec4899",
+      color: "#ffc533",
       group: "Flow Control",
       inputs: 1,
       outputs: 2,
@@ -105,7 +105,7 @@
     },
     set_variable: {
       label: "Set Variable",
-      color: "#8b5cf6",
+      color: "#57c1ff",
       group: "Variables",
       inputs: 1,
       outputs: 1,
@@ -149,7 +149,7 @@
     },
     database_query: {
       label: "Database Query",
-      color: "#e879f9",
+      color: "#57c1ff",
       group: "Data",
       inputs: 1,
       outputs: 2,
@@ -278,10 +278,10 @@
     success: "#59d499",
     error: "#ff6161"
   };
-  var STATUS_GLOWS = {
-    running: "0 0 0 2px rgba(255,197,51,0.3), 0 0 12px rgba(255,197,51,0.15)",
-    success: "0 0 0 2px rgba(89,212,153,0.3), 0 0 8px rgba(89,212,153,0.1)",
-    error: "0 0 0 2px rgba(255,97,97,0.3), 0 0 8px rgba(255,97,97,0.1)"
+  var STATUS_BORDERS = {
+    running: "rgba(255,197,51,0.55)",
+    success: "rgba(89,212,153,0.45)",
+    error: "rgba(255,97,97,0.45)"
   };
   function renderNode(node, isSelected, callbacks, selectedNodeIds) {
     const def = NODE_DEFS[node.type];
@@ -290,17 +290,17 @@
     el.style.left = node.x + "px";
     el.style.top = node.y + "px";
     el.setAttribute("data-node-id", node.id);
-    const headerBg = def?.color || "#7c3aed";
+    const headerColor = def?.color || "#57c1ff";
     const typeLabel = def?.label || node.type;
     const iconSvg = def?.icon || "";
     const statusColor = STATUS_COLORS[node.status] || STATUS_COLORS.idle;
-    const statusGlow = STATUS_GLOWS[node.status] || "";
+    const statusBorder = STATUS_BORDERS[node.status] || "";
     const isRunning = node.status === "running";
     if (selectedNodeIds?.has(node.id)) {
       el.classList.add("workflow-node-multi-selected");
     }
     el.innerHTML = `
-    <div class="workflow-node-header" style="background:${headerBg};" data-drag-handle>
+    <div class="workflow-node-header" style="--workflow-type-color:${headerColor};" data-drag-handle>
       <span class="workflow-node-status-dot" style="background:${statusColor};${isRunning ? "animation:nodeStatusPulse 1s ease-in-out infinite;" : ""}"></span>
       <span class="workflow-node-type-icon">${iconSvg}</span>
       <span class="workflow-node-type-label">${typeLabel}</span>
@@ -330,8 +330,8 @@
           </div>`).join("")}
       </div>
     </div>`;
-    if (statusGlow) {
-      el.style.boxShadow = statusGlow;
+    if (statusBorder && !isSelected) {
+      el.style.borderColor = statusBorder;
     }
     const header = el.querySelector("[data-drag-handle]");
     header?.addEventListener("mousedown", (e) => {
@@ -376,7 +376,7 @@
     defs.innerHTML = `
     <linearGradient id="flow-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
       <stop offset="0%" stop-color="#ffc533" stop-opacity="0"/>
-      <stop offset="50%" stop-color="#ffc533" stop-opacity="1"/>
+      <stop offset="50%" stop-color="#ffffff" stop-opacity="0.85"/>
       <stop offset="100%" stop-color="#ffc533" stop-opacity="0"/>
     </linearGradient>
   `;
@@ -492,7 +492,7 @@
     const scale = Math.min(scaleX, scaleY);
     if (groups && groups.length > 0) {
       ctx.globalAlpha = 0.12;
-      ctx.fillStyle = "#57c1ff";
+      ctx.fillStyle = "rgba(255,255,255,0.16)";
       for (const g of groups) {
         const groupNodes = nodes.filter((n) => g.nodeIds.includes(n.id));
         if (groupNodes.length === 0) continue;
@@ -861,8 +861,8 @@
       overlay.className = "wf-dialog-overlay";
       overlay.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999";
       const card = document.createElement("div");
-      card.style.cssText = "background:var(--color-surface,#1c1c1f);border:1px solid var(--color-hairline,rgba(255,255,255,0.06));border-radius:10px;padding:24px;min-width:300px;max-width:420px;box-shadow:0 16px 48px rgba(0,0,0,0.4)";
-      card.innerHTML = `<div style="font-size:14px;font-weight:600;margin-bottom:8px;color:var(--color-text,#eee)">${title}</div><div style="font-size:12px;color:var(--color-text-secondary,#999);margin-bottom:20px">${message}</div><div style="display:flex;gap:8px;justify-content:flex-end"><button id="wf-conf-cancel" style="padding:6px 16px;border-radius:6px;border:1px solid var(--color-hairline,rgba(255,255,255,0.06));background:transparent;color:var(--color-text-secondary,#999);cursor:pointer;font-size:12px">Cancel</button><button id="wf-conf-ok" style="padding:6px 16px;border-radius:6px;border:none;background:var(--color-accent,#fff);color:var(--color-bg,#000);cursor:pointer;font-size:12px">Delete</button></div>`;
+      card.style.cssText = "background:var(--color-surface,#0d0d0d);border:1px solid var(--color-hairline,#242728);border-radius:10px;padding:24px;min-width:300px;max-width:420px;box-shadow:none";
+      card.innerHTML = `<div style="font-size:14px;font-weight:600;margin-bottom:8px;color:var(--color-text,#eee)">${title}</div><div style="font-size:12px;color:var(--color-text-secondary,#999);margin-bottom:20px">${message}</div><div style="display:flex;gap:8px;justify-content:flex-end"><button id="wf-conf-cancel" style="padding:6px 16px;border-radius:6px;border:1px solid var(--color-hairline,rgba(255,255,255,0.06));background:transparent;color:var(--color-text-secondary,#999);cursor:pointer;font-size:12px">Cancel</button><button id="wf-conf-ok" style="padding:6px 16px;border-radius:8px;border:1px solid var(--color-primary,#fff);background:var(--color-primary,#fff);color:var(--color-on-primary,#000);cursor:pointer;font-size:12px">Delete</button></div>`;
       overlay.appendChild(card);
       overlay.addEventListener("click", (e) => {
         if (e.target === overlay) {
@@ -1367,7 +1367,7 @@
       container.innerHTML = filtered.map((n) => {
         const def = NODE_DEFS[n.type];
         return `<div class="workflow-search-item" data-node-id="${n.id}">
-        <span class="workflow-search-dot" style="background:${def?.color || "#7c3aed"}"></span>
+        <span class="workflow-search-dot" style="background:${def?.color || "#57c1ff"}"></span>
         <span class="workflow-search-name">${this._escapeHtml(n.title)}</span>
         <span class="workflow-search-type">${def?.label || n.type}</span>
       </div>`;
@@ -1781,7 +1781,7 @@
       <button class="workflow-zoom-btn" id="wf-logs-btn" title="Toggle Logs (L)" style="font-size:12px;width:auto;padding:0 6px;">\u{1F4CB}</button>
       <button class="workflow-zoom-btn" id="wf-undo-btn" title="Undo (Ctrl+Z)" style="font-size:12px;width:auto;padding:0 6px;opacity:0.4;">\u21B6</button>
       <button class="workflow-zoom-btn" id="wf-redo-btn" title="Redo (Ctrl+Shift+Z)" style="font-size:12px;width:auto;padding:0 6px;opacity:0.4;">\u21B7</button>
-      <button class="workflow-zoom-btn ${isSnap ? "active" : ""}" id="wf-snap-btn" title="Toggle Snap to Grid" style="font-size:11px;width:auto;padding:0 6px;${isSnap ? "color:var(--color-accent);" : ""}">\u229E</button>
+            <button class="workflow-zoom-btn ${isSnap ? "active" : ""}" id="wf-snap-btn" title="Toggle Snap to Grid" style="font-size:11px;width:auto;padding:0 6px;${isSnap ? "color:var(--color-text);border-color:var(--color-hairline-strong);background:var(--color-surface-elevated);" : ""}">\u229E</button>
       <button class="workflow-zoom-btn" id="wf-search-btn" title="Search (Ctrl+F)" style="font-size:12px;width:auto;padding:0 6px;">\u{1F50D}</button>
       <button class="workflow-zoom-btn" id="wf-import-btn" title="Import Workflow" style="font-size:12px;width:auto;padding:0 6px;">\u{1F4C2}</button>
       <button class="workflow-zoom-btn" id="wf-export-btn" title="Export Workflow (Ctrl+E)" style="font-size:12px;width:auto;padding:0 6px;">\u{1F4BE}</button>

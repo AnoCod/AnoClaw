@@ -86,6 +86,141 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   ]);
 }
 
+const RAW_MIME_TYPES: Record<string, string> = {
+  '.aac': 'audio/aac',
+  '.apng': 'image/apng',
+  '.avif': 'image/avif',
+  '.bmp': 'image/bmp',
+  '.css': 'text/css; charset=utf-8',
+  '.csv': 'text/csv; charset=utf-8',
+  '.gif': 'image/gif',
+  '.htm': 'text/html; charset=utf-8',
+  '.html': 'text/html; charset=utf-8',
+  '.ico': 'image/x-icon',
+  '.jpeg': 'image/jpeg',
+  '.jpg': 'image/jpeg',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.m4a': 'audio/mp4',
+  '.m4v': 'video/mp4',
+  '.md': 'text/markdown; charset=utf-8',
+  '.mov': 'video/quicktime',
+  '.mp3': 'audio/mpeg',
+  '.mp4': 'video/mp4',
+  '.oga': 'audio/ogg',
+  '.ogg': 'audio/ogg',
+  '.ogv': 'video/ogg',
+  '.pdf': 'application/pdf',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml; charset=utf-8',
+  '.tsv': 'text/tab-separated-values; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
+  '.wav': 'audio/wav',
+  '.webm': 'video/webm',
+  '.webp': 'image/webp',
+  '.xml': 'application/xml; charset=utf-8',
+};
+
+function mimeTypeForFile(filePath: string): string {
+  return RAW_MIME_TYPES[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
+}
+
+function wantsRawFile(url: URL): boolean {
+  const raw = (url.searchParams.get('raw') || '').toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
+function rawPreviewCsp(mimeType: string): string | null {
+  const mime = mimeType.split(';', 1)[0].toLowerCase();
+  if (mime === 'text/html' || mime === 'image/svg+xml' || mime === 'application/xml' || mime === 'text/xml') {
+    return [
+      'sandbox',
+      "default-src 'self' data: blob:",
+      "img-src 'self' data: blob:",
+      "media-src 'self' data: blob:",
+      "style-src 'self' 'unsafe-inline'",
+      "script-src 'none'",
+    ].join('; ');
+  }
+  return null;
+}
+
+function parseByteRange(header: string | undefined, size: number): { start: number; end: number } | null | 'invalid' {
+  if (!header) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!match) return 'invalid';
+  if (size <= 0) return 'invalid';
+
+  let start: number;
+  let end: number;
+  if (match[1] === '') {
+    const suffixLength = Number(match[2]);
+    if (!Number.isFinite(suffixLength) || suffixLength <= 0) return 'invalid';
+    start = Math.max(0, size - suffixLength);
+    end = size - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] === '' ? size - 1 : Number(match[2]);
+  }
+
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || start >= size) {
+    return 'invalid';
+  }
+  return { start, end: Math.min(end, size - 1) };
+}
+
+async function sendRawWorkspaceFile(req: IncomingMessage, res: ServerResponse, absPath: string, stat: fs.Stats): Promise<void> {
+  const mimeType = mimeTypeForFile(absPath);
+  const rangeHeader = Array.isArray(req.headers.range) ? req.headers.range[0] : req.headers.range;
+  const range = parseByteRange(rangeHeader, stat.size);
+
+  if (range === 'invalid') {
+    res.writeHead(416, {
+      'Accept-Ranges': 'bytes',
+      'Content-Range': `bytes */${stat.size}`,
+    });
+    res.end();
+    return;
+  }
+
+  const headers: Record<string, string | number> = {
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'no-store',
+    'Content-Type': mimeType,
+    'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(path.basename(absPath))}`,
+  };
+  const csp = rawPreviewCsp(mimeType);
+  if (csp) headers['Content-Security-Policy'] = csp;
+
+  if (stat.size === 0) {
+    headers['Content-Length'] = 0;
+    res.writeHead(200, headers);
+    res.end();
+    return;
+  }
+
+  const start = range ? range.start : 0;
+  const end = range ? range.end : stat.size - 1;
+  headers['Content-Length'] = end - start + 1;
+  if (range) headers['Content-Range'] = `bytes ${start}-${end}/${stat.size}`;
+  res.writeHead(range ? 206 : 200, headers);
+
+  await new Promise<void>((resolve, reject) => {
+    const stream = fs.createReadStream(absPath, { start, end });
+    let settled = false;
+    const done = (err?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (err) reject(err);
+      else resolve();
+    };
+    stream.on('error', done);
+    res.on('finish', () => done());
+    res.on('close', () => done());
+    stream.pipe(res);
+  });
+}
+
 /** Load .gitignore patterns from workspace root */
 function loadGitignore(workspaceRoot: string): string[] {
   const gitignorePath = path.join(workspaceRoot, '.gitignore');
@@ -250,6 +385,11 @@ export async function handleReadWorkspaceFile(
     const stat = fs.statSync(absPath);
     if (stat.isDirectory()) {
       sendJson(res, 400, { error: 'Bad Request', message: 'Path is a directory, not a file' });
+      return;
+    }
+
+    if (wantsRawFile(url)) {
+      await sendRawWorkspaceFile(req, res, absPath, stat);
       return;
     }
 
@@ -774,13 +914,70 @@ function readZipEntry(buf: Buffer, entry: ZipEntry): Buffer | null {
  * @param xml - Raw XML buffer (e.g. xl/sharedStrings.xml from an .xlsx file).
  * @returns Plain text string with all markup removed.
  */
+function decodeXmlEntities(value: string): string {
+  return value.replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, d) => String.fromCharCode(Number.parseInt(d, 16)));
+}
+
 function extractXmlText(xml: Buffer): string {
   const s = xml.toString('utf-8');
   // Remove XML tags, keep content
-  return s.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
+  return decodeXmlEntities(s.replace(/<[^>]+>/g, ' '))
     .replace(/\s+/g, ' ').trim();
+}
+
+function parseSharedStrings(xml: string): string[] {
+  const strings: string[] = [];
+  const items = xml.match(/<si[\s\S]*?<\/si>/g) || [];
+  for (const item of items) {
+    const textParts = [...item.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)]
+      .map(match => decodeXmlEntities(match[1]));
+    strings.push(textParts.join(''));
+  }
+  return strings;
+}
+
+function columnIndexFromCellRef(ref: string): number {
+  const letters = (ref.match(/^[A-Z]+/i)?.[0] || '').toUpperCase();
+  if (!letters) return -1;
+  let index = 0;
+  for (const ch of letters) index = index * 26 + (ch.charCodeAt(0) - 64);
+  return index - 1;
+}
+
+function extractCellText(cellXml: string, sharedStrings: string[]): string {
+  const type = cellXml.match(/\st="([^"]+)"/)?.[1] || '';
+  if (type === 'inlineStr') {
+    return [...cellXml.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)]
+      .map(match => decodeXmlEntities(match[1]))
+      .join('');
+  }
+
+  const value = cellXml.match(/<v[^>]*>([\s\S]*?)<\/v>/)?.[1] || '';
+  if (!value) return '';
+  if (type === 's') return sharedStrings[Number(value)] || '';
+  if (type === 'b') return value === '1' ? 'TRUE' : 'FALSE';
+  return decodeXmlEntities(value);
+}
+
+function parseXlsxRows(sheetXml: string, sharedStrings: string[]): string[][] {
+  const rows: string[][] = [];
+  const rowMatches = sheetXml.match(/<row\b[\s\S]*?<\/row>/g) || [];
+  for (const rowXml of rowMatches.slice(0, 200)) {
+    const row: string[] = [];
+    const cells = rowXml.match(/<c\b[\s\S]*?<\/c>/g) || [];
+    for (const cellXml of cells) {
+      const ref = cellXml.match(/\sr="([^"]+)"/)?.[1] || '';
+      const col = columnIndexFromCellRef(ref);
+      if (col < 0 || col >= 50) continue;
+      row[col] = extractCellText(cellXml, sharedStrings);
+    }
+    while (row.length > 0 && !row[row.length - 1]) row.pop();
+    if (row.some(cell => cell && cell.trim())) rows.push(row.map(cell => cell || ''));
+  }
+  return rows;
 }
 
 /**
@@ -853,8 +1050,7 @@ export async function handleConvertOffice(
         const raw = readZipEntry(buf, ssEntry);
         if (raw) {
           const xml = raw.toString('utf-8');
-          const matches = xml.match(/<t[^>]*>([^<]*)<\/t>/g);
-          if (matches) sharedStrings = matches.map(m => m.replace(/<[^>]+>/g, '').trim());
+          sharedStrings = parseSharedStrings(xml);
         }
       }
 
@@ -865,6 +1061,12 @@ export async function handleConvertOffice(
         const raw = readZipEntry(buf, sheetEntry);
         if (raw) {
           const xml = raw.toString('utf-8');
+          const rows = parseXlsxRows(xml, sharedStrings);
+          if (rows.length > 0) {
+            const content = rows.map(row => row.join('\t')).join('\n');
+            sendJson(res, 200, { type: 'table', rows, content });
+            return;
+          }
           // Replace shared string refs with actual strings
           let text = xml;
           if (sharedStrings.length > 0) {

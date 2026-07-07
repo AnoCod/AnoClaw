@@ -45,6 +45,13 @@ import {
 } from './TalentPoolRoutes.js';
 import { InlineSuggestRoute } from './InlineSuggestRoute.js';
 import {
+  LanguageCompletionsRoute,
+  LanguageDefinitionRoute,
+  LanguageDiagnosticsRoute,
+  LanguageHoverRoute,
+  LanguageOrganizeImportsRoute,
+} from './LanguageServiceRoutes.js';
+import {
   ListSessionsRoute, CreateSessionRoute, SearchSessionsRoute,
   GetSessionRoute, PatchSessionRoute, DeleteSessionRoute, ClearSessionsRoute,
   SessionOverviewRoute, SessionToolStatsRoute, SessionAutoTitleRoute,
@@ -222,6 +229,13 @@ export function registerAllRoutes(api: ApiServer): void {
 
   // Inline code completion
   api.registerRoute(new InlineSuggestRoute());
+
+  // Workspace language intelligence
+  api.registerRoute(new LanguageCompletionsRoute());
+  api.registerRoute(new LanguageHoverRoute());
+  api.registerRoute(new LanguageDefinitionRoute());
+  api.registerRoute(new LanguageDiagnosticsRoute());
+  api.registerRoute(new LanguageOrganizeImportsRoute());
 
   // Non-declarative endpoints (not backed by RouteHandler — for discovery only)
   const R = (m: string, p: string, d: string, c?: string) => api.registerNonDeclarativeEndpoint(m, p, d, c);

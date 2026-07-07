@@ -59,6 +59,8 @@ export class WorkspacePage implements Page {
   private _tabMount!: HTMLElement;
   private _currentGroup: WorkspaceSplitContainer | null = null;
   private _onSessionChange: ((node: any) => void) | null = null;
+  private _onRevealWorkspacePath: ((event: Event) => void) | null = null;
+  private _onWorkspaceDownloadComplete: ((event: Event) => void) | null = null;
   private _tabCache = new Map<string, WorkspaceSplitContainer>();
 
   /** Exposed for the global agent browser handler. */
@@ -100,8 +102,21 @@ export class WorkspacePage implements Page {
   }
 
   onEnter(): void {
+    if (this._onSessionChange) { App.getInstance().sessionVM?.off('sessionSelected', this._onSessionChange); this._onSessionChange = null; }
+    if (this._onRevealWorkspacePath) { window.removeEventListener('ws-reveal-workspace-path', this._onRevealWorkspacePath); this._onRevealWorkspacePath = null; }
+    if (this._onWorkspaceDownloadComplete) { window.removeEventListener('ws-workspace-download-complete', this._onWorkspaceDownloadComplete); this._onWorkspaceDownloadComplete = null; }
     this._onSessionChange = () => { void this._onSessionSwitched(); };
     App.getInstance().sessionVM?.on('sessionSelected', this._onSessionChange);
+    this._onRevealWorkspacePath = (event: Event) => {
+      const detail = (event as CustomEvent).detail || {};
+      void this._revealWorkspacePath(String(detail.path || ''), Boolean(detail.open));
+    };
+    this._onWorkspaceDownloadComplete = (event: Event) => {
+      const detail = (event as CustomEvent).detail || {};
+      void this._revealWorkspacePath(String(detail.relativePath || detail.path || ''), false);
+    };
+    window.addEventListener('ws-reveal-workspace-path', this._onRevealWorkspacePath);
+    window.addEventListener('ws-workspace-download-complete', this._onWorkspaceDownloadComplete);
     const sid = App.getInstance().sessionVM?.activeSessionId || '';
     if (sid) { void this._loadWorkspaceForSession(sid); }
   }
@@ -109,6 +124,8 @@ export class WorkspacePage implements Page {
   onExit(): void {
     try {
       if (this._onSessionChange) { App.getInstance().sessionVM?.off('sessionSelected', this._onSessionChange); this._onSessionChange = null; }
+      if (this._onRevealWorkspacePath) { window.removeEventListener('ws-reveal-workspace-path', this._onRevealWorkspacePath); this._onRevealWorkspacePath = null; }
+      if (this._onWorkspaceDownloadComplete) { window.removeEventListener('ws-workspace-download-complete', this._onWorkspaceDownloadComplete); this._onWorkspaceDownloadComplete = null; }
       if (this._extChangeTimer) { clearInterval(this._extChangeTimer); this._extChangeTimer = 0; }
       for (const g of this._tabCache.values()) { try { g.dispose(); } catch { console.debug('WorkspacePage: dispose tab group failed'); } }
       this._tabCache.clear(); this._currentGroup = null;
@@ -141,8 +158,13 @@ export class WorkspacePage implements Page {
       await this._fileTree.loadRoot(sid);
       if (this._currentGroup) { this._currentGroup.element.remove(); }
       const cached = this._tabCache.get(sid);
-      if (cached) { cached.setSessionId(sid); this._currentGroup = cached; }
-      else { this._currentGroup = new WorkspaceSplitContainer(); this._currentGroup.setSessionId(sid); this._tabCache.set(sid, this._currentGroup); }
+      if (cached) { cached.setSessionId(sid); cached.setWorkspacePath(newPath); this._currentGroup = cached; }
+      else {
+        this._currentGroup = new WorkspaceSplitContainer();
+        this._currentGroup.setSessionId(sid);
+        this._currentGroup.setWorkspacePath(newPath);
+        this._tabCache.set(sid, this._currentGroup);
+      }
       this._currentGroup.onOpenFile = (path, name) => this._openFile(path, name);
       this._tabMount.innerHTML = '';
       this._tabMount.appendChild(this._currentGroup.element);
@@ -184,6 +206,7 @@ export class WorkspacePage implements Page {
       this._tabCache.get(this._sessionId)?.dispose(); this._tabCache.delete(this._sessionId); this._currentGroup = null;
       this._tabMount.innerHTML = '';
       const fresh = new WorkspaceSplitContainer(); fresh.setSessionId(this._sessionId);
+      fresh.setWorkspacePath(result.path);
       fresh.onOpenFile = (path, name) => this._openFile(path, name);
       this._tabCache.set(this._sessionId, fresh); this._currentGroup = fresh;
       this._tabMount.appendChild(fresh.element);
@@ -193,6 +216,12 @@ export class WorkspacePage implements Page {
 
   private _openFile(path: string, name: string): void {
     if (this._currentGroup) { void this._currentGroup.primaryGroup.openFile(path, name); }
+  }
+
+  private async _revealWorkspacePath(path: string, open: boolean): Promise<void> {
+    if (!path || !this._sessionId) return;
+    await this._fileTree.revealPath(path);
+    if (open) this._openFile(path, path.split('/').pop() || path);
   }
 
   private _wireTreeGrip(): void {

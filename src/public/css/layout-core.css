@@ -167,7 +167,7 @@ html, body {
 }
 .layout-split-handle:hover,
 .layout-split-handle.active {
-  background: var(--color-accent);
+  background: var(--color-hairline-strong);
 }
 
 /* ---- Page layout: two-column ---- */
@@ -349,7 +349,7 @@ html.is-resizing .page-col-center {
 }
 .resize-handle:hover,
 .resize-handle.active {
-  background: var(--color-accent);
+  background: var(--color-hairline-strong);
 }
 
 .resizing {
@@ -437,7 +437,7 @@ html.is-resizing .page-col-center {
   background: var(--color-surface-elevated);
   border: 1px solid var(--color-hairline);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-dropdown);
+  box-shadow: none;
   z-index: var(--z-dropdown);
   padding: 4px;
   display: flex;
@@ -554,9 +554,9 @@ html.is-resizing .page-col-center {
   bottom: 16px;
   right: 16px;
   padding: 8px 16px;
-  background: var(--color-accent);
-  color: var(--color-on-accent);
-  border: none;
+  background: var(--color-primary, #ffffff);
+  color: var(--color-on-primary, #000000);
+  border: 1px solid var(--color-primary, #ffffff);
   border-radius: 9999px;
   cursor: pointer;
   font-size: 12px;

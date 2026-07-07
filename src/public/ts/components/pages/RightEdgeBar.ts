@@ -102,8 +102,8 @@ export class RightEdgeBar {
     if (this._contextText) {
       this._contextText.textContent = String(Math.round(pct));
       if (pct > 80) {
-        this._contextText.style.borderColor = 'var(--color-accent-cinema)';
-        this._contextText.style.color = 'var(--color-accent-cinema)';
+        this._contextText.style.borderColor = 'var(--color-warning, #ffc533)';
+        this._contextText.style.color = 'var(--color-warning, #ffc533)';
       } else {
         this._contextText.style.borderColor = 'var(--cinema-text-muted)';
         this._contextText.style.color = 'var(--cinema-text-muted)';
@@ -220,7 +220,7 @@ export class RightEdgeBar {
         ${this._tipRow('Messages', 'var(--color-token-messages)', fmt(breakdown.messages))}
         ${this._tipRow('Free Space', 'var(--color-token-free-space)', fmt(freeTokens))}
       </table>
-      <button class="context-compact-btn" style="width:100%;padding:6px;background:var(--hairline-cinema);border:1px solid var(--hairline-cinema-bar);border-radius:6px;color:var(--color-text-primary);cursor:pointer;font-family:var(--font-sans);font-size:12px;">Manual Compact</button>
+      <button class="context-compact-btn" style="width:100%;padding:6px;background:var(--color-surface-elevated);border:1px solid var(--color-hairline);border-radius:6px;color:var(--color-text-primary);cursor:pointer;font-family:var(--font-sans);font-size:12px;">Manual Compact</button>
     `;
 
     const compactBtn = tip.querySelector('.context-compact-btn');

@@ -32,7 +32,7 @@ export interface NodeTypeDef {
 
 export const NODE_DEFS: Record<string, NodeTypeDef> = {
   agent_task: {
-    label: 'Agent Task', color: '#8b5cf6', group: 'AI Orchestration',
+    label: 'Agent Task', color: '#57c1ff', group: 'AI Orchestration',
     inputs: 1, outputs: 1, icon: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M6 21v-2a4 4 0 014-4h4a4 4 0 014 4v2"/></svg>`,
     defaultTitle: 'Agent Task', inputLabels: ['Trigger'], outputLabels: ['Done'],
     params: [
@@ -79,7 +79,7 @@ export const NODE_DEFS: Record<string, NodeTypeDef> = {
     ],
   },
   condition: {
-    label: 'Condition', color: '#ec4899', group: 'Flow Control',
+    label: 'Condition', color: '#ffc533', group: 'Flow Control',
     inputs: 1, outputs: 2, icon: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>`,
     defaultTitle: 'Condition', inputLabels: ['Input'], outputLabels: ['True', 'False'],
     params: [
@@ -87,7 +87,7 @@ export const NODE_DEFS: Record<string, NodeTypeDef> = {
     ],
   },
   set_variable: {
-    label: 'Set Variable', color: '#8b5cf6', group: 'Variables',
+    label: 'Set Variable', color: '#57c1ff', group: 'Variables',
     inputs: 1, outputs: 1, icon: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>`,
     defaultTitle: 'Set Variable', inputLabels: ['Trigger'], outputLabels: ['Done'],
     params: [
@@ -113,7 +113,7 @@ export const NODE_DEFS: Record<string, NodeTypeDef> = {
     ],
   },
   database_query: {
-    label: 'Database Query', color: '#e879f9', group: 'Data',
+    label: 'Database Query', color: '#57c1ff', group: 'Data',
     inputs: 1, outputs: 2, icon: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>`,
     defaultTitle: 'Database Query', inputLabels: ['Trigger'], outputLabels: ['Results', 'Error'],
     params: [

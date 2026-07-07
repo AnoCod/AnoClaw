@@ -6,28 +6,32 @@
 <title>System Monitor</title>
 <style>
 :root {
-  --bg: #050608;
-  --panel: rgba(255,255,255,0.034);
-  --panel-strong: rgba(255,255,255,0.058);
-  --panel-hover: rgba(255,255,255,0.074);
-  --hairline: rgba(255,255,255,0.052);
-  --hairline-strong: rgba(255,255,255,0.11);
+  --bg: #07080a;
+  --surface: #0d0d0d;
+  --surface-elevated: #101111;
+  --surface-card: #121212;
+  --panel: #0d0d0d;
+  --panel-strong: #101111;
+  --panel-hover: #101111;
+  --hairline: #242728;
+  --hairline-strong: rgba(255,255,255,0.16);
   --text: #f4f4f6;
-  --muted: rgba(255,255,255,0.64);
-  --faint: rgba(255,255,255,0.38);
-  --dim: rgba(255,255,255,0.22);
-  --red: #ff4058;
-  --red-soft: rgba(255,64,88,0.16);
-  --blue: #489cff;
-  --blue-soft: rgba(72,156,255,0.15);
+  --muted: #cdcdcd;
+  --faint: #9c9c9d;
+  --dim: #434345;
+  --red: #ff6161;
+  --red-soft: rgba(255,97,97,0.15);
+  --blue: #57c1ff;
+  --blue-soft: rgba(87,193,255,0.15);
   --green: #59d499;
   --green-soft: rgba(89,212,153,0.15);
   --yellow: #ffc533;
   --yellow-soft: rgba(255,197,51,0.14);
   --radius: 8px;
-  --radius-lg: 12px;
+  --radius-lg: 10px;
   --font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  font-feature-settings: "calt", "kern", "liga", "ss03";
 }
 
 [data-theme="light"] {
@@ -64,12 +68,10 @@ body::after {
 body::before {
   inset: -22%;
   background:
-    linear-gradient(126deg, transparent 0 23%, rgba(255,64,88,0.18) 32%, rgba(255,130,154,0.10) 40%, transparent 53%),
-    linear-gradient(126deg, transparent 40%, rgba(72,156,255,0.14) 51%, rgba(255,64,88,0.10) 62%, transparent 77%),
-    radial-gradient(circle at 78% 12%, rgba(72,156,255,0.20), transparent 22%),
-    radial-gradient(circle at 16% 72%, rgba(255,64,88,0.20), transparent 24%),
-    linear-gradient(180deg, #07111b 0%, #08080c 48%, #050608 100%);
-  opacity: .78;
+    linear-gradient(126deg, transparent 0 28%, rgba(255,255,255,0.035) 33%, transparent 42%),
+    linear-gradient(126deg, transparent 44%, rgba(255,255,255,0.025) 52%, transparent 64%),
+    linear-gradient(180deg, #07080a 0%, #0d0d0d 48%, #07080a 100%);
+  opacity: .68;
   transform: translate3d(-1%, -1%, 0) scale(1.03);
   animation: drift 16s ease-in-out infinite alternate, flow 22s ease-in-out infinite;
 }
@@ -78,9 +80,9 @@ body::after {
   inset: 0;
   background:
     repeating-linear-gradient(90deg, rgba(255,255,255,0.012) 0 1px, transparent 1px 5px),
-    linear-gradient(180deg, rgba(0,0,0,0.05), rgba(0,0,0,0.56));
-  opacity: .42;
-  mix-blend-mode: overlay;
+    linear-gradient(180deg, rgba(0,0,0,0.05), rgba(0,0,0,0.45));
+  opacity: .32;
+  mix-blend-mode: normal;
 }
 
 @keyframes drift {
@@ -110,14 +112,12 @@ body::after {
   gap: 8px;
   align-items: center;
   padding: 7px;
-  border: 1px solid rgba(255,255,255,0.078);
+  border: 1px solid var(--hairline);
   border-radius: var(--radius-lg);
-  background:
-    linear-gradient(180deg, rgba(255,255,255,0.065), rgba(255,255,255,0.018)),
-    rgba(5,6,9,0.76);
-  backdrop-filter: blur(24px) saturate(1.3);
-  -webkit-backdrop-filter: blur(24px) saturate(1.3);
-  box-shadow: 0 22px 60px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.04);
+  background: var(--surface);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
 }
 
 .icon-btn,
@@ -231,11 +231,10 @@ body::after {
   height: 6px;
   border-radius: 50%;
   background: var(--green);
-  box-shadow: 0 0 14px var(--green-soft);
 }
 
-.dot.busy { background: var(--yellow); box-shadow: 0 0 14px var(--yellow-soft); }
-.dot.error { background: var(--red); box-shadow: 0 0 14px var(--red-soft); }
+.dot.busy { background: var(--yellow); }
+.dot.error { background: var(--red); }
 
 .kpis {
   display: grid;
@@ -247,9 +246,9 @@ body::after {
 .panel,
 .detail-card {
   background: var(--panel);
-  border: 1px solid transparent;
+  border: 1px solid var(--hairline);
   border-radius: var(--radius-lg);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.025);
+  box-shadow: none;
 }
 
 .kpi {
@@ -285,15 +284,15 @@ body::after {
 
 .bar {
   height: 5px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.065);
+  border-radius: 6px;
+  background: var(--surface-elevated);
   overflow: hidden;
 }
 
 .bar-fill {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--red), var(--blue));
+  background: #ffffff;
   transition: width .35s ease;
 }
 
@@ -310,11 +309,9 @@ body::after {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background:
-    linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.010)),
-    rgba(5,6,9,0.58);
-  backdrop-filter: blur(20px) saturate(1.2);
-  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  background: var(--surface);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .panel-head {
@@ -375,9 +372,7 @@ body::after {
 }
 
 .process-row:hover { background: var(--panel-hover); }
-.process-row.active {
-  background: linear-gradient(90deg, rgba(255,64,88,0.20), rgba(255,255,255,0.060));
-}
+.process-row.active { background: var(--surface-elevated); }
 
 .proc-name {
   min-width: 0;
@@ -393,7 +388,8 @@ body::after {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, rgba(255,64,88,0.18), rgba(72,156,255,0.16));
+  background: var(--surface-card);
+  border: 1px solid var(--hairline);
   color: var(--text);
   flex-shrink: 0;
 }

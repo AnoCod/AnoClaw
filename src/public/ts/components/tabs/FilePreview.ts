@@ -51,7 +51,7 @@ export function renderMarkdown(content: string): string {
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     // Links
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color:var(--color-accent);text-decoration:none">$1</a>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color:var(--color-text-primary);text-decoration:none">$1</a>')
     // Unordered lists (simple)
     .replace(/^[\s]*[-*+] (.+)$/gm, '<li style="margin:2px 0">$1</li>')
     // Horizontal rules

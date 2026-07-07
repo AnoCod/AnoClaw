@@ -12,8 +12,16 @@ files:
   - "!src/public/js/**/*.js.map"
   - src/electron/setup-wizard.html
   - docs/**/*
+  - "!docs/design-md/**"
   - plugins/**/*
   - plugins/**/node_modules/**/*
+  - "!**/AGENTS.md"
+  - "!**/CLAUDE.md"
+  - "!**/CLAUDE.*.md"
+  - "!plugins/**/data/**"
+  - "!plugins/**/logs/**"
+  - "!plugins/**/tmp/**"
+  - "!plugins/**/cache/**"
   - skills/**/*
   - node_modules/**/*
   - "!**/*.map"
@@ -33,6 +41,10 @@ asarUnpack:
   # User-writable / agent-readable directories
   - "plugins/**"
   - "plugins/**/node_modules/**"
+  - "!plugins/**/data/**"
+  - "!plugins/**/logs/**"
+  - "!plugins/**/tmp/**"
+  - "!plugins/**/cache/**"
   - "skills/**"
   - "docs/**"
 extraResources:

@@ -36,8 +36,7 @@ interface MeetingTableOptions {
 // Deterministic color palette (matches existing AVATAR_COLORS)
 const TABLE_COLORS = [
   '#57c1ff', '#59d499', '#ffc533', '#ff6161',
-  '#c084fc', '#f472b6', '#38bdf8', '#fb923c',
-  '#a78bfa', '#34d399', '#fbbf24', '#f87171',
+  '#9c9c9d', '#cdcdcd', '#6a6b6c', '#434345',
 ];
 
 function deterministicColor(name: string): string {
@@ -127,7 +126,6 @@ export class MeetingTable {
       background:#121212;border:1px solid #242728;
       display:flex;align-items:center;justify-content:center;
       flex-direction:column;gap:4px;
-      box-shadow:0 0 40px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.03);
       transition:width 0.3s ease,height 0.3s ease;
     `;
     // Center label
@@ -179,11 +177,6 @@ export class MeetingTable {
         : spokeInRound
           ? `3px solid #57c1ff`
           : `2px solid ${color}`;
-      const glowStyle = isSpeaking
-        ? `0 0 12px rgba(89,212,153,0.5),0 0 24px rgba(89,212,153,0.2)`
-        : spokeInRound
-          ? `0 0 8px rgba(87,193,255,0.3)`
-          : 'none';
       const opacity = isObserver ? '0.6' : '1';
 
       seat.style.cssText = `
@@ -196,9 +189,8 @@ export class MeetingTable {
         border:${borderStyle};
         display:flex;align-items:center;justify-content:center;
         cursor:pointer;
-        transition:transform 0.2s ease,box-shadow 0.2s ease,border-color 0.2s ease;
+        transition:transform 0.2s ease,border-color 0.2s ease;
         opacity:${opacity};
-        box-shadow:${glowStyle};
         z-index:2;
       `;
 

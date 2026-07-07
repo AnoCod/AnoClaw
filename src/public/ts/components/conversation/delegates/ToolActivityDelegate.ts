@@ -131,7 +131,7 @@ export class ToolActivityDelegate {
         background: var(--raycast-card-fill, rgba(255,255,255,0.034));
         border: 1px solid rgba(255,255,255,0.055);
         border-radius: var(--raycast-radius-control, 8px);
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.025);
+        box-shadow: none;
         ${isLong && !this._expanded ? 'max-height: 72px; overflow: hidden;' : ''}
       `;
       body.hidden = !this._expanded;

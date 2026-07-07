@@ -6,7 +6,7 @@
 .tp-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(7, 8, 10, 0.62);
   z-index: 500;
 }
 
@@ -18,13 +18,13 @@
   width: 320px;
   height: 100%;
   background: var(--color-surface);
-  border-left: 1px solid var(--color-bubble-sent);
+  border-left: 1px solid var(--color-hairline);
   z-index: 501;
   display: flex;
   flex-direction: column;
   transform: translateX(100%);
   transition: transform 0.25s ease;
-  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.3);
+  box-shadow: none;
 }
 
 .tp-panel.tp-open {
@@ -34,7 +34,7 @@
 /* ── Header ── */
 .tp-header {
   padding: 16px;
-  border-bottom: 1px solid var(--color-bubble-sent);
+  border-bottom: 1px solid var(--color-hairline);
   flex-shrink: 0;
 }
 
@@ -72,7 +72,7 @@
 .tp-search-input {
   width: 100%;
   padding: 7px 10px;
-  border: 1px solid var(--color-bubble-sent);
+  border: 1px solid var(--color-hairline);
   border-radius: 6px;
   background: var(--color-surface-elevated);
   color: var(--color-text-primary);
@@ -82,7 +82,7 @@
 }
 
 .tp-search-input:focus {
-  border-color: var(--color-nav-active);
+  border-color: var(--color-hairline-strong);
 }
 
 .tp-add-group-btn {
@@ -91,15 +91,15 @@
   border: 1px dashed var(--color-text-quaternary);
   border-radius: 6px;
   background: transparent;
-  color: var(--color-info);
+  color: var(--color-text-primary);
   font-size: 12px;
   cursor: pointer;
   transition: background 0.15s;
 }
 
 .tp-add-group-btn:hover {
-  background: var(--color-info-soft);
-  border-color: var(--color-info);
+  background: var(--color-surface-card);
+  border-color: var(--color-hairline-strong);
 }
 
 /* ── Body / Tree ── */
@@ -130,7 +130,7 @@
 
 /* ── Group ── */
 .tp-group {
-  border-bottom: 1px solid var(--color-bubble-sent);
+  border-bottom: 1px solid var(--color-hairline);
 }
 
 .tp-group-header {
@@ -145,7 +145,7 @@
 }
 
 .tp-group-header:hover {
-  background: var(--color-info-soft);
+  background: var(--color-surface-card);
 }
 
 /* Domain group accent colors via data attribute */
@@ -222,23 +222,23 @@
 }
 
 .tp-template:hover {
-  background: var(--color-info-soft);
+  background: var(--color-surface-card);
 }
 
 .tp-template.tp-selected {
-  background: var(--color-info-soft);
-  outline: 1px solid var(--color-info);
+  background: var(--color-surface-card);
+  outline: 1px solid var(--color-hairline-strong);
 }
 
-/* Role dot: Manager=purple, Member=blue */
+/* Role dot: Manager=blue, Member=green */
 .tp-tpl-role-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   flex-shrink: 0;
 }
-.tp-tpl-role-dot.manager { background: #8b5cf6; }
-.tp-tpl-role-dot.member { background: var(--color-info); }
+.tp-tpl-role-dot.manager { background: var(--color-info, #57c1ff); }
+.tp-tpl-role-dot.member { background: var(--color-success, #59d499); }
 
 .tp-tpl-name {
   font-size: 12px;
@@ -253,27 +253,27 @@
   font-size: 9px;
   color: var(--color-warning);
   flex-shrink: 0;
-  letter-spacing: -1px;
+  letter-spacing: 0;
 }
 
 .tp-tpl-role-badge {
   font-size: 9px;
   padding: 1px 5px;
   border-radius: 4px;
-  background: var(--color-info-soft);
-  color: var(--color-info);
+  background: var(--color-surface-elevated);
+  color: var(--color-text-secondary);
   flex-shrink: 0;
   font-weight: 500;
 }
 .tp-tpl-role-badge.manager {
-  background: rgba(139, 92, 246, 0.15);
-  color: #a78bfa;
+  background: var(--color-info-soft);
+  color: var(--color-info);
 }
 
 /* ── Footer ── */
 .tp-footer {
   padding: 10px 16px;
-  border-top: 1px solid var(--color-bubble-sent);
+  border-top: 1px solid var(--color-hairline);
   display: flex;
   justify-content: space-between;
   font-size: 11px;
@@ -288,7 +288,7 @@
   right: 20px;
   z-index: 100;
   padding: 6px 12px;
-  border: 1px solid var(--color-bubble-sent);
+  border: 1px solid var(--color-hairline);
   border-radius: 6px;
   background: var(--color-surface);
   color: var(--color-text-secondary);
@@ -301,15 +301,15 @@
 }
 
 .ag-talent-btn:hover {
-  background: var(--color-info-soft);
-  border-color: var(--color-info);
+  background: var(--color-surface-card);
+  border-color: var(--color-hairline-strong);
   color: var(--color-text-primary);
 }
 
 .ag-talent-btn.active {
-  background: var(--color-info-soft);
-  border-color: var(--color-info);
-  color: var(--color-info);
+  background: var(--color-surface-card);
+  border-color: var(--color-hairline-strong);
+  color: var(--color-text-primary);
 }
 
 /* ── Preview Modal ── */
@@ -325,12 +325,13 @@
 
 .tp-preview-modal {
   background: var(--color-surface);
-  border-radius: 12px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 10px;
   width: 520px;
   max-height: 80vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  box-shadow: none;
 }
 
 .tp-preview-header {
@@ -338,7 +339,7 @@
   justify-content: space-between;
   align-items: center;
   padding: 16px 20px;
-  border-bottom: 1px solid var(--color-bubble-sent);
+  border-bottom: 1px solid var(--color-hairline);
   font-size: 15px;
   font-weight: 600;
   color: var(--color-text-primary);
@@ -378,7 +379,7 @@
 
 .tp-preview-prompt {
   background: var(--color-surface-elevated);
-  border: 1px solid var(--color-bubble-sent);
+  border: 1px solid var(--color-hairline);
   border-radius: 6px;
   padding: 10px;
   font-size: 12px;
@@ -393,8 +394,8 @@
 .tp-preview-tag {
   display: inline-block;
   padding: 1px 7px;
-  background: var(--color-info-soft);
-  color: var(--color-info);
+  background: var(--color-surface-elevated);
+  color: var(--color-text-secondary);
   border-radius: 4px;
   font-size: 11px;
   margin: 2px 3px 2px 0;
@@ -411,14 +412,14 @@
   gap: 8px;
   justify-content: flex-end;
   padding: 12px 20px 16px;
-  border-top: 1px solid var(--color-bubble-sent);
+  border-top: 1px solid var(--color-hairline);
 }
 
 .tp-preview-hire-btn {
   padding: 7px 18px;
   border: none;
   border-radius: 6px;
-  background: var(--color-info);
+  background: #fff;
   color: #000;
   cursor: pointer;
   font-size: 13px;
@@ -431,7 +432,7 @@
 
 .tp-preview-close-btn {
   padding: 7px 18px;
-  border: 1px solid var(--color-bubble-sent);
+  border: 1px solid var(--color-hairline);
   border-radius: 6px;
   background: transparent;
   color: var(--color-text-tertiary);

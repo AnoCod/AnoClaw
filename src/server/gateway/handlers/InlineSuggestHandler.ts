@@ -43,6 +43,17 @@ export async function handleInlineSuggest(
       }
     }
 
+    if (provider === 'ollama' && !apiUrl) {
+      apiUrl = 'http://localhost:11434';
+    }
+    if (provider !== 'ollama' && !apiUrl) {
+      sendJson(res, 412, {
+        error: 'Completion not configured',
+        message: 'The active agent has no API URL configured for inline code completion.',
+      });
+      return;
+    }
+
     const maxPrefix = (prefix || '').split('\n').slice(-PREFIX_MAX_LINES).join('\n');
     const maxSuffix = (suffix || '').split('\n').slice(0, SUFFIX_MAX_LINES).join('\n');
     const lang = language || 'plaintext';
@@ -72,8 +83,8 @@ export async function handleInlineSuggest(
       if (event.type === 'done' || event.type === 'error') break;
     }
 
-    // Strip markdown fences if present
-    completion = completion.replace(/^```[\w]*\n?/gm, '').replace(/```$/gm, '').trim();
+    // Strip markdown fences if present, but preserve leading indentation.
+    completion = completion.replace(/^```[\w]*\n?/gm, '').replace(/```$/gm, '').trimEnd();
     sendJson(res, 200, { completion });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

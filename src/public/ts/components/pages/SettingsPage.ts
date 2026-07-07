@@ -205,7 +205,7 @@ export class SettingsPage implements Page {
             <span id="compaction-val">${s.compactionThreshold}%</span>
           </div>
           <input type="range" name="compactionThreshold" min="30" max="90" value="${s.compactionThreshold}" step="5"
-            style="width:100%;accent-color:var(--color-accent-cinema);"
+            style="width:100%;accent-color:var(--color-primary, #ffffff);"
             oninput="document.getElementById('compaction-val').textContent=this.value+'%'">
         </div>
       </div>
@@ -297,12 +297,11 @@ export class SettingsPage implements Page {
 
     // ── Appearance: accent swatches ──
     const ACCENTS = [
-      { value: '#da291c', label: t('settings.accent.red') },
+      { value: '#ff6161', label: t('settings.accent.red') },
       { value: '#ffffff', label: t('settings.accent.white') },
-      { value: '#0984E3', label: t('settings.accent.blue') },
-      { value: '#00B894', label: t('settings.accent.green') },
-      { value: '#7c3aed', label: t('settings.accent.purple') },
-      { value: '#E17055', label: t('settings.accent.orange') },
+      { value: '#57c1ff', label: t('settings.accent.blue') },
+      { value: '#59d499', label: t('settings.accent.green') },
+      { value: '#ffc533', label: t('settings.accent.orange') },
     ];
 
     const accentSlot = form.querySelector('#appearance-accent');
@@ -318,10 +317,7 @@ export class SettingsPage implements Page {
         swatch.title = a.label;
         swatch.addEventListener('click', () => {
           currentAccent = a.value;
-          // Override CSS variables directly — works for all accent colors
-          document.documentElement.style.setProperty('--color-accent-cinema', a.value);
-          document.documentElement.style.setProperty('--color-accent-cinema-subtle', a.value + '1A');
-          document.documentElement.style.setProperty('--color-accent-cinema-glow', a.value + '26');
+          document.documentElement.style.setProperty('--user-accent', a.value);
           swatchRow.querySelectorAll('.appearance-swatch').forEach(s => s.classList.remove('active'));
           swatch.classList.add('active');
         });
@@ -436,7 +432,7 @@ export class SettingsPage implements Page {
           var applyBtn = document.createElement('button');
           applyBtn.type = 'button';
           applyBtn.className = 'cinema-btn';
-          applyBtn.style.cssText = 'border-color:var(--color-accent);color:var(--color-accent);';
+          applyBtn.style.cssText = 'border-color:var(--color-hairline-strong);color:var(--color-text-primary);';
           applyBtn.textContent = t('settings.evolution.applySkillArchives');
           applyBtn.addEventListener('click', async function () {
             try {

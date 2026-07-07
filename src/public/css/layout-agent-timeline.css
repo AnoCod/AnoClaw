@@ -4,7 +4,7 @@
   --agent-flow-track-x: 18px;
   --agent-flow-dot-size: 8px;
   --agent-flow-dot-y: 10px;
-  --agent-flow-track-color: rgba(111, 220, 154, 0.88);
+  --agent-flow-track-color: var(--color-hairline-strong, rgba(255,255,255,0.16));
   --agent-flow-dot-center-y: calc(var(--agent-flow-dot-y) + (var(--agent-flow-dot-size) / 2));
 
   position: relative !important;
@@ -22,8 +22,8 @@
   height: max(0px, calc(var(--agent-flow-next-distance, 0px) - var(--agent-flow-dot-size) - 4px));
   width: 2px;
   border-radius: 999px;
-  background: linear-gradient(180deg, rgba(111, 220, 154, 0.95), rgba(111, 220, 154, 0.42));
-  box-shadow: 0 0 10px rgba(111, 220, 154, 0.24);
+  background: var(--agent-flow-track-color);
+  box-shadow: none;
   pointer-events: none;
   z-index: 1;
 }
@@ -53,8 +53,9 @@
   width: var(--agent-flow-dot-size);
   height: var(--agent-flow-dot-size);
   border-radius: 999px;
-  background: rgba(111, 220, 154, 0.96);
-  box-shadow: 0 0 0 3px rgba(14, 16, 20, 0.96), 0 0 14px rgba(111, 220, 154, 0.22);
+  background: var(--color-text-primary, #fff);
+  outline: 3px solid var(--color-bg, #07080a);
+  box-shadow: none;
   pointer-events: none;
 }
 
@@ -64,11 +65,11 @@
 }
 
 .agent-flow-step.is-success::after {
-  background: rgba(111, 220, 154, 0.92);
+  background: var(--color-success, #59d499);
 }
 
 .agent-flow-step.is-error::after {
-  background: rgba(255, 92, 105, 0.95);
+  background: var(--color-error, #ff6161);
 }
 
 .agent-flow-step--think::after,
@@ -79,12 +80,12 @@
 .agent-flow-step--tool::after,
 .agent-flow-step--delegate::after,
 .agent-flow-step--todo::after {
-  background: rgba(111, 220, 154, 0.92);
+  background: var(--color-success, #59d499);
 }
 
 .agent-flow-step--tool.is-error::after,
 .agent-flow-step--delegate.is-error::after {
-  background: rgba(255, 92, 105, 0.95);
+  background: var(--color-error, #ff6161);
 }
 
 .agent-flow-step--respond.cinema-agent-block {

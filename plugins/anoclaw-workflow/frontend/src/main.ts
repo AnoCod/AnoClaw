@@ -477,7 +477,7 @@ class WorkflowPage {
     container.innerHTML = filtered.map(n => {
       const def = NODE_DEFS[n.type];
       return `<div class="workflow-search-item" data-node-id="${n.id}">
-        <span class="workflow-search-dot" style="background:${def?.color || '#7c3aed'}"></span>
+        <span class="workflow-search-dot" style="background:${def?.color || '#57c1ff'}"></span>
         <span class="workflow-search-name">${this._escapeHtml(n.title)}</span>
         <span class="workflow-search-type">${def?.label || n.type}</span>
       </div>`;
@@ -948,7 +948,7 @@ class WorkflowPage {
       <button class="workflow-zoom-btn" id="wf-logs-btn" title="Toggle Logs (L)" style="font-size:12px;width:auto;padding:0 6px;">📋</button>
       <button class="workflow-zoom-btn" id="wf-undo-btn" title="Undo (Ctrl+Z)" style="font-size:12px;width:auto;padding:0 6px;opacity:0.4;">↶</button>
       <button class="workflow-zoom-btn" id="wf-redo-btn" title="Redo (Ctrl+Shift+Z)" style="font-size:12px;width:auto;padding:0 6px;opacity:0.4;">↷</button>
-      <button class="workflow-zoom-btn ${isSnap ? 'active' : ''}" id="wf-snap-btn" title="Toggle Snap to Grid" style="font-size:11px;width:auto;padding:0 6px;${isSnap ? 'color:var(--color-accent);' : ''}">⊞</button>
+            <button class="workflow-zoom-btn ${isSnap ? 'active' : ''}" id="wf-snap-btn" title="Toggle Snap to Grid" style="font-size:11px;width:auto;padding:0 6px;${isSnap ? 'color:var(--color-text);border-color:var(--color-hairline-strong);background:var(--color-surface-elevated);' : ''}">⊞</button>
       <button class="workflow-zoom-btn" id="wf-search-btn" title="Search (Ctrl+F)" style="font-size:12px;width:auto;padding:0 6px;">🔍</button>
       <button class="workflow-zoom-btn" id="wf-import-btn" title="Import Workflow" style="font-size:12px;width:auto;padding:0 6px;">📂</button>
       <button class="workflow-zoom-btn" id="wf-export-btn" title="Export Workflow (Ctrl+E)" style="font-size:12px;width:auto;padding:0 6px;">💾</button>

@@ -142,8 +142,8 @@ export class SessionEdgeBar {
     for (const [sid, dot] of this._dots) {
       if (sid === id) {
         dot.classList.add('active');
-        dot.style.background = 'var(--color-accent-cinema)';
-        dot.style.boxShadow = '0 0 10px var(--color-accent-cinema-glow)';
+        dot.style.background = 'var(--color-primary, #ffffff)';
+        dot.style.boxShadow = 'none';
       } else {
         dot.classList.remove('active');
         dot.style.background = '';
@@ -163,7 +163,7 @@ export class SessionEdgeBar {
     dot.style.width = `${size}px`;
     dot.style.height = `${size}px`;
     dot.style.background = node.id === activeId
-      ? 'var(--color-accent-cinema)'
+      ? 'var(--color-primary, #ffffff)'
       : `rgba(255,255,255,${0.12 - depth * 0.03})`;
     dot.title = node.title;
 
@@ -182,11 +182,9 @@ export class SessionEdgeBar {
     dot.style.width = `${size}px`;
     dot.style.height = `${size}px`;
     dot.style.background = isActive
-      ? 'var(--color-accent-cinema)'
+      ? 'var(--color-primary, #ffffff)'
       : `rgba(255,255,255,${0.12 - depth * 0.03})`;
-    dot.style.boxShadow = isActive
-      ? '0 0 10px var(--color-accent-cinema-glow)'
-      : '';
+    dot.style.boxShadow = 'none';
     dot.title = node.title;
   }
 
@@ -325,7 +323,7 @@ export class SessionEdgeBar {
     const dot = document.createElement('div');
     dot.className = 'cinema-tree-dot';
     dot.style.background = id === this._activeId
-      ? 'var(--color-accent-cinema)'
+      ? 'var(--color-primary, #ffffff)'
       : 'var(--cinema-text-welcome-desc)';
     row.appendChild(dot);
 
@@ -425,7 +423,7 @@ export class SessionEdgeBar {
       const dot = document.createElement('div');
       dot.className = 'cinema-tree-dot';
       dot.style.background = n.id === this._activeId
-        ? 'var(--color-accent-cinema)'
+        ? 'var(--color-primary, #ffffff)'
         : 'var(--cinema-text-welcome-desc)';
       row.appendChild(dot);
 

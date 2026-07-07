@@ -7,6 +7,7 @@ export class WorkspaceSplitContainer {
   private _primary: WorkspaceTabGroup;
   private _secondary: WorkspaceTabGroup|null = null;
   private _grip: HTMLElement|null = null;
+  private _workspacePath = '';
 
   get primaryGroup(): WorkspaceTabGroup { return this._primary; }
   get secondaryGroup(): WorkspaceTabGroup|null { return this._secondary; }
@@ -15,6 +16,7 @@ export class WorkspaceSplitContainer {
   constructor() {
     this.element = document.createElement('div'); this.element.className = 'ws-split-container';
     this._primary = new WorkspaceTabGroup(); this._primary.element.classList.add('ws-split-primary');
+    this._primary.setPersistenceScope('primary');
     this.element.appendChild(this._primary.element);
   }
 
@@ -27,7 +29,9 @@ export class WorkspaceSplitContainer {
 
     this._secondary = new WorkspaceTabGroup();
     this._secondary.element.classList.add('ws-split-secondary');
+    this._secondary.setPersistenceScope('secondary');
     this._secondary.setSessionId(sessionId);
+    this._secondary.setWorkspacePath(this._workspacePath);
     this._secondary.element.style.flex = '1';
     this._primary.element.style.flex = '1';
     this._primary.element.style.minWidth = '200px';
@@ -84,6 +88,12 @@ export class WorkspaceSplitContainer {
   setSessionId(id: string): void {
     this._primary.setSessionId(id);
     if (this._secondary) this._secondary.setSessionId(id);
+  }
+
+  setWorkspacePath(path: string): void {
+    this._workspacePath = path;
+    this._primary.setWorkspacePath(path);
+    if (this._secondary) this._secondary.setWorkspacePath(path);
   }
 
   set onOpenFile(fn: ((path: string, name: string) => void) | null) {

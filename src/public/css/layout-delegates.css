@@ -182,7 +182,7 @@
 }
 
 .md-blockquote {
-  border-left: 2px solid var(--color-accent);
+  border-left: 2px solid var(--color-hairline-strong);
   padding: var(--space-xs) var(--space-md);
   margin: var(--space-sm) 0;
   color: var(--color-text-secondary);
@@ -219,7 +219,7 @@
   display: inline-block;
   width: 18px;
   margin-right: 4px;
-  color: var(--color-accent);
+  color: var(--color-text-primary);
   font-size: 13px;
 }
 
@@ -257,12 +257,12 @@
 }
 
 .md-link {
-  color: var(--color-accent);
+  color: var(--color-text-primary);
   text-decoration: underline;
 }
 
 .clickable-path {
-  color: var(--color-accent);
+  color: var(--color-text-primary);
   text-decoration: underline dotted;
   cursor: pointer;
 }
@@ -297,7 +297,7 @@
 /* --- Clickable file paths (Ctrl+Click to open in explorer) --- */
 
 .md-file-path {
-  color: var(--color-accent);
+  color: var(--color-text-primary);
   text-decoration: underline;
   text-decoration-style: dashed;
   text-underline-offset: 3px;
@@ -307,7 +307,7 @@
 }
 
 .md-file-path:hover {
-  color: var(--color-accent-hover, #6ea8fe);
+  color: var(--color-text-secondary);
   text-decoration-style: solid;
 }
 
@@ -343,7 +343,7 @@
   display: inline-block;
   width: 2px;
   height: var(--font-size-body-md);
-  background: var(--color-accent);
+  background: var(--color-primary, #ffffff);
   margin-left: 1px;
   vertical-align: text-bottom;
   animation: cursorBlink 500ms step-end infinite;
@@ -442,28 +442,28 @@
 /* --- Structured tool result cards --- */
 
 .tool-result-card {
-  --tool-accent: rgba(111, 220, 154, 0.92);
+  --tool-accent: rgba(255,255,255,0.72);
   margin: 0 0 14px;
   border-radius: var(--raycast-radius-control, 8px);
   border: 1px solid rgba(255, 255, 255, 0.06);
   background:
     linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.016)),
     var(--raycast-card-fill, rgba(255, 255, 255, 0.034));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.025), 0 16px 44px rgba(0,0,0,0.22);
+  box-shadow: none;
   overflow: hidden !important;
   color: var(--color-text-primary);
 }
 
-.tool-result-card--file { --tool-accent: #6fdc9a; }
-.tool-result-card--shell { --tool-accent: #f5b56b; }
-.tool-result-card--web { --tool-accent: #62b6ff; }
-.tool-result-card--api { --tool-accent: #9b8cff; }
-.tool-result-card--agent { --tool-accent: #ff6680; }
-.tool-result-card--skill { --tool-accent: #b080ff; }
-.tool-result-card--plan { --tool-accent: #f0d66b; }
-.tool-result-card--memory { --tool-accent: #48d6c1; }
-.tool-result-card--browser { --tool-accent: #7cc7ff; }
-.tool-result-card.is-error { --tool-accent: #ff6677; }
+.tool-result-card--file,
+.tool-result-card--shell,
+.tool-result-card--web,
+.tool-result-card--api,
+.tool-result-card--agent,
+.tool-result-card--skill,
+.tool-result-card--plan,
+.tool-result-card--memory,
+.tool-result-card--browser { --tool-accent: var(--color-text-tertiary, #9c9c9d); }
+.tool-result-card.is-error { --tool-accent: var(--color-error, #ff6161); }
 
 .tool-result-header {
   display: flex;
@@ -474,7 +474,7 @@
   padding: 8px 12px;
   border: 0;
   border-bottom: 1px solid rgba(255,255,255,0.045);
-  background: linear-gradient(90deg, color-mix(in srgb, var(--tool-accent) 14%, transparent), transparent 46%);
+  background: linear-gradient(90deg, rgba(255,255,255,0.045), transparent 46%);
   color: var(--color-text-primary);
   font: inherit;
   text-align: left;
@@ -482,7 +482,7 @@
 }
 
 .tool-result-header:hover {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--tool-accent) 20%, transparent), rgba(255,255,255,0.028) 48%, transparent);
+  background: linear-gradient(90deg, rgba(255,255,255,0.06), rgba(255,255,255,0.028) 48%, transparent);
 }
 
 .tool-result-mark {
@@ -490,7 +490,6 @@
   height: 7px;
   border-radius: 999px;
   background: var(--tool-accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tool-accent) 18%, transparent);
   flex-shrink: 0;
 }
 
@@ -693,7 +692,7 @@
   background: var(--raycast-card-fill, rgba(255,255,255,0.034)) !important;
   border: 1px solid rgba(255,255,255,0.055) !important;
   border-radius: var(--raycast-radius-control, 8px) !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.025) !important;
+  box-shadow: none !important;
 }
 
 @media (max-width: 720px) {

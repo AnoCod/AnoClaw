@@ -18,9 +18,9 @@ const SVG_DELETE = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" 
 // ── Role-based color map ──
 
 const ROLE_COLORS: Record<string, string> = {
-  MainAgent: 'var(--color-accent)',
-  Manager: 'var(--color-info)',
-  Member: 'var(--color-success)',
+  MainAgent: 'var(--color-text-primary)',
+  Manager: 'var(--color-text-secondary)',
+  Member: 'var(--color-text-tertiary)',
   SubAgent: 'var(--color-text-quaternary)',
 };
 
@@ -29,9 +29,9 @@ function getRoleColor(role: string | undefined): string {
 }
 
 function getLevelColor(level: number | undefined): string {
-  if (level === 0) return 'var(--color-accent)';
-  if (level === 1) return 'var(--color-info)';
-  return 'var(--color-success)';
+  if (level === 0) return 'var(--color-text-primary)';
+  if (level === 1) return 'var(--color-text-secondary)';
+  return 'var(--color-text-tertiary)';
 }
 
 function getStatusColor(status: string): string {
@@ -157,7 +157,7 @@ export class SessionTreeNode {
       const badge = document.createElement('span');
       badge.className = 'stn-badge';
       badge.textContent = badgeName || 'Main';
-      badge.style.color = 'var(--color-accent)';
+      badge.style.color = 'var(--color-text-primary)';
       row.appendChild(badge);
     }
 

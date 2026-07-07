@@ -51,16 +51,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
   quitSetup: () => ipcRenderer.send('quit-setup'),
 
   // ── WebContentsView management ──
-  wvCreate: (url) => ipcRenderer.invoke('wv-create', url),
+  wvCreate: (url, options) => ipcRenderer.invoke('wv-create', url, options),
+  wvSetMetadata: (viewId, options) => ipcRenderer.invoke('wv-set-metadata', viewId, options),
   wvNavigate: (viewId, url) => ipcRenderer.invoke('wv-navigate', viewId, url),
   wvSetBounds: (viewId, x, y, w, h) => ipcRenderer.invoke('wv-set-bounds', viewId, x, y, w, h),
   wvDestroy: (viewId) => ipcRenderer.invoke('wv-destroy', viewId),
   wvGoBack: (viewId) => ipcRenderer.invoke('wv-go-back', viewId),
   wvGoForward: (viewId) => ipcRenderer.invoke('wv-go-forward', viewId),
   wvReload: (viewId) => ipcRenderer.invoke('wv-reload', viewId),
+  wvSetZoom: (viewId, zoomFactor) => ipcRenderer.invoke('wv-set-zoom', viewId, zoomFactor),
+  wvSetViewport: (viewId, viewport) => ipcRenderer.invoke('wv-set-viewport', viewId, viewport),
   wvDevTools: (viewId) => ipcRenderer.invoke('wv-dev-tools', viewId),
   wvCaptureScreenshot: (viewId, rect) => ipcRenderer.invoke('wv-capture-screenshot', viewId, rect),
   wvExecJs: (viewId, code) => ipcRenderer.invoke('wv-exec-js', viewId, code),
+  wvGetConsole: (viewId, limit) => ipcRenderer.invoke('wv-get-console', viewId, limit),
+  wvGetNetwork: (viewId, limit) => ipcRenderer.invoke('wv-get-network', viewId, limit),
+  wvGetSecurity: (viewId, limit) => ipcRenderer.invoke('wv-get-security', viewId, limit),
+  wvFindInPage: (viewId, text, options) => ipcRenderer.invoke('wv-find-in-page', viewId, text, options),
+  wvStopFind: (viewId, action) => ipcRenderer.invoke('wv-stop-find', viewId, action),
+  wvResolvePermission: (eventId, allowed) => ipcRenderer.invoke('wv-resolve-permission', eventId, allowed),
   wvEnableContextCapture: (viewId) => ipcRenderer.invoke('wv-enable-context-capture', viewId),
 
   // ── WebContentsView state change events ──
@@ -68,6 +77,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event, data) => cb(data);
     ipcRenderer.on('wv-state-change', handler);
     return () => ipcRenderer.removeListener('wv-state-change', handler);
+  },
+
+  onWvDownload: (cb) => {
+    const handler = (_event, data) => cb(data);
+    ipcRenderer.on('wv-download', handler);
+    return () => ipcRenderer.removeListener('wv-download', handler);
+  },
+
+  onWvNetwork: (cb) => {
+    const handler = (_event, data) => cb(data);
+    ipcRenderer.on('wv-network', handler);
+    return () => ipcRenderer.removeListener('wv-network', handler);
+  },
+
+  onWvSecurity: (cb) => {
+    const handler = (_event, data) => cb(data);
+    ipcRenderer.on('wv-security', handler);
+    return () => ipcRenderer.removeListener('wv-security', handler);
+  },
+
+  onWvFindResult: (cb) => {
+    const handler = (_event, data) => cb(data);
+    ipcRenderer.on('wv-find-result', handler);
+    return () => ipcRenderer.removeListener('wv-find-result', handler);
   },
 
   onAgentBrowserEvent: (cb) => {

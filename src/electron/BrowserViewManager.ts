@@ -6,11 +6,106 @@
 // rather than lazy-required, so this module has no hidden coupling to WindowManager.
 
 import { WebContentsView, BrowserWindow } from 'electron';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 interface ViewEntry {
   view: WebContentsView;
   bounds: { x: number; y: number; w: number; h: number };
   createdAt: number;
+  sessionId?: string;
+  workspacePath?: string;
+  defaultUserAgent: string;
+  consoleLogs: BrowserConsoleLog[];
+  networkEvents: BrowserNetworkEvent[];
+  networkStarts: Map<string, BrowserNetworkStart>;
+  securityEvents: BrowserSecurityEvent[];
+  viewport?: BrowserViewportOptions;
+}
+
+interface BrowserViewState {
+  url: string;
+  title: string;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  isLoading: boolean;
+  zoomFactor: number;
+}
+
+interface BrowserViewOptions {
+  sessionId?: string;
+  workspacePath?: string;
+}
+
+interface BrowserNetworkStart {
+  url: string;
+  method: string;
+  resourceType: string;
+  timestamp: number;
+}
+
+export interface BrowserNetworkEvent {
+  viewId: string;
+  id: string;
+  state: 'started' | 'completed' | 'failed';
+  url: string;
+  method: string;
+  resourceType: string;
+  statusCode?: number;
+  fromCache?: boolean;
+  error?: string;
+  timestamp: number;
+  durationMs?: number;
+}
+
+export interface BrowserSecurityEvent {
+  viewId: string;
+  id: string;
+  kind: 'popup' | 'external' | 'permission' | 'certificate';
+  decision: 'prompt' | 'allowed' | 'blocked' | 'redirected';
+  message: string;
+  url?: string;
+  permission?: string;
+  timestamp: number;
+}
+
+export interface BrowserFindResult {
+  viewId: string;
+  requestId: number;
+  activeMatchOrdinal: number;
+  matches: number;
+  finalUpdate: boolean;
+  selectionArea?: unknown;
+}
+
+export interface BrowserViewportOptions {
+  name: string;
+  width?: number;
+  height?: number;
+  mobile?: boolean;
+  deviceScaleFactor?: number;
+  userAgent?: string;
+}
+
+export interface BrowserConsoleLog {
+  level: string;
+  message: string;
+  line?: number;
+  sourceId?: string;
+  timestamp: number;
+}
+
+export interface BrowserDownloadEvent {
+  viewId: string;
+  id: string;
+  state: 'started' | 'progress' | 'completed' | 'cancelled' | 'interrupted';
+  filename: string;
+  url: string;
+  savePath: string;
+  relativePath: string;
+  receivedBytes: number;
+  totalBytes: number;
+  timestamp: number;
 }
 
 export interface AgentBrowserEvent {
@@ -30,6 +125,11 @@ let _instance: BrowserViewManager | null = null;
 
 export class BrowserViewManager {
   private _views = new Map<string, ViewEntry>();
+  private _webContentsToViewId = new Map<number, string>();
+  private _downloadSessions = new WeakSet<object>();
+  private _networkSessions = new WeakSet<object>();
+  private _permissionSessions = new WeakSet<object>();
+  private _pendingPermissions = new Map<string, { callback: (allowed: boolean) => void; timer: NodeJS.Timeout; viewId: string; permission: string; url?: string }>();
   private _maxViews = 20;
   private _getMainWindow: (() => BrowserWindow | null) | null = null;
 
@@ -47,25 +147,39 @@ export class BrowserViewManager {
 
 
 
-  create(url: string): string {
+  create(url: string, options: BrowserViewOptions = {}): string {
     if (this._views.size >= this._maxViews) {
       throw new Error(`BrowserView limit reached (max ${this._maxViews})`);
     }
+    const viewId = `wv_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
     const view = new WebContentsView({
       webPreferences: { sandbox: false, nodeIntegration: false, contextIsolation: true },
     });
     view.webContents.setWindowOpenHandler(({ url: popupUrl }: { url: string }) => {
-      if (popupUrl && popupUrl !== 'about:blank') view.webContents.loadURL(popupUrl);
+      this._handlePopup(viewId, popupUrl, view);
       return { action: 'deny' };
     });
-    view.webContents.loadURL(url);
 
     const mainWin = this._getMainWindow?.() ?? null;
     if (mainWin?.contentView) mainWin.contentView.addChildView(view);
     view.setBounds({ x: 0, y: 0, width: 1, height: 1 }); // hidden until positioned
 
-    const viewId = `wv_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-    this._views.set(viewId, { view, bounds: { x: 0, y: 0, w: 0, h: 0 }, createdAt: Date.now() });
+    this._views.set(viewId, {
+      view,
+      bounds: { x: 0, y: 0, w: 0, h: 0 },
+      createdAt: Date.now(),
+      sessionId: options.sessionId,
+      workspacePath: options.workspacePath,
+      defaultUserAgent: view.webContents.getUserAgent?.() || '',
+      consoleLogs: [],
+      networkEvents: [],
+      networkStarts: new Map(),
+      securityEvents: [],
+    });
+    this._webContentsToViewId.set(view.webContents.id, viewId);
+    this._ensureDownloadHook(view.webContents.session);
+    this._ensureNetworkHook(view.webContents.session);
+    this._ensurePermissionHook(view.webContents.session);
 
     // Forward lifecycle events to renderer
     view.webContents.on('did-start-loading', () => this._emit(viewId, 'loading-start'));
@@ -80,8 +194,27 @@ export class BrowserViewManager {
     view.webContents.on('page-favicon-updated', (_e: any, favicons: string[]) => {
       this._emit(viewId, 'favicon', { favicons });
     });
-    view.webContents.on('destroyed', () => { this._views.delete(viewId); });
+    view.webContents.on('will-navigate', (event: any, navUrl: string) => {
+      if (this._isExternalNavigation(navUrl)) {
+        event.preventDefault();
+        this._recordSecurityEvent(viewId, {
+          kind: 'external',
+          decision: 'blocked',
+          message: 'External navigation was blocked',
+          url: navUrl,
+        });
+      }
+    });
+    view.webContents.on('did-navigate', () => this._emit(viewId, 'nav-state'));
+    view.webContents.on('did-navigate-in-page', () => this._emit(viewId, 'nav-state'));
+    (view.webContents as any).on('console-message', (...args: any[]) => this._recordConsoleMessage(viewId, args));
+    view.webContents.on('found-in-page', (_event: unknown, result: any) => this._emitFindResult(viewId, result));
+    view.webContents.on('destroyed', () => {
+      this._webContentsToViewId.delete(view.webContents.id);
+      this._views.delete(viewId);
+    });
 
+    view.webContents.loadURL(url);
     return viewId;
   }
 
@@ -94,7 +227,15 @@ export class BrowserViewManager {
     }
     try { entry.view.webContents.close(); } catch {}
     this._views.delete(viewId);
+    this._webContentsToViewId.delete(entry.view.webContents.id);
     return true;
+  }
+
+  setMetadata(viewId: string, options: BrowserViewOptions): void {
+    const entry = this._views.get(viewId);
+    if (!entry) return;
+    if (options.sessionId !== undefined) entry.sessionId = options.sessionId;
+    if (options.workspacePath !== undefined) entry.workspacePath = options.workspacePath;
   }
 
   get(viewId: string): WebContentsView | null {
@@ -152,6 +293,35 @@ export class BrowserViewManager {
   reload(viewId: string): void { this.get(viewId)?.webContents.reload(); }
   goBack(viewId: string): void { this.get(viewId)?.webContents.navigationHistory?.goBack(); }
   goForward(viewId: string): void { this.get(viewId)?.webContents.navigationHistory?.goForward(); }
+  setZoomFactor(viewId: string, zoomFactor: number): void {
+    const view = this.get(viewId);
+    if (!view) throw new Error(`View ${viewId} not found`);
+    const bounded = Math.max(0.25, Math.min(3, zoomFactor));
+    view.webContents.setZoomFactor(bounded);
+    this._emit(viewId, 'zoom', { zoomFactor: bounded });
+  }
+
+  setViewport(viewId: string, viewport: BrowserViewportOptions): void {
+    const entry = this._views.get(viewId);
+    if (!entry) throw new Error(`View ${viewId} not found`);
+    entry.viewport = viewport;
+    const wc = entry.view.webContents as any;
+    if (viewport.mobile) {
+      if (viewport.userAgent) wc.setUserAgent?.(viewport.userAgent);
+      wc.enableDeviceEmulation?.({
+        screenPosition: 'mobile',
+        screenSize: { width: viewport.width || 390, height: viewport.height || 844 },
+        viewPosition: { x: 0, y: 0 },
+        deviceScaleFactor: viewport.deviceScaleFactor || 2,
+        viewSize: { width: viewport.width || 390, height: viewport.height || 844 },
+        scale: 1,
+      });
+    } else {
+      wc.disableDeviceEmulation?.();
+      if (entry.defaultUserAgent) wc.setUserAgent?.(entry.defaultUserAgent);
+    }
+    this._emit(viewId, 'viewport', { viewport });
+  }
 
 
 
@@ -193,6 +363,88 @@ export class BrowserViewManager {
     try { return this.get(viewId)?.webContents.getTitle() || ''; } catch { return ''; }
   }
 
+  getState(viewId: string): BrowserViewState | null {
+    const view = this.get(viewId);
+    if (!view) return null;
+    const wc = view.webContents as any;
+    const history = wc.navigationHistory;
+    return {
+      url: wc.getURL?.() || '',
+      title: wc.getTitle?.() || '',
+      canGoBack: Boolean(history?.canGoBack?.() ?? wc.canGoBack?.() ?? false),
+      canGoForward: Boolean(history?.canGoForward?.() ?? wc.canGoForward?.() ?? false),
+      isLoading: Boolean(wc.isLoading?.() ?? false),
+      zoomFactor: Number(wc.getZoomFactor?.() || 1),
+    };
+  }
+
+  getConsoleLogs(viewId: string, limit = 80): BrowserConsoleLog[] {
+    const entry = this._views.get(viewId);
+    if (!entry) return [];
+    return entry.consoleLogs.slice(-Math.max(1, Math.min(200, limit)));
+  }
+
+  getNetworkEvents(viewId: string, limit = 120): BrowserNetworkEvent[] {
+    const entry = this._views.get(viewId);
+    if (!entry) return [];
+    return entry.networkEvents.slice(-Math.max(1, Math.min(200, limit)));
+  }
+
+  getSecurityEvents(viewId: string, limit = 60): BrowserSecurityEvent[] {
+    const entry = this._views.get(viewId);
+    if (!entry) return [];
+    return entry.securityEvents.slice(-Math.max(1, Math.min(120, limit)));
+  }
+
+  findInPage(viewId: string, text: string, options: { forward?: boolean; findNext?: boolean; matchCase?: boolean } = {}): number {
+    const view = this.get(viewId);
+    if (!view) throw new Error(`View ${viewId} not found`);
+    if (!text) {
+      view.webContents.stopFindInPage('clearSelection');
+      return 0;
+    }
+    return view.webContents.findInPage(text, {
+      forward: options.forward !== false,
+      findNext: Boolean(options.findNext),
+      matchCase: Boolean(options.matchCase),
+    });
+  }
+
+  stopFindInPage(viewId: string, action: 'clearSelection' | 'keepSelection' | 'activateSelection' = 'clearSelection'): void {
+    const view = this.get(viewId);
+    if (!view) throw new Error(`View ${viewId} not found`);
+    view.webContents.stopFindInPage(action);
+  }
+
+  resolvePermission(eventId: string, allowed: boolean): boolean {
+    const pending = this._pendingPermissions.get(eventId);
+    if (!pending) return false;
+    clearTimeout(pending.timer);
+    this._pendingPermissions.delete(eventId);
+    pending.callback(allowed);
+    this._recordSecurityEvent(pending.viewId, {
+      id: eventId,
+      kind: 'permission',
+      decision: allowed ? 'allowed' : 'blocked',
+      permission: pending.permission,
+      url: pending.url,
+      message: `${pending.permission} permission ${allowed ? 'allowed' : 'blocked'}`,
+    });
+    return true;
+  }
+
+  handleCertificateError(webContents: { id?: number } | null | undefined, url: string, error: string): boolean {
+    const viewId = this._webContentsToViewId.get(Number(webContents?.id));
+    if (!viewId) return false;
+    this._recordSecurityEvent(viewId, {
+      kind: 'certificate',
+      decision: 'blocked',
+      message: `Certificate error: ${error}`,
+      url,
+    });
+    return true;
+  }
+
 
 
   /** Wait for the page to finish loading. */
@@ -230,6 +482,269 @@ export class BrowserViewManager {
   private _emit(viewId: string, type: string, extra?: Record<string, unknown>): void {
     const mainWin = this._getMainWindow?.() ?? null;
     if (!mainWin || mainWin.isDestroyed()) return;
-    mainWin.webContents.send('wv-state-change', { viewId, type, ...(extra || {}) });
+    mainWin.webContents.send('wv-state-change', { viewId, type, ...(this.getState(viewId) || {}), ...(extra || {}) });
   }
+
+  private _recordConsoleMessage(viewId: string, args: any[]): void {
+    const entry = this._views.get(viewId);
+    if (!entry) return;
+    const details = args.find((arg) => arg && typeof arg === 'object' && ('message' in arg || 'level' in arg));
+    const legacyLevel = args[1];
+    const legacyMessage = args[2];
+    const log: BrowserConsoleLog = {
+      level: String(details?.level ?? legacyLevel ?? 'log'),
+      message: String(details?.message ?? legacyMessage ?? ''),
+      line: Number(details?.line ?? args[3] ?? 0) || undefined,
+      sourceId: typeof details?.sourceId === 'string' ? details.sourceId : (typeof args[4] === 'string' ? args[4] : undefined),
+      timestamp: Date.now(),
+    };
+    if (!log.message) return;
+    entry.consoleLogs.push(log);
+    if (entry.consoleLogs.length > 200) entry.consoleLogs.splice(0, entry.consoleLogs.length - 200);
+    this._emit(viewId, 'console-message', { consoleLog: log });
+  }
+
+  private _recordNetworkEvent(viewId: string, event: BrowserNetworkEvent): void {
+    const entry = this._views.get(viewId);
+    if (!entry) return;
+    entry.networkEvents.push(event);
+    if (entry.networkEvents.length > 200) entry.networkEvents.splice(0, entry.networkEvents.length - 200);
+    this._emitNetwork(event);
+  }
+
+  private _recordSecurityEvent(viewId: string, partial: Omit<BrowserSecurityEvent, 'viewId' | 'id' | 'timestamp'> & { id?: string }): string {
+    const entry = this._views.get(viewId);
+    const id = partial.id || `sec_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    const event: BrowserSecurityEvent = { viewId, id, timestamp: Date.now(), ...partial };
+    if (entry) {
+      const idx = entry.securityEvents.findIndex(item => item.id === id);
+      if (idx >= 0) entry.securityEvents[idx] = event;
+      else entry.securityEvents.push(event);
+      if (entry.securityEvents.length > 120) entry.securityEvents.splice(0, entry.securityEvents.length - 120);
+    }
+    this._emitSecurity(event);
+    return id;
+  }
+
+  private _emitFindResult(viewId: string, result: any): void {
+    const event: BrowserFindResult = {
+      viewId,
+      requestId: Number(result?.requestId || 0),
+      activeMatchOrdinal: Number(result?.activeMatchOrdinal || 0),
+      matches: Number(result?.matches || 0),
+      finalUpdate: Boolean(result?.finalUpdate),
+      selectionArea: result?.selectionArea,
+    };
+    const mainWin = this._getMainWindow?.() ?? null;
+    if (!mainWin || mainWin.isDestroyed()) return;
+    mainWin.webContents.send('wv-find-result', event);
+  }
+
+  private _ensureNetworkHook(session: object): void {
+    if (this._networkSessions.has(session)) return;
+    this._networkSessions.add(session);
+    const webRequest = (session as any).webRequest;
+    if (!webRequest) return;
+    const filter = { urls: ['<all_urls>'] };
+
+    webRequest.onBeforeRequest(filter, (details: any, callback: (response: { cancel?: boolean }) => void) => {
+      const viewId = this._webContentsToViewId.get(Number(details?.webContentsId));
+      if (viewId) {
+        const entry = this._views.get(viewId);
+        const id = String(details?.id || `${Date.now()}-${Math.random()}`);
+        const start: BrowserNetworkStart = {
+          url: String(details?.url || ''),
+          method: String(details?.method || 'GET'),
+          resourceType: String(details?.resourceType || 'other'),
+          timestamp: Date.now(),
+        };
+        entry?.networkStarts.set(id, start);
+        this._recordNetworkEvent(viewId, { viewId, id, state: 'started', ...start });
+      }
+      callback({ cancel: false });
+    });
+
+    webRequest.onCompleted(filter, (details: any) => {
+      const viewId = this._webContentsToViewId.get(Number(details?.webContentsId));
+      if (!viewId) return;
+      const entry = this._views.get(viewId);
+      const id = String(details?.id || '');
+      const start = entry?.networkStarts.get(id);
+      if (entry && id) entry.networkStarts.delete(id);
+      const timestamp = Date.now();
+      this._recordNetworkEvent(viewId, {
+        viewId,
+        id,
+        state: 'completed',
+        url: String(details?.url || start?.url || ''),
+        method: String(details?.method || start?.method || 'GET'),
+        resourceType: String(details?.resourceType || start?.resourceType || 'other'),
+        statusCode: Number(details?.statusCode || 0) || undefined,
+        fromCache: Boolean(details?.fromCache),
+        timestamp,
+        durationMs: start ? timestamp - start.timestamp : undefined,
+      });
+    });
+
+    webRequest.onErrorOccurred(filter, (details: any) => {
+      const viewId = this._webContentsToViewId.get(Number(details?.webContentsId));
+      if (!viewId) return;
+      const entry = this._views.get(viewId);
+      const id = String(details?.id || '');
+      const start = entry?.networkStarts.get(id);
+      if (entry && id) entry.networkStarts.delete(id);
+      const timestamp = Date.now();
+      this._recordNetworkEvent(viewId, {
+        viewId,
+        id,
+        state: 'failed',
+        url: String(details?.url || start?.url || ''),
+        method: String(details?.method || start?.method || 'GET'),
+        resourceType: String(details?.resourceType || start?.resourceType || 'other'),
+        error: String(details?.error || 'Network error'),
+        timestamp,
+        durationMs: start ? timestamp - start.timestamp : undefined,
+      });
+    });
+  }
+
+  private _ensureDownloadHook(session: object): void {
+    if (this._downloadSessions.has(session)) return;
+    this._downloadSessions.add(session);
+    (session as any).on('will-download', (_event: unknown, item: any, webContents: any) => {
+      const viewId = this._webContentsToViewId.get(webContents?.id);
+      if (!viewId) return;
+      this._handleDownload(viewId, item);
+    });
+  }
+
+  private _handleDownload(viewId: string, item: any): void {
+    const entry = this._views.get(viewId);
+    if (!entry) return;
+    const workspacePath = entry.workspacePath ? path.resolve(entry.workspacePath) : '';
+    const filename = sanitizeDownloadFilename(item.getFilename?.() || 'download');
+    let savePath = item.getSavePath?.() || '';
+    let relativePath = '';
+
+    if (workspacePath) {
+      const targetDir = path.join(workspacePath, 'downloads');
+      fs.mkdirSync(targetDir, { recursive: true });
+      savePath = uniqueDownloadPath(targetDir, filename);
+      relativePath = path.relative(workspacePath, savePath).replace(/\\/g, '/');
+      item.setSavePath?.(savePath);
+    }
+
+    const downloadId = `dl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    const emitDownload = (state: BrowserDownloadEvent['state']) => {
+      this._emitDownload({
+        viewId,
+        id: downloadId,
+        state,
+        filename,
+        url: item.getURL?.() || '',
+        savePath: item.getSavePath?.() || savePath,
+        relativePath,
+        receivedBytes: Number(item.getReceivedBytes?.() || 0),
+        totalBytes: Number(item.getTotalBytes?.() || 0),
+        timestamp: Date.now(),
+      });
+    };
+
+    emitDownload('started');
+    item.on?.('updated', (_event: unknown, state: string) => emitDownload(state === 'interrupted' ? 'interrupted' : 'progress'));
+    item.once?.('done', (_event: unknown, state: string) => {
+      emitDownload(state === 'completed' ? 'completed' : state === 'cancelled' ? 'cancelled' : 'interrupted');
+    });
+  }
+
+  private _emitDownload(event: BrowserDownloadEvent): void {
+    const mainWin = this._getMainWindow?.() ?? null;
+    if (!mainWin || mainWin.isDestroyed()) return;
+    mainWin.webContents.send('wv-download', event);
+  }
+
+  private _ensurePermissionHook(session: object): void {
+    if (this._permissionSessions.has(session)) return;
+    this._permissionSessions.add(session);
+    (session as any).setPermissionRequestHandler?.((webContents: any, permission: string, callback: (allowed: boolean) => void, details?: any) => {
+      const viewId = this._webContentsToViewId.get(Number(webContents?.id));
+      if (!viewId) { callback(false); return; }
+      const url = String(details?.requestingUrl || details?.embeddingOrigin || this.getUrl(viewId) || '');
+      const id = this._recordSecurityEvent(viewId, {
+        kind: 'permission',
+        decision: 'prompt',
+        permission,
+        url,
+        message: `${permission} permission requested`,
+      });
+      const timer = setTimeout(() => {
+        const pending = this._pendingPermissions.get(id);
+        if (!pending) return;
+        this._pendingPermissions.delete(id);
+        pending.callback(false);
+        this._recordSecurityEvent(viewId, {
+          id,
+          kind: 'permission',
+          decision: 'blocked',
+          permission,
+          url,
+          message: `${permission} permission timed out`,
+        });
+      }, 15000);
+      this._pendingPermissions.set(id, { callback, timer, viewId, permission, url });
+    });
+  }
+
+  private _emitNetwork(event: BrowserNetworkEvent): void {
+    const mainWin = this._getMainWindow?.() ?? null;
+    if (!mainWin || mainWin.isDestroyed()) return;
+    mainWin.webContents.send('wv-network', event);
+  }
+
+  private _emitSecurity(event: BrowserSecurityEvent): void {
+    const mainWin = this._getMainWindow?.() ?? null;
+    if (!mainWin || mainWin.isDestroyed()) return;
+    mainWin.webContents.send('wv-security', event);
+  }
+
+  private _handlePopup(viewId: string, popupUrl: string, view: WebContentsView): void {
+    if (!popupUrl || popupUrl === 'about:blank') return;
+    if (this._isExternalNavigation(popupUrl)) {
+      this._recordSecurityEvent(viewId, {
+        kind: 'external',
+        decision: 'blocked',
+        message: 'External popup was blocked',
+        url: popupUrl,
+      });
+      return;
+    }
+    this._recordSecurityEvent(viewId, {
+      kind: 'popup',
+      decision: 'redirected',
+      message: 'Popup opened in the current browser tab',
+      url: popupUrl,
+    });
+    view.webContents.loadURL(popupUrl);
+  }
+
+  private _isExternalNavigation(url: string): boolean {
+    if (!url) return false;
+    return !/^(https?:|file:|about:|data:|blob:|view-source:)/i.test(url);
+  }
+}
+
+function sanitizeDownloadFilename(filename: string): string {
+  const cleaned = filename.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim();
+  return cleaned && cleaned !== '.' && cleaned !== '..' ? cleaned : 'download';
+}
+
+function uniqueDownloadPath(dir: string, filename: string): string {
+  const parsed = path.parse(filename);
+  let candidate = path.join(dir, filename);
+  let i = 1;
+  while (fs.existsSync(candidate)) {
+    candidate = path.join(dir, `${parsed.name} (${i})${parsed.ext}`);
+    i++;
+  }
+  return candidate;
 }

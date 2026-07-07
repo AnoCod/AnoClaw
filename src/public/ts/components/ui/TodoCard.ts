@@ -62,7 +62,7 @@ export class TodoCard {
       .ui-todocard-row { display: flex; align-items: flex-start; gap: 8px; padding: 3px 0; font-size: 12px; }
       .ui-todocard-icon { flex-shrink: 0; width: 18px; text-align: center; font-size: 11px; }
       .ui-todocard-icon.pending { color: var(--cinema-text-muted); }
-      .ui-todocard-icon.in_progress { color: var(--color-accent); }
+      .ui-todocard-icon.in_progress { color: var(--color-warning, #ffc533); }
       .ui-todocard-icon.completed { color: rgba(89,212,153,0.5); }
       .ui-todocard-text { flex: 1; color: var(--cinema-text-btn); line-height: 1.5; }
       .ui-todocard-text.completed { text-decoration: line-through; opacity: 0.4; }

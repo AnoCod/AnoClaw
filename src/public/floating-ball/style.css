@@ -30,7 +30,7 @@ html { border-radius: 50%; }
 .ball:hover,
 body.hover .ball {
   width: 64px; height: 64px;
-  box-shadow: 0 0 20px rgba(255,255,255,0.08), 0 0 60px rgba(150,100,255,0.06);
+  box-shadow: 0 0 20px rgba(255,255,255,0.08), 0 0 48px rgba(255,255,255,0.04);
 }
 
 /* ─── Icon ─── */
@@ -83,7 +83,7 @@ body.hover .sat {
 .sat:hover {
   background: radial-gradient(circle at 30% 30%, #505056, #252528);
   border-color: rgba(255,255,255,0.18);
-  box-shadow: 0 0 12px rgba(150,100,255,0.1);
+  box-shadow: 0 0 12px rgba(255,255,255,0.08);
 }
 
 /* ─── Satellite labels ─── */

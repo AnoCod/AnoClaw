@@ -124,7 +124,6 @@ function _injectStyles(): void {
     .mcp-dot-connected {
       background: ${T.accentGreen};
       animation: mcp-dotPulse 2s ease infinite;
-      box-shadow: 0 0 6px ${T.accentGreenBg};
     }
     .mcp-dot-disconnected {
       background: ${T.stone};
@@ -168,7 +167,6 @@ function _injectStyles(): void {
     .mcp-search-input:focus {
       border-color: rgba(87,193,255,0.4) !important;
       outline: none;
-      box-shadow: 0 0 0 1px rgba(87,193,255,0.2);
     }
     .mcp-transport-badge {
       font-size: 10px;
@@ -321,7 +319,7 @@ function _serverCard(s: MCPServer, isSelected: boolean, h: CardHandlers): HTMLEl
     "display:flex;align-items:center;gap:14px;margin-bottom:8px;",
     _transition(),
     "animation:mcp-fadeIn 200ms ease;",
-    isSelected ? "box-shadow:inset 0 0 0 1px rgba(87,193,255,0.12);" : "",
+    isSelected ? "outline:1px solid rgba(255,255,255,0.12);" : "",
   ].join(""));
 
   if (!isSelected) {
@@ -904,7 +902,7 @@ class MCPPage {
           "color:" + T.ink + ";font-family:" + T.fontSans + ";",
           "font-feature-settings:" + T.fontFeature + ";font-size:13px;",
           "outline:none;box-sizing:border-box;",
-          _transition("border-color 200ms ease, box-shadow 200ms ease"),
+          _transition("border-color 200ms ease, outline-color 200ms ease"),
         ].join("");
         searchWrap.appendChild(searchInput);
         tabContent.appendChild(searchWrap);
@@ -1091,7 +1089,7 @@ class MCPPage {
     const overlay = _el("div", [
       "position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.6);",
       "display:flex;align-items:center;justify-content:center;",
-      "animation:mcp-fadeIn 150ms ease;backdrop-filter:blur(4px);",
+      "animation:mcp-fadeIn 150ms ease;",
     ].join(""));
 
     const dialog = _el("div", [

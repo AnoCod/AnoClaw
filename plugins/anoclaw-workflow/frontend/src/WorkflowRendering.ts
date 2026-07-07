@@ -16,11 +16,11 @@ const STATUS_COLORS: Record<string, string> = {
   error: '#ff6161',
 };
 
-/** Status glow mapping for node border */
-const STATUS_GLOWS: Record<string, string> = {
-  running: '0 0 0 2px rgba(255,197,51,0.3), 0 0 12px rgba(255,197,51,0.15)',
-  success: '0 0 0 2px rgba(89,212,153,0.3), 0 0 8px rgba(89,212,153,0.1)',
-  error: '0 0 0 2px rgba(255,97,97,0.3), 0 0 8px rgba(255,97,97,0.1)',
+/** Semantic status border colors; surface depth stays shadow-free. */
+const STATUS_BORDERS: Record<string, string> = {
+  running: 'rgba(255,197,51,0.55)',
+  success: 'rgba(89,212,153,0.45)',
+  error: 'rgba(255,97,97,0.45)',
 };
 
 /** Build a node DOM element */
@@ -39,13 +39,13 @@ export function renderNode(node: WorkflowNode, isSelected: boolean, callbacks: {
   el.style.top = node.y + 'px';
   el.setAttribute('data-node-id', node.id);
 
-  const headerBg = def?.color || '#7c3aed';
+  const headerColor = def?.color || '#57c1ff';
   const typeLabel = def?.label || node.type;
   const iconSvg = def?.icon || '';
 
   // Status indicator
   const statusColor = STATUS_COLORS[node.status] || STATUS_COLORS.idle;
-  const statusGlow = STATUS_GLOWS[node.status] || '';
+  const statusBorder = STATUS_BORDERS[node.status] || '';
   const isRunning = node.status === 'running';
 
   // Multi-select class
@@ -54,7 +54,7 @@ export function renderNode(node: WorkflowNode, isSelected: boolean, callbacks: {
   }
 
   el.innerHTML = `
-    <div class="workflow-node-header" style="background:${headerBg};" data-drag-handle>
+    <div class="workflow-node-header" style="--workflow-type-color:${headerColor};" data-drag-handle>
       <span class="workflow-node-status-dot" style="background:${statusColor};${isRunning ? 'animation:nodeStatusPulse 1s ease-in-out infinite;' : ''}"></span>
       <span class="workflow-node-type-icon">${iconSvg}</span>
       <span class="workflow-node-type-label">${typeLabel}</span>
@@ -85,8 +85,8 @@ export function renderNode(node: WorkflowNode, isSelected: boolean, callbacks: {
       </div>
     </div>`;
 
-  if (statusGlow) {
-    el.style.boxShadow = statusGlow;
+  if (statusBorder && !isSelected) {
+    el.style.borderColor = statusBorder;
   }
 
   // Drag start on header (skip delete button and form controls)
@@ -147,7 +147,7 @@ export function renderConnections(svg: SVGSVGElement, connections: WorkflowConne
   defs.innerHTML = `
     <linearGradient id="flow-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
       <stop offset="0%" stop-color="#ffc533" stop-opacity="0"/>
-      <stop offset="50%" stop-color="#ffc533" stop-opacity="1"/>
+      <stop offset="50%" stop-color="#ffffff" stop-opacity="0.85"/>
       <stop offset="100%" stop-color="#ffc533" stop-opacity="0"/>
     </linearGradient>
   `;
@@ -302,7 +302,7 @@ export function renderMinimap(
   // Groups (background rectangles)
   if (groups && groups.length > 0) {
     ctx.globalAlpha = 0.12;
-    ctx.fillStyle = '#57c1ff';
+    ctx.fillStyle = 'rgba(255,255,255,0.16)';
     for (const g of groups) {
       const groupNodes = nodes.filter(n => g.nodeIds.includes(n.id));
       if (groupNodes.length === 0) continue;

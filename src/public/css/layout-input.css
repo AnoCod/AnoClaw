@@ -9,7 +9,7 @@
   border-radius: var(--radius);
   padding: var(--space-xs);
   min-width: 200px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  box-shadow: none;
   z-index: 1000;
 }
 
@@ -47,13 +47,13 @@
   flex-shrink: 0;
 }
 .mode-radio.active {
-  border-color: var(--color-accent);
+  border-color: #fff;
 }
 .mode-radio-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--color-accent);
+  background: #fff;
 }
 
 .mode-dropdown-text {
@@ -95,7 +95,7 @@
 
 .mode-goal-label {
   font-size: var(--font-size-caption-md);
-  color: var(--color-accent);
+  color: var(--color-text-primary);
   font-weight: 500;
 }
 
@@ -109,7 +109,7 @@
   transition: background var(--transition-slow);
 }
 .mode-effort-track.enabled {
-  background: var(--color-accent);
+  background: #fff;
 }
 
 .mode-effort-knob {
@@ -124,6 +124,7 @@
 }
 .mode-effort-knob.enabled {
   left: 18px;
+  background: #000;
 }
 
 
@@ -215,8 +216,8 @@
   color: var(--color-text-primary);
 }
 .tab-panel-tab.selected {
-  color: var(--color-icon-active);
-  border-bottom-color: var(--color-accent);
+  color: var(--color-text-primary);
+  border-bottom-color: #fff;
   font-weight: var(--font-weight-medium);
 }
 
@@ -268,7 +269,7 @@
   gap: 4px;
   padding: 2px 8px;
   background: var(--color-bubble-sent);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-full);
   font-size: var(--font-size-caption-sm);
   color: var(--color-text-primary);
   max-width: 180px;
@@ -341,9 +342,9 @@
 }
 
 .send-btn {
-  background: var(--color-accent);
-  color: var(--color-on-accent);
-  border: none;
+  background: #fff;
+  color: #000;
+  border: 1px solid #fff;
   border-radius: var(--radius);
   padding: 8px 16px;
   cursor: pointer;
@@ -354,7 +355,9 @@
   transition: opacity var(--transition-normal), background var(--transition-normal);
 }
 .send-btn:hover {
-  opacity: 0.9;
+  background: #e8e8e8;
+  border-color: #e8e8e8;
+  opacity: 1;
 }
 
 .stop-btn {
@@ -379,7 +382,7 @@
   background: var(--color-surface);
   border: 1px solid var(--color-hairline);
   border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  box-shadow: none;
   z-index: 1000;
   max-height: 320px;
   display: flex;
@@ -520,8 +523,8 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--color-accent-cinema, var(--color-accent));
-  box-shadow: 0 0 8px var(--color-accent-cinema-glow, transparent);
+  background: #fff;
+  box-shadow: none;
 }
 .input-goal-card.paused .input-goal-dot {
   background: var(--cinema-text-muted, var(--color-text-tertiary));

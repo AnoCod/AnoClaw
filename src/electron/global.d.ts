@@ -28,18 +28,31 @@ declare global {
     saveSetup: (data: Record<string, unknown>) => Promise<{ ok: boolean; error?: string }>;
     setupDone: () => void;
     quitSetup: () => void;
-    wvCreate: (url: string) => Promise<{ viewId: string | null; error?: string }>;
+    wvCreate: (url: string, options?: { sessionId?: string; workspacePath?: string }) => Promise<{ viewId: string | null; error?: string }>;
+    wvSetMetadata: (viewId: string, options?: { sessionId?: string; workspacePath?: string }) => Promise<{ ok: boolean; error?: string }>;
     wvNavigate: (viewId: string, url: string) => Promise<{ ok: boolean; error?: string }>;
     wvSetBounds: (viewId: string, x: number, y: number, w: number, h: number) => Promise<{ ok: boolean }>;
     wvDestroy: (viewId: string) => Promise<{ ok: boolean }>;
     wvGoBack: (viewId: string) => Promise<{ ok: boolean }>;
     wvGoForward: (viewId: string) => Promise<{ ok: boolean }>;
     wvReload: (viewId: string) => Promise<{ ok: boolean }>;
+    wvSetZoom: (viewId: string, zoomFactor: number) => Promise<{ ok: boolean; error?: string }>;
+    wvSetViewport: (viewId: string, viewport: { name: string; width?: number; height?: number; mobile?: boolean; deviceScaleFactor?: number; userAgent?: string }) => Promise<{ ok: boolean; error?: string }>;
     wvDevTools: (viewId: string) => Promise<{ ok: boolean }>;
     wvCaptureScreenshot: (viewId: string, rect?: { x: number; y: number; width: number; height: number }) => Promise<{ ok: boolean; dataUrl?: string; error?: string }>;
     wvExecJs: (viewId: string, code: string) => Promise<{ ok: boolean; result?: unknown; error?: string }>;
+    wvGetConsole: (viewId: string, limit?: number) => Promise<{ ok: boolean; logs: Array<{ level: string; message: string; line?: number; sourceId?: string; timestamp: number }>; error?: string }>;
+    wvGetNetwork: (viewId: string, limit?: number) => Promise<{ ok: boolean; events: Array<{ viewId: string; id: string; state: string; url: string; method: string; resourceType: string; statusCode?: number; fromCache?: boolean; error?: string; timestamp: number; durationMs?: number }>; error?: string }>;
+    wvGetSecurity: (viewId: string, limit?: number) => Promise<{ ok: boolean; events: Array<{ viewId: string; id: string; kind: string; decision: string; message: string; url?: string; permission?: string; timestamp: number }>; error?: string }>;
+    wvFindInPage: (viewId: string, text: string, options?: { forward?: boolean; findNext?: boolean; matchCase?: boolean }) => Promise<{ ok: boolean; requestId: number; error?: string }>;
+    wvStopFind: (viewId: string, action?: 'clearSelection' | 'keepSelection' | 'activateSelection') => Promise<{ ok: boolean; error?: string }>;
+    wvResolvePermission: (eventId: string, allowed: boolean) => Promise<{ ok: boolean; error?: string }>;
     wvEnableContextCapture: (viewId: string) => Promise<{ ok: boolean }>;
     onWvStateChange: (cb: (data: { viewId: string; type: string; [key: string]: unknown }) => void) => () => void;
+    onWvDownload: (cb: (data: { viewId: string; id: string; state: string; filename: string; url: string; savePath: string; relativePath: string; receivedBytes: number; totalBytes: number; timestamp: number }) => void) => () => void;
+    onWvNetwork: (cb: (data: { viewId: string; id: string; state: string; url: string; method: string; resourceType: string; statusCode?: number; fromCache?: boolean; error?: string; timestamp: number; durationMs?: number }) => void) => () => void;
+    onWvSecurity: (cb: (data: { viewId: string; id: string; kind: string; decision: string; message: string; url?: string; permission?: string; timestamp: number }) => void) => () => void;
+    onWvFindResult: (cb: (data: { viewId: string; requestId: number; activeMatchOrdinal: number; matches: number; finalUpdate: boolean; selectionArea?: unknown }) => void) => () => void;
     onAgentBrowserEvent: (cb: (data: { sessionId: string; viewId: string; action: string; phase: 'start' | 'done' | 'error'; [key: string]: unknown }) => void) => () => void;
   }
 

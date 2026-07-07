@@ -31,8 +31,8 @@ export class DelegationActivityDelegate {
     // Spinner — tiny, inline
     const spinner = document.createElement('span');
     spinner.style.cssText = `
-      width: 10px; height: 10px; border: 1.5px solid rgba(167,139,250,0.25);
-      border-top-color: rgba(167,139,250,0.5);
+      width: 10px; height: 10px; border: 1.5px solid var(--hairline-cinema, var(--color-hairline));
+      border-top-color: #fff;
       border-radius: 50%; flex-shrink: 0;
       animation: da-spin 1s linear infinite;
     `;
@@ -41,7 +41,7 @@ export class DelegationActivityDelegate {
     // Label
     const label = document.createElement('span');
     label.textContent = 'DELEGATE';
-    label.style.cssText = 'color: rgba(167,139,250,0.2);';
+    label.style.cssText = 'color: var(--cinema-text-edge);';
     indicator.appendChild(label);
 
     // Separator

@@ -60,7 +60,8 @@
   --color-token-free: var(--color-token-free-space);
 
   /* ─── Hairline borders — moved from layout-core.css for centralization ─── */
-  --color-hairline: rgba(255,255,255,0.08);
+  --color-hairline: #242728;
+  --color-hairline-soft: rgba(255,255,255,0.08);
   --color-hairline-strong: rgba(255,255,255,0.16);
 
   /* ─── Overlay colors — theme-aware, replaces raw rgba(255,255,255,X) ─── */
@@ -141,22 +142,22 @@
   --z-toast: 10001;
 
   /* ─── Shadow tokens (used only for elevated overlays — surfaces use hairline borders) ─── */
-  --shadow-dialog: 0 8px 32px rgba(0,0,0,0.4);
-  --shadow-dropdown: 0 8px 24px rgba(0,0,0,0.4);
-  --shadow-card-hover: 0 4px 24px rgba(0,0,0,0.2);
+  --shadow-dialog: none;
+  --shadow-dropdown: none;
+  --shadow-card-hover: none;
 
   /* ─── Disabled state ─── */
   --opacity-disabled: 0.45;
 
   /* ─── Agent avatar palette (hash-indexed, theme-aware) ─── */
-  --color-avatar-0: #7c3aed;
-  --color-avatar-1: #3b82f6;
-  --color-avatar-2: #10b981;
-  --color-avatar-3: #f59e0b;
-  --color-avatar-4: #ef4444;
-  --color-avatar-5: #8b5cf6;
-  --color-avatar-6: #ec4899;
-  --color-avatar-7: #06b6d4;
+  --color-avatar-0: #ff6161;
+  --color-avatar-1: #57c1ff;
+  --color-avatar-2: #59d499;
+  --color-avatar-3: #ffc533;
+  --color-avatar-4: #ff6161;
+  --color-avatar-5: #57c1ff;
+  --color-avatar-6: #59d499;
+  --color-avatar-7: #ffc533;
 
   /* ─── Layout ─── */
   --titlebar-height: 36px;
@@ -352,9 +353,9 @@
   --color-icon-active: #E17055;
 }
 [data-accent="purple"] {
-  --color-accent: #7c3aed;
-  --color-on-accent: #ffffff;
-  --color-icon-active: #c4b5fd;
+  --color-accent: #57c1ff;
+  --color-on-accent: #000000;
+  --color-icon-active: #57c1ff;
 }
 
 [data-theme="light"][data-accent="blue"] {
@@ -373,7 +374,7 @@
   --color-icon-active: #E17055;
 }
 [data-theme="light"][data-accent="purple"] {
-  --color-accent: #6d28d9;
+  --color-accent: #0984E3;
   --color-on-accent: #ffffff;
-  --color-icon-active: #6d28d9;
+  --color-icon-active: #0984E3;
 }

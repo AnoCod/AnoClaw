@@ -4,9 +4,10 @@ import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { PassThrough } from 'node:stream';
 import { ApiServer } from '../ApiServer.js';
 import type { RouteHandler, RouteMatch } from '../RouteHandler.js';
-import { handleBrowseWorkspace, resolveWorkspacePath } from '../handlers/WorkspaceHandlers.js';
+import { handleBrowseWorkspace, handleReadWorkspaceFile, resolveWorkspacePath } from '../handlers/WorkspaceHandlers.js';
 
 interface Capture {
   status: number;
@@ -14,11 +15,26 @@ interface Capture {
   body: Record<string, unknown>;
 }
 
+interface RawCapture {
+  status: number;
+  headers: Record<string, string | number>;
+  chunks: Buffer[];
+}
+
 function mockReq(url: string, origin?: string, remoteAddress = '10.0.0.5'): IncomingMessage {
   return Object.assign(new EventEmitter(), {
     method: 'GET',
     url,
     headers: origin ? { origin } : {},
+    socket: { remoteAddress },
+  }) as unknown as IncomingMessage;
+}
+
+function mockReqWithHeaders(url: string, headers: Record<string, string>, remoteAddress = '127.0.0.1'): IncomingMessage {
+  return Object.assign(new EventEmitter(), {
+    method: 'GET',
+    url,
+    headers,
     socket: { remoteAddress },
   }) as unknown as IncomingMessage;
 }
@@ -33,6 +49,21 @@ function mockRes(capture: Capture): ServerResponse {
       catch { capture.body = { raw: data }; }
     },
   } as unknown as ServerResponse;
+}
+
+function mockRawRes(capture: RawCapture): ServerResponse {
+  const stream = new PassThrough();
+  stream.on('data', (chunk: Buffer | string) => {
+    capture.chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  });
+  return Object.assign(stream, {
+    setHeader: (key: string, value: string | number) => { capture.headers[key] = value; },
+    writeHead: (status: number, headers?: Record<string, string | number>) => {
+      capture.status = status;
+      if (headers) Object.assign(capture.headers, headers);
+      return stream;
+    },
+  }) as unknown as ServerResponse;
 }
 
 describe('ApiServer security boundaries', () => {
@@ -150,6 +181,37 @@ describe('ApiServer security boundaries', () => {
       expect(ignoredDirectoryNames).not.toContain('components');
       expect(ignoredDirectoryNames).not.toContain('main.js');
       expect(browseNames(await browseWorkspace('visible'))).toContain('keep.txt');
+    } finally {
+      process.chdir(previousCwd);
+      fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('serves raw workspace files with mime type and range support', async () => {
+    const previousCwd = process.cwd();
+    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'anoclaw-raw-'));
+
+    try {
+      const bytes = Buffer.from([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+      fs.writeFileSync(path.join(workspaceRoot, 'clip.mp4'), bytes);
+      process.chdir(workspaceRoot);
+
+      const capture: RawCapture = { status: 0, headers: {}, chunks: [] };
+      await handleReadWorkspaceFile(
+        mockReqWithHeaders('/api/v1/workspace/read?path=clip.mp4&raw=1', { range: 'bytes=2-5' }),
+        mockRawRes(capture),
+        (_res, status, body) => {
+          capture.status = status;
+          capture.chunks.push(Buffer.from(JSON.stringify(body)));
+        },
+        '127.0.0.1',
+        15730,
+      );
+
+      expect(capture.status).toBe(206);
+      expect(capture.headers['Content-Type']).toBe('video/mp4');
+      expect(capture.headers['Content-Range']).toBe('bytes 2-5/10');
+      expect(Buffer.concat(capture.chunks)).toEqual(Buffer.from([2, 3, 4, 5]));
     } finally {
       process.chdir(previousCwd);
       fs.rmSync(workspaceRoot, { recursive: true, force: true });

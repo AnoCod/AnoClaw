@@ -143,7 +143,6 @@
       }
       .gw-ws-dot.connected {
         background: var(--gw-accent-green);
-        box-shadow: 0 0 6px var(--gw-accent-green-soft);
         animation: gw-pulse 2s ease-in-out infinite;
       }
       @keyframes gw-pulse { 0%,100% { opacity:0.6 } 50% { opacity:1 } }
@@ -219,7 +218,6 @@
       }
       .gw-conn-status.connected {
         background: var(--gw-accent-green);
-        box-shadow: 0 0 6px var(--gw-accent-green-soft);
       }
       .gw-conn-status.disconnected { background: var(--gw-text-quaternary); }
       .gw-conn-name { font-size: 13px; font-weight: 500; color: var(--gw-text-primary); }
@@ -1039,7 +1037,7 @@ ${d.content}`);
         const dotColor = a.connected ? "var(--gw-accent-green)" : "var(--gw-accent-red)";
         return `
               <div class="gw-health-item">
-                <span class="gw-health-dot" style="background:${dotColor};${a.connected ? "box-shadow:0 0 6px " + dotColor + "30" : ""}"></span>
+                <span class="gw-health-dot" style="background:${dotColor};"></span>
                 <div>
                   <div class="gw-health-name">${esc(id)}</div>
                   <div class="gw-health-detail">${a.platform} \xB7 ${a.connected ? "Connected" : "Disconnected"}</div>

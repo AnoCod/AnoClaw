@@ -42,6 +42,91 @@ interface WVCreateResult {
   error?: string;
 }
 
+interface WVCreateOptions {
+  sessionId?: string;
+  workspacePath?: string;
+}
+
+interface WVConsoleLog {
+  level: string;
+  message: string;
+  line?: number;
+  sourceId?: string;
+  timestamp: number;
+}
+
+interface WVConsoleResult extends ApiResult {
+  logs: WVConsoleLog[];
+}
+
+interface WVNetworkEvent {
+  viewId: string;
+  id: string;
+  state: 'started' | 'completed' | 'failed';
+  url: string;
+  method: string;
+  resourceType: string;
+  statusCode?: number;
+  fromCache?: boolean;
+  error?: string;
+  timestamp: number;
+  durationMs?: number;
+}
+
+interface WVNetworkResult extends ApiResult {
+  events: WVNetworkEvent[];
+}
+
+interface WVSecurityEvent {
+  viewId: string;
+  id: string;
+  kind: 'popup' | 'external' | 'permission' | 'certificate';
+  decision: 'prompt' | 'allowed' | 'blocked' | 'redirected';
+  message: string;
+  url?: string;
+  permission?: string;
+  timestamp: number;
+}
+
+interface WVSecurityResult extends ApiResult {
+  events: WVSecurityEvent[];
+}
+
+interface WVFindResult {
+  viewId: string;
+  requestId: number;
+  activeMatchOrdinal: number;
+  matches: number;
+  finalUpdate: boolean;
+  selectionArea?: unknown;
+}
+
+interface WVFindRequestResult extends ApiResult {
+  requestId: number;
+}
+
+interface WVViewportOptions {
+  name: string;
+  width?: number;
+  height?: number;
+  mobile?: boolean;
+  deviceScaleFactor?: number;
+  userAgent?: string;
+}
+
+interface WVDownloadEvent {
+  viewId: string;
+  id: string;
+  state: 'started' | 'progress' | 'completed' | 'cancelled' | 'interrupted';
+  filename: string;
+  url: string;
+  savePath: string;
+  relativePath: string;
+  receivedBytes: number;
+  totalBytes: number;
+  timestamp: number;
+}
+
 interface AgentBrowserEvent {
   sessionId: string;
   viewId: string;
@@ -121,20 +206,33 @@ interface ElectronAPI {
   quitSetup: () => void;
 
   // ── WebContentsView management ──
-  wvCreate: (url: string) => Promise<WVCreateResult>;
+  wvCreate: (url: string, options?: WVCreateOptions) => Promise<WVCreateResult>;
+  wvSetMetadata: (viewId: string, options?: WVCreateOptions) => Promise<ApiResult>;
   wvNavigate: (viewId: string, url: string) => Promise<ApiResult>;
   wvSetBounds: (viewId: string, x: number, y: number, w: number, h: number) => Promise<ApiResult>;
   wvDestroy: (viewId: string) => Promise<ApiResult>;
   wvGoBack: (viewId: string) => Promise<ApiResult>;
   wvGoForward: (viewId: string) => Promise<ApiResult>;
   wvReload: (viewId: string) => Promise<ApiResult>;
+  wvSetZoom: (viewId: string, zoomFactor: number) => Promise<ApiResult>;
+  wvSetViewport: (viewId: string, viewport: WVViewportOptions) => Promise<ApiResult>;
   wvDevTools: (viewId: string) => Promise<ApiResult>;
   wvCaptureScreenshot: (viewId: string, rect?: { x: number; y: number; width: number; height: number }) => Promise<CaptureScreenshotResult>;
   wvExecJs: (viewId: string, code: string) => Promise<ExecJsResult>;
+  wvGetConsole: (viewId: string, limit?: number) => Promise<WVConsoleResult>;
+  wvGetNetwork: (viewId: string, limit?: number) => Promise<WVNetworkResult>;
+  wvGetSecurity: (viewId: string, limit?: number) => Promise<WVSecurityResult>;
+  wvFindInPage: (viewId: string, text: string, options?: { forward?: boolean; findNext?: boolean; matchCase?: boolean }) => Promise<WVFindRequestResult>;
+  wvStopFind: (viewId: string, action?: 'clearSelection' | 'keepSelection' | 'activateSelection') => Promise<ApiResult>;
+  wvResolvePermission: (eventId: string, allowed: boolean) => Promise<ApiResult>;
   wvEnableContextCapture: (viewId: string) => Promise<ApiResult>;
 
   // ── WebContentsView state change events ──
   onWvStateChange: (cb: (data: WVStateChangeData) => void) => () => void;
+  onWvDownload: (cb: (data: WVDownloadEvent) => void) => () => void;
+  onWvNetwork: (cb: (data: WVNetworkEvent) => void) => () => void;
+  onWvSecurity: (cb: (data: WVSecurityEvent) => void) => () => void;
+  onWvFindResult: (cb: (data: WVFindResult) => void) => () => void;
   onAgentBrowserEvent: (cb: (data: AgentBrowserEvent) => void) => () => void;
 }
 

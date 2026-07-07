@@ -30,9 +30,9 @@ export function resolveStatusColor(status: string): string {
 
 /** Agent role color palette — design-system-aligned, not semantic tokens */
 export const ROLE_COLORS: Record<string, string> = {
-  ceo: '#7c3aed',
-  manager: '#3b82f6',
-  member: '#10b981',
+  ceo: '#ff6161',
+  manager: '#57c1ff',
+  member: '#59d499',
   default: '#6a6b6c',
 };
 

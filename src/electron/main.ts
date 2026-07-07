@@ -157,9 +157,14 @@ export async function createApp(electron: typeof import('electron')) {
   // ── WebContentsView management IPC (delegates to BrowserViewManager) ──
   const bvm = BrowserViewManager.getInstance();
 
-  ipcMain.handle('wv-create', async (_e: IpcMainInvokeEvent, url: string) => {
-    try { return { viewId: bvm.create(url) }; }
+  ipcMain.handle('wv-create', async (_e: IpcMainInvokeEvent, url: string, options?: { sessionId?: string; workspacePath?: string }) => {
+    try { return { viewId: bvm.create(url, options || {}) }; }
     catch (err) { return { viewId: null, error: String(err) }; }
+  });
+
+  ipcMain.handle('wv-set-metadata', async (_e: IpcMainInvokeEvent, viewId: string, options?: { sessionId?: string; workspacePath?: string }) => {
+    try { bvm.setMetadata(viewId, options || {}); return { ok: true }; }
+    catch (err) { return { ok: false, error: String(err) }; }
   });
 
   ipcMain.handle('wv-navigate', async (_e: IpcMainInvokeEvent, viewId: string, url: string) => {
@@ -191,6 +196,16 @@ export async function createApp(electron: typeof import('electron')) {
     catch { return { ok: false }; }
   });
 
+  ipcMain.handle('wv-set-zoom', (_e: IpcMainInvokeEvent, viewId: string, zoomFactor: number) => {
+    try { bvm.setZoomFactor(viewId, zoomFactor); return { ok: true }; }
+    catch (err) { return { ok: false, error: String(err) }; }
+  });
+
+  ipcMain.handle('wv-set-viewport', (_e: IpcMainInvokeEvent, viewId: string, viewport: { name: string; width?: number; height?: number; mobile?: boolean; deviceScaleFactor?: number; userAgent?: string }) => {
+    try { bvm.setViewport(viewId, viewport); return { ok: true }; }
+    catch (err) { return { ok: false, error: String(err) }; }
+  });
+
   ipcMain.handle('wv-dev-tools', (_e: IpcMainInvokeEvent, viewId: string) => {
     bvm.devTools(viewId);
     return { ok: true };
@@ -208,6 +223,36 @@ export async function createApp(electron: typeof import('electron')) {
       const result = await bvm.execJs(viewId, code);
       return { ok: true, result };
     } catch (err) { return { ok: false, error: String(err) }; }
+  });
+
+  ipcMain.handle('wv-get-console', (_e: IpcMainInvokeEvent, viewId: string, limit?: number) => {
+    try { return { ok: true, logs: bvm.getConsoleLogs(viewId, limit) }; }
+    catch (err) { return { ok: false, error: String(err), logs: [] }; }
+  });
+
+  ipcMain.handle('wv-get-network', (_e: IpcMainInvokeEvent, viewId: string, limit?: number) => {
+    try { return { ok: true, events: bvm.getNetworkEvents(viewId, limit) }; }
+    catch (err) { return { ok: false, error: String(err), events: [] }; }
+  });
+
+  ipcMain.handle('wv-get-security', (_e: IpcMainInvokeEvent, viewId: string, limit?: number) => {
+    try { return { ok: true, events: bvm.getSecurityEvents(viewId, limit) }; }
+    catch (err) { return { ok: false, error: String(err), events: [] }; }
+  });
+
+  ipcMain.handle('wv-find-in-page', (_e: IpcMainInvokeEvent, viewId: string, text: string, options?: { forward?: boolean; findNext?: boolean; matchCase?: boolean }) => {
+    try { return { ok: true, requestId: bvm.findInPage(viewId, text, options || {}) }; }
+    catch (err) { return { ok: false, error: String(err), requestId: 0 }; }
+  });
+
+  ipcMain.handle('wv-stop-find', (_e: IpcMainInvokeEvent, viewId: string, action?: 'clearSelection' | 'keepSelection' | 'activateSelection') => {
+    try { bvm.stopFindInPage(viewId, action || 'clearSelection'); return { ok: true }; }
+    catch (err) { return { ok: false, error: String(err) }; }
+  });
+
+  ipcMain.handle('wv-resolve-permission', (_e: IpcMainInvokeEvent, eventId: string, allowed: boolean) => {
+    try { return { ok: bvm.resolvePermission(eventId, allowed) }; }
+    catch (err) { return { ok: false, error: String(err) }; }
   });
 
   // Cache context-capture script (loaded once from file)
@@ -265,6 +310,11 @@ export async function createApp(electron: typeof import('electron')) {
 
   app.on('window-all-closed', () => { app.quit(); });
   app.on('before-quit', async () => { globalThis._quitting = true; await shutdown(); });
+  app.on('certificate-error', (event: any, webContents: any, url: string, error: string, _certificate: unknown, callback: (allowed: boolean) => void) => {
+    if (!bvm.handleCertificateError(webContents, url, error)) return;
+    event.preventDefault();
+    callback(false);
+  });
   app.on('activate', () => {
     if (!WindowManager.getInstance().getMainWindow()) WindowManager.getInstance().createWindow();
   });

@@ -89,8 +89,11 @@ const NAME_LANG_MAP: Record<string, string> = {
 };
 
 const IMG_EXTS = new Set(['png','jpg','jpeg','gif','webp','svg','bmp','ico','tiff','tif','avif','heic','heif','jfif','pjpeg','pjp','apng','jxl','jpe']);
+const AUDIO_EXTS = new Set(['mp3','wav','ogg','oga','m4a','aac','flac','opus']);
+const VIDEO_EXTS = new Set(['mp4','webm','ogv','mov','m4v']);
 const OFFICE_EXTS = new Set(['docx','xlsx','pptx','xls','xlsm','ppt','pptm','odt','ods','odp']);
-type FileType = 'code'|'image'|'pdf'|'markdown'|'binary'|'browser'|'docx'|'xlsx'|'pptx';
+const TABLE_EXTS = new Set(['csv','tsv']);
+type FileType = 'code'|'image'|'audio'|'video'|'pdf'|'markdown'|'csv'|'binary'|'browser'|'docx'|'xlsx'|'pptx';
 interface AgentBrowserEvent {
   sessionId: string;
   viewId: string;
@@ -102,6 +105,103 @@ interface AgentBrowserEvent {
   resultPreview?: string;
   error?: string;
   timestamp: number;
+}
+interface BrowserStateEvent {
+  viewId: string;
+  type: string;
+  url?: string;
+  title?: string;
+  favicons?: string[];
+  favicon?: string;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
+  isLoading?: boolean;
+  zoomFactor?: number;
+  consoleLog?: BrowserConsoleLog;
+}
+
+interface BrowserDownloadEvent {
+  viewId: string;
+  id: string;
+  state: 'started' | 'progress' | 'completed' | 'cancelled' | 'interrupted';
+  filename: string;
+  url: string;
+  savePath: string;
+  relativePath: string;
+  receivedBytes: number;
+  totalBytes: number;
+  timestamp: number;
+}
+
+interface BrowserConsoleLog {
+  level: string;
+  message: string;
+  line?: number;
+  sourceId?: string;
+  timestamp: number;
+}
+
+interface BrowserNetworkEvent {
+  viewId: string;
+  id: string;
+  state: 'started' | 'completed' | 'failed';
+  url: string;
+  method: string;
+  resourceType: string;
+  statusCode?: number;
+  fromCache?: boolean;
+  error?: string;
+  timestamp: number;
+  durationMs?: number;
+}
+
+interface BrowserSecurityEvent {
+  viewId: string;
+  id: string;
+  kind: 'popup' | 'external' | 'permission' | 'certificate';
+  decision: 'prompt' | 'allowed' | 'blocked' | 'redirected';
+  message: string;
+  url?: string;
+  permission?: string;
+  timestamp: number;
+}
+
+interface BrowserFindResult {
+  viewId: string;
+  requestId: number;
+  activeMatchOrdinal: number;
+  matches: number;
+  finalUpdate: boolean;
+}
+
+interface BrowserViewportPreset {
+  name: string;
+  label: string;
+  width?: number;
+  height?: number;
+  mobile?: boolean;
+  deviceScaleFactor?: number;
+  userAgent?: string;
+}
+
+type BrowserPanelMode = 'network' | 'console' | 'security';
+
+interface PersistedBrowserTab {
+  url: string;
+  title?: string;
+  favicon?: string;
+  zoomFactor?: number;
+  recentUrls?: string[];
+  viewportName?: string;
+}
+
+interface PersistedBrowserState {
+  version: 1;
+  sessionId: string;
+  workspacePath: string;
+  activeIndex: number;
+  tabs: PersistedBrowserTab[];
+  savedAt: number;
 }
 
 /**
@@ -233,23 +333,52 @@ interface OpenTab {
   path:string; name:string; fileType:FileType; isDirty:boolean; language:string;
   model:any; viewState:any; browserUrl?:string; wvId?:string;
   browserLoading?:boolean; browserTitle?:string; browserFavicon?:string;
+  browserCanGoBack?:boolean; browserCanGoForward?:boolean;
+  browserZoomFactor?:number; browserRecentUrls?:string[];
+  downloads?:BrowserDownloadEvent[];
+  networkEvents?:BrowserNetworkEvent[];
+  consoleLogs?:BrowserConsoleLog[];
+  securityEvents?:BrowserSecurityEvent[];
+  browserPanel?:BrowserPanelMode|null;
+  findVisible?:boolean; findQuery?:string; findMatches?:number; findActiveMatch?:number; findMatchCase?:boolean;
+  browserViewport?:BrowserViewportPreset;
   agentTrace?: AgentBrowserEvent[];
+  tableRows?:string[][];
   originalContent?:string; // snapshot at open — for diff detection
 }
 
 export class WorkspaceTabGroup {
+  private static _groups = new Set<WorkspaceTabGroup>();
+  private static _languageFeaturesRegistered = false;
   readonly element: HTMLElement;
   private _tabBar: HTMLElement; private _plusBtn: HTMLElement; private _contentArea: HTMLElement;
   private _tabs: OpenTab[] = []; private _activePath: string|null = null;
   private _editor: any = null; private _editorHost: HTMLElement | null = null; private _monacoReady = false; private _monacoInit: Promise<void>|null = null;
-  private _sessionId = ''; private _ro: ResizeObserver|null = null;
+  private _sessionId = ''; private _workspacePath = ''; private _ro: ResizeObserver|null = null;
   private _wvStateCleanup: (()=>void)|null = null;
+  private _wvDownloadCleanup: (()=>void)|null = null;
+  private _wvNetworkCleanup: (()=>void)|null = null;
+  private _wvSecurityCleanup: (()=>void)|null = null;
+  private _wvFindCleanup: (()=>void)|null = null;
   private _globalKeyHandler: ((e: KeyboardEvent) => void) | null = null;
+  private _findInputTimer = 0;
+  private _browserStateRestored = false;
+  private _browserStateSaveTimer = 0;
+  private _restoringBrowserState = false;
+  private _workspacePathReady = false;
+  private _persistenceScope = 'primary';
+  private _inlineCompletionRequestId = 0;
+  private _inlineCompletionState: 'idle' | 'waiting' | 'thinking' | 'ready' | 'empty' | 'error' = 'idle';
+  private _inlineCompletionMessage = 'AI Ready';
+  private _diagnosticsTimer = 0;
+  private _languageStatusState: 'idle' | 'working' | 'ready' | 'error' = 'idle';
+  private _languageStatusMessage = 'LS Ready';
   onOpenFile: ((path:string, name:string)=>void)|null = null;
   /** Called (throttled) whenever editor state changes — cursor, selection, tab switch. */
   onEditorContextChange: (()=>void)|null = null;
 
   constructor() {
+    WorkspaceTabGroup._groups.add(this);
     this.element = document.createElement('div'); this.element.className = 'ws-tab-group';
     this._tabBar = document.createElement('div'); this._tabBar.className = 'ws-tab-bar';
     this.element.appendChild(this._tabBar);
@@ -273,6 +402,13 @@ export class WorkspaceTabGroup {
         e.preventDefault();
         void this.saveActiveFile();
       }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        if (!this.element.isConnected || !this.element.offsetParent) return;
+        const tab = this._tabs.find(t => t.path === this._activePath);
+        if (tab?.fileType !== 'browser') return;
+        e.preventDefault();
+        this._showFindBar(tab);
+      }
     };
     document.addEventListener('keydown', this._globalKeyHandler);
     // Sync WebContentsView bounds on window resize
@@ -281,22 +417,23 @@ export class WorkspaceTabGroup {
     // Listen for WebContentsView state changes (loading, title, favicon)
     const api = this._api();
     if (api?.onWvStateChange) {
-      this._wvStateCleanup = api.onWvStateChange((data: { viewId: string; type: string; url?: string; title?: string; favicons?: string[]; favicon?: string }) => {
+      this._wvStateCleanup = api.onWvStateChange((data: BrowserStateEvent) => {
         const tab = this._tabs.find(t => t.wvId === data.viewId);
         if (!tab) return;
+        this._applyBrowserState(tab, data);
         switch (data.type) {
           case 'loading-start':
             tab.browserLoading = true;
-            this._updateBrowserLoading(tab);
+            this._updateBrowserChrome(tab);
             break;
           case 'loading-stop':
           case 'load-finish':
             tab.browserLoading = false;
-            this._updateBrowserLoading(tab);
+            this._updateBrowserChrome(tab);
             break;
           case 'load-error':
             tab.browserLoading = false;
-            this._updateBrowserLoading(tab);
+            this._updateBrowserChrome(tab);
             break;
           case 'title':
             if (data.title && data.title !== 'about:blank') {
@@ -304,20 +441,148 @@ export class WorkspaceTabGroup {
               tab.name = data.title.substring(0, 40);
               const nm = this._tabBar.querySelector(`[data-tab-path="${_escAttr(tab.path)}"] .ws-tab-name`) as HTMLElement;
               if (nm) nm.textContent = tab.name;
+              this._scheduleBrowserStateSave();
             }
             break;
           case 'favicon':
             if (data.favicons?.length) {
               tab.browserFavicon = data.favicons[0];
               this._updateTabFavicon(tab);
+              this._scheduleBrowserStateSave();
+            }
+            break;
+          case 'zoom':
+            if (typeof data.zoomFactor === 'number') {
+              tab.browserZoomFactor = data.zoomFactor;
+              this._scheduleBrowserStateSave();
+            }
+            break;
+          case 'console-message':
+            if (data.consoleLog) {
+              tab.consoleLogs = [...(tab.consoleLogs || []), data.consoleLog].slice(-200);
+              if (tab.path === this._activePath) this._renderBrowserPanel(tab);
             }
             break;
         }
       });
     }
+
+    if (api?.onWvDownload) {
+      this._wvDownloadCleanup = api.onWvDownload((event: BrowserDownloadEvent) => this._handleBrowserDownload(event));
+    }
+    if (api?.onWvNetwork) {
+      this._wvNetworkCleanup = api.onWvNetwork((event: BrowserNetworkEvent) => this._handleBrowserNetwork(event));
+    }
+    if (api?.onWvSecurity) {
+      this._wvSecurityCleanup = api.onWvSecurity((event: BrowserSecurityEvent) => this._handleBrowserSecurity(event));
+    }
+    if (api?.onWvFindResult) {
+      this._wvFindCleanup = api.onWvFindResult((event: BrowserFindResult) => this._handleBrowserFindResult(event));
+    }
   }
 
-  setSessionId(id: string): void { this._sessionId = id; }
+  setSessionId(id: string): void {
+    if (id !== this._sessionId) this._browserStateRestored = false;
+    this._sessionId = id;
+    this._restoreBrowserStateIfReady();
+  }
+
+  setWorkspacePath(path: string): void {
+    if (path !== this._workspacePath) this._browserStateRestored = false;
+    this._workspacePathReady = true;
+    this._workspacePath = path;
+    for (const tab of this._tabs) {
+      if (tab.fileType === 'browser' && tab.wvId) {
+        this._api()?.wvSetMetadata?.(tab.wvId, { sessionId: this._sessionId, workspacePath: this._workspacePath });
+      }
+    }
+    this._restoreBrowserStateIfReady();
+  }
+
+  setPersistenceScope(scope: string): void {
+    const next = scope || 'primary';
+    if (next === this._persistenceScope) return;
+    this._saveBrowserStateNow();
+    this._persistenceScope = next;
+    this._browserStateRestored = false;
+    this._restoreBrowserStateIfReady();
+  }
+
+  private _restoreBrowserStateIfReady(): void {
+    if (this._browserStateRestored || !this._sessionId || !this._workspacePathReady || this._tabs.length > 0) return;
+    this._browserStateRestored = true;
+    const key = this._browserStorageKey();
+    if (!key) return;
+    let state: PersistedBrowserState | null = null;
+    try {
+      const raw = localStorage.getItem(key);
+      state = raw ? JSON.parse(raw) as PersistedBrowserState : null;
+    } catch {
+      state = null;
+    }
+    if (!state || state.version !== 1 || !Array.isArray(state.tabs) || state.tabs.length === 0) return;
+
+    this._restoringBrowserState = true;
+    void (async () => {
+      try {
+        const tabs = state!.tabs.slice(0, 8).filter(t => typeof t.url === 'string' && t.url);
+        for (const tab of tabs) {
+          await this.newBrowserTab(tab.url, tab);
+        }
+        const browserTabs = this._tabs.filter(t => t.fileType === 'browser');
+        const active = browserTabs[Math.max(0, Math.min(browserTabs.length - 1, state!.activeIndex || 0))] || browserTabs[0];
+        if (active) this._activate(active);
+      } finally {
+        this._restoringBrowserState = false;
+        this._scheduleBrowserStateSave();
+      }
+    })();
+  }
+
+  private _browserStorageKey(): string {
+    if (!this._sessionId) return '';
+    return `anoclaw:workspace-browser:v1:${this._sessionId}:${_hashString(this._workspacePath || 'default')}:${this._persistenceScope}`;
+  }
+
+  private _scheduleBrowserStateSave(): void {
+    if (this._restoringBrowserState) return;
+    if (this._browserStateSaveTimer) window.clearTimeout(this._browserStateSaveTimer);
+    this._browserStateSaveTimer = window.setTimeout(() => {
+      this._browserStateSaveTimer = 0;
+      this._saveBrowserStateNow();
+    }, 250);
+  }
+
+  private _saveBrowserStateNow(): void {
+    if (!this._sessionId || !this._workspacePathReady) return;
+    const key = this._browserStorageKey();
+    if (!key) return;
+    const browserTabs = this._tabs.filter(t => t.fileType === 'browser');
+    try {
+      if (browserTabs.length === 0) {
+        localStorage.removeItem(key);
+        return;
+      }
+      const state: PersistedBrowserState = {
+        version: 1,
+        sessionId: this._sessionId,
+        workspacePath: this._workspacePath,
+        activeIndex: Math.max(0, browserTabs.findIndex(t => t.path === this._activePath)),
+        savedAt: Date.now(),
+        tabs: browserTabs.map(tab => ({
+          url: tab.browserUrl || 'about:blank',
+          title: tab.browserTitle || tab.name,
+          favicon: tab.browserFavicon,
+          zoomFactor: tab.browserZoomFactor || 1,
+          recentUrls: (tab.browserRecentUrls || []).slice(-20),
+          viewportName: tab.browserViewport?.name || 'desktop',
+        })),
+      };
+      localStorage.setItem(key, JSON.stringify(state));
+    } catch {
+      console.debug('WorkspaceTabGroup: browser state save failed');
+    }
+  }
 
   private _api(): any { return (window as any).electronAPI; }
 
@@ -355,18 +620,33 @@ export class WorkspaceTabGroup {
   }
 
   /** Create a new browser tab by spawning a new WebContentsView. */
-  async newBrowserTab(initialUrl?: string): Promise<void> {
+  async newBrowserTab(initialUrl?: string, restore?: PersistedBrowserTab): Promise<void> {
     const url = initialUrl || 'about:blank';
     const api = this._api();
-    const result = await api?.wvCreate?.(url);
+    const result = await api?.wvCreate?.(url, { sessionId: this._sessionId, workspacePath: this._workspacePath });
 
     const tabId = 'browser:' + Date.now();
     const tab: OpenTab = {
-      path: tabId, name: url === 'about:blank' ? 'New Tab' : url.replace(/^https?:\/\//,'').substring(0, 30),
+      path: tabId, name: restore?.title || (url === 'about:blank' ? 'New Tab' : url.replace(/^https?:\/\//,'').substring(0, 30)),
       fileType: 'browser', isDirty: false, language: '', model: null, viewState: null,
       browserUrl: url, wvId: result?.viewId || undefined, agentTrace: [],
+      browserTitle: restore?.title, browserFavicon: restore?.favicon,
+      browserZoomFactor: restore?.zoomFactor || 1,
+      browserRecentUrls: restore?.recentUrls?.slice(-20) || (url !== 'about:blank' ? [url] : []),
+      downloads: [], networkEvents: [], consoleLogs: [], securityEvents: [], browserPanel: null,
+      findVisible: false, findQuery: '', findMatches: 0, findActiveMatch: 0, findMatchCase: false,
+      browserViewport: _viewportByName(restore?.viewportName),
     };
     this._tabs.push(tab); this._renderTabBtn(tab); this._activate(tab);
+    if (tab.browserFavicon) this._updateTabFavicon(tab);
+    if (tab.wvId && tab.browserZoomFactor && tab.browserZoomFactor !== 1) {
+      void this._api()?.wvSetZoom?.(tab.wvId, tab.browserZoomFactor);
+    }
+    const viewport = tab.browserViewport;
+    if (tab.wvId && viewport && viewport.name !== 'desktop') {
+      void this._api()?.wvSetViewport?.(tab.wvId, _viewportPayload(viewport));
+    }
+    if (!this._restoringBrowserState) this._scheduleBrowserStateSave();
   }
 
   /** Public entry point for agent-created browser tabs (view already created via IPC). */
@@ -381,9 +661,14 @@ export class WorkspaceTabGroup {
       path: 'browser:' + Date.now(),
       name: url === 'about:blank' ? 'New Tab' : url.replace(/^https?:\/\//,'').substring(0, 30),
       fileType: 'browser', isDirty: false, language: '', model: null, viewState: null,
-      browserUrl: url, wvId: viewId, agentTrace: [],
+      browserUrl: url, wvId: viewId, agentTrace: [], browserZoomFactor: 1, browserRecentUrls: url !== 'about:blank' ? [url] : [], downloads: [],
+      networkEvents: [], consoleLogs: [], securityEvents: [], browserPanel: null,
+      findVisible: false, findQuery: '', findMatches: 0, findActiveMatch: 0, findMatchCase: false,
+      browserViewport: BROWSER_VIEWPORT_PRESETS[0],
     };
     this._tabs.push(tab); this._renderTabBtn(tab); this._activate(tab);
+    this._api()?.wvSetMetadata?.(viewId, { sessionId: this._sessionId, workspacePath: this._workspacePath });
+    this._scheduleBrowserStateSave();
   }
 
   handleAgentBrowserEvent(event: AgentBrowserEvent): void {
@@ -394,23 +679,33 @@ export class WorkspaceTabGroup {
         path: 'browser:' + Date.now(),
         name: url === 'about:blank' ? 'Agent Browser' : url.replace(/^https?:\/\//,'').substring(0, 30),
         fileType: 'browser', isDirty: false, language: '', model: null, viewState: null,
-        browserUrl: url, wvId: event.viewId, agentTrace: [],
+        browserUrl: url, wvId: event.viewId, agentTrace: [], browserZoomFactor: 1, browserRecentUrls: url !== 'about:blank' ? [url] : [], downloads: [],
+        networkEvents: [], consoleLogs: [], securityEvents: [], browserPanel: null,
+        findVisible: false, findQuery: '', findMatches: 0, findActiveMatch: 0, findMatchCase: false,
+        browserViewport: BROWSER_VIEWPORT_PRESETS[0],
       };
       this._tabs.push(tab);
       this._renderTabBtn(tab);
+      this._api()?.wvSetMetadata?.(event.viewId, { sessionId: this._sessionId, workspacePath: this._workspacePath });
     }
 
     if (event.url) this._updateBrowserTabUrl(tab, event.url);
     tab.agentTrace = [...(tab.agentTrace || []), event].slice(-12);
     this._activate(tab);
     this._renderAgentTrace(tab);
+    this._scheduleBrowserStateSave();
   }
 
   private _updateBrowserTabUrl(tab: OpenTab, url: string): void {
     tab.browserUrl = url;
+    if (url && url !== 'about:blank') {
+      const recent = (tab.browserRecentUrls || []).filter(item => item !== url);
+      tab.browserRecentUrls = [...recent, url].slice(-20);
+    }
     if (!tab.browserTitle) tab.name = url === 'about:blank' ? 'Agent Browser' : url.replace(/^https?:\/\//,'').substring(0, 30);
     const btn = this._tabBar.querySelector(`[data-tab-path="${_escAttr(tab.path)}"] .ws-tab-name`) as HTMLElement | null;
     if (btn) btn.textContent = tab.name;
+    this._scheduleBrowserStateSave();
   }
 
   // ── Input dialog helper (for New File) ──
@@ -473,6 +768,18 @@ export class WorkspaceTabGroup {
       return;
     }
 
+    // ── Audio / video ──
+    if (AUDIO_EXTS.has(ext)) {
+      const tab: OpenTab = { path, name, fileType:'audio', isDirty:false, language:'', model:null, viewState:null };
+      this._tabs.push(tab); this._renderTabBtn(tab); this._activate(tab);
+      return;
+    }
+    if (VIDEO_EXTS.has(ext)) {
+      const tab: OpenTab = { path, name, fileType:'video', isDirty:false, language:'', model:null, viewState:null };
+      this._tabs.push(tab); this._renderTabBtn(tab); this._activate(tab);
+      return;
+    }
+
     // ── PDF ──
     if (ext === 'pdf') {
       const tab: OpenTab = { path, name, fileType:'pdf', isDirty:false, language:'', model:null, viewState:null };
@@ -499,6 +806,16 @@ export class WorkspaceTabGroup {
 
       if (_isBinaryContent(content)) {
         const tab: OpenTab = { path, name, fileType:'binary', isDirty:false, language:'', model:null, viewState:null };
+        this._tabs.push(tab); this._renderTabBtn(tab); this._activate(tab);
+        return;
+      }
+
+      if (TABLE_EXTS.has(ext)) {
+        const tab: OpenTab = {
+          path, name, fileType:'csv', isDirty:false, language:'csv', model:null, viewState:null,
+          tableRows: _parseDelimitedRows(content, ext === 'tsv' ? '\t' : ','),
+          originalContent: content,
+        };
         this._tabs.push(tab); this._renderTabBtn(tab); this._activate(tab);
         return;
       }
@@ -540,13 +857,17 @@ export class WorkspaceTabGroup {
     switch (tab.fileType) {
       case 'code': this._showCodeEditor(tab); break;
       case 'image': this._showImage(tab); break;
+      case 'audio': this._showMedia(tab, 'audio'); break;
+      case 'video': this._showMedia(tab, 'video'); break;
       case 'pdf': this._showPdf(tab); break;
       case 'markdown': this._showMarkdown(tab); break;
+      case 'csv': this._showTablePreview(tab.tableRows || [], tab.name); break;
       case 'browser': this._showBrowser(tab); break;
       case 'docx': case 'xlsx': case 'pptx': this._showOffice(tab); break;
       default: this._showBinaryNotice(tab);
     }
     this._notifyContextChange();
+    if (tab.fileType === 'browser') this._scheduleBrowserStateSave();
   }
 
   closeTab(path: string): void {
@@ -592,6 +913,7 @@ export class WorkspaceTabGroup {
       if (next) { this._activate(next); }
       else { this._activePath = null; if (this._editor) { this._editor.dispose(); this._editor = null; } this._editorHost = null; this._showEmpty(); }
     }
+    if (tab.fileType === 'browser') this._scheduleBrowserStateSave();
   }
 
   // ── Content renderers ──
@@ -612,10 +934,18 @@ export class WorkspaceTabGroup {
         theme:'anoclaw-dark', fontSize:13, fontFamily:"'Cascadia Code','Fira Code',Consolas,'SF Mono',Monaco,monospace",
         minimap:{enabled:true,scale:1}, automaticLayout:false, scrollBeyondLastLine:false, wordWrap:'off',
         lineNumbers:'on', renderWhitespace:'selection', tabSize:2, bracketPairColorization:{enabled:true}, folding:true, glyphMargin:true,
+        quickSuggestions:{ other:true, comments:false, strings:false },
+        suggestOnTriggerCharacters:true,
+        acceptSuggestionOnEnter:'on',
+        tabCompletion:'on',
+        wordBasedSuggestions:'allDocuments',
+        parameterHints:{ enabled:true },
+        inlineSuggest:{ enabled:true, showToolbar:'onHover', mode:'prefix' },
       });
       this._editor.onDidChangeModelContent(() => {
         const active = this._tabs.find(t => t.path===this._activePath);
         if (active && !active.isDirty) { active.isDirty = true; this._updateDirty(active); }
+        this._scheduleDiagnostics(this._editor.getModel());
       });
       // Update status bar on cursor change
       this._editor.onDidChangeCursorPosition((e: { position: { lineNumber: number; column: number } }) => {
@@ -632,10 +962,12 @@ export class WorkspaceTabGroup {
       this._registerAgentActions();
       // Register inline completion provider (once)
       this._registerInlineCompletion();
+      this._registerLanguageFeatures();
     }
     this._editor.setModel(tab.model);
     if (tab.viewState) this._editor.restoreViewState(tab.viewState);
     this._editor.focus();
+    this._scheduleDiagnostics(tab.model, 80);
 
     // Add editor status bar
     const statusBar = document.createElement('div');
@@ -672,11 +1004,107 @@ export class WorkspaceTabGroup {
     encEl.style.cssText = 'opacity:0.5;';
     statusBar.appendChild(encEl);
 
+    const lsEl = document.createElement('button');
+    lsEl.type = 'button';
+    lsEl.className = `ws-editor-ls-status ${this._languageStatusState}`;
+    lsEl.setAttribute('data-role', 'language-service-status');
+    lsEl.title = 'Language service: completions, hover, diagnostics, definitions, and imports.';
+    lsEl.textContent = this._languageStatusMessage;
+    lsEl.addEventListener('click', () => { void this._goToDefinitionFromEditor(); });
+    statusBar.appendChild(lsEl);
+
+    const aiEl = document.createElement('button');
+    aiEl.type = 'button';
+    aiEl.className = `ws-editor-ai-status ${this._inlineCompletionState}`;
+    aiEl.setAttribute('data-role', 'inline-completion-status');
+    aiEl.title = 'AI completion: wait briefly after typing, or click / use Alt+\\ to complete at cursor.';
+    aiEl.textContent = this._inlineCompletionMessage;
+    aiEl.addEventListener('click', () => { void this._triggerInlineCompletion(true); });
+    statusBar.appendChild(aiEl);
+
     this._contentArea.appendChild(statusBar);
+    this._renderLanguageStatus();
+    this._renderInlineCompletionStatus();
   }
 
-  private _showImage(tab: OpenTab): void { this._destroyContent(); this._contentArea.style.cssText = 'display:flex;align-items:center;justify-content:center;background:#0a0a0a;'; const img = document.createElement('img'); img.className = 'ws-preview-image'; img.src = `/api/v1/workspace/read?path=${encodeURIComponent(tab.path)}&sessionId=${encodeURIComponent(this._sessionId)}&raw=1`; img.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;'; this._contentArea.appendChild(img); }
-  private _showPdf(tab: OpenTab): void { this._destroyContent(); const iframe = document.createElement('iframe'); iframe.src = `/api/v1/workspace/read?path=${encodeURIComponent(tab.path)}&sessionId=${encodeURIComponent(this._sessionId)}&raw=1`; iframe.style.cssText = 'width:100%;height:100%;border:none;'; this._contentArea.appendChild(iframe); }
+  private _rawFileUrl(filePath: string): string {
+    return `/api/v1/workspace/read?path=${encodeURIComponent(filePath)}&sessionId=${encodeURIComponent(this._sessionId)}&raw=1`;
+  }
+
+  private _showImage(tab: OpenTab): void {
+    this._destroyContent();
+    this._contentArea.classList.add('ws-preview-surface');
+    this._contentArea.style.cssText = 'display:flex;align-items:center;justify-content:center;background:#0a0a0a;';
+    const img = document.createElement('img');
+    img.className = 'ws-preview-image';
+    img.src = this._rawFileUrl(tab.path);
+    img.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;';
+    this._contentArea.appendChild(img);
+  }
+
+  private _showMedia(tab: OpenTab, kind: 'audio' | 'video'): void {
+    this._destroyContent();
+    this._contentArea.classList.add('ws-preview-surface');
+    this._contentArea.style.cssText = 'display:flex;align-items:center;justify-content:center;background:#0a0a0a;padding:24px;box-sizing:border-box;';
+    const media = document.createElement(kind);
+    media.controls = true;
+    media.preload = 'metadata';
+    media.src = this._rawFileUrl(tab.path);
+    media.className = `ws-preview-${kind}`;
+    if (kind === 'video') {
+      media.style.cssText = 'max-width:100%;max-height:100%;background:#000;border-radius:6px;';
+    } else {
+      media.style.cssText = 'width:min(620px,100%);';
+    }
+    this._contentArea.appendChild(media);
+  }
+
+  private _showPdf(tab: OpenTab): void {
+    this._destroyContent();
+    const iframe = document.createElement('iframe');
+    iframe.src = this._rawFileUrl(tab.path);
+    iframe.style.cssText = 'width:100%;height:100%;border:none;';
+    this._contentArea.appendChild(iframe);
+  }
+
+  private _showTablePreview(rows: string[][], title: string): void {
+    this._destroyContent();
+    this._contentArea.style.cssText = 'overflow:auto;background:var(--color-bg,#07080a);';
+    const wrapper = document.createElement('div');
+    wrapper.className = 'ws-preview-table-wrap';
+    if (!rows.length) {
+      wrapper.innerHTML = `<div class="ws-preview-empty">${_escHtml(title)}<span>No rows found.</span></div>`;
+      this._contentArea.appendChild(wrapper);
+      return;
+    }
+
+    const table = document.createElement('table');
+    table.className = 'ws-preview-table';
+    const maxCols = Math.min(50, Math.max(...rows.map(row => row.length)));
+    const head = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    for (let i = 0; i < maxCols; i++) {
+      const th = document.createElement('th');
+      th.textContent = _columnName(i);
+      headRow.appendChild(th);
+    }
+    head.appendChild(headRow);
+    table.appendChild(head);
+
+    const body = document.createElement('tbody');
+    for (const row of rows.slice(0, 200)) {
+      const tr = document.createElement('tr');
+      for (let i = 0; i < maxCols; i++) {
+        const td = document.createElement('td');
+        td.textContent = row[i] || '';
+        tr.appendChild(td);
+      }
+      body.appendChild(tr);
+    }
+    table.appendChild(body);
+    wrapper.appendChild(table);
+    this._contentArea.appendChild(wrapper);
+  }
 
   private async _showMarkdown(tab: OpenTab): Promise<void> {
     this._destroyContent();
@@ -705,10 +1133,15 @@ export class WorkspaceTabGroup {
     // Left group: Back / Forward / Reload
     const leftGroup = document.createElement('div');
     leftGroup.className = 'ws-browser-group';
-    leftGroup.innerHTML = `
-      <button class="ws-browser-nav-btn" data-action="back" title="Go Back" disabled>◂</button>
-      <button class="ws-browser-nav-btn" data-action="forward" title="Go Forward" disabled>▸</button>
-      <button class="ws-browser-nav-btn" data-action="reload" title="Reload">↻</button>`;
+    const backBtn = this._browserBtn('Go Back', _SVG_BROWSER_BACK);
+    backBtn.setAttribute('data-action', 'back');
+    (backBtn as HTMLButtonElement).disabled = !tab.browserCanGoBack;
+    const forwardBtn = this._browserBtn('Go Forward', _SVG_BROWSER_FORWARD);
+    forwardBtn.setAttribute('data-action', 'forward');
+    (forwardBtn as HTMLButtonElement).disabled = !tab.browserCanGoForward;
+    const reloadBtn = this._browserBtn('Reload', _SVG_BROWSER_RELOAD);
+    reloadBtn.setAttribute('data-action', 'reload');
+    leftGroup.append(backBtn, forwardBtn, reloadBtn);
     bar.appendChild(leftGroup);
 
     // Address bar with SSL icon + loading spinner
@@ -717,8 +1150,8 @@ export class WorkspaceTabGroup {
     // SSL indicator
     const sslIcon = document.createElement('span');
     sslIcon.className = 'ws-browser-ssl-icon';
-    sslIcon.style.cssText = 'position:absolute;left:8px;font-size:12px;pointer-events:none;z-index:1;';
-    sslIcon.textContent = tab.browserUrl?.startsWith('https://') ? '🔒' : '';
+    sslIcon.style.cssText = 'position:absolute;left:8px;width:13px;height:13px;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:1;color:var(--color-text-tertiary,#6a6b6c);';
+    sslIcon.innerHTML = tab.browserUrl?.startsWith('https://') ? _SVG_BROWSER_LOCK : '';
     urlWrapper.appendChild(sslIcon);
     // URL input
     const input = document.createElement('input');
@@ -734,24 +1167,34 @@ export class WorkspaceTabGroup {
     const rightGroup = document.createElement('div');
     rightGroup.className = 'ws-browser-group';
 
+    const viewportBtn = this._browserBtn(tab.browserViewport?.label || 'Viewport Presets', _SVG_BROWSER_DEVICE);
+    viewportBtn.classList.add('ws-browser-viewport-btn');
+    viewportBtn.addEventListener('click', (e) => { e.stopPropagation(); this._showViewportMenu(viewportBtn, tab); });
+    rightGroup.appendChild(viewportBtn);
+
+    const panelBtn = this._browserBtn('Network / Console', _SVG_BROWSER_PANEL);
+    panelBtn.classList.toggle('active', Boolean(tab.browserPanel));
+    panelBtn.addEventListener('click', () => { void this._toggleBrowserPanel(tab, tab.browserPanel || 'network'); });
+    rightGroup.appendChild(panelBtn);
+
     // Share with Agent
-    const shareBtn = this._browserBtn('Share with Agent', '↗');
-    shareBtn.addEventListener('click', () => this._shareUrlWithAgent(tab));
+    const shareBtn = this._browserBtn('Share with Agent', _SVG_BROWSER_SHARE);
+    shareBtn.addEventListener('click', () => { void this._sendPageContextToAgent(tab); });
     rightGroup.appendChild(shareBtn);
 
     // Add element to chat
-    const addDropdown = this._browserBtn('Add to Chat', '+');
+    const addDropdown = this._browserBtn('Add to Chat', _SVG_BROWSER_PLUS);
     addDropdown.style.position = 'relative';
     addDropdown.addEventListener('click', (e) => { e.stopPropagation(); this._showAddToChatMenu(addDropdown, tab); });
     rightGroup.appendChild(addDropdown);
 
     // DevTools
-    const devBtn = this._browserBtn('Developer Tools', '◇');
+    const devBtn = this._browserBtn('Developer Tools', _SVG_BROWSER_DEVTOOLS);
     devBtn.addEventListener('click', () => this._api()?.wvDevTools?.(tab.wvId));
     rightGroup.appendChild(devBtn);
 
     // More menu
-    const moreBtn = this._browserBtn('More', '…');
+    const moreBtn = this._browserBtn('More', _SVG_BROWSER_MORE);
     moreBtn.addEventListener('click', (e) => { e.stopPropagation(); this._showBrowserMoreMenu(moreBtn, tab); });
     rightGroup.appendChild(moreBtn);
 
@@ -763,9 +1206,24 @@ export class WorkspaceTabGroup {
     progressBar.className = 'ws-browser-progress';
     progressBar.style.cssText = 'height:2px;flex-shrink:0;background:transparent;transition:background 0.3s;';
     if (tab.browserLoading) {
-      progressBar.innerHTML = '<div style="height:100%;width:30%;background:var(--color-accent,#fff);animation:ws-progress-indeterminate 1.5s ease-in-out infinite;border-radius:1px;"></div>';
+      progressBar.innerHTML = '<div style="height:100%;width:30%;background:var(--color-primary,#fff);animation:ws-progress-indeterminate 1.5s ease-in-out infinite;border-radius:1px;"></div>';
     }
     this._contentArea.appendChild(progressBar);
+
+    const findBar = document.createElement('div');
+    findBar.className = 'ws-browser-findbar';
+    this._contentArea.appendChild(findBar);
+    this._renderFindBar(tab);
+
+    const downloads = document.createElement('div');
+    downloads.className = 'ws-browser-downloads';
+    this._contentArea.appendChild(downloads);
+    this._renderDownloads(tab);
+
+    const security = document.createElement('div');
+    security.className = 'ws-browser-security';
+    this._contentArea.appendChild(security);
+    this._renderSecurityPrompts(tab);
 
     const trace = document.createElement('div');
     trace.className = 'ws-browser-agent-trace';
@@ -778,26 +1236,30 @@ export class WorkspaceTabGroup {
     placeholder.setAttribute('data-wv-view', tab.wvId || '');
     this._contentArea.appendChild(placeholder);
 
+    const panel = document.createElement('div');
+    panel.className = 'ws-browser-panel';
+    this._contentArea.appendChild(panel);
+    void this._hydrateBrowserPanel(tab);
+    this._renderBrowserPanel(tab);
+
     this._lastWvId = tab.wvId || null;
 
     // Navigation
     const navigate = () => {
-      let url = input.value.trim();
+      let url = this._normalizeBrowserInput(input.value.trim());
       if (!url) return;
-      if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('about:') && !url.startsWith('file://')) {
-        url = 'https://' + url;
-      }
       tab.browserUrl = url;
       tab.name = url.replace(/^https?:\/\//, '').substring(0, 30) || 'Browser';
       const nm = this._tabBar.querySelector(`[data-tab-path="${_escAttr(tab.path)}"] .ws-tab-name`);
       if (nm) nm.textContent = tab.name;
       // Update SSL icon
-      sslIcon.textContent = url.startsWith('https://') ? '🔒' : '';
+      sslIcon.innerHTML = url.startsWith('https://') ? _SVG_BROWSER_LOCK : '';
       if (tab.wvId) this._api()?.wvNavigate?.(tab.wvId, url);
       // Show loading bar
       tab.browserLoading = true;
       input.value = url;
-      progressBar.innerHTML = '<div style="height:100%;width:30%;background:var(--color-accent,#fff);animation:ws-progress-indeterminate 1.5s ease-in-out infinite;border-radius:1px;"></div>';
+      progressBar.innerHTML = '<div style="height:100%;width:30%;background:var(--color-primary,#fff);animation:ws-progress-indeterminate 1.5s ease-in-out infinite;border-radius:1px;"></div>';
+      this._scheduleBrowserStateSave();
       this._syncWvBounds();
     };
 
@@ -808,7 +1270,7 @@ export class WorkspaceTabGroup {
     bar.querySelector('[data-action="forward"]')?.addEventListener('click', () => this._api()?.wvGoForward?.(tab.wvId));
     bar.querySelector('[data-action="reload"]')?.addEventListener('click', () => {
       tab.browserLoading = true;
-      progressBar.innerHTML = '<div style="height:100%;width:30%;background:var(--color-accent,#fff);animation:ws-progress-indeterminate 1.5s ease-in-out infinite;border-radius:1px;"></div>';
+      progressBar.innerHTML = '<div style="height:100%;width:30%;background:var(--color-primary,#fff);animation:ws-progress-indeterminate 1.5s ease-in-out infinite;border-radius:1px;"></div>';
       this._api()?.wvReload?.(tab.wvId);
     });
 
@@ -868,25 +1330,487 @@ export class WorkspaceTabGroup {
     return lines.join('\n');
   }
 
-  private _browserBtn(title: string, label: string): HTMLElement {
+  private _handleBrowserDownload(event: BrowserDownloadEvent): void {
+    const tab = this._tabs.find(t => t.wvId === event.viewId);
+    if (!tab) return;
+    const downloads = [...(tab.downloads || [])];
+    const idx = downloads.findIndex(item => item.id === event.id);
+    if (idx >= 0) downloads[idx] = event;
+    else downloads.push(event);
+    tab.downloads = downloads.slice(-12);
+    if (tab.path === this._activePath) this._renderDownloads(tab);
+    if (event.state === 'completed' && event.relativePath) {
+      window.dispatchEvent(new CustomEvent('ws-workspace-download-complete', { detail: event }));
+    }
+  }
+
+  private _renderDownloads(tab: OpenTab): void {
+    const box = this._contentArea.querySelector('.ws-browser-downloads') as HTMLElement | null;
+    if (!box || tab.fileType !== 'browser') return;
+    const downloads = (tab.downloads || []).slice(-6).reverse();
+    box.innerHTML = '';
+    if (downloads.length === 0) {
+      box.style.display = 'none';
+      return;
+    }
+    box.style.display = 'flex';
+
+    for (const item of downloads) {
+      const row = document.createElement('div');
+      row.className = `ws-browser-download-item ${item.state}`;
+
+      const main = document.createElement('div');
+      main.className = 'ws-browser-download-main';
+
+      const title = document.createElement('div');
+      title.className = 'ws-browser-download-title';
+      title.textContent = item.filename || 'download';
+      title.title = item.savePath || item.url || item.filename;
+      main.appendChild(title);
+
+      const status = document.createElement('div');
+      status.className = 'ws-browser-download-status';
+      const total = item.totalBytes || 0;
+      const pct = total > 0 ? Math.min(100, Math.round((item.receivedBytes / total) * 100)) : 0;
+      const stateText = item.state === 'completed' ? 'Done'
+        : item.state === 'interrupted' ? 'Interrupted'
+        : item.state === 'cancelled' ? 'Cancelled'
+        : total > 0 ? `${pct}%`
+        : 'Downloading';
+      const sizeText = total > 0 ? `${_formatBytes(item.receivedBytes)} / ${_formatBytes(total)}` : _formatBytes(item.receivedBytes);
+      status.textContent = `${stateText}${sizeText ? ` - ${sizeText}` : ''}`;
+      main.appendChild(status);
+
+      const track = document.createElement('div');
+      track.className = 'ws-browser-download-progress';
+      const fill = document.createElement('div');
+      fill.style.width = item.state === 'completed' ? '100%' : `${pct}%`;
+      track.appendChild(fill);
+      main.appendChild(track);
+      row.appendChild(main);
+
+      const actions = document.createElement('div');
+      actions.className = 'ws-browser-download-actions';
+      if (item.state === 'completed') {
+        const openBtn = this._downloadActionButton('Open', () => this._openDownload(item));
+        const locateBtn = this._downloadActionButton('Locate', () => this._locateDownload(item));
+        const agentBtn = this._downloadActionButton('Agent', () => this._sendDownloadToAgent(item));
+        actions.append(openBtn, locateBtn, agentBtn);
+      }
+      row.appendChild(actions);
+      box.appendChild(row);
+    }
+  }
+
+  private _downloadActionButton(label: string, action: () => void): HTMLButtonElement {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ws-browser-download-action';
+    btn.textContent = label;
+    btn.addEventListener('click', (e) => { e.stopPropagation(); action(); });
+    return btn;
+  }
+
+  private _openDownload(item: BrowserDownloadEvent): void {
+    if (item.relativePath) {
+      this.onOpenFile?.(item.relativePath, item.filename || item.relativePath.split('/').pop() || 'download');
+      return;
+    }
+    if (item.savePath) void this._api()?.openPath?.(item.savePath);
+  }
+
+  private _locateDownload(item: BrowserDownloadEvent): void {
+    const path = item.relativePath;
+    if (!path) {
+      if (item.savePath) void this._api()?.openPath?.(item.savePath);
+      return;
+    }
+    window.dispatchEvent(new CustomEvent('ws-reveal-workspace-path', { detail: { path, open: false } }));
+  }
+
+  private _sendDownloadToAgent(item: BrowserDownloadEvent): void {
+    const lines = [
+      '[Workspace Download]',
+      `File: ${item.relativePath || item.filename}`,
+      item.url ? `Source: ${item.url}` : '',
+      item.savePath ? `Saved: ${item.savePath}` : '',
+    ].filter(Boolean);
+    this._sendToAgent(lines.join('\n'));
+  }
+
+  private _handleBrowserNetwork(event: BrowserNetworkEvent): void {
+    const tab = this._tabs.find(t => t.wvId === event.viewId);
+    if (!tab) return;
+    const events = [...(tab.networkEvents || [])];
+    const idx = events.findIndex(item => item.id === event.id);
+    if (idx >= 0) events[idx] = event;
+    else events.push(event);
+    tab.networkEvents = events.slice(-200);
+    if (tab.path === this._activePath) this._renderBrowserPanel(tab);
+  }
+
+  private _handleBrowserSecurity(event: BrowserSecurityEvent): void {
+    const tab = this._tabs.find(t => t.wvId === event.viewId);
+    if (!tab) return;
+    const events = [...(tab.securityEvents || [])];
+    const idx = events.findIndex(item => item.id === event.id);
+    if (idx >= 0) events[idx] = event;
+    else events.push(event);
+    tab.securityEvents = events.slice(-120);
+    if (tab.path === this._activePath) {
+      this._renderSecurityPrompts(tab);
+      this._renderBrowserPanel(tab);
+    }
+  }
+
+  private _handleBrowserFindResult(event: BrowserFindResult): void {
+    const tab = this._tabs.find(t => t.wvId === event.viewId);
+    if (!tab) return;
+    tab.findMatches = event.matches;
+    tab.findActiveMatch = event.activeMatchOrdinal;
+    if (tab.path === this._activePath) this._renderFindBar(tab);
+  }
+
+  private _showFindBar(tab: OpenTab): void {
+    tab.findVisible = true;
+    if (tab.path === this._activePath) {
+      this._renderFindBar(tab);
+      setTimeout(() => {
+        const input = this._contentArea.querySelector('.ws-browser-find-input') as HTMLInputElement | null;
+        input?.focus();
+        input?.select();
+      }, 0);
+    }
+  }
+
+  private _renderFindBar(tab: OpenTab): void {
+    const bar = this._contentArea.querySelector('.ws-browser-findbar') as HTMLElement | null;
+    if (!bar || tab.fileType !== 'browser') return;
+    bar.innerHTML = '';
+    if (!tab.findVisible) {
+      bar.style.display = 'none';
+      return;
+    }
+    bar.style.display = 'flex';
+
+    const input = document.createElement('input');
+    input.className = 'ws-browser-find-input';
+    input.type = 'text';
+    input.placeholder = 'Find';
+    input.value = tab.findQuery || '';
+    input.addEventListener('input', () => {
+      tab.findQuery = input.value;
+      tab.findMatches = 0;
+      tab.findActiveMatch = 0;
+      if (this._findInputTimer) window.clearTimeout(this._findInputTimer);
+      this._findInputTimer = window.setTimeout(() => this._runFind(tab, true, false), 120);
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this._runFind(tab, !e.shiftKey, true);
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this._closeFindBar(tab);
+      }
+    });
+    bar.appendChild(input);
+
+    const count = document.createElement('span');
+    count.className = 'ws-browser-find-count';
+    const matches = tab.findMatches || 0;
+    const active = tab.findActiveMatch || 0;
+    count.textContent = matches ? `${active}/${matches}` : '0/0';
+    bar.appendChild(count);
+
+    const prev = this._smallCommandButton('Prev', () => this._runFind(tab, false, true));
+    const next = this._smallCommandButton('Next', () => this._runFind(tab, true, true));
+    const matchCase = this._smallCommandButton('Aa', () => {
+      tab.findMatchCase = !tab.findMatchCase;
+      this._runFind(tab, true, false);
+      this._renderFindBar(tab);
+    });
+    matchCase.classList.toggle('active', Boolean(tab.findMatchCase));
+    const close = this._smallCommandButton('Close', () => this._closeFindBar(tab));
+    bar.append(prev, next, matchCase, close);
+  }
+
+  private _smallCommandButton(label: string, action: () => void): HTMLButtonElement {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ws-browser-command-btn';
+    btn.textContent = label;
+    btn.addEventListener('click', (e) => { e.stopPropagation(); action(); });
+    return btn;
+  }
+
+  private _runFind(tab: OpenTab, forward: boolean, findNext: boolean): void {
+    if (!tab.wvId) return;
+    const text = (tab.findQuery || '').trim();
+    if (!text) {
+      tab.findMatches = 0;
+      tab.findActiveMatch = 0;
+      void this._api()?.wvStopFind?.(tab.wvId, 'clearSelection');
+      this._renderFindBar(tab);
+      return;
+    }
+    void this._api()?.wvFindInPage?.(tab.wvId, text, { forward, findNext, matchCase: Boolean(tab.findMatchCase) });
+  }
+
+  private _closeFindBar(tab: OpenTab): void {
+    tab.findVisible = false;
+    tab.findQuery = '';
+    tab.findMatches = 0;
+    tab.findActiveMatch = 0;
+    if (tab.wvId) void this._api()?.wvStopFind?.(tab.wvId, 'clearSelection');
+    this._renderFindBar(tab);
+    setTimeout(() => this._syncWvBounds(), 0);
+  }
+
+  private _renderSecurityPrompts(tab: OpenTab): void {
+    const box = this._contentArea.querySelector('.ws-browser-security') as HTMLElement | null;
+    if (!box || tab.fileType !== 'browser') return;
+    const events = (tab.securityEvents || [])
+      .filter(event => event.decision === 'prompt' || event.kind === 'certificate' || event.kind === 'external' || event.kind === 'popup')
+      .slice(-3)
+      .reverse();
+    box.innerHTML = '';
+    if (!events.length) {
+      box.style.display = 'none';
+      return;
+    }
+    box.style.display = 'flex';
+    for (const event of events) {
+      const row = document.createElement('div');
+      row.className = `ws-browser-security-row ${event.decision}`;
+      const text = document.createElement('div');
+      text.className = 'ws-browser-security-text';
+      text.textContent = event.message;
+      text.title = event.url || event.message;
+      row.appendChild(text);
+      if (event.decision === 'prompt') {
+        const allow = this._smallCommandButton('Allow', () => this._resolvePermission(event.id, true));
+        const block = this._smallCommandButton('Block', () => this._resolvePermission(event.id, false));
+        row.append(allow, block);
+      }
+      box.appendChild(row);
+    }
+  }
+
+  private _resolvePermission(eventId: string, allowed: boolean): void {
+    void this._api()?.wvResolvePermission?.(eventId, allowed);
+  }
+
+  private async _hydrateBrowserPanel(tab: OpenTab): Promise<void> {
+    if (!tab.wvId) return;
+    try {
+      const [network, logs, security] = await Promise.all([
+        this._api()?.wvGetNetwork?.(tab.wvId, 120),
+        this._api()?.wvGetConsole?.(tab.wvId, 120),
+        this._api()?.wvGetSecurity?.(tab.wvId, 80),
+      ]);
+      if (Array.isArray(network?.events)) tab.networkEvents = network.events;
+      if (Array.isArray(logs?.logs)) tab.consoleLogs = logs.logs;
+      if (Array.isArray(security?.events)) tab.securityEvents = security.events;
+      if (tab.path === this._activePath) {
+        this._renderSecurityPrompts(tab);
+        this._renderBrowserPanel(tab);
+      }
+    } catch { console.debug('WorkspaceTabGroup: browser panel hydrate failed'); }
+  }
+
+  private async _toggleBrowserPanel(tab: OpenTab, mode: BrowserPanelMode): Promise<void> {
+    tab.browserPanel = tab.browserPanel === mode ? null : mode;
+    await this._hydrateBrowserPanel(tab);
+    this._renderBrowserPanel(tab);
+    setTimeout(() => this._syncWvBounds(), 0);
+  }
+
+  private _switchBrowserPanel(tab: OpenTab, mode: BrowserPanelMode): void {
+    tab.browserPanel = mode;
+    this._renderBrowserPanel(tab);
+    setTimeout(() => this._syncWvBounds(), 0);
+  }
+
+  private _renderBrowserPanel(tab: OpenTab): void {
+    const panel = this._contentArea.querySelector('.ws-browser-panel') as HTMLElement | null;
+    if (!panel || tab.fileType !== 'browser') return;
+    panel.innerHTML = '';
+    if (!tab.browserPanel) {
+      panel.style.display = 'none';
+      return;
+    }
+    panel.style.display = 'flex';
+
+    const header = document.createElement('div');
+    header.className = 'ws-browser-panel-header';
+    for (const mode of ['network', 'console', 'security'] as BrowserPanelMode[]) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ws-browser-panel-tab';
+      btn.classList.toggle('active', tab.browserPanel === mode);
+      btn.textContent = mode === 'network' ? 'Network' : mode === 'console' ? 'Console' : 'Security';
+      btn.addEventListener('click', () => this._switchBrowserPanel(tab, mode));
+      header.appendChild(btn);
+    }
+    const spacer = document.createElement('div');
+    spacer.style.flex = '1';
+    header.appendChild(spacer);
+    header.appendChild(this._smallCommandButton('Close', () => { tab.browserPanel = null; this._renderBrowserPanel(tab); setTimeout(() => this._syncWvBounds(), 0); }));
+    panel.appendChild(header);
+
+    const body = document.createElement('div');
+    body.className = 'ws-browser-panel-body';
+    panel.appendChild(body);
+    if (tab.browserPanel === 'network') this._renderNetworkRows(tab, body);
+    if (tab.browserPanel === 'console') this._renderConsoleRows(tab, body);
+    if (tab.browserPanel === 'security') this._renderSecurityRows(tab, body);
+  }
+
+  private _renderNetworkRows(tab: OpenTab, body: HTMLElement): void {
+    const rows = (tab.networkEvents || []).slice(-80).reverse();
+    if (!rows.length) { this._renderPanelEmpty(body, 'No network activity yet'); return; }
+    for (const item of rows) {
+      const row = document.createElement('div');
+      row.className = `ws-browser-panel-row ${item.state === 'failed' ? 'error' : ''}`;
+      const status = item.state === 'failed' ? 'ERR' : item.statusCode ? String(item.statusCode) : item.state.toUpperCase();
+      this._appendPanelCell(row, item.method || 'GET', 'method');
+      this._appendPanelCell(row, status, 'status');
+      this._appendPanelCell(row, item.resourceType || 'other', 'type');
+      this._appendPanelCell(row, _compactUrl(item.url), 'url');
+      this._appendPanelCell(row, item.durationMs !== undefined ? `${item.durationMs}ms` : '', 'time');
+      row.title = item.error || item.url;
+      body.appendChild(row);
+    }
+  }
+
+  private _renderConsoleRows(tab: OpenTab, body: HTMLElement): void {
+    const rows = (tab.consoleLogs || []).slice(-100).reverse();
+    if (!rows.length) { this._renderPanelEmpty(body, 'No console output yet'); return; }
+    for (const item of rows) {
+      const row = document.createElement('div');
+      row.className = `ws-browser-panel-row ${item.level === 'error' ? 'error' : item.level === 'warning' || item.level === 'warn' ? 'warn' : ''}`;
+      this._appendPanelCell(row, item.level || 'log', 'method');
+      this._appendPanelCell(row, item.message || '', 'url');
+      this._appendPanelCell(row, item.sourceId ? `${_compactUrl(item.sourceId)}${item.line ? ':' + item.line : ''}` : '', 'time');
+      body.appendChild(row);
+    }
+  }
+
+  private _renderSecurityRows(tab: OpenTab, body: HTMLElement): void {
+    const rows = (tab.securityEvents || []).slice(-80).reverse();
+    if (!rows.length) { this._renderPanelEmpty(body, 'No security events yet'); return; }
+    for (const item of rows) {
+      const row = document.createElement('div');
+      row.className = `ws-browser-panel-row ${item.decision === 'blocked' ? 'warn' : ''}`;
+      this._appendPanelCell(row, item.kind, 'method');
+      this._appendPanelCell(row, item.decision, 'status');
+      this._appendPanelCell(row, item.message, 'url');
+      if (item.decision === 'prompt') {
+        const actions = document.createElement('div');
+        actions.className = 'ws-browser-panel-actions';
+        actions.append(this._smallCommandButton('Allow', () => this._resolvePermission(item.id, true)));
+        actions.append(this._smallCommandButton('Block', () => this._resolvePermission(item.id, false)));
+        row.appendChild(actions);
+      }
+      row.title = item.url || item.message;
+      body.appendChild(row);
+    }
+  }
+
+  private _appendPanelCell(row: HTMLElement, text: string, cls: string): void {
+    const cell = document.createElement('span');
+    cell.className = `ws-browser-panel-cell ${cls}`;
+    cell.textContent = text;
+    row.appendChild(cell);
+  }
+
+  private _renderPanelEmpty(body: HTMLElement, text: string): void {
+    const empty = document.createElement('div');
+    empty.className = 'ws-browser-panel-empty';
+    empty.textContent = text;
+    body.appendChild(empty);
+  }
+
+  private _showViewportMenu(anchor: HTMLElement, tab: OpenTab): void {
+    this._closeAllMenus();
+    const menu = document.createElement('div');
+    menu.className = 'ws-browser-menu ws-browser-viewport-menu';
+    for (const preset of BROWSER_VIEWPORT_PRESETS) {
+      const item = document.createElement('div');
+      item.className = 'ws-browser-menu-item';
+      item.textContent = preset.width && preset.height ? `${preset.label} ${preset.width}x${preset.height}` : preset.label;
+      item.addEventListener('click', () => {
+        this._closeAllMenus();
+        void this._setViewportPreset(tab, preset);
+      });
+      menu.appendChild(item);
+    }
+    anchor.appendChild(menu);
+    (this as any)._openMenu = menu;
+    setTimeout(() => document.addEventListener('click', () => this._closeAllMenus(), { once: true }), 0);
+  }
+
+  private async _setViewportPreset(tab: OpenTab, preset: BrowserViewportPreset): Promise<void> {
+    tab.browserViewport = preset;
+    if (tab.wvId) await this._api()?.wvSetViewport?.(tab.wvId, _viewportPayload(preset));
+    this._scheduleBrowserStateSave();
+    if (tab.path === this._activePath) {
+      const btn = this._contentArea.querySelector('.ws-browser-viewport-btn') as HTMLButtonElement | null;
+      if (btn) btn.title = preset.label;
+    }
+  }
+
+  private _browserBtn(title: string, icon: string): HTMLButtonElement {
     const btn = document.createElement('button');
     btn.className = 'ws-browser-nav-btn ws-browser-action';
-    btn.title = title; btn.textContent = label;
+    btn.type = 'button';
+    btn.title = title;
+    btn.setAttribute('aria-label', title);
+    btn.innerHTML = icon;
     return btn;
+  }
+
+  private _normalizeBrowserInput(value: string): string {
+    if (!value) return '';
+    if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(value)) return value;
+    if (/^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?)(:\d+)?(\/.*)?$/i.test(value)) return `http://${value}`;
+    if (/^[\w.-]+:\d+(\/.*)?$/i.test(value)) return `http://${value}`;
+    if (/\s/.test(value) || !value.includes('.')) return `https://duckduckgo.com/?q=${encodeURIComponent(value)}`;
+    return `https://${value}`;
+  }
+
+  private _applyBrowserState(tab: OpenTab, data: BrowserStateEvent): void {
+    if (typeof data.url === 'string' && data.url) this._updateBrowserTabUrl(tab, data.url);
+    if (typeof data.canGoBack === 'boolean') tab.browserCanGoBack = data.canGoBack;
+    if (typeof data.canGoForward === 'boolean') tab.browserCanGoForward = data.canGoForward;
+    if (typeof data.isLoading === 'boolean') tab.browserLoading = data.isLoading;
+    if (typeof data.zoomFactor === 'number') tab.browserZoomFactor = data.zoomFactor;
+    this._updateBrowserChrome(tab);
+  }
+
+  private _updateBrowserChrome(tab: OpenTab): void {
+    if (tab.path !== this._activePath || tab.fileType !== 'browser') return;
+    const input = this._contentArea.querySelector('.ws-browser-url') as HTMLInputElement | null;
+    if (input && document.activeElement !== input) {
+      input.value = tab.browserUrl && tab.browserUrl !== 'about:blank' ? tab.browserUrl : '';
+    }
+    const sslIcon = this._contentArea.querySelector('.ws-browser-ssl-icon') as HTMLElement | null;
+    if (sslIcon) sslIcon.innerHTML = tab.browserUrl?.startsWith('https://') ? _SVG_BROWSER_LOCK : '';
+
+    const back = this._contentArea.querySelector('[data-action="back"]') as HTMLButtonElement | null;
+    const forward = this._contentArea.querySelector('[data-action="forward"]') as HTMLButtonElement | null;
+    if (back) back.disabled = !tab.browserCanGoBack;
+    if (forward) forward.disabled = !tab.browserCanGoForward;
+
+    this._updateBrowserLoading(tab);
   }
 
   private _shareUrlWithAgent(tab: OpenTab): void {
     const url = tab.browserUrl || '';
     if (!url || url === 'about:blank') return;
-    const app = (window as any).__anoclawApp;
-    if (!app) return;
-    const sid = app.sessionVM?.activeSessionId;
-    if (!sid) return;
-    const agent = app.conversationVM?.getAgent(sid);
-    if (agent) {
-      const content = `[Browser: ${url}]\n`;
-      agent.sendMessage(content, app.conversationVM.permissionMode, app.conversationVM.effortMode, []).catch(() => {});
-    }
+    this._sendToAgent(`[Browser: ${url}]\n`);
   }
 
   private _showAddToChatMenu(anchor: HTMLElement, tab: OpenTab): void {
@@ -894,6 +1818,7 @@ export class WorkspaceTabGroup {
     const menu = document.createElement('div');
     menu.className = 'ws-browser-menu';
     menu.innerHTML = `
+      <div class="ws-browser-menu-item" data-action="add-page-context">Add Page Context to Chat</div>
       <div class="ws-browser-menu-item" data-action="add-element">Add Element to Chat</div>
       <div class="ws-browser-menu-item" data-action="add-console">Add Console Logs to Chat</div>
       <div class="ws-browser-menu-item" data-action="add-screenshot">Add Screenshot to Chat</div>
@@ -901,6 +1826,7 @@ export class WorkspaceTabGroup {
     anchor.appendChild(menu);
     (this as any)._openMenu = menu;
 
+    menu.querySelector('[data-action="add-page-context"]')?.addEventListener('click', () => { this._closeAllMenus(); void this._sendPageContextToAgent(tab); });
     menu.querySelector('[data-action="add-element"]')?.addEventListener('click', () => { this._closeAllMenus(); this._addElementToChat(tab); });
     menu.querySelector('[data-action="add-console"]')?.addEventListener('click', () => { this._closeAllMenus(); this._addConsoleToChat(tab); });
     menu.querySelector('[data-action="add-screenshot"]')?.addEventListener('click', () => { this._closeAllMenus(); this._addScreenshotToChat(tab, false); });
@@ -936,14 +1862,14 @@ export class WorkspaceTabGroup {
     if ((this as any)._openMenu) { (this as any)._openMenu.remove(); (this as any)._openMenu = null; }
   }
 
-  private _sendToAgent(content: string): void {
+  private _sendToAgent(content: string, attachments: { name: string; path: string; type: string; size: number; content?: string }[] = []): void {
     const app = (window as any).__anoclawApp;
     if (!app) return;
     const sid = app.sessionVM?.activeSessionId;
     if (!sid) return;
     const agent = app.conversationVM?.getAgent(sid);
     if (agent) {
-      agent.sendMessage(content, app.conversationVM.permissionMode, app.conversationVM.effortMode, []).catch(() => {});
+      agent.sendMessage(content, app.conversationVM.permissionMode, app.conversationVM.effortMode, attachments).catch(() => {});
     }
   }
 
@@ -951,6 +1877,121 @@ export class WorkspaceTabGroup {
     const app = (window as any).__anoclawApp;
     if (!app) return;
     app.conversationVM?.addAttachment({ name: 'screenshot.png', path: '', type: 'image', size: 0, content: dataUrl });
+  }
+
+  private async _sendPageContextToAgent(tab: OpenTab): Promise<void> {
+    if (!tab.wvId) {
+      this._shareUrlWithAgent(tab);
+      return;
+    }
+
+    const code = `
+      (() => {
+        const limit = (value, max) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, max);
+        const textLimit = (value, max) => String(value || '').replace(/\\r/g, '').replace(/[ \\t]+/g, ' ').replace(/\\n{3,}/g, '\\n\\n').trim().slice(0, max);
+        const selectorFor = (el) => {
+          if (!el || !el.tagName) return '';
+          if (el.id) return el.tagName.toLowerCase() + '#' + el.id;
+          const cls = String(el.className || '').trim().split(/\\s+/).filter(Boolean).slice(0, 3).join('.');
+          return el.tagName.toLowerCase() + (cls ? '.' + cls : '');
+        };
+        const main = document.querySelector('main,[role="main"],article') || document.body || document.documentElement;
+        const active = document.activeElement && document.activeElement !== document.body ? document.activeElement : null;
+        const selectedText = String(window.getSelection ? window.getSelection() : '').trim();
+        const headings = Array.from(document.querySelectorAll('h1,h2,h3')).slice(0, 12).map((el) => ({
+          level: el.tagName.toLowerCase(),
+          text: limit(el.textContent, 180),
+        })).filter((item) => item.text);
+        return JSON.stringify({
+          title: document.title || '',
+          url: location.href,
+          description: limit(document.querySelector('meta[name="description"]')?.getAttribute('content'), 500),
+          selectedText: textLimit(selectedText, 1500),
+          headings,
+          bodyText: textLimit((document.body && document.body.innerText) || '', 4500),
+          domSnippet: String((main && main.outerHTML) || document.documentElement.outerHTML || '').slice(0, 2500),
+          activeElement: active ? {
+            selector: selectorFor(active),
+            text: textLimit(active.innerText || active.value || active.textContent || '', 1000),
+            html: String(active.outerHTML || '').slice(0, 1800),
+          } : null,
+          counts: {
+            links: document.links.length,
+            buttons: document.querySelectorAll('button,[role="button"]').length,
+            inputs: document.querySelectorAll('input,textarea,select').length,
+            images: document.images.length,
+          },
+        });
+      })()
+    `;
+
+    let page: any = null;
+    try {
+      const result = await this._api()?.wvExecJs?.(tab.wvId, code);
+      const raw = result?.result;
+      page = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    } catch {
+      page = null;
+    }
+    if (!page) {
+      this._shareUrlWithAgent(tab);
+      return;
+    }
+
+    const consoleResult = await this._api()?.wvGetConsole?.(tab.wvId, 30);
+    const logs = Array.isArray(consoleResult?.logs) ? consoleResult.logs as BrowserConsoleLog[] : [];
+    const screenshot = await this._api()?.wvCaptureScreenshot?.(tab.wvId);
+    const attachments = screenshot?.ok && screenshot.dataUrl
+      ? [{ name: 'browser-screenshot.png', path: '', type: 'image', size: 0, content: screenshot.dataUrl }]
+      : [];
+
+    const headings = Array.isArray(page.headings) && page.headings.length
+      ? page.headings.map((h: { level: string; text: string }) => `- ${h.level}: ${h.text}`).join('\n')
+      : '(none)';
+    const counts = page.counts || {};
+    const activeElement = page.activeElement
+      ? [
+          `Selector: ${page.activeElement.selector || '(unknown)'}`,
+          page.activeElement.text ? `Text: ${page.activeElement.text}` : '',
+          page.activeElement.html ? `HTML:\n\`\`\`html\n${_safeFence(page.activeElement.html)}\n\`\`\`` : '',
+        ].filter(Boolean).join('\n')
+      : '(none)';
+
+    const content = [
+      '[Browser Page Context]',
+      `URL: ${page.url || tab.browserUrl || ''}`,
+      `Title: ${page.title || tab.browserTitle || tab.name || ''}`,
+      page.description ? `Description: ${page.description}` : '',
+      `Elements: links=${counts.links ?? 0}, buttons=${counts.buttons ?? 0}, inputs=${counts.inputs ?? 0}, images=${counts.images ?? 0}`,
+      '',
+      'Selected Text:',
+      page.selectedText || '(none)',
+      '',
+      'Headings:',
+      headings,
+      '',
+      'Body Excerpt:',
+      page.bodyText || '(empty)',
+      '',
+      'Active Element:',
+      activeElement,
+      '',
+      'DOM Snippet:',
+      `\`\`\`html\n${_safeFence(page.domSnippet || '')}\n\`\`\``,
+      '',
+      'Recent Console:',
+      this._formatConsoleLogs(logs),
+    ].filter(line => line !== '').join('\n');
+
+    this._sendToAgent(content, attachments);
+  }
+
+  private _formatConsoleLogs(logs: BrowserConsoleLog[]): string {
+    if (!logs.length) return '(none)';
+    return logs.slice(-20).map(log => {
+      const source = log.sourceId ? ` ${log.sourceId}${log.line ? ':' + log.line : ''}` : '';
+      return `[${log.level}]${source} ${log.message}`;
+    }).join('\n');
   }
 
   private async _addElementToChat(tab: OpenTab): Promise<void> {
@@ -995,18 +2036,9 @@ export class WorkspaceTabGroup {
   }
 
   private async _addConsoleToChat(tab: OpenTab): Promise<void> {
-    await this._api()?.wvExecJs?.(tab.wvId, `
-      (function() {
-        if (!window.__anoclawLogs) { window.__anoclawLogs = []; }
-        const orig = { log: console.log, warn: console.warn, error: console.error };
-        ['log','warn','error'].forEach(l => { console[l] = (...a) => { window.__anoclawLogs.push({level:l,msg:a.join(' ')}); orig[l](...a); }; });
-      })();
-    `);
-    const result = await this._api()?.wvExecJs?.(tab.wvId, 'JSON.stringify(window.__anoclawLogs||[])');
-    const logs = result?.ok ? JSON.parse(result.result) : [];
-    if (logs.length > 0) {
-      this._sendToAgent(`[Browser Console]\n${logs.map((l: { level: string; msg: string }) => `[${l.level}] ${l.msg}`).join('\n')}`);
-    }
+    const result = await this._api()?.wvGetConsole?.(tab.wvId, 80);
+    const logs = Array.isArray(result?.logs) ? result.logs as BrowserConsoleLog[] : [];
+    if (logs.length > 0) this._sendToAgent(`[Browser Console]\n${this._formatConsoleLogs(logs)}`);
   }
 
   private async _addScreenshotToChat(tab: OpenTab, area: boolean): Promise<void> {
@@ -1018,15 +2050,20 @@ export class WorkspaceTabGroup {
   }
 
   private async _wvZoom(tab: OpenTab, delta: number): Promise<void> {
-    await this._api()?.wvExecJs?.(tab.wvId, `(()=>{const z=parseFloat(document.body.style.zoom||1)+${delta};document.body.style.zoom=Math.max(0.25,Math.min(3,z));})()`);
+    const next = Math.max(0.25, Math.min(3, (tab.browserZoomFactor || 1) + delta));
+    tab.browserZoomFactor = next;
+    await this._api()?.wvSetZoom?.(tab.wvId, next);
+    this._scheduleBrowserStateSave();
   }
 
   private async _wvZoomReset(tab: OpenTab): Promise<void> {
-    await this._api()?.wvExecJs?.(tab.wvId, 'document.body.style.zoom=1');
+    tab.browserZoomFactor = 1;
+    await this._api()?.wvSetZoom?.(tab.wvId, 1);
+    this._scheduleBrowserStateSave();
   }
 
   private async _wvFind(tab: OpenTab): Promise<void> {
-    await this._api()?.wvExecJs?.(tab.wvId, 'window.find(prompt("Find in page:"))');
+    this._showFindBar(tab);
   }
 
   private async _wvViewSource(tab: OpenTab): Promise<void> {
@@ -1104,7 +2141,7 @@ export class WorkspaceTabGroup {
     const progressBar = this._contentArea.querySelector('.ws-browser-progress') as HTMLElement;
     if (!progressBar) return;
     if (tab.browserLoading) {
-      progressBar.innerHTML = '<div style="height:100%;width:30%;background:var(--color-accent,#fff);animation:ws-progress-indeterminate 1.5s ease-in-out infinite;border-radius:1px;"></div>';
+      progressBar.innerHTML = '<div style="height:100%;width:30%;background:var(--color-primary,#fff);animation:ws-progress-indeterminate 1.5s ease-in-out infinite;border-radius:1px;"></div>';
     } else {
       // Brief green flash to indicate done
       progressBar.innerHTML = '<div style="height:100%;width:100%;background:#4ade80;border-radius:1px;transition:opacity 0.5s;opacity:1;"></div>';
@@ -1161,7 +2198,9 @@ export class WorkspaceTabGroup {
       this._contentArea.innerHTML = '';
       this._contentArea.style.cssText = 'overflow-y:auto;';
 
-      if (data.type === 'html') {
+      if (data.type === 'table' && Array.isArray(data.rows)) {
+        this._showTablePreview(data.rows, tab.name);
+      } else if (data.type === 'html') {
         const wrapper = document.createElement('div');
         wrapper.className = 'ws-preview-office';
         wrapper.style.cssText = 'padding:20px 28px;font-size:13px;line-height:1.7;color:var(--color-text,#f4f4f6);max-width:860px;margin:0 auto;';
@@ -1191,7 +2230,7 @@ export class WorkspaceTabGroup {
       } else if (data.type === 'image') {
         const img = document.createElement('img');
         img.className = 'ws-preview-image';
-        img.src = data.dataUrl || `/api/v1/workspace/read?path=${encodeURIComponent(tab.path)}&sessionId=${encodeURIComponent(this._sessionId)}&raw=1`;
+        img.src = data.dataUrl || this._rawFileUrl(tab.path);
         img.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;';
         this._contentArea.style.cssText = 'display:flex;align-items:center;justify-content:center;background:#0a0a0a;';
         this._contentArea.appendChild(img);
@@ -1255,6 +2294,299 @@ export class WorkspaceTabGroup {
       contextMenuOrder: 3,
       run: (ed: any) => { const sel = ed.getSelection(); const text = sel && !sel.isEmpty() ? ed.getModel()?.getValueInRange(sel) || '' : ''; this._dispatchAskAgent(text, 'FindBugs'); },
     });
+
+    const aiKeybindings = m.KeyCode?.Backslash ? [m.KeyMod.Alt | m.KeyCode.Backslash] : undefined;
+    m.editor.addEditorAction({
+      id: 'anoclaw-ai-complete',
+      label: 'AI: Complete at Cursor',
+      keybindings: aiKeybindings,
+      contextMenuGroupId: 'anoclaw-agent',
+      contextMenuOrder: 0,
+      run: () => { void this._triggerInlineCompletion(true); },
+    });
+
+    const goToDefinitionKey = m.KeyCode?.F12 ? [m.KeyCode.F12] : undefined;
+    m.editor.addEditorAction({
+      id: 'anoclaw-ls-definition',
+      label: 'IDE: Go to Definition',
+      keybindings: goToDefinitionKey,
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 1,
+      run: () => { void this._goToDefinitionFromEditor(); },
+    });
+
+    const organizeKey = m.KeyCode?.KeyO ? [m.KeyMod.Shift | m.KeyMod.Alt | m.KeyCode.KeyO] : undefined;
+    m.editor.addEditorAction({
+      id: 'anoclaw-ls-organize-imports',
+      label: 'IDE: Organize Imports',
+      keybindings: organizeKey,
+      contextMenuGroupId: 'anoclaw-agent',
+      contextMenuOrder: 4,
+      run: () => { void this._organizeImports(); },
+    });
+  }
+
+  private _registerLanguageFeatures(): void {
+    if (WorkspaceTabGroup._languageFeaturesRegistered) return;
+    const m = (window as any).monaco; if (!m) return;
+    WorkspaceTabGroup._languageFeaturesRegistered = true;
+    const languages = ['typescript', 'javascript', 'python'];
+    for (const language of languages) {
+      m.languages.registerCompletionItemProvider(language, {
+        triggerCharacters: ['.', '"', '\'', '/', '@', '<'],
+        provideCompletionItems: async (model: any, position: any) => {
+          const group = WorkspaceTabGroup._groupForModel(model);
+          if (!group) return { suggestions: [] };
+          return group._provideLanguageCompletions(model, position);
+        },
+      });
+      m.languages.registerHoverProvider(language, {
+        provideHover: async (model: any, position: any) => {
+          const group = WorkspaceTabGroup._groupForModel(model);
+          if (!group) return null;
+          return group._provideLanguageHover(model, position);
+        },
+      });
+      m.languages.registerDefinitionProvider(language, {
+        provideDefinition: async (model: any, position: any) => {
+          const group = WorkspaceTabGroup._groupForModel(model);
+          if (!group) return [];
+          return group._provideLanguageDefinitions(model, position);
+        },
+      });
+    }
+  }
+
+  private static _groupForModel(model: any): WorkspaceTabGroup | null {
+    for (const group of WorkspaceTabGroup._groups) {
+      if (group._tabs.some(tab => tab.model === model)) return group;
+    }
+    return null;
+  }
+
+  private _tabForModel(model: any): OpenTab | null {
+    return this._tabs.find(tab => tab.model === model) || null;
+  }
+
+  private async _provideLanguageCompletions(model: any, position: any): Promise<{ suggestions: any[] }> {
+    const m = (window as any).monaco;
+    const tab = this._tabForModel(model);
+    if (!tab) return { suggestions: [] };
+    try {
+      this._setLanguageStatus('working', 'LS Completing');
+      const word = model.getWordUntilPosition(position);
+      const fallbackRange = new m.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn);
+      const data = await this._languageFetch('completions', model, position);
+      const suggestions = (data.items || []).map((item: any) => ({
+        label: item.label,
+        kind: this._monacoCompletionKind(item.kind),
+        detail: item.detail,
+        documentation: item.documentation ? { value: item.documentation } : undefined,
+        insertText: item.insertText || item.label,
+        sortText: item.sortText,
+        range: item.range ? this._monacoRange(item.range) : fallbackRange,
+        additionalTextEdits: (item.additionalTextEdits || [])
+          .filter((edit: any) => edit.path === tab.path)
+          .map((edit: any) => ({ range: this._monacoRange(edit.range), text: edit.text })),
+      }));
+      this._setLanguageStatus('ready', suggestions.length ? `LS ${suggestions.length}` : 'LS Ready');
+      return { suggestions };
+    } catch {
+      this._setLanguageStatus('error', 'LS Error');
+      return { suggestions: [] };
+    }
+  }
+
+  private async _provideLanguageHover(model: any, position: any): Promise<any | null> {
+    try {
+      const data = await this._languageFetch('hover', model, position);
+      const hover = data.hover;
+      if (!hover?.contents) return null;
+      return {
+        contents: [{ value: hover.contents }],
+        range: hover.range ? this._monacoRange(hover.range) : undefined,
+      };
+    } catch {
+      this._setLanguageStatus('error', 'LS Error');
+      return null;
+    }
+  }
+
+  private async _provideLanguageDefinitions(model: any, position: any): Promise<any[]> {
+    const m = (window as any).monaco;
+    try {
+      const data = await this._languageFetch('definition', model, position);
+      const locations = data.locations || [];
+      return locations.map((loc: any) => ({
+        uri: m.Uri.parse('file:///' + String(loc.absolutePath || loc.path).replace(/\\/g, '/')),
+        range: this._monacoRange(loc.range),
+      }));
+    } catch {
+      this._setLanguageStatus('error', 'LS Error');
+      return [];
+    }
+  }
+
+  private _scheduleDiagnostics(model: any, delay = 650): void {
+    if (!model || !this._tabForModel(model)) return;
+    if (this._diagnosticsTimer) window.clearTimeout(this._diagnosticsTimer);
+    this._diagnosticsTimer = window.setTimeout(() => {
+      this._diagnosticsTimer = 0;
+      void this._refreshDiagnostics(model);
+    }, delay);
+  }
+
+  private async _refreshDiagnostics(model: any): Promise<void> {
+    const m = (window as any).monaco;
+    const tab = this._tabForModel(model);
+    if (!m || !tab) return;
+    try {
+      this._setLanguageStatus('working', 'LS Checking');
+      const data = await this._languageFetch('diagnostics', model);
+      const markers = (data.diagnostics || []).map((d: any) => ({
+        severity: this._monacoMarkerSeverity(d.severity),
+        message: d.message || '',
+        source: d.source || 'language',
+        code: d.code,
+        startLineNumber: d.range?.startLineNumber || 1,
+        startColumn: d.range?.startColumn || 1,
+        endLineNumber: d.range?.endLineNumber || d.range?.startLineNumber || 1,
+        endColumn: d.range?.endColumn || d.range?.startColumn || 2,
+      }));
+      m.editor.setModelMarkers(model, 'anoclaw-language', markers);
+      this._setLanguageStatus('ready', markers.length ? `LS ${markers.length} issue${markers.length === 1 ? '' : 's'}` : 'LS Ready');
+    } catch {
+      this._setLanguageStatus('error', 'LS Error');
+    }
+  }
+
+  private async _goToDefinitionFromEditor(): Promise<void> {
+    if (!this._editor) return;
+    const model = this._editor.getModel();
+    const position = this._editor.getPosition();
+    if (!model || !position) return;
+    try {
+      this._setLanguageStatus('working', 'LS Definition');
+      const data = await this._languageFetch('definition', model, position);
+      const target = (data.locations || []).find((loc: any) => !loc.external) || (data.locations || [])[0];
+      if (!target) { this._setLanguageStatus('ready', 'LS No definition'); return; }
+      if (target.external) { this._setLanguageStatus('ready', 'LS External'); return; }
+      await this.openFile(target.path, _baseName(target.path));
+      if (this._editor && target.range) {
+        this._editor.setSelection(this._monacoRange(target.range));
+        this._editor.revealLineInCenter(target.range.startLineNumber);
+        this._editor.focus();
+      }
+      this._setLanguageStatus('ready', 'LS Definition');
+    } catch {
+      this._setLanguageStatus('error', 'LS Error');
+    }
+  }
+
+  private async _organizeImports(): Promise<void> {
+    if (!this._editor) return;
+    const model = this._editor.getModel();
+    if (!model || !this._tabForModel(model)) return;
+    try {
+      this._setLanguageStatus('working', 'LS Imports');
+      const data = await this._languageFetch('organize-imports', model);
+      const edits = (data.edits || [])
+        .filter((edit: any) => edit.path === this._tabForModel(model)?.path)
+        .sort((a: any, b: any) => {
+          if (a.range.startLineNumber !== b.range.startLineNumber) return b.range.startLineNumber - a.range.startLineNumber;
+          return b.range.startColumn - a.range.startColumn;
+        })
+        .map((edit: any) => ({ range: this._monacoRange(edit.range), text: edit.text, forceMoveMarkers: true }));
+      if (edits.length) this._editor.executeEdits('anoclaw-organize-imports', edits);
+      this._setLanguageStatus('ready', edits.length ? 'LS Imports done' : 'LS Imports clean');
+      this._editor.focus();
+    } catch {
+      this._setLanguageStatus('error', 'LS Error');
+    }
+  }
+
+  private async _languageFetch(operation: string, model: any, position?: any): Promise<any> {
+    const tab = this._tabForModel(model);
+    if (!tab) throw new Error('No workspace tab for model');
+    const endpoint = LANGUAGE_ENDPOINTS[operation];
+    if (!endpoint) throw new Error(`Unsupported language operation: ${operation}`);
+    const body = {
+      sessionId: this._sessionId,
+      path: tab.path,
+      content: model.getValue(),
+      language: model.getLanguageId(),
+      line: position?.lineNumber || 1,
+      column: position?.column || 1,
+    };
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.message || data.error || `Language service failed (${resp.status})`);
+    return data;
+  }
+
+  private _monacoCompletionKind(kind: string): number {
+    const m = (window as any).monaco;
+    const K = m?.languages?.CompletionItemKind || {};
+    const key = String(kind || '').toLowerCase();
+    if (key.includes('method')) return K.Method;
+    if (key.includes('function')) return K.Function;
+    if (key.includes('constructor')) return K.Constructor;
+    if (key.includes('field')) return K.Field;
+    if (key.includes('property')) return K.Property;
+    if (key.includes('variable')) return K.Variable;
+    if (key.includes('class')) return K.Class;
+    if (key.includes('interface')) return K.Interface;
+    if (key.includes('module')) return K.Module;
+    if (key.includes('enum')) return K.Enum;
+    if (key.includes('keyword')) return K.Keyword;
+    if (key.includes('snippet')) return K.Snippet;
+    if (key.includes('file')) return K.File;
+    if (key.includes('constant')) return K.Constant;
+    if (key.includes('type')) return K.TypeParameter;
+    return K.Text;
+  }
+
+  private _monacoMarkerSeverity(severity: string): number {
+    const m = (window as any).monaco;
+    const S = m?.MarkerSeverity || {};
+    if (severity === 'error') return S.Error;
+    if (severity === 'warning') return S.Warning;
+    if (severity === 'hint') return S.Hint;
+    return S.Info;
+  }
+
+  private _monacoRange(range: any): any {
+    const m = (window as any).monaco;
+    return new m.Range(
+      range.startLineNumber || 1,
+      range.startColumn || 1,
+      range.endLineNumber || range.startLineNumber || 1,
+      range.endColumn || range.startColumn || 1,
+    );
+  }
+
+  private _setLanguageStatus(state: typeof this._languageStatusState, message: string): void {
+    this._languageStatusState = state;
+    this._languageStatusMessage = message;
+    this._renderLanguageStatus();
+    if (state === 'ready') {
+      window.setTimeout(() => {
+        if (this._languageStatusState === state && this._languageStatusMessage === message) {
+          this._setLanguageStatus('idle', 'LS Ready');
+        }
+      }, 2600);
+    }
+  }
+
+  private _renderLanguageStatus(): void {
+    const el = this._contentArea.querySelector('[data-role="language-service-status"]') as HTMLElement | null;
+    if (!el) return;
+    el.className = `ws-editor-ls-status ${this._languageStatusState}`;
+    el.textContent = this._languageStatusMessage;
   }
 
   private _registerInlineCompletion(): void {
@@ -1264,41 +2596,28 @@ export class WorkspaceTabGroup {
 
     m.languages.registerInlineCompletionsProvider('*', {
       provideInlineCompletions: async (model: any, position: any, _context: any, _token: any) => {
-        // Only trigger if there's content to complete (cursor at end of a line with code)
         const lineContent = model.getLineContent(position.lineNumber);
         const textBeforeCursor = lineContent.substring(0, position.column - 1);
         if (textBeforeCursor.trim().length < 2) return { items: [] };
 
-        // Debounce — wait 1.5s since last keystroke
+        // Debounce after typing; manual completion uses _triggerInlineCompletion().
         const key = `${model.uri.path}_${position.lineNumber}_${position.column}`;
         (this as any)._lastInlineKey = key;
-        await new Promise(r => setTimeout(r, 1500));
+        const requestId = ++this._inlineCompletionRequestId;
+        this._setInlineCompletionStatus('waiting', 'AI Waiting');
+        await new Promise(r => setTimeout(r, 750));
         if ((this as any)._lastInlineKey !== key) return { items: [] };
+        if (requestId !== this._inlineCompletionRequestId) return { items: [] };
 
         try {
-          const prefix = model.getValueInRange({
-            startLineNumber: Math.max(1, position.lineNumber - 15),
-            startColumn: 1,
-            endLineNumber: position.lineNumber,
-            endColumn: position.column,
-          });
-          const totalLines = model.getLineCount();
-          const suffix = position.lineNumber < totalLines ? model.getValueInRange({
-            startLineNumber: position.lineNumber,
-            startColumn: position.column,
-            endLineNumber: Math.min(totalLines, position.lineNumber + 3),
-            endColumn: model.getLineMaxColumn(Math.min(totalLines, position.lineNumber + 3)),
-          }) : '';
-
-          const resp = await fetch('/api/v1/inline-suggest', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prefix, suffix, language: model.getLanguageId(), sessionId: this._sessionId }),
-          });
-          if (!resp.ok) return { items: [] };
-          const data = await resp.json();
-          const completion = (data.completion || '').trim();
-          if (!completion || completion.length < 1) return { items: [] };
+          this._setInlineCompletionStatus('thinking', 'AI Thinking');
+          const completion = await this._requestInlineCompletion(model, position);
+          if (requestId !== this._inlineCompletionRequestId) return { items: [] };
+          if (!completion) {
+            this._setInlineCompletionStatus('empty', 'AI No suggestion');
+            return { items: [] };
+          }
+          this._setInlineCompletionStatus('ready', 'AI Suggested');
 
           return {
             items: [{
@@ -1306,12 +2625,101 @@ export class WorkspaceTabGroup {
               range: { startLineNumber: position.lineNumber, startColumn: position.column, endLineNumber: position.lineNumber, endColumn: position.column },
             }],
           };
-        } catch {
+        } catch (err) {
+          this._setInlineCompletionStatus('error', this._inlineCompletionErrorMessage(err));
           return { items: [] };
         }
       },
       freeInlineCompletions: () => {},
     } as any);
+  }
+
+  private async _triggerInlineCompletion(manual: boolean): Promise<void> {
+    if (!this._editor) return;
+    const model = this._editor.getModel();
+    const position = this._editor.getPosition();
+    if (!model || !position) return;
+
+    const lineContent = model.getLineContent(position.lineNumber);
+    const textBeforeCursor = lineContent.substring(0, position.column - 1);
+    if (textBeforeCursor.trim().length < 2) {
+      this._setInlineCompletionStatus('empty', 'AI Type more');
+      return;
+    }
+
+    const requestId = ++this._inlineCompletionRequestId;
+    this._setInlineCompletionStatus('thinking', manual ? 'AI Completing' : 'AI Thinking');
+    try {
+      const completion = await this._requestInlineCompletion(model, position);
+      if (requestId !== this._inlineCompletionRequestId) return;
+      if (!completion) {
+        this._setInlineCompletionStatus('empty', 'AI No suggestion');
+        return;
+      }
+      this._editor.executeEdits('anoclaw-ai-complete', [{
+        range: { startLineNumber: position.lineNumber, startColumn: position.column, endLineNumber: position.lineNumber, endColumn: position.column },
+        text: completion,
+        forceMoveMarkers: true,
+      }]);
+      this._setInlineCompletionStatus('ready', 'AI Inserted');
+      this._editor.focus();
+    } catch (err) {
+      if (requestId !== this._inlineCompletionRequestId) return;
+      this._setInlineCompletionStatus('error', this._inlineCompletionErrorMessage(err));
+    }
+  }
+
+  private async _requestInlineCompletion(model: any, position: any): Promise<string> {
+    const prefix = model.getValueInRange({
+      startLineNumber: Math.max(1, position.lineNumber - 24),
+      startColumn: 1,
+      endLineNumber: position.lineNumber,
+      endColumn: position.column,
+    });
+    const totalLines = model.getLineCount();
+    const suffix = position.lineNumber < totalLines ? model.getValueInRange({
+      startLineNumber: position.lineNumber,
+      startColumn: position.column,
+      endLineNumber: Math.min(totalLines, position.lineNumber + 8),
+      endColumn: model.getLineMaxColumn(Math.min(totalLines, position.lineNumber + 8)),
+    }) : '';
+
+    const resp = await fetch('/api/v1/inline-suggest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prefix, suffix, language: model.getLanguageId(), sessionId: this._sessionId }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.message || data.error || `Suggest failed (${resp.status})`);
+    return String(data.completion || '').replace(/^\r?\n/, '').replace(/[ \t\r\n]+$/, '');
+  }
+
+  private _setInlineCompletionStatus(state: typeof this._inlineCompletionState, message: string): void {
+    this._inlineCompletionState = state;
+    this._inlineCompletionMessage = message;
+    this._renderInlineCompletionStatus();
+    if (state === 'ready' || state === 'empty') {
+      window.setTimeout(() => {
+        if (this._inlineCompletionState === state && this._inlineCompletionMessage === message) {
+          this._setInlineCompletionStatus('idle', 'AI Ready');
+        }
+      }, 2200);
+    }
+  }
+
+  private _renderInlineCompletionStatus(): void {
+    const el = this._contentArea.querySelector('[data-role="inline-completion-status"]') as HTMLElement | null;
+    if (!el) return;
+    el.className = `ws-editor-ai-status ${this._inlineCompletionState}`;
+    el.textContent = this._inlineCompletionMessage;
+  }
+
+  private _inlineCompletionErrorMessage(err: unknown): string {
+    const raw = err instanceof Error ? err.message : String(err || 'error');
+    if (/api url|configured|missing/i.test(raw)) return 'AI Not configured';
+    if (/401|403|api key|unauthorized/i.test(raw)) return 'AI Auth error';
+    if (/fetch|network|ECONN|ENOTFOUND|timeout/i.test(raw)) return 'AI Offline';
+    return 'AI Error';
   }
 
   private _dispatchAskAgent(selectedText: string, action: string): void {
@@ -1479,7 +2887,7 @@ export class WorkspaceTabGroup {
     if (tab.path === this._activePath) this._activate(tab);
   }
 
-  private _destroyContent(): void { this._destroyBrowserView(); if (this._editorHost && this._editorHost.parentElement) this._editorHost.remove(); this._contentArea.innerHTML = ''; this._contentArea.style.cssText = ''; }
+  private _destroyContent(): void { this._destroyBrowserView(); if (this._editorHost && this._editorHost.parentElement) this._editorHost.remove(); this._contentArea.innerHTML = ''; this._contentArea.style.cssText = ''; this._contentArea.classList.remove('ws-preview-surface'); }
   private _showEmpty(): void {
     this._contentArea.innerHTML = `<div class="ws-editor-empty" style="flex-direction:column;gap:4px;">
       <div style="font-size:13px;margin-bottom:8px;">Open a file from the tree</div>
@@ -1488,9 +2896,27 @@ export class WorkspaceTabGroup {
   }
 
   dispose(): void {
+    this._saveBrowserStateNow();
+    if (this._browserStateSaveTimer) {
+      window.clearTimeout(this._browserStateSaveTimer);
+      this._browserStateSaveTimer = 0;
+    }
+    if (this._findInputTimer) {
+      window.clearTimeout(this._findInputTimer);
+      this._findInputTimer = 0;
+    }
+    if (this._diagnosticsTimer) {
+      window.clearTimeout(this._diagnosticsTimer);
+      this._diagnosticsTimer = 0;
+    }
+    WorkspaceTabGroup._groups.delete(this);
     this._ro?.disconnect();
     this._destroyBrowserView();
     this._wvStateCleanup?.();
+    this._wvDownloadCleanup?.();
+    this._wvNetworkCleanup?.();
+    this._wvSecurityCleanup?.();
+    this._wvFindCleanup?.();
     if (this._globalKeyHandler) {
       document.removeEventListener('keydown', this._globalKeyHandler);
       this._globalKeyHandler = null;
@@ -1505,3 +2931,131 @@ export class WorkspaceTabGroup {
 
 function _escAttr(s: string): string { return s.replace(/"/g,'\\"'); }
 function _escHtml(s: string): string { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function _baseName(filePath: string): string { return String(filePath || '').replace(/\\/g, '/').split('/').filter(Boolean).pop() || String(filePath || ''); }
+function _safeFence(s: string): string { return String(s || '').replace(/```/g, '`` `'); }
+function _formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '';
+  if (bytes < 1024) return `${Math.round(bytes)}B`;
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / 1048576).toFixed(1)}MB`;
+}
+function _hashString(input: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function _compactUrl(url: string): string {
+  if (!url) return '';
+  try {
+    const u = new URL(url);
+    return `${u.host}${u.pathname}${u.search}`.slice(0, 180);
+  } catch {
+    return url.slice(0, 180);
+  }
+}
+
+function _viewportByName(name?: string): BrowserViewportPreset {
+  return BROWSER_VIEWPORT_PRESETS.find(preset => preset.name === name) || BROWSER_VIEWPORT_PRESETS[0];
+}
+
+function _viewportPayload(preset: BrowserViewportPreset): { name: string; width?: number; height?: number; mobile?: boolean; deviceScaleFactor?: number; userAgent?: string } {
+  return {
+    name: preset.name,
+    width: preset.width,
+    height: preset.height,
+    mobile: preset.mobile,
+    deviceScaleFactor: preset.deviceScaleFactor,
+    userAgent: preset.userAgent,
+  };
+}
+
+function _columnName(index: number): string {
+  let n = index + 1;
+  let name = '';
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    name = String.fromCharCode(65 + rem) + name;
+    n = Math.floor((n - 1) / 26);
+  }
+  return name;
+}
+
+function _parseDelimitedRows(content: string, delimiter: ',' | '\t'): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+  const pushCell = () => { row.push(cell); cell = ''; };
+  const pushRow = () => {
+    pushCell();
+    if (row.some(value => value.trim())) rows.push(row.slice(0, 50));
+    row = [];
+  };
+
+  for (let i = 0; i < content.length && rows.length < 200; i++) {
+    const ch = content[i];
+    if (quoted) {
+      if (ch === '"' && content[i + 1] === '"') { cell += '"'; i++; continue; }
+      if (ch === '"') { quoted = false; continue; }
+      cell += ch;
+      continue;
+    }
+    if (ch === '"') { quoted = true; continue; }
+    if (ch === delimiter) { pushCell(); continue; }
+    if (ch === '\n') { pushRow(); continue; }
+    if (ch === '\r') {
+      if (content[i + 1] === '\n') i++;
+      pushRow();
+      continue;
+    }
+    cell += ch;
+  }
+  if (cell || row.length) pushRow();
+  return rows;
+}
+
+const _SVG_BROWSER_BACK = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>`;
+const _SVG_BROWSER_FORWARD = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>`;
+const _SVG_BROWSER_RELOAD = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.4 6.4L3 16"/><path d="M3 16v5h5"/><path d="M3 12A9 9 0 0 1 18.4 5.6L21 8"/><path d="M21 8V3h-5"/></svg>`;
+const _SVG_BROWSER_LOCK = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`;
+const _SVG_BROWSER_SHARE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>`;
+const _SVG_BROWSER_PLUS = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`;
+const _SVG_BROWSER_DEVTOOLS = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 9-4 3 4 3"/><path d="m16 9 4 3-4 3"/><path d="m14 5-4 14"/></svg>`;
+const _SVG_BROWSER_MORE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>`;
+const _SVG_BROWSER_PANEL = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>`;
+const _SVG_BROWSER_DEVICE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M11 18h2"/></svg>`;
+
+const BROWSER_VIEWPORT_PRESETS: BrowserViewportPreset[] = [
+  { name: 'desktop', label: 'Desktop' },
+  { name: 'desktop-small', label: 'Small', width: 1024, height: 768, mobile: false },
+  {
+    name: 'iphone',
+    label: 'iPhone',
+    width: 390,
+    height: 844,
+    mobile: true,
+    deviceScaleFactor: 3,
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+  },
+  {
+    name: 'ipad',
+    label: 'iPad',
+    width: 820,
+    height: 1180,
+    mobile: true,
+    deviceScaleFactor: 2,
+    userAgent: 'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+  },
+];
+
+const LANGUAGE_ENDPOINTS: Record<string, string> = {
+  completions: '/api/v1/workspace/language/completions',
+  hover: '/api/v1/workspace/language/hover',
+  definition: '/api/v1/workspace/language/definition',
+  diagnostics: '/api/v1/workspace/language/diagnostics',
+  'organize-imports': '/api/v1/workspace/language/organize-imports',
+};

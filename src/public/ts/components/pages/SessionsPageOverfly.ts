@@ -159,7 +159,7 @@ export class SessionsPageOverfly {
       row.style.cssText = 'display:flex;gap:8px;align-items:flex-start;padding:4px 0;font-size:11px;';
       const isExit = latestPlanBoundary.type === 'plan_exit';
       row.innerHTML = `
-        <span style="color:${isExit ? 'var(--cinema-text-muted)' : 'var(--color-accent-cinema)'}">${isExit ? '[done]' : '[active]'}</span>
+        <span style="color:${isExit ? 'var(--cinema-text-muted)' : 'var(--color-success)'}">${isExit ? '[done]' : '[active]'}</span>
         <span style="color:var(--cinema-text-overlay)">${_esc(isExit ? 'Plan mode exited' : (latestPlanBoundary.planTitle || latestPlanBoundary.content || 'Plan mode active'))}</span>
       `;
       overfly.appendChild(row);
@@ -171,7 +171,7 @@ export class SessionsPageOverfly {
       const status = String(todo.status || 'pending');
       const marker = status === 'completed' ? '[x]' : status === 'in_progress' ? '[~]' : '[ ]';
       row.innerHTML = `
-        <span style="color:${status === 'completed' ? 'var(--color-success)' : status === 'in_progress' ? 'var(--color-accent-cinema)' : 'var(--cinema-text-muted)'}">${marker}</span>
+        <span style="color:${status === 'completed' ? 'var(--color-success)' : status === 'in_progress' ? 'var(--color-warning, #ffc533)' : 'var(--cinema-text-muted)'}">${marker}</span>
         <span style="color:var(--cinema-text-overlay)">${_esc(String(todo.content || ''))}</span>
       `;
       overfly.appendChild(row);

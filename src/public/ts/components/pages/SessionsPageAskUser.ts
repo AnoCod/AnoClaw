@@ -1,7 +1,7 @@
 /**
  * AnoClaw Cinema — AskUserQuestion Interactive Card
  * Noticeable (user needs to see questions) but borderless cinema aesthetic.
- * Subtle purple surface lift, no hard border. Option buttons get purple accent.
+ * Raycast-like surface lift with a white primary confirmation affordance.
  */
 import type { Message } from '../../types.js';
 
@@ -16,8 +16,9 @@ export class AskUserQuestionCard {
     const wrapper = document.createElement('div');
     wrapper.style.cssText = `
       margin-bottom: 12px;
-      border-radius: 4px;
-      background: rgba(124,58,237,0.04);
+      border: 1px solid var(--color-hairline, #242728);
+      border-radius: 8px;
+      background: var(--color-surface, #0d0d0d);
       overflow: hidden;
     `;
     wrapper.setAttribute('data-tool-type', 'askuserquestion');
@@ -37,13 +38,13 @@ export class AskUserQuestionCard {
     header.style.cssText = `
       display: flex; align-items: center; gap: 8px;
       padding: 10px 14px;
-      font-size: 10px; color: rgba(167,139,250,0.35);
-      letter-spacing: 1px; text-transform: uppercase;
+      font-size: 10px; color: var(--color-text-secondary, #9c9c9d);
+      letter-spacing: 0.4px; text-transform: uppercase;
     `;
 
     // Dot
     const dot = document.createElement('span');
-    dot.style.cssText = `width:4px;height:4px;border-radius:50%;flex-shrink:0;background:rgba(167,139,250,0.4);`;
+    dot.style.cssText = `width:4px;height:4px;border-radius:50%;flex-shrink:0;background:var(--color-info, #57c1ff);`;
     header.appendChild(dot);
 
     const title = document.createElement('span');
@@ -93,8 +94,8 @@ export class AskUserQuestionCard {
         const hdr = document.createElement('div');
         hdr.style.cssText = `
           font-size: 10px; font-weight: 600;
-          color: rgba(167,139,250,0.4); text-transform: uppercase;
-          letter-spacing: 0.5px; margin-bottom: 4px;
+          color: var(--color-text-secondary, #9c9c9d); text-transform: uppercase;
+          letter-spacing: 0.4px; margin-bottom: 4px;
           display: flex; align-items: center; gap: 6px;
         `;
         hdr.textContent = q.header;
@@ -128,13 +129,15 @@ export class AskUserQuestionCard {
               if (selectedOptions.has(opt)) {
                 selectedOptions.delete(opt);
                 btn.removeAttribute('data-selected');
-                btn.style.background = 'rgba(124,58,237,0.08)';
-                btn.style.color = 'rgba(167,139,250,0.6)';
+                btn.style.background = 'var(--color-surface-elevated, #101111)';
+                btn.style.color = 'var(--color-text-secondary, #cdcdcd)';
+                btn.style.borderColor = 'var(--color-hairline, #242728)';
               } else {
                 selectedOptions.add(opt);
                 btn.setAttribute('data-selected', '1');
-                btn.style.background = 'rgba(124,58,237,0.2)';
-                btn.style.color = '#ffffff';
+                btn.style.background = '#fff';
+                btn.style.color = '#000';
+                btn.style.borderColor = '#fff';
               }
             });
             btnGroup.appendChild(btn);
@@ -143,7 +146,7 @@ export class AskUserQuestionCard {
           confirmBtn.textContent = 'Confirm';
           confirmBtn.style.cssText = `
             padding: 6px 16px; font-size: 12px; cursor: pointer;
-            border: none; background: #7c3aed; color: #fff;
+            border: 1px solid #fff; background: #fff; color: #000;
             border-radius: 4px; font-family: var(--font-sans); font-weight: 600;
           `;
           confirmBtn.addEventListener('click', () => {
@@ -223,8 +226,9 @@ export class AskUserQuestionCard {
     btn.style.cssText = `
       padding: 6px 14px; font-size: 12px; cursor: pointer;
       border: none; border-radius: 4px;
-      background: rgba(124,58,237,0.08);
-      color: rgba(167,139,250,0.6);
+      border: 1px solid var(--color-hairline, #242728);
+      background: var(--color-surface-elevated, #101111);
+      color: var(--color-text-secondary, #cdcdcd);
       font-family: var(--font-sans);
       transition: background 0.15s, color 0.15s;
     `;
@@ -235,13 +239,15 @@ export class AskUserQuestionCard {
       btn.addEventListener('click', onClick);
       btn.addEventListener('mouseenter', () => {
         if (btn.hasAttribute('data-selected')) return;
-        btn.style.background = 'rgba(124,58,237,0.15)';
-        btn.style.color = 'rgba(167,139,250,0.8)';
+        btn.style.background = 'var(--color-surface-card, #121212)';
+        btn.style.color = 'var(--color-text-primary, #fff)';
+        btn.style.borderColor = 'var(--color-hairline-strong, rgba(255,255,255,0.16))';
       });
       btn.addEventListener('mouseleave', () => {
         if (btn.hasAttribute('data-selected')) return;
-        btn.style.background = 'rgba(124,58,237,0.08)';
-        btn.style.color = 'rgba(167,139,250,0.6)';
+        btn.style.background = 'var(--color-surface-elevated, #101111)';
+        btn.style.color = 'var(--color-text-secondary, #cdcdcd)';
+        btn.style.borderColor = 'var(--color-hairline, #242728)';
       });
     }
     return btn;
@@ -284,8 +290,8 @@ export class AskUserQuestionCard {
     badge.style.cssText = `
       margin-left: auto; font-size: 10px;
       padding: 2px 8px; border-radius: 10px;
-      color: ${complete ? '#10b981' : 'rgba(167,139,250,0.5)'};
-      background: ${complete ? 'rgba(16,185,129,0.08)' : 'rgba(124,58,237,0.08)'};
+      color: ${complete ? 'var(--color-success, #59d499)' : 'var(--color-text-secondary, #cdcdcd)'};
+      background: ${complete ? 'var(--color-success-soft, rgba(89,212,153,0.15))' : 'var(--color-surface-elevated, #101111)'};
     `;
     return badge;
   }

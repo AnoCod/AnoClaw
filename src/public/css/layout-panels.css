@@ -85,9 +85,9 @@
 
 /* Primary — white pill, black text (Raycast signature) */
 .btn-primary {
-  background: var(--color-accent);
-  color: var(--color-on-accent);
-  border: 1px solid transparent;
+  background: var(--color-primary, #ffffff);
+  color: var(--color-on-primary, #000000);
+  border: 1px solid var(--color-primary, #ffffff);
 }
 
 /* Secondary — transparent with hairline */
@@ -124,11 +124,12 @@
 
 .dialog {
   background: var(--color-surface);
-  border-radius: var(--radius-xl);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
   padding: var(--space-xl);
   min-width: 360px;
   max-width: 480px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  box-shadow: none;
   display: flex;
   flex-direction: column;
   gap: var(--space-lg);
@@ -173,18 +174,19 @@
 
 .btn-dialog-confirm {
   padding: 8px 24px;
-  background: var(--color-accent);
-  border: none;
-  border-radius: var(--radius-sm);
-  color: var(--color-on-accent);
+  background: var(--color-primary, #ffffff);
+  border: 1px solid var(--color-primary, #ffffff);
+  border-radius: var(--radius-md);
+  color: var(--color-on-primary, #000000);
   cursor: pointer;
   font-size: var(--font-size-caption-md);
   font-weight: var(--font-weight-medium);
   font-family: inherit;
-  transition: opacity var(--transition-fast);
+  transition: background var(--transition-fast), border-color var(--transition-fast);
 }
 .btn-dialog-confirm:hover {
-  opacity: 0.85;
+  background: var(--color-primary-pressed, #e8e8e8);
+  border-color: var(--color-primary-pressed, #e8e8e8);
 }
 
 /* Dialog header with close button */
@@ -338,9 +340,10 @@
   position: absolute;
   cursor: pointer;
   inset: 0;
-  background: var(--color-surface-card);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-hairline);
   border-radius: 9999px;
-  transition: background 0.15s;
+  transition: background 0.15s, border-color 0.15s;
 }
 
 .toggle-slider::before {
@@ -356,12 +359,13 @@
 }
 
 .toggle-switch input:checked + .toggle-slider {
-  background: var(--color-accent);
+  background: var(--color-primary, #ffffff);
+  border-color: var(--color-primary, #ffffff);
 }
 
 .toggle-switch input:checked + .toggle-slider::before {
   transform: translateX(16px);
-  background: var(--color-on-accent);
+  background: var(--color-on-primary, #000000);
 }
 
 /* Range slider */
@@ -379,7 +383,7 @@ input[type="range"]::-webkit-slider-thumb {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: var(--color-accent);
+  background: var(--color-primary, #ffffff);
   cursor: pointer;
 }
 
@@ -509,12 +513,12 @@ input[type="range"]::-webkit-slider-thumb {
 
 .plg-status-dot.active {
   background: var(--color-success);
-  box-shadow: 0 0 4px var(--color-success);
+  box-shadow: none;
 }
 
 .plg-status-dot.error {
   background: var(--color-error);
-  box-shadow: 0 0 4px var(--color-error);
+  box-shadow: none;
 }
 
 /* Plugins page action buttons */
@@ -545,11 +549,11 @@ input[type="range"]::-webkit-slider-thumb {
 
 .plg-btn.busy {
   animation: plg-spin 0.8s linear infinite;
-  color: var(--color-accent);
+  color: var(--color-text-primary);
 }
 
 .plg-btn-toggle:hover {
-  color: var(--color-accent);
+  color: var(--color-text-primary);
 }
 
 .plg-btn-reload:hover {

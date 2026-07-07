@@ -54,6 +54,7 @@ describe('buildDefaultAgentConfigs', () => {
       'ApiCall',
       'office.create_pptx',
       'office.create_docx',
+      'office.analyze_spreadsheet',
     ]));
     expect(manager.allowedTools).toContain('TaskAssign');
     expect(manager.allowedTools).toContain('HireEmployee');

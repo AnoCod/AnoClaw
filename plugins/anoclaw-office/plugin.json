@@ -12,7 +12,8 @@
   "contributes": {
     "tools": [
       { "name": "office.create_pptx" },
-      { "name": "office.create_docx" }
+      { "name": "office.create_docx" },
+      { "name": "office.analyze_spreadsheet" }
     ],
     "capabilities": [
       {
@@ -67,6 +68,31 @@
         "artifactTypes": ["document", "docx"],
         "recommendedPlugins": ["anoclaw-office"],
         "priority": 96
+      },
+      {
+        "id": "spreadsheet.analyze",
+        "title": "Analyze a spreadsheet",
+        "description": "Analyze CSV, TSV, XLSX, or row data and generate an Excel workbook with a preview report.",
+        "domain": "data",
+        "kind": "analysis",
+        "triggers": ["spreadsheet", "excel", "xlsx", "csv", "table", "chart", "数据分析", "表格", "图表", "Excel分析"],
+        "examples": [
+          "把这个Excel做成图表并写分析",
+          "Analyze this CSV and create a workbook summary"
+        ],
+        "inputs": [
+          { "name": "filePath", "label": "Spreadsheet file", "type": "file", "required": false, "aliases": ["文件", "表格", "excel", "csv"] },
+          { "name": "csv", "label": "CSV data", "type": "string", "required": false, "aliases": ["数据", "内容"] },
+          { "name": "title", "label": "Title", "type": "string", "required": false, "defaultValue": "Spreadsheet analysis", "aliases": ["标题", "主题"] }
+        ],
+        "outputs": [
+          { "type": "file", "label": "Excel workbook", "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "extension": "xlsx", "artifactType": "spreadsheet" },
+          { "type": "preview", "label": "Markdown analysis", "mimeType": "text/markdown", "artifactType": "table_analysis" }
+        ],
+        "requiredTools": ["office.analyze_spreadsheet"],
+        "artifactTypes": ["spreadsheet", "table_analysis", "report"],
+        "recommendedPlugins": ["anoclaw-office"],
+        "priority": 94
       }
     ]
   }

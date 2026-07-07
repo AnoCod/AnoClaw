@@ -46,6 +46,7 @@ export const DEFAULT_CEO_TOOLS = [
   'ApiCall',
   'office.create_pptx',
   'office.create_docx',
+  'office.analyze_spreadsheet',
 ];
 
 export const DEFAULT_MANAGER_TOOLS = [

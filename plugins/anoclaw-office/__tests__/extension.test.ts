@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createDocumentArtifact, createPresentationArtifact } from '../extension.js';
+import { createDocumentArtifact, createPresentationArtifact, createSpreadsheetAnalysisArtifact } from '../extension.js';
 
 describe('anoclaw-office presentation tool', () => {
   let root: string;
@@ -122,6 +122,68 @@ describe('anoclaw-office presentation tool', () => {
     expect(result.ok).toBe(true);
     expect(result.preview).toContain('摘要');
     expect(result.preview).toContain('公司年终总结报告');
+    expect(result.preview).not.toMatch(/鈥|鍋|甯|绠|姒/);
+    const file = await fs.readFile(result.filePath);
+    expect(file.subarray(0, 2).toString()).toBe('PK');
+  });
+
+  it('creates a spreadsheet analysis workbook and registers an artifact', async () => {
+    const apiCall = vi.fn(async (_method: string, _path: string, body: Record<string, unknown>) => ({
+      body: {
+        artifact: {
+          id: 'sheet-art-test',
+          sessionId: body.sessionId,
+          title: body.title,
+        },
+      },
+    }));
+    const fakeApi = {
+      context: { storagePath: root },
+      api: { call: apiCall },
+    };
+
+    const result = await createSpreadsheetAnalysisArtifact({
+      title: 'Revenue analysis',
+      rows: [
+        { month: 'Jan', revenue: 120, cost: 70 },
+        { month: 'Feb', revenue: 180, cost: 90 },
+        { month: 'Mar', revenue: 150, cost: 80 },
+      ],
+    }, { sessionId: 'session-1', agentId: 'ceo', workspace: root }, fakeApi);
+
+    expect(result.ok).toBe(true);
+    expect(result.artifactId).toBe('sheet-art-test');
+    expect(result.rowCount).toBe(3);
+    expect(result.columnCount).toBe(3);
+    expect(result.numericColumns).toEqual(expect.arrayContaining(['revenue', 'cost']));
+    expect(result.preview).toContain('Revenue analysis');
+    expect(result.preview).toContain('150');
+    const file = await fs.readFile(result.filePath);
+    expect(file.subarray(0, 2).toString()).toBe('PK');
+    expect(apiCall).toHaveBeenCalledWith('POST', '/api/v1/artifacts', expect.objectContaining({
+      sessionId: 'session-1',
+      kind: 'spreadsheet',
+      status: 'done',
+      capabilityId: 'spreadsheet.analyze',
+      preview: expect.objectContaining({ type: 'markdown' }),
+    }));
+  });
+
+  it('analyzes Chinese CSV text without mojibake', async () => {
+    const fakeApi = {
+      context: { storagePath: root },
+    };
+
+    const result = await createSpreadsheetAnalysisArtifact({
+      title: '销售数据分析',
+      csv: '月份,销售额,成本\n一月,1200,800\n二月,1800,950\n三月,1500,900',
+    }, { sessionId: 'standalone', agentId: 'ceo', workspace: root }, fakeApi);
+
+    expect(result.ok).toBe(true);
+    expect(result.rowCount).toBe(3);
+    expect(result.preview).toContain('销售数据分析');
+    expect(result.preview).toContain('销售额');
+    expect(result.preview).toContain('1500');
     expect(result.preview).not.toMatch(/鈥|鍋|甯|绠|姒/);
     const file = await fs.readFile(result.filePath);
     expect(file.subarray(0, 2).toString()).toBe('PK');

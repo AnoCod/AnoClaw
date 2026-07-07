@@ -165,6 +165,33 @@ describe('TaskResolver', () => {
     expect(result.missingInputs).toEqual([]);
     expect(result.nextAction).toBe('execute_capability');
   });
+
+  it('routes spreadsheet analysis requests to the office spreadsheet capability', async () => {
+    ToolRegistry.getInstance().registerTool(new AnalyzeSpreadsheetFixtureTool(), 'Office', { source: 'plugin', pluginName: 'office' });
+    const registry = CapabilityRegistry.getInstance();
+    registry.registerRuntimeCapabilities('office', [
+      {
+        id: 'spreadsheet.analyze',
+        title: 'Analyze a spreadsheet',
+        domain: 'data',
+        kind: 'analysis',
+        triggers: ['excel', 'csv', '表格', '图表'],
+        inputs: [{ name: 'filePath', type: 'file', required: false }],
+        requiredTools: ['office.analyze_spreadsheet'],
+        outputs: [{ type: 'file', extension: 'xlsx', artifactType: 'spreadsheet' }],
+      },
+    ], { source: 'plugin', pluginName: 'office', pluginStatus: 'activated' });
+
+    const result = await new TaskResolver(registry).resolve({
+      message: '把这个 CSV 做成图表并写分析',
+      userMode: 'office',
+    });
+
+    expect(result.bestCapability?.id).toBe('spreadsheet.analyze');
+    expect(result.bestCapability?.source).toBe('plugin');
+    expect(result.missingInputs).toEqual([]);
+    expect(result.nextAction).toBe('execute_capability');
+  });
 });
 
 class CreatePptFixtureTool extends Tool {
@@ -194,6 +221,18 @@ class GenerateQrFixtureTool extends Tool {
 class CreateDocFixtureTool extends Tool {
   name(): string { return 'office.create_docx'; }
   description(): string { return 'Create a DOCX file.'; }
+  parametersSchema(): Record<string, unknown> {
+    return { type: 'object', properties: {}, required: [] };
+  }
+  riskLevel(): RiskLevel { return RiskLevel.Safe; }
+  async execute(_params: Record<string, unknown>, _ctx: ExecutionContext): Promise<ToolResult> {
+    return this.makeResult('ok');
+  }
+}
+
+class AnalyzeSpreadsheetFixtureTool extends Tool {
+  name(): string { return 'office.analyze_spreadsheet'; }
+  description(): string { return 'Analyze spreadsheet data.'; }
   parametersSchema(): Record<string, unknown> {
     return { type: 'object', properties: {}, required: [] };
   }

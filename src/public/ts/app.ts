@@ -23,11 +23,13 @@ import type { AppSettings, PluginPageContribution } from './types.js';
 import { ClientLogger } from './ClientLogger.js';
 import { initAnoClawAPI } from './anoclaw-api.js';
 import { localeDirection, normalizeLocale, setLocale } from './i18n/index.js';
+import { normalizeUserMode } from './userMode.js';
 
 const SETTINGS_KEY = 'anoclaw-settings';
 
 const DEFAULT_SETTINGS: AppSettings = {
   lang: 'zh-CN',
+  userMode: 'simple',
   showThinkCards: true,
   showToolCards: true,
   theme: 'dark',
@@ -332,6 +334,7 @@ class App {
       ...DEFAULT_SETTINGS,
       ...settings,
       lang: normalizeLocale((settings as { lang?: unknown }).lang),
+      userMode: normalizeUserMode((settings as { userMode?: unknown }).userMode),
       theme: settings.theme === 'light' ? 'light' : 'dark',
     };
   }

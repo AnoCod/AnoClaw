@@ -27,6 +27,7 @@ import { TaskDAG } from './TaskDAG.js';
 import { ExecutionPlan } from './ExecutionPlan.js';
 import { EventSubscriptionManager } from '../events/index.js';
 import { WsServer } from '../../infra/network/WsServer.js';
+import { SettingsManager } from '../../infra/storage/SettingsManager.js';
 import { buildTaskNotificationXML } from './TaskNotification.js';
 import {
   bubbleEventToParent,
@@ -430,8 +431,11 @@ export class AgentRuntime extends EventEmitter {
     if (session && !session.isRoot()) return null;
 
     try {
+      const settings = SettingsManager.getInstance();
       const result = await new TaskResolver().resolve({
         message: message.content,
+        userMode: settings.get<string>('ui.userMode', 'simple'),
+        locale: settings.get<string>('ui.lang', 'zh-CN'),
         includeUnavailable: true,
       });
       if (result.intent !== 'capability' || !result.bestCapability) return null;
@@ -1173,6 +1177,7 @@ function buildTaskResolutionContext(taskResolution: UserTaskResolution): string 
     `Capability title: ${capability.title}`,
     `Domain: ${capability.domain}`,
     `Kind: ${capability.kind || 'utility'}`,
+    `User mode: ${result.userMode}`,
     `Confidence: ${result.confidence.toFixed(2)}`,
     `Reason: ${result.reason}`,
   ];
@@ -1201,6 +1206,8 @@ function summarizeTaskResolution(result: TaskResolveResult): Record<string, unkn
   return {
     intent: result.intent,
     query: result.query,
+    userMode: result.userMode,
+    locale: result.locale,
     confidence: result.confidence,
     nextAction: result.nextAction,
     canStart: result.canStart,

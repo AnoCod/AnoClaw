@@ -11,6 +11,7 @@ import { ToastManager } from '../../ToastManager.js';
 import { slotRegistry } from '../../SlotRegistry.js';
 import { Toggle } from '../ui/Toggle.js';
 import { normalizeLocale, SUPPORTED_LOCALES, t } from '../../i18n/index.js';
+import { normalizeUserMode, USER_MODE_OPTIONS } from '../../userMode.js';
 
 const SVG_REVIEW = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18h8"/><path d="M3 22h18"/><path d="M14 22a7 7 0 0 0-7-7"/><path d="M10 14 21 3"/><path d="m21 3-4 12-7-5z"/></svg>`;
 
@@ -138,6 +139,11 @@ export class SettingsPage implements Page {
     const languageOptions = SUPPORTED_LOCALES.map((locale) =>
       `<option value="${locale.code}" ${currentLocale === locale.code ? 'selected' : ''}>${locale.nativeName}</option>`
     ).join('');
+    const currentUserMode = normalizeUserMode(s.userMode);
+    const userModeOptions = USER_MODE_OPTIONS.map((mode) =>
+      `<option value="${mode.value}" ${currentUserMode === mode.value ? 'selected' : ''}>${t(mode.labelKey)}</option>`
+    ).join('');
+    const modeDescription = USER_MODE_OPTIONS.find((mode) => mode.value === currentUserMode)?.descriptionKey || 'settings.userMode.simpleDesc';
 
     form.innerHTML = `
       <div class="cinema-section">
@@ -162,6 +168,18 @@ export class SettingsPage implements Page {
             <select name="lang" class="cinema-select" style="min-width:150px;">${languageOptions}</select>
           </label>
           <div style="font-size:10px;color:var(--color-cinema-text-muted);line-height:1.5;">${t('settings.languageHint')}</div>
+        </div>
+      </div>
+
+      <div class="cinema-section">
+        <div class="cinema-section-legend">${t('settings.userMode')}</div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <label style="display:flex;align-items:center;justify-content:space-between;gap:16px;">
+            <span style="font-size:12px;color:var(--color-cinema-text-secondary);">${t('settings.userMode.label')}</span>
+            <select name="userMode" class="cinema-select" style="min-width:170px;">${userModeOptions}</select>
+          </label>
+          <div id="user-mode-hint" style="font-size:10px;color:var(--color-cinema-text-muted);line-height:1.5;">${t(modeDescription)}</div>
+          <div style="font-size:10px;color:var(--color-cinema-text-muted);line-height:1.5;">${t('settings.userMode.hint')}</div>
         </div>
       </div>
 
@@ -314,12 +332,21 @@ export class SettingsPage implements Page {
     }
 
     // Bind events
+    const modeSelect = form.querySelector('select[name="userMode"]') as HTMLSelectElement | null;
+    const modeHint = form.querySelector('#user-mode-hint') as HTMLElement | null;
+    modeSelect?.addEventListener('change', () => {
+      const selected = normalizeUserMode(modeSelect.value);
+      const next = USER_MODE_OPTIONS.find((mode) => mode.value === selected);
+      if (modeHint && next) modeHint.textContent = t(next.descriptionKey);
+    });
+
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       console.log('[Settings] form submit — theme:', currentTheme, 'accent:', currentAccent);
       const fd = new FormData(form);
       const patch: Partial<AppSettings> = {
         lang: normalizeLocale(fd.get('lang')),
+        userMode: normalizeUserMode(fd.get('userMode')),
         theme: currentTheme,
         accentColor: currentAccent,
         showThinkCards: thinkToggle.checked,

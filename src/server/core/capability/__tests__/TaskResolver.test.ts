@@ -30,7 +30,50 @@ describe('TaskResolver', () => {
     });
 
     expect(result.intent).toBe('capability');
+    expect(result.userMode).toBe('simple');
     expect(result.bestCapability?.id).toBe('presentation.create');
+  });
+
+  it('uses office mode to prefer office capabilities when matches are otherwise close', async () => {
+    const registry = CapabilityRegistry.getInstance();
+    registry.setCatalogCapabilities([
+      {
+        id: 'web.report',
+        title: 'Research a report',
+        domain: 'web',
+        kind: 'knowledge',
+        triggers: ['report'],
+        priority: 100,
+      },
+      {
+        id: 'office.report',
+        title: 'Create an office report',
+        domain: 'office',
+        kind: 'artifact',
+        triggers: ['report'],
+        priority: 10,
+      },
+    ]);
+
+    const result = await new TaskResolver(registry).resolve({
+      message: 'make a report',
+      userMode: 'office',
+    });
+
+    expect(result.userMode).toBe('office');
+    expect(result.bestCapability?.id).toBe('office.report');
+  });
+
+  it('uses child mode to route learning requests to the education capability', async () => {
+    const result = await new TaskResolver().resolve({
+      message: '给我孩子讲一下这道数学题',
+      userMode: 'child',
+    });
+
+    expect(result.userMode).toBe('child');
+    expect(result.bestCapability?.id).toBe('education.explain');
+    expect(result.nextAction).toBe('recommend_plugin');
+    expect(result.recommendedPlugins).toContain('education');
   });
 
   it('prefers an available plugin capability over a catalog placeholder with the same id', async () => {

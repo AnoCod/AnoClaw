@@ -16,6 +16,8 @@ export type CapabilityKind =
   | 'memory'
   | 'utility';
 
+export type UserMode = 'simple' | 'office' | 'child' | 'professional';
+
 export interface CapabilityInputField {
   name: string;
   label?: string;
@@ -72,7 +74,7 @@ export interface CapabilityListFilters {
 
 export interface TaskResolveRequest {
   message: string;
-  userMode?: string;
+  userMode?: UserMode | string;
   locale?: string;
   includeUnavailable?: boolean;
 }
@@ -96,6 +98,8 @@ export type TaskResolveNextAction =
 export interface TaskResolveResult {
   intent: TaskResolveIntent;
   query: string;
+  userMode: UserMode;
+  locale?: string;
   confidence: number;
   nextAction: TaskResolveNextAction;
   canStart: boolean;

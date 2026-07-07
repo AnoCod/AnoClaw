@@ -12,6 +12,7 @@ import { LogManager } from '../../infra/logging/LogManager.js';
 
 const UI_DEFAULTS: Record<string, unknown> = {
   lang: 'zh-CN',
+  userMode: 'simple',
   theme: 'dark',
   accentColor: '#ffffff',
   showThinkCards: true,

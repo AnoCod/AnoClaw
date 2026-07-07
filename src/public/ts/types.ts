@@ -12,6 +12,8 @@
 
 import type { LocaleCode } from './i18n/index.js';
 
+export type UserMode = 'simple' | 'office' | 'child' | 'professional';
+
 export type MessageRole = 'user' | 'assistant' | 'system';
 
 export type MessageType =
@@ -270,6 +272,7 @@ export interface Page {
 
 export interface AppSettings {
   lang: LocaleCode;
+  userMode: UserMode;
   showThinkCards: boolean;
   showToolCards: boolean;
   theme: 'dark' | 'light';

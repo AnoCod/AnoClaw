@@ -130,6 +130,24 @@ export function createDefaultCapabilityCatalog(): CapabilityDefinition[] {
       priority: 60,
     },
     {
+      id: 'education.explain',
+      title: 'Explain a learning topic',
+      description: 'Explain homework, math problems, science concepts, or reading material with child-friendly guidance.',
+      domain: 'education',
+      kind: 'knowledge',
+      triggers: ['homework', 'math problem', 'explain to my child', 'teach', '作业', '数学题', '给孩子讲', '讲解', '辅导', '出题'],
+      inputs: [
+        { name: 'question', label: 'Question', type: 'string', required: false },
+        { name: 'childAge', label: 'Child age', type: 'number', required: false },
+      ],
+      outputs: [
+        { type: 'artifact', label: 'Learning explanation', artifactType: 'report' },
+      ],
+      requiredTools: ['education.explain'],
+      recommendedPlugins: ['education'],
+      priority: 58,
+    },
+    {
       id: 'memory.preference.save',
       title: 'Remember user preferences',
       description: 'Save durable preferences such as writing style, output format, family context, or work habits.',

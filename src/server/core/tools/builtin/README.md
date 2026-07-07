@@ -93,7 +93,7 @@ Reads files from the local filesystem or lists directories. Supports text, strea
 
 ### WriteTool — `Write`
 
-Writes content to a file. Overwrites existing files. Requires reading the file first if it already exists.
+Writes UTF-8 text content to a file. Creates parent directories when needed. Requires reading the file first if it already exists, and supports overwrite guards, SHA-256 stale-write checks, dry-run validation, and no-op detection.
 
 | Property | Value |
 |---|---|
@@ -105,6 +105,14 @@ Writes content to a file. Overwrites existing files. Requires reading the file f
 |---|---|---|---|
 | `file_path` | string | ✓ | Absolute path to the file |
 | `content` | string | ✓ | Content to write |
+| `create_only` | boolean | No | Fail if the target file already exists |
+| `expected_sha256` | string | No | Fail unless the current file has this SHA-256 hash |
+| `dry_run` | boolean | No | Validate the write without changing the filesystem |
+
+**Behavior notes:**
+- Refuses to write to directory paths, content containing NUL bytes, or existing binary files.
+- Returns structured metadata including created/overwritten/noOp/dryRun, byte counts, and SHA-256 hashes.
+- Skips the filesystem write when the existing file already matches the requested content.
 
 ---
 

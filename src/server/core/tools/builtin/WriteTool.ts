@@ -4,11 +4,15 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { createHash } from 'crypto';
 import { Tool } from '../Tool.js';
 import type { ToolResult } from '../../../../shared/types/tool.js';
 import { RiskLevel, InterruptBehavior } from '../../../../shared/types/tool.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
 import { atomicWriteFile, resolvePath } from './FileUtils.js';
+
+const SHA256_HEX_RE = /^[a-f0-9]{64}$/i;
+const BINARY_SAMPLE_BYTES = 4096;
 
 export class WriteTool extends Tool {
 
@@ -21,13 +25,17 @@ export class WriteTool extends Tool {
   description(): string {
     return 'Writes a file to the local filesystem. Create parent directories if needed.' +
       ' This tool will overwrite the existing file if there is one at the provided path.' +
-      ' If this is an existing file, you MUST read the file first.';
+      ' If this is an existing file, you MUST read the file first.' +
+      ' Supports create_only, expected_sha256, and dry_run safety checks.';
   }
 
   prompt(): string {
     return '## Write Usage\n' +
       '- Prefer Edit for modifying existing files - it only sends the diff\n' +
       '- Only use Write for new files or complete rewrites\n' +
+      '- Use create_only=true when creating a new file that must not overwrite anything\n' +
+      '- Use expected_sha256 after reading an existing file to guard against stale overwrites\n' +
+      '- Use dry_run=true to validate path and overwrite checks without writing\n' +
       '- NEVER create documentation files (*.md) or README files unless explicitly requested by the user\n' +
       '- Do not create planning, decision, or analysis documents unless asked';
   }
@@ -44,6 +52,18 @@ export class WriteTool extends Tool {
         content: {
           type: 'string',
           description: 'The content to write to the file',
+        },
+        create_only: {
+          type: 'boolean',
+          description: 'Fail if the target file already exists.',
+        },
+        expected_sha256: {
+          type: 'string',
+          description: 'Optional SHA-256 hash of the current file. Fails if the existing file has changed since it was read.',
+        },
+        dry_run: {
+          type: 'boolean',
+          description: 'Validate the write and return metadata without modifying the file.',
         },
       },
       required: ['file_path', 'content'],
@@ -71,7 +91,10 @@ export class WriteTool extends Tool {
     ctx: ExecutionContext,
   ): Promise<ToolResult> {
     const filePath = params.file_path as string;
-    const content = params.content as string;
+    const content = params.content;
+    const createOnly = params.create_only === true;
+    const dryRun = params.dry_run === true;
+    const expectedSha256 = normalizeExpectedSha256(params.expected_sha256);
 
     if (!filePath || typeof filePath !== 'string') {
       return this.makeError('file_path is required');
@@ -79,26 +102,135 @@ export class WriteTool extends Tool {
     if (content === undefined || content === null) {
       return this.makeError('content is required');
     }
+    if (typeof content !== 'string') {
+      return this.makeError('content must be a string');
+    }
+    if (content.includes('\u0000')) {
+      return this.makeError('Write supports UTF-8 text only; binary/NUL content is not supported');
+    }
+    if (expectedSha256 === null) {
+      return this.makeError('expected_sha256 must be a 64-character SHA-256 hex string');
+    }
+    if (createOnly && expectedSha256) {
+      return this.makeError('create_only and expected_sha256 cannot be used together');
+    }
 
     const startedAt = Date.now();
 
     try {
       const resolved = resolvePath(filePath, ctx.workspace);
 
-      // Check if file exists already - warn about overwriting with empty content
+      if (ctx.signal?.aborted) {
+        return this.makeError('Write cancelled by user before file validation started', { startedAt });
+      }
+
       let existed = false;
+      let previousBytes = 0;
+      let previousSha256: string | undefined;
+      let previousContent: string | undefined;
       try {
-        await fs.stat(resolved);
+        const stat = await fs.stat(resolved);
+        if (stat.isDirectory()) {
+          return this.makeError(`Cannot write file because target is a directory: ${resolved}`);
+        }
         existed = true;
-      } catch { /* file doesn't exist yet */ }
+        previousBytes = stat.size;
+        const currentBuffer = await fs.readFile(resolved);
+        previousSha256 = sha256(currentBuffer);
+        if (looksBinary(currentBuffer)) {
+          return this.makeError(`Refusing to overwrite binary file with Write: ${resolved}`, {
+            startedAt,
+            structured: {
+              existed,
+              previousBytes,
+              previousSha256,
+            },
+          });
+        }
+        previousContent = currentBuffer.toString('utf-8');
+      } catch (err: unknown) {
+        if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+          throw err;
+        }
+      }
+
+      if (createOnly && existed) {
+        return this.makeError(`Write refused: target already exists and create_only=true: ${resolved}`, {
+          startedAt,
+          structured: {
+            existed,
+            createOnly,
+            previousBytes,
+            previousSha256,
+          },
+        });
+      }
+
+      if (expectedSha256 && !existed) {
+        return this.makeError(`Write refused: expected_sha256 was provided but target does not exist: ${resolved}`, {
+          startedAt,
+          structured: {
+            existed,
+            expectedSha256,
+          },
+        });
+      }
+
+      if (expectedSha256 && previousSha256 !== expectedSha256) {
+        return this.makeError(
+          `Write refused: current file SHA-256 does not match expected_sha256 for ${resolved}. ` +
+          `Expected ${expectedSha256}, found ${previousSha256}. Re-read the file before overwriting.`,
+          {
+            startedAt,
+            structured: {
+              existed,
+              expectedSha256,
+              previousSha256,
+              previousBytes,
+            },
+          },
+        );
+      }
+
+      const bytes = Buffer.byteLength(content, 'utf-8');
+      const contentSha256 = sha256(Buffer.from(content, 'utf-8'));
+      const noOp = existed && previousContent === content;
+
+      const structured = {
+        created: !existed,
+        overwritten: existed && !noOp,
+        dryRun,
+        noOp,
+        chars: content.length,
+        bytes,
+        previousBytes: existed ? previousBytes : undefined,
+        sha256: contentSha256,
+        previousSha256,
+        createOnly,
+      };
+
+      if (dryRun) {
+        return this.makeResult(
+          `Dry run succeeded for ${resolved}: would ${existed ? (noOp ? 'leave unchanged' : 'overwrite') : 'create'} ` +
+          `${bytes} byte${bytes === 1 ? '' : 's'} (${content.length} chars)`,
+          { startedAt, structured },
+        );
+      }
+
+      if (noOp) {
+        return this.makeResult(
+          `No changes needed: ${resolved} already matches the provided content (${bytes} byte${bytes === 1 ? '' : 's'})`,
+          { startedAt, structured },
+        );
+      }
 
       await atomicWriteFile(resolved, content, 'utf-8');
 
-      let msg = `Successfully wrote ${content.length} chars to ${resolved}`;
+      let msg = `Successfully ${existed ? 'overwrote' : 'created'} ${resolved} with ${content.length} chars (${bytes} bytes)`;
       if (existed && content.length === 0) {
         msg += '\n[Warning: file was overwritten with empty content]';
       }
-      return this.makeResult(msg, { startedAt });
+      return this.makeResult(msg, { startedAt, structured });
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       return this.makeError(`Write failed: ${errMsg}`);
@@ -121,4 +253,26 @@ export class WriteTool extends Tool {
   getActivityDescription(_input?: Record<string, unknown>): string | null {
     return 'Writing file';
   }
+}
+
+function normalizeExpectedSha256(value: unknown): string | undefined | null {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  return SHA256_HEX_RE.test(normalized) ? normalized : null;
+}
+
+function sha256(data: Buffer): string {
+  return createHash('sha256').update(data).digest('hex');
+}
+
+function looksBinary(data: Buffer): boolean {
+  const sample = data.subarray(0, Math.min(BINARY_SAMPLE_BYTES, data.length));
+  if (sample.length === 0) return false;
+  if (sample.includes(0)) return true;
+  let suspicious = 0;
+  for (const byte of sample) {
+    if (byte < 7 || (byte > 14 && byte < 32)) suspicious++;
+  }
+  return suspicious / sample.length > 0.3;
 }

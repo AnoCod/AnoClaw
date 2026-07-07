@@ -652,18 +652,33 @@ Launches a browser automation agent for web interaction tasks. Supports navigati
 
 ### ApiCallTool — `ApiCall`
 
-Makes internal API calls to AnoClaw endpoints. Used for programmatic system operations.
+Makes bounded internal API calls to AnoClaw endpoints, with endpoint/tool discovery, structured status metadata, timeout feedback, and large-response preview envelopes.
 
 | Property | Value |
 |---|---|
 | Risk | `High` |
+| InterruptBehavior | `Cancel` |
+| Timeout | 15s default, configurable via `timeout_ms` |
 
 **Parameters:**
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `method` | string | ✓ | HTTP method (`GET`, `POST`, `PUT`, `DELETE`) |
-| `path` | string | ✓ | API path (e.g., `/api/v1/sessions`) |
-| `body` | object | | Request body for POST/PUT |
+| `action` | string | | `call`, `discover`, or `tools`; defaults to `call`, or `discover` when only `search` is provided |
+| `method` | string | | HTTP method (`GET`, `POST`, `PATCH`, `PUT`, `DELETE`); default `GET` |
+| `path` | string | | API path or template, e.g. `/api/v1/agents/:id` |
+| `params` | object | | Path params for `:placeholders` |
+| `query` | object | | Query string values; strings, numbers, booleans, arrays, null, or undefined |
+| `body` | object | | JSON body for non-GET `call` requests |
+| `search` | string | | Search text for endpoint/tool discovery |
+| `category` | string | | Endpoint category filter for `discover` |
+| `group` | string | | Tool group/category filter for `tools` |
+| `source` | string | | Tool source filter: `builtin`, `plugin`, `external` |
+| `risk` | string | | Tool risk filter |
+| `readOnly` | boolean | | Read-only tool filter |
+| `detail` | boolean | | Include tool parameter schemas |
+| `limit` | number | | Discovery result limit; endpoints max 200, tools max 500 |
+| `timeout_ms` | number | | Internal API timeout, default 15000, max 60000 |
+| `max_response_chars` | number | | Max response chars before returning a JSON preview envelope, default 16000, max 100000 |
 
 ---
 

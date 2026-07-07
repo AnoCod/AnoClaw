@@ -31,6 +31,8 @@ describe('ApiCallTool', () => {
     ToolRegistry.getInstance().registerTool(new MemorySearchFixtureTool(), 'memory');
     tool = new ApiCallTool();
 
+    api.registerRoute(new LargePayloadRoute());
+    api.registerRoute(new SlowRoute());
     api.registerRoute(new ItemDetailRoute());
     api.registerRoute(new ItemUpdateRoute());
     api.registerRoute(new ToolsListRoute());
@@ -188,6 +190,76 @@ describe('ApiCallTool', () => {
     expect(result.success).toBe(false);
     expect(result.errorMessage).toBe('Missing path params: id');
   });
+
+  it('rejects ambiguous or unsafe request shapes instead of silently coercing them', async () => {
+    await expectFailure(
+      { action: 'unknown', path: '/api/v1/items/:id', params: { id: 'item-1' } },
+      'Unsupported action "unknown". Use call, discover, or tools.',
+    );
+    await expectFailure(
+      { path: 'https://example.test/api/v1/items/item-1' },
+      'Only /api/ paths are allowed',
+    );
+    await expectFailure(
+      { path: '/api/v1/items/:id', params: { id: ['bad'] } },
+      'params.id must be a string, number, boolean, null, or undefined',
+    );
+    await expectFailure(
+      { path: '/api/v1/items/:id', params: { id: 'item-1' }, query: { nested: { nope: true } } },
+      'query.nested must be a string, number, boolean, array, null, or undefined',
+    );
+    await expectFailure(
+      { path: '/api/v1/items/:id', params: { id: 'item-1' }, body: { ignored: true } },
+      'body is not supported for GET requests; use query instead',
+    );
+
+    async function expectFailure(input: Record<string, unknown>, message: string): Promise<void> {
+      const result = await tool.execute(input, ctx);
+      expect(result.success).toBe(false);
+      expect(result.errorMessage).toBe(message);
+      expect(result.structured).toMatchObject({ status: 'invalid_request' });
+    }
+  });
+
+  it('returns a bounded JSON preview envelope for oversized responses', async () => {
+    const result = await tool.execute({
+      path: '/api/v1/items/large',
+      max_response_chars: 500,
+    }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.wasTruncated).toBe(true);
+    const body = JSON.parse(result.content) as {
+      _truncated: boolean;
+      responseChars: number;
+      maxResponseChars: number;
+      preview: string;
+    };
+    expect(body._truncated).toBe(true);
+    expect(body.responseChars).toBeGreaterThan(500);
+    expect(body.maxResponseChars).toBe(500);
+    expect(body.preview).toContain('ApiCall response truncated');
+    expect(result.structured).toMatchObject({
+      path: '/api/v1/items/large',
+      wasTruncated: true,
+      maxResponseChars: 500,
+    });
+  });
+
+  it('times out stalled internal routes with structured feedback', async () => {
+    const result = await tool.execute({
+      path: '/api/v1/items/slow',
+      timeout_ms: 100,
+    }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.errorMessage).toContain('ApiCall timed out after 100ms');
+    expect(result.structured).toMatchObject({
+      path: '/api/v1/items/slow',
+      status: 'timeout',
+      timeoutMs: 100,
+    });
+  });
 });
 
 class ItemDetailRoute implements RouteHandler {
@@ -228,6 +300,45 @@ class ItemUpdateRoute implements RouteHandler {
   ): Promise<boolean> {
     const body = await readBody(req);
     sendJson(res, 200, { updated: true, id: match.params.id, body });
+    return true;
+  }
+}
+
+class LargePayloadRoute implements RouteHandler {
+  method = 'GET' as const;
+  path = '/api/v1/items/large';
+  description = 'Read large payload';
+  category = 'Items';
+
+  handle(
+    _match: RouteMatch,
+    _req: IncomingMessage,
+    res: ServerResponse,
+    _token: ApiToken | null,
+  ): boolean {
+    sendJson(res, 200, {
+      id: 'large',
+      data: 'x'.repeat(5000),
+      tail: 'large payload tail',
+    });
+    return true;
+  }
+}
+
+class SlowRoute implements RouteHandler {
+  method = 'GET' as const;
+  path = '/api/v1/items/slow';
+  description = 'Slow item detail';
+  category = 'Items';
+
+  async handle(
+    _match: RouteMatch,
+    _req: IncomingMessage,
+    res: ServerResponse,
+    _token: ApiToken | null,
+  ): Promise<boolean> {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    sendJson(res, 200, { ok: true });
     return true;
   }
 }

@@ -71,13 +71,15 @@ Executes shell commands in a sandboxed environment.
 
 ### ReadTool — `Read`
 
-Reads files from the local filesystem. Supports text, images (PNG/JPG), PDFs (with page ranges), and Jupyter notebooks (`.ipynb`).
+Reads files from the local filesystem or lists directories. Supports text, streamed line ranges for large files, image/binary summaries, and PDF text extraction with page ranges.
 
 | Property | Value |
 |---|---|
 | Risk | `Safe` |
 | Output limit | 80000 chars |
-| Max file size | 256 KB |
+| Full text read limit | 256 KB (larger files require `offset`/`limit`) |
+| Directory list limit | 500 entries |
+| PDF default | First 10 pages unless `pages` is provided |
 
 **Parameters:**
 | Name | Type | Required | Description |

@@ -1,9 +1,11 @@
 // ReadTool - reads a file from the local filesystem
-// Supports offset/limit for partial reads, images, PDFs, and Jupyter notebooks.
+// Supports offset/limit for partial reads, images, binary summaries, and PDFs.
 // Based on Claude Code's FileReadTool pattern.
 
 import * as fs from 'fs/promises';
+import { createReadStream } from 'fs';
 import * as path from 'path';
+import { createInterface } from 'readline';
 import { Tool } from '../Tool.js';
 import { RiskLevel, InterruptBehavior } from '../../../../shared/types/tool.js';
 import type { ToolResult } from '../../../../shared/types/tool.js';
@@ -14,6 +16,10 @@ const MAX_SIZE_BYTES = 256 * 1024;
 
 /** Maximum character output for text files. */
 const MAX_OUTPUT_CHARS = 80000;
+const MAX_DIRECTORY_ENTRIES = 500;
+const BINARY_SAMPLE_BYTES = 4096;
+const DEFAULT_PDF_MAX_PAGES = 10;
+const MAX_PDF_SELECTED_PAGES = 50;
 
 export class ReadTool extends Tool {
 
@@ -24,7 +30,7 @@ export class ReadTool extends Tool {
   }
 
   description(): string {
-    return 'Read a local file or list a directory. Use offset and limit for large files. Prefer this over shell commands for file inspection.';
+    return 'Read a local file, extract text from PDF pages, or list a directory. Use offset and limit for large text files. Prefer this over shell commands for file inspection.';
   }
 
   prompt(): string {
@@ -33,6 +39,7 @@ export class ReadTool extends Tool {
       'Use Read to inspect files before proposing or making changes.',
       'Read only relevant files and avoid rereading unchanged content in the same turn.',
       'For large files, use offset and limit to inspect the relevant region.',
+      'For PDFs, use pages such as "1-3,5" to extract specific page text.',
     ].join('\n');
   }
 
@@ -58,7 +65,7 @@ export class ReadTool extends Tool {
         pages: {
           type: 'string',
           description:
-            'NOT YET IMPLEMENTED. Page range for PDF files (e.g., "1-5", "3", "10-20"). This parameter is accepted but has no effect - PDF parsing is not currently supported.',
+            'Page range for PDF files (e.g., "1-5", "3", "10-20"). Defaults to the first pages.',
         },
       },
       required: ['file_path'],
@@ -122,25 +129,30 @@ export class ReadTool extends Tool {
       }
 
       if (stat.isDirectory()) {
-        // List directory contents instead
-        const entries = await fs.readdir(resolved);
-        const content = entries.length > 0
-          ? entries.join('\n')
-          : '(empty directory)';
-        return this.makeResult(content, { startedAt });
+        const listing = await listDirectory(resolved, ctx.signal);
+        return this.makeResult(listing.content, { startedAt, wasTruncated: listing.wasTruncated });
       }
 
-      // Check file size
-      if (stat.size > MAX_SIZE_BYTES && !offset && !limit && !pages) {
-        const sizeStr = formatBytes(stat.size);
-        const maxStr = formatBytes(MAX_SIZE_BYTES);
-        return this.makeError(
-          `File is too large (${sizeStr}). Max size is ${maxStr}. Use offset/limit to read a portion.`
-        );
+      if (ctx.signal?.aborted) {
+        return this.makeError('Read cancelled by user before file read started', { startedAt });
       }
 
       // Handle different file types
       const ext = path.extname(resolved).toLowerCase();
+
+      if (ext === '.pdf') {
+        const pdf = await readPdfText(resolved, pages, ctx.signal);
+        return this.makeResult(pdf.content, {
+          startedAt,
+          wasTruncated: pdf.wasTruncated,
+          structured: {
+            pageCount: pdf.pageCount,
+            selectedPages: pdf.selectedPages,
+            truncatedByPages: pdf.truncatedByPages,
+            truncatedByChars: pdf.truncatedByChars,
+          },
+        });
+      }
 
       // Image files - note that we've read them but can't render inline here
       if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'].includes(ext)) {
@@ -148,6 +160,38 @@ export class ReadTool extends Tool {
           `[Image file: ${path.basename(resolved)}]\nSize: ${formatBytes(stat.size)}\nPath: ${resolved}`,
           { startedAt }
         );
+      }
+
+      if (await looksBinary(resolved)) {
+        return this.makeResult(
+          `[Binary file: ${path.basename(resolved)}]\nSize: ${formatBytes(stat.size)}\nPath: ${resolved}`,
+          { startedAt }
+        );
+      }
+
+      // Check file size for full reads. Line ranges are streamed below.
+      if (stat.size > MAX_SIZE_BYTES && offset === undefined && limit === undefined) {
+        const sizeStr = formatBytes(stat.size);
+        const maxStr = formatBytes(MAX_SIZE_BYTES);
+        return this.makeError(
+          `File is too large (${sizeStr}). Max size is ${maxStr}. Use offset/limit to read a portion.`
+        );
+      }
+
+      if (offset !== undefined || limit !== undefined) {
+        const range = await readTextLineRange(resolved, offset, limit, ctx.signal);
+        const wasTruncated = range.wasTruncated || range.content.length > MAX_OUTPUT_CHARS;
+        return this.makeResult(range.content, {
+          startedAt,
+          wasTruncated,
+          structured: {
+            lineStart: range.lineStart,
+            lineEnd: range.lineEnd,
+            linesRead: range.linesRead,
+            truncatedByLimit: range.truncatedByLimit,
+            truncatedByChars: range.truncatedByChars,
+          },
+        });
       }
 
       // Read as text
@@ -160,16 +204,6 @@ export class ReadTool extends Tool {
           `[Binary file: ${path.basename(resolved)}]\nSize: ${formatBytes(stat.size)}`,
           { startedAt }
         );
-      }
-
-      // Apply line-based offset/limit
-      if (offset !== undefined || limit !== undefined) {
-        const lines = content.split('\n');
-        const start = Math.max(1, offset ?? 1) - 1;
-        const end = limit !== undefined
-          ? Math.min(lines.length, start + limit)
-          : lines.length;
-        content = lines.slice(start, end).join('\n');
       }
 
       // Apply character limit - pipeline normalizes via outputLimit: 80000
@@ -208,4 +242,274 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function listDirectory(
+  dirPath: string,
+  signal?: AbortSignal,
+): Promise<{ content: string; wasTruncated: boolean }> {
+  if (signal?.aborted) throw new Error('Read cancelled by user');
+  const entries = await fs.readdir(dirPath, { withFileTypes: true });
+  entries.sort((a, b) => {
+    if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  const visible = entries.slice(0, MAX_DIRECTORY_ENTRIES);
+  const lines = [
+    `Directory: ${dirPath}`,
+    `Entries: ${entries.length}${entries.length > MAX_DIRECTORY_ENTRIES ? ` (showing first ${MAX_DIRECTORY_ENTRIES})` : ''}`,
+    '',
+  ];
+
+  for (const entry of visible) {
+    if (signal?.aborted) throw new Error('Read cancelled by user');
+    const fullPath = path.join(dirPath, entry.name);
+    let size = '';
+    let modified = '';
+    try {
+      const stat = await fs.stat(fullPath);
+      size = entry.isDirectory() ? '<DIR>' : formatBytes(stat.size);
+      modified = stat.mtime.toISOString();
+    } catch {
+      size = '?';
+    }
+    const suffix = entry.isDirectory() ? '/' : '';
+    lines.push(`${entry.isDirectory() ? 'd' : 'f'}  ${size.padStart(10)}  ${modified}  ${entry.name}${suffix}`);
+  }
+
+  if (entries.length === 0) lines.push('(empty directory)');
+  if (entries.length > MAX_DIRECTORY_ENTRIES) {
+    lines.push('', `... ${entries.length - MAX_DIRECTORY_ENTRIES} more entries omitted. Use Glob for filtered file discovery.`);
+  }
+  return {
+    content: lines.join('\n').trimEnd(),
+    wasTruncated: entries.length > MAX_DIRECTORY_ENTRIES,
+  };
+}
+
+async function looksBinary(filePath: string): Promise<boolean> {
+  const handle = await fs.open(filePath, 'r');
+  try {
+    const buffer = Buffer.alloc(BINARY_SAMPLE_BYTES);
+    const { bytesRead } = await handle.read(buffer, 0, BINARY_SAMPLE_BYTES, 0);
+    if (bytesRead === 0) return false;
+    const sample = buffer.subarray(0, bytesRead);
+    if (sample.includes(0)) return true;
+    let suspicious = 0;
+    for (const byte of sample) {
+      if (byte < 7 || (byte > 14 && byte < 32)) suspicious++;
+    }
+    return suspicious / sample.length > 0.3;
+  } finally {
+    await handle.close();
+  }
+}
+
+interface TextRangeResult {
+  content: string;
+  lineStart: number;
+  lineEnd: number;
+  linesRead: number;
+  wasTruncated: boolean;
+  truncatedByLimit: boolean;
+  truncatedByChars: boolean;
+}
+
+async function readTextLineRange(
+  filePath: string,
+  offset: number | undefined,
+  limit: number | undefined,
+  signal?: AbortSignal,
+): Promise<TextRangeResult> {
+  const startLine = clampPositiveInt(offset, 1);
+  const maxLines = limit === undefined ? undefined : clampPositiveInt(limit, 1);
+  const endLine = maxLines === undefined ? Number.POSITIVE_INFINITY : startLine + maxLines - 1;
+  const lines: string[] = [];
+  let currentLine = 0;
+  let collectedChars = 0;
+  let truncatedByLimit = false;
+  let truncatedByChars = false;
+
+  const stream = createReadStream(filePath, { encoding: 'utf-8' });
+  const rl = createInterface({ input: stream, crlfDelay: Infinity });
+  const abort = () => {
+    rl.close();
+    stream.destroy(new Error('Read cancelled by user'));
+  };
+
+  if (signal?.aborted) abort();
+  signal?.addEventListener('abort', abort, { once: true });
+  try {
+    for await (const line of rl) {
+      if (signal?.aborted) throw new Error('Read cancelled by user');
+      currentLine++;
+      if (currentLine < startLine) continue;
+      if (currentLine > endLine) {
+        truncatedByLimit = true;
+        break;
+      }
+      lines.push(line);
+      collectedChars += line.length + (lines.length > 1 ? 1 : 0);
+      if (collectedChars > MAX_OUTPUT_CHARS) {
+        truncatedByChars = true;
+        break;
+      }
+    }
+  } finally {
+    signal?.removeEventListener('abort', abort);
+    rl.close();
+    stream.destroy();
+  }
+
+  const content = lines.join('\n');
+  const actualEnd = lines.length > 0 ? startLine + lines.length - 1 : startLine - 1;
+  return {
+    content: content || '(no content in requested range)',
+    lineStart: startLine,
+    lineEnd: actualEnd,
+    linesRead: lines.length,
+    wasTruncated: truncatedByLimit || truncatedByChars,
+    truncatedByLimit,
+    truncatedByChars,
+  };
+}
+
+interface PdfReadResult {
+  content: string;
+  pageCount: number;
+  selectedPages: number[];
+  wasTruncated: boolean;
+  truncatedByPages: boolean;
+  truncatedByChars: boolean;
+}
+
+async function readPdfText(
+  filePath: string,
+  pagesSpec?: string,
+  signal?: AbortSignal,
+): Promise<PdfReadResult> {
+  if (signal?.aborted) throw new Error('Read cancelled by user');
+  const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const buffer = await fs.readFile(filePath);
+  const loadingTask = (getDocument as any)({
+    data: new Uint8Array(buffer),
+    disableWorker: true,
+    useSystemFonts: true,
+  });
+  const pdf = await loadingTask.promise;
+  try {
+    const selectedPages = selectPdfPages({
+      spec: pagesSpec,
+      pageCount: pdf.numPages,
+      maxPages: pagesSpec ? MAX_PDF_SELECTED_PAGES : DEFAULT_PDF_MAX_PAGES,
+    });
+    if (selectedPages.length === 0) {
+      throw new Error(`No valid PDF pages selected. Use a range within 1-${pdf.numPages}.`);
+    }
+
+    const lines = [
+      `PDF: ${filePath}`,
+      `Total pages: ${pdf.numPages}`,
+      `Selected pages: ${selectedPages.join(', ')}`,
+      '',
+    ];
+    let totalChars = 0;
+    let truncatedByChars = false;
+    for (const pageNumber of selectedPages) {
+      if (signal?.aborted) throw new Error('Read cancelled by user');
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const text = textContentToString(content);
+      const pageBlock = [`--- Page ${pageNumber} ---`, text || '(no extractable text on this page)', ''].join('\n');
+      const remaining = MAX_OUTPUT_CHARS - totalChars;
+      if (remaining <= 0) {
+        truncatedByChars = true;
+        break;
+      }
+      const nextBlock = pageBlock.length > remaining ? pageBlock.slice(0, remaining) : pageBlock;
+      if (pageBlock.length > remaining) truncatedByChars = true;
+      lines.push(nextBlock.trimEnd(), '');
+      totalChars += nextBlock.length;
+      if (truncatedByChars) break;
+    }
+
+    const truncatedByPages = !pagesSpec && pdf.numPages > selectedPages.length;
+    if (truncatedByPages) {
+      lines.push(`... ${pdf.numPages - selectedPages.length} more pages omitted. Pass pages to read a specific range.`);
+    }
+    if (truncatedByChars) {
+      lines.push('... PDF text truncated at the Read output limit.');
+    }
+
+    return {
+      content: lines.join('\n').trimEnd(),
+      pageCount: pdf.numPages,
+      selectedPages,
+      wasTruncated: truncatedByPages || truncatedByChars,
+      truncatedByPages,
+      truncatedByChars,
+    };
+  } finally {
+    await pdf.destroy();
+  }
+}
+
+function textContentToString(content: any): string {
+  const lines: string[] = [];
+  let current = '';
+  for (const item of content.items || []) {
+    const text = typeof item?.str === 'string' ? item.str.trim() : '';
+    if (!text) continue;
+    current += current ? ` ${text}` : text;
+    if (item.hasEOL) {
+      lines.push(current);
+      current = '';
+    }
+  }
+  if (current) lines.push(current);
+  return lines.join('\n').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function selectPdfPages({
+  spec,
+  pageCount,
+  maxPages,
+}: {
+  spec?: string;
+  pageCount: number;
+  maxPages: number;
+}): number[] {
+  if (!spec) {
+    const count = Math.min(pageCount, maxPages);
+    return Array.from({ length: count }, (_unused, index) => index + 1);
+  }
+
+  const selected = new Set<number>();
+  for (const rawPart of spec.split(',')) {
+    const part = rawPart.trim();
+    if (!part) continue;
+    const range = part.match(/^(\d+)\s*-\s*(\d+)$/);
+    if (range) {
+      const start = clamp(Number(range[1]), 1, pageCount);
+      const end = clamp(Number(range[2]), 1, pageCount);
+      for (let page = Math.min(start, end); page <= Math.max(start, end); page++) {
+        selected.add(page);
+      }
+      continue;
+    }
+    const page = Number(part);
+    if (Number.isInteger(page) && page >= 1 && page <= pageCount) selected.add(page);
+  }
+
+  return Array.from(selected).sort((a, b) => a - b).slice(0, maxPages);
+}
+
+function clampPositiveInt(value: number | undefined, fallback: number): number {
+  if (!Number.isFinite(value) || !value || value < 1) return fallback;
+  return Math.floor(value);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.floor(value)));
 }

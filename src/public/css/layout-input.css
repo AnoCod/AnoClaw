@@ -1,8 +1,6 @@
-﻿/* AnoClaw Layout Input 鈥?Mode selector, conversation panel, tab panel,
-   input composer, attachments bar, send/stop buttons, context ring,
-   and context tooltip. */
+﻿
 
-/* Mode Selector 鈥?dropdown menu (trigger uses cinema-tool-btn) */
+
 
 .mode-dropdown {
   position: fixed;
@@ -128,9 +126,7 @@
   left: 18px;
 }
 
-/* ========================================
-   Conversation Panel 鈥?header + toggle buttons
-   ======================================== */
+
 
 .conversation-panel {
   display: flex;
@@ -178,9 +174,7 @@
   opacity: 0.4;
 }
 
-/* ========================================
-   Tab Panel 鈥?right-side container
-   ======================================== */
+
 
 .tab-bar {
   display: flex;
@@ -199,7 +193,7 @@
   position: relative;
 }
 
-/* Tab button 鈥?underline style (distinct from session pill tabs) */
+
 .tab-panel-tab {
   display: flex;
   align-items: center;
@@ -244,9 +238,7 @@
   background: rgba(255,255,255,0.1);
 }
 
-/* ========================================
-   Input Panel 鈥?message composer
-   ======================================== */
+
 
 .input-panel-row {
   display: flex;

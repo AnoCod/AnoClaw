@@ -1,8 +1,4 @@
-﻿/**
- * ModeSelector 鈥?Mode selection button + dropdown menu component
- * Extracted from InputPanel, independently manages input mode (Ask / Auto-Edit / Plan / Auto) and Effort toggle.
- * Dropdown menu renders on body and auto-closes on outside click.
- */
+﻿
 
 import type { GoalState, InputMode } from './types.js';
 import { ClientLogger } from '../../ClientLogger.js';
@@ -28,7 +24,7 @@ export class ModeSelector {
     this.element = this._buildButton();
   }
 
-  // 鈹€鈹€ Public API 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+
 
   getMode(): InputMode {
     return this.mode;
@@ -54,7 +50,7 @@ export class ModeSelector {
     if (emit && this.onEffortChange) this.onEffortChange(enabled);
   }
 
-  // 鈹€鈹€ Button build 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+
 
   private _buildButton(): HTMLButtonElement {
     const btn = document.createElement('button');
@@ -88,7 +84,7 @@ export class ModeSelector {
     b.appendChild(arrow);
   }
 
-  // 鈹€鈹€ Dropdown menu 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+
 
   private _toggleDropdown(): void {
     if (this.dropdown) {

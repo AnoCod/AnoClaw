@@ -1,4 +1,4 @@
-﻿// BrowserViewManager 鈥?singleton registry for Electron WebContentsView instances.
+﻿
 // Shared between main.ts IPC handlers and BrowserAgentTool so the agent tool
 // can control browser tabs directly through webContents APIs instead of CDP.
 //
@@ -45,7 +45,7 @@ export class BrowserViewManager {
 
   private constructor() {}
 
-  // 鈹€鈹€ CRUD 鈹€鈹€
+
 
   create(url: string): string {
     if (this._views.size >= this._maxViews) {
@@ -141,7 +141,7 @@ export class BrowserViewManager {
   /** Set the maximum number of concurrent views. */
   setMaxViews(n: number): void { this._maxViews = n; }
 
-  // 鈹€鈹€ Navigation 鈹€鈹€
+
 
   navigate(viewId: string, url: string): void {
     const view = this.get(viewId);
@@ -153,7 +153,7 @@ export class BrowserViewManager {
   goBack(viewId: string): void { this.get(viewId)?.webContents.navigationHistory?.goBack(); }
   goForward(viewId: string): void { this.get(viewId)?.webContents.navigationHistory?.goForward(); }
 
-  // 鈹€鈹€ JS execution 鈹€鈹€
+
 
   async execJs(viewId: string, code: string): Promise<any> {
     const view = this.get(viewId);
@@ -166,7 +166,7 @@ export class BrowserViewManager {
     view.webContents.sendInputEvent(event as any);
   }
 
-  // 鈹€鈹€ Screenshot 鈹€鈹€
+
 
   async screenshot(viewId: string): Promise<string> {
     const view = this.get(viewId);
@@ -183,7 +183,7 @@ export class BrowserViewManager {
     mainWin.webContents.send('agent-browser-event', event);
   }
 
-  // 鈹€鈹€ Info 鈹€鈹€
+
 
   getUrl(viewId: string): string {
     try { return this.get(viewId)?.webContents.getURL() || ''; } catch { return ''; }
@@ -193,7 +193,7 @@ export class BrowserViewManager {
     try { return this.get(viewId)?.webContents.getTitle() || ''; } catch { return ''; }
   }
 
-  // 鈹€鈹€ Waiting 鈹€鈹€
+
 
   /** Wait for the page to finish loading. */
   waitForLoad(viewId: string, timeoutMs = 15000): Promise<void> {
@@ -225,7 +225,7 @@ export class BrowserViewManager {
     throw new Error(`Timeout waiting for selector: ${selector}`);
   }
 
-  // 鈹€鈹€ Private 鈹€鈹€
+
 
   private _emit(viewId: string, type: string, extra?: Record<string, unknown>): void {
     const mainWin = this._getMainWindow?.() ?? null;

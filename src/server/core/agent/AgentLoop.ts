@@ -1,11 +1,11 @@
-﻿// AgentLoop 鈥?ReAct loop, the core execution engine
-// Replicates patterns from anochat/agent.js runAgent() 鈥?the reference Claude Code implementation.
+﻿
+
 //
 // KEY PATTERNS FROM REFERENCE:
 // 1. Generator-based loop: yield SSE events, consumer iterates
 // 2. SSE event types: 'think', 'text', 'tool_call', 'tool_result', 'done', 'sleep', 'wake'
-// 3. Retry: 429/503/529 鈫?exponential backoff (1s,2s,4s,8s, max 60s), max 10 retries
-// 4. Context overflow detection: >70% of context window 鈫?trigger compaction
+
+
 // 5. Tool result compression before injecting into conversation
 // 6. Interrupt behavior: check AbortSignal before each LLM call
 // 7. StallDetector: 5 consecutive no-tool turns, 3 consecutive same-tool failures, >50 tools/turn
@@ -54,7 +54,7 @@ import { ConfirmationRegistry } from './ConfirmationRegistry.js';
 import { WsServer } from '../../infra/network/WsServer.js';
 import { RiskLevel } from '../../../shared/types/tool.js';
 
-// 鈹€鈹€ AgentLoopConfig 鈹€鈹€
+
 
 export interface AgentLoopConfig {
   maxTurns: number;
@@ -66,21 +66,9 @@ export interface AgentLoopConfig {
   effort?: string;
 }
 
-// 鈹€鈹€ AgentLoop 鈹€鈹€
 
-/**
- * AgentLoop 鈥?ReAct loop execution engine
- *
- * Each AgentLoop instance is bound to a single (agentId, sessionId) pair.
- * run() returns an AsyncGenerator that yields SSE events one by one:
- * think / text / tool_call / tool_result / done / error.
- *
- * Core flow:
- *   1. Assemble system prompt + history messages + user message
- *   2. Load the agent's allowed tool list
- *   3. ReAct loop: LLM call 鈫?tool execution 鈫?append results 鈫?next turn
- *   4. Built-in: retry (exponential backoff), context compression, stall detection, memory extraction
- */
+
+
 
 export class AgentLoop {
   readonly agentId: string;
@@ -110,9 +98,9 @@ export class AgentLoop {
     history: Message[],
     _signal?: AbortSignal,
   ): AsyncGenerator<SSEEvent> {
-    // Mutable copy 鈥?soft interrupts create fresh AbortControllers mid-loop
+
     let signal = _signal;
-    // ExtensionPoints: agentLoop override 鈥?plugin replaces the entire ReAct loop
+
     const agentLoopOverride = extensionPoints.get('agentLoop');
     if (agentLoopOverride) {
       try {
@@ -223,7 +211,7 @@ export class AgentLoop {
     const sessionManager = SessionManager.getInstance();
     let lastKnownMsgCount = sessionManager.getMessageCount(this.sessionId);
 
-    // 鈹€鈹€ AgentChannel subscription: real-time agent-to-agent messages 鈹€鈹€
+
     // Messages arrive via TypedEventBus (no polling delay). Checked every turn.
     const channelMsgs: Array<{ role: 'system' | 'user'; content: string }> = [];
     const unsubChannel = AgentChannel.getInstance().subscribe(
@@ -233,7 +221,7 @@ export class AgentLoop {
       },
     );
 
-    // 鈹€鈹€ SharedContextStore polling: bidirectional parent鈫攃hild state sharing 鈹€鈹€
+
     // Checked every inter-turn. Agents read context written by teammates in real-time.
     const sharedStore = SharedContextStore.getInstance();
     const teamScope = agent?.teamName || this.sessionId;
@@ -256,7 +244,7 @@ export class AgentLoop {
 
     try {
     while (turn < maxTurns) {
-      // Re-read agent from registry every turn 鈥?config may have been updated
+
       // via Agents page while the loop is running (for example, during goal mode).
       const currentAgent = registry.agent(this.agentId);
       if (!currentAgent || !currentAgent.isActive) {
@@ -291,7 +279,7 @@ export class AgentLoop {
         });
       }
 
-      /** Interrupt check 鈥?soft interrupt (user message queued) continues the loop */
+
       if (signal?.aborted) {
         const ic = InterruptController.getInstance();
         const pending = ic.takePendingUserMessage(this.sessionId);
@@ -301,7 +289,7 @@ export class AgentLoop {
           // Create a fresh controller for this continuation turn
           signal = ic.createController(this.sessionId).signal;
           this.stallDetector.reset();
-          // Sync message count 鈥?pending message was also appended to session store
+
           lastKnownMsgCount = sessionManager.getMessageCount(this.sessionId);
           continue;
         }
@@ -333,7 +321,7 @@ export class AgentLoop {
 
       createLogger('anochat.agent').debug('AgentLoop turn start', { sid: this.sessionId, turn, messageCount: messages.length });
 
-      /** Context compaction check 鈥?runs every 8 turns or when token growth > 50% since last compaction */
+
       if (compactCheckCounter > 7) {
         compactCheckCounter = 0;
         // Quick token estimate on conversation messages (skip expensive tool def re-count)
@@ -350,7 +338,7 @@ export class AgentLoop {
             lastCompactionTokenCount,
           });
         } else if (consecutiveCompactFailures >= MAX_CONSECUTIVE_COMPACT_FAILURES) {
-          createLogger('anochat.agent').debug('Compaction circuit breaker open 鈥?skipping', { sid: this.sessionId, consecutiveCompactFailures });
+          createLogger('anochat.agent').debug('Compaction circuit breaker open -skipping', { sid: this.sessionId, consecutiveCompactFailures });
         } else {
           const breakdown = TokenCounter.breakdown(
             systemPrompt, tools, '', messages.filter(m => m.role !== 'system') as unknown as Message[],
@@ -378,7 +366,7 @@ export class AgentLoop {
         }
       }
 
-      /** Inter-turn message injection 鈥?AgentChannel (real-time) + SharedContext (polling) + session messages (polling) */
+
       // 1. Drain AgentChannel queue first (sub-millisecond delivery, no JSONL read)
       while (channelMsgs.length > 0) {
         const chMsg = channelMsgs.shift()!;
@@ -450,7 +438,7 @@ export class AgentLoop {
         lastKnownMsgCount = currentMsgCount;
       }
 
-      /** API call with retry 鈥?delegated to AgentLoopLLM */
+
       let assistantMessage: ApiMessage | null = null;
       let hadThinkContent = false;
       {
@@ -488,7 +476,7 @@ export class AgentLoop {
         assistantMessage = llmResult.assistantMessage;
         hadThinkContent = llmResult.hadThinkContent;
 
-        // Retries exhausted 鈥?final compression attempt
+
         if (!assistantMessage) {
           consecutiveFatalErrors++;
           if (consecutiveFatalErrors >= MAX_CONSECUTIVE_FATAL) {
@@ -507,7 +495,7 @@ export class AgentLoop {
         }
       }
 
-      // LLM call succeeded 鈥?reset fatal error counter
+
       consecutiveFatalErrors = 0;
 
       // If signal was aborted during the API call, check for soft interrupt
@@ -560,7 +548,7 @@ export class AgentLoop {
             });
           }
         } catch {
-          // Non-critical 鈥?keyword extraction is best-effort
+
         }
       }
 
@@ -568,7 +556,7 @@ export class AgentLoop {
       skillNudgeTurn++;
       if (skillNudgeTurn >= 20 && turn >= 10) {
         skillNudgeTurn = 0;
-        yield { type: SSEEventType.Think, content: '(Skill nudge 鈥?not yet integrated)' };
+        yield { type: SSEEventType.Think, content: '(Skill nudge - not yet integrated)' };
       }
 
       /** Tool execution gate */
@@ -576,7 +564,7 @@ export class AgentLoop {
         const textContent = assistantMessage.content || '';
         const hasNoContent = textContent.trim().length === 0;
 
-        // P0: LLM returned empty content 鈥?trigger stall detection + context reduction
+
         if (hasNoContent) {
           consecutiveEmptyResponses++;
           this.stallDetector.recordEmptyResponse();
@@ -615,7 +603,7 @@ export class AgentLoop {
             }
           }
 
-          // Not at stall threshold yet 鈥?reduce context and retry
+
           yield {
             type: SSEEventType.Think,
             content: `(LLM returned empty response (${consecutiveEmptyResponses}/${MAX_CONSECUTIVE_EMPTY}), reducing context and retrying...)`,
@@ -631,7 +619,7 @@ export class AgentLoop {
 
         createLogger('anochat.agent').debug('AgentLoop: no tool calls, finishing', { sid: this.sessionId, turn, textLen: assistantMessage.content?.length || 0 });
         if (hadThinkContent && !assistantMessage.content && turn < this.maxTurns - 1) {
-          yield { type: SSEEventType.Think, content: '(Reasoning complete 鈥?requesting final answer)' };
+          yield { type: SSEEventType.Think, content: '(Reasoning complete - requesting final answer)' };
           messages.push({
             role: 'user',
             content: 'Please provide your final answer based on your reasoning above. Do not repeat the reasoning.',
@@ -640,7 +628,7 @@ export class AgentLoop {
           continue;
         }
 
-        // 鈹€鈹€ Wait for background tasks (event-driven) 鈹€鈹€
+
         // If this agent dispatched background work (Bash run_in_background, TaskAssign,
         // SubAgentSpawn), don't exit the loop. Subscribe to BackgroundTaskManager
         // taskCompletedInSession events for instant wakeup instead of polling.
@@ -682,7 +670,7 @@ export class AgentLoop {
                   taskWaitInterrupted = true;
                   break;
                 }
-                // Hard abort 鈥?exit wait
+
                 break;
               }
 
@@ -721,7 +709,7 @@ export class AgentLoop {
       createLogger('anochat.agent').debug('AgentLoop executing tools', { sid: this.sessionId, turn, toolCount: toolCalls.length, toolNames: toolCalls.map(tc => tc.function.name) });
 
       agent.setSessionStatus(this.sessionId, AgentStatus.WaitingTool);
-      // Tell frontend what's happening 鈥?avoids dead silence during tool execution
+
       yield {
         type: SSEEventType.StatusInfo,
         content: toolCalls.length === 1
@@ -752,7 +740,7 @@ export class AgentLoop {
 
         const tool = agentTools.find((t) => t.name() === toolName);
 
-        // 鈹€鈹€ Tool confirmation check 鈹€鈹€
+
         let userRejected = false;
         if (tool && this._needsConfirmation(tool, this._permissionMode())) {
           WsServer.getInstance().send(this.sessionId, {
@@ -816,7 +804,7 @@ export class AgentLoop {
           const planEventType = toolName === 'EnterPlanMode' ? 'plan_enter' : 'plan_exit';
           yield { type: planEventType as SSEEventType };
           if (toolName === 'EnterPlanMode') {
-            yield { type: SSEEventType.Think, content: '(Plan mode active 鈥?only read-only tools are available. Use ExitPlanMode to return to normal execution.)' };
+            yield { type: SSEEventType.Think, content: '(Plan mode active - only read-only tools are available. Use ExitPlanMode to return to normal execution.)' };
           }
         }
 
@@ -832,7 +820,7 @@ export class AgentLoop {
         completedToolIds.add(tc.id);
       }
       } finally {
-        // Always backfill missing tool_result messages 鈥?signal abort or
+
         // exceptions during tool execution can leave orphan tool_use blocks
         // that crash DeepSeek API on the next call.
         for (const tc of toolCalls) {
@@ -864,16 +852,16 @@ export class AgentLoop {
       };
 
       if (allDeferred && toolCalls.length > 0) {
-        // Deferred tools don't count as a full turn 鈥?the LLM hasn't seen results yet,
+
         // so don't consume turn budget until the deferred execution completes.
         turn--;
       }
 
       // If any tool requires user interaction (e.g. AskUserQuestion), pause the loop
-      // until the user responds 鈥?don't keep calling the LLM while waiting.
+
       if (anyUserInteraction) {
         const WAIT_POLL_MS = 500;
-        const WAIT_TIMEOUT_MS = 5 * 60_000; // 5 min 鈥?same as delegation timeout
+        const WAIT_TIMEOUT_MS = 5 * 60_000;
         const waitStartedAt = Date.now();
         yield { type: SSEEventType.StatusInfo, content: '(Waiting for user response...)' };
 
@@ -891,7 +879,7 @@ export class AgentLoop {
             }
           }
 
-          // Polling fallback 鈥?user message appended outside interrupt path
+
           const currentCount = sessionManager.getMessageCount(this.sessionId);
           if (currentCount > lastKnownMsgCount) {
             const fullHistory = await sessionManager.getHistory(this.sessionId);
@@ -911,7 +899,7 @@ export class AgentLoop {
           }
 
           if (Date.now() - waitStartedAt > WAIT_TIMEOUT_MS) {
-            yield { type: SSEEventType.StatusInfo, content: '(User response timeout 鈥?continuing)' };
+            yield { type: SSEEventType.StatusInfo, content: '(User response timeout - continuing)' };
             break;
           }
 
@@ -930,7 +918,7 @@ export class AgentLoop {
         this.toolCallHistory = this.toolCallHistory.slice(-40);
       }
 
-      /** Stall detection 鈥?escalate through hint 鈫?compact 鈫?yield */
+
       this.stallDetector.record(toolNames, toolResults);
       const stallCheck = this.stallDetector.check();
       if (stallCheck.stalled) {

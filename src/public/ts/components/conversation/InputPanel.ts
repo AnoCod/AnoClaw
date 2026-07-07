@@ -1,4 +1,4 @@
-﻿// AnoClaw Cinema 鈥?InputPanel: textarea (top) + unified button bar (bottom).
+﻿
 // Slash command popup, attachment chips, file upload, mode selector.
 
 import type { Attachment, GoalState } from './types.js';
@@ -16,16 +16,7 @@ const SVG_ATTACH = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" 
 const SVG_ATTACHMENT_FILE = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`;
 const SVG_REMOVE = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`;
 
-/**
- * Unified input panel: textarea + send/stop buttons + mode selector + attachments bar + slash command popup.
- *
- * Send flow: user types text (optionally with /commands) and attaches files,
- * presses Enter or clicks SEND 鈫?onSend callback fires 鈫?caller routes to
- * ConversationViewModel 鈫?SessionAgent.sendMessage via WebSocket.
- *
- * Streaming: setStreaming(true) shows STOP button, hides attach/mode,
- * keeps textarea writable for interjection while agent runs.
- */
+
 export class InputPanel {
   readonly element: HTMLElement;
   private _textarea: HTMLTextAreaElement;
@@ -93,7 +84,7 @@ export class InputPanel {
     });
   }
 
-  // Build DOM: attachments bar (above) 鈫?textarea (mid) 鈫?button bar (below)
+
   private _build(): HTMLElement {
     const area = document.createElement('div');
     area.className = 'cinema-input-area';
@@ -117,7 +108,7 @@ export class InputPanel {
     return area;
   }
 
-  // 鈹€鈹€ Textarea: auto-grows, Enter to send, arrow keys/Esc in slash popup 鈹€鈹€
+
 
   private _makeTextarea(): HTMLTextAreaElement {
     const ta = document.createElement('textarea');
@@ -156,17 +147,17 @@ export class InputPanel {
     });
     // Close slash panel only on genuine focus-leave (e.g. click on a focusable
     // element elsewhere). Do NOT close on involuntary blur (relatedTarget=null)
-    // caused by DOM updates during streaming 鈥?the SlashCommandPanel's own
+
     // click-outside handler covers the case where the user clicks a non-focusable
     // element.
     ta.addEventListener('focusout', (e) => {
       const related = (e as FocusEvent).relatedTarget as HTMLElement | null;
-      if (!related) return; // involuntary blur or click on non-focusable 鈥?let click handler decide
-      // Focus moved within the input area 鈥?keep slash panel open
+      if (!related) return;
+
       if (this.element.contains(related)) return;
-      // Focus moved to slash panel popup 鈥?keep it open (defensive; items aren't focusable today)
+
       if (this._slashPanel.containsElement(related)) return;
-      // Genuine focus change to a focusable element elsewhere 鈥?close after a tick
+
       setTimeout(() => {
         if (this._slashPanel.isOpen) this._slashPanel.close();
       }, 150);
@@ -174,7 +165,7 @@ export class InputPanel {
     return ta;
   }
 
-  // 鈹€鈹€ Slash command detection 鈹€鈹€
+
 
   // Find the last '/' before cursor, open/filter the slash command popup
   private _checkSlash(): void {
@@ -208,7 +199,7 @@ export class InputPanel {
     this._slashPanel.close();
   }
 
-  // 鈹€鈹€ Attach button 鈥?uploads local files and sends them as attachments to the agent.
+
   // This is NOT for changing the workspace directory (see Workspace page "Switch..." button).
 
   private _makeAttachBtn(): HTMLButtonElement {
@@ -264,7 +255,7 @@ export class InputPanel {
     input.click();
   }
 
-  // 鈹€鈹€ Attachments bar 鈹€鈹€
+
 
   private _makeAttachmentsBar(): HTMLElement {
     const bar = document.createElement('div');
@@ -272,7 +263,7 @@ export class InputPanel {
     return bar;
   }
 
-  // Rebuild attachment chips DOM from _attachments array 鈥?each chip has icon, name, remove button
+
   private _renderAttachments(): void {
     this._attachmentsBar.innerHTML = '';
     if (this._attachments.length === 0) {
@@ -494,7 +485,7 @@ export class InputPanel {
     return `${oneLine.slice(0, 117).trim()}...`;
   }
 
-  // 鈹€鈹€ Send / Stop buttons 鈹€鈹€
+
 
   private _makeSendBtn(): HTMLButtonElement {
     const btn = document.createElement('button');
@@ -515,13 +506,13 @@ export class InputPanel {
     return btn;
   }
 
-  // 鈹€鈹€ Streaming state 鈹€鈹€
+
 
   // Toggle between send mode (attach+mode visible) and streaming mode (stop visible, input dimmed)
   setStreaming(v: boolean): void {
     this.isStreaming = v;
     // During streaming: keep textarea writable for soft interrupt, show send button
-    this._sendBtn.style.display = '';          // always visible 鈥?user can interject
+    this._sendBtn.style.display = '';
     this._stopBtn.style.display = v ? '' : 'none';
     this._attachBtn.style.display = v ? 'none' : '';
     this._modeSelector.element.style.display = v ? 'none' : '';
@@ -529,7 +520,7 @@ export class InputPanel {
     this._textarea.style.opacity = v ? '0.7' : '';
   }
 
-  // 鈹€鈹€ Send 鈹€鈹€
+
 
   // Clear textarea and attachments, then fire onSend with content + mode + attachments
   private _fireSend(): void {

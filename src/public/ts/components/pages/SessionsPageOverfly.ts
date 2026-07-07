@@ -1,6 +1,6 @@
-﻿// SessionsPageOverfly 鈥?right-bar overfly panels (overview, plan)
+﻿
 // Extracted from SessionsPage.ts to keep the main page class under 500 lines.
-// Files panel removed 鈥?replaced by WorkspacePage.
+
 
 import { App } from '../../app.js';
 import { handlePathClick } from '../../utils/ClickablePathHandler.js';
@@ -29,7 +29,7 @@ export class SessionsPageOverfly {
     overfly.className = 'cinema-overfly';
     const openedAt = Date.now();
 
-    // Slot: sessions-overfly 鈥?plugins can add content here
+
     const overflySlot = document.createElement('div');
     overflySlot.setAttribute('data-slot', 'sessions-overfly');
     overfly.appendChild(overflySlot);
@@ -55,7 +55,7 @@ export class SessionsPageOverfly {
         return;
     }
 
-    // Close on outside click 鈥?with a 300ms grace period so async renders
+
     // and streaming DOM updates don't spuriously trigger close.
     setTimeout(() => {
       const onOutsideClick = (e: MouseEvent) => {
@@ -83,7 +83,7 @@ export class SessionsPageOverfly {
     this._activeSessionId = null;
   }
 
-  // 鈹€鈹€ Overview panel 鈹€鈹€
+
 
   private _renderOverviewPanel(overfly: HTMLElement, activeSessionId: string | null): void {
     const title = document.createElement('div');
@@ -121,7 +121,7 @@ export class SessionsPageOverfly {
     }
   }
 
-  // 鈹€鈹€ Plan panel 鈹€鈹€
+
 
   private _renderPlanPanel(overfly: HTMLElement): void {
     const title = document.createElement('div');
@@ -168,7 +168,7 @@ export class SessionsPageOverfly {
     }
   }
 
-  // 鈹€鈹€ Tasks panel 鈹€鈹€
+
 
   private _renderTasksPanel(overfly: HTMLElement, activeSessionId: string | null): void {
     const title = document.createElement('div');
@@ -183,7 +183,7 @@ export class SessionsPageOverfly {
   }
 }
 
-// 鈹€鈹€ Shared helpers 鈹€鈹€
+
 
 function _esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

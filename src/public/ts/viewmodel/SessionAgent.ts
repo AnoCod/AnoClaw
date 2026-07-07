@@ -1,4 +1,4 @@
-﻿// SessionAgent 鈥?per-session independent processing pipeline.
+﻿
 // Each session has its own SessionAgent with its own EventEmitter, SessionState,
 // and WS event handlers. No global pointer swap, no silent emit, no shared state.
 //
@@ -58,10 +58,10 @@ export function removeStatusCard(agent: SessionAgent): void {
   if (idx !== -1) agent.state.messages.removeMessage(idx);
 }
 
-// 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?// WS event handlers 鈥?operate on agent.state, emit on agent
+
 // Each handler is a pure function: takes an agent, mutates its state,
 // and fires events on its emitter so the UI (SessionsPage) can react.
-// 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+
 /** Handle a 'think' event: create or accumulate a thinking block message. */
 export function onThink(agent: SessionAgent, content: string, durationMs?: number): void {
   const s = agent.state;
@@ -97,7 +97,7 @@ export function onText(agent: SessionAgent, content: string): void {
     agent.emit('streamingStarted');
   }
   if (!s.streamMsgId) {
-    // First text token for this turn 鈥?create the message
+
     s.streamMsgId = generateId();
     const msg: Message = {
       id: s.streamMsgId, sessionId: agent.sessionId, type: 'message', role: 'assistant', content, timestamp: Date.now(),
@@ -117,8 +117,7 @@ export function onText(agent: SessionAgent, content: string): void {
   agent.emit('streamToken', content);
 }
 
-/** Handle a 'tool_call' event: finalize think/text, create a pending tool_call card.
- *  TodoWrite is special-cased 鈥?it updates the todo list inline instead. */
+
 export function onToolCall(agent: SessionAgent, id: string, name: string, input: Record<string, unknown>): void {
   finalizeThink(agent);
   finalizeTextSegment(agent);
@@ -167,7 +166,7 @@ export function onDone(agent: SessionAgent, tokenUsage?: TokenBreakdown): void {
   finalizeTextSegment(agent);
   s.streamMsgId = null;
 
-  // Parse token breakdown 鈥?shows context window usage
+
   if (tokenUsage) {
     s.tokenBreakdown = { ...tokenUsage };
     agent.emit('tokensUpdated', s.tokenBreakdown);
@@ -186,7 +185,7 @@ export function onError(agent: SessionAgent, data: { message?: string; code?: st
     return;
   }
   if (!agent.state.isStreaming) {
-    // Fatal errors outside streaming should still be shown 鈥?e.g. API key errors
+
     const fatalMsg: Message = {
       id: generateId(), sessionId: agent.sessionId, type: 'error',
       content: message || 'API request failed -- check your API key and URL in Agents settings.',
@@ -262,7 +261,7 @@ export function onDelegationProgress(agent: SessionAgent, data: Record<string, u
   const displayContent = formatDelegationContent(subAgentId, originalType, content, toolName);
 
   if (existing === -1) {
-    // New delegation 鈥?create the activity card
+
     const dMsg: Message = {
       id: delegationMsgId, sessionId: agent.sessionId, type: 'delegation_activity', content: displayContent,
       subAgentId, subSessionId, timestamp: Date.now(),
@@ -324,7 +323,7 @@ export function onTaskNotification(agent: SessionAgent, data: Record<string, unk
 
   const existingIdx = agent.state.messages.indexOf(msgId);
   if (existingIdx >= 0) {
-    // Update in place 鈥?avoids DOM rebuild
+
     agent.state.messages.updateMessage(existingIdx, msg);
     agent.emit('messageUpdated', msg);
   } else {
@@ -398,8 +397,8 @@ function formatDelegationContent(
   }
 }
 
-// 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?// SessionAgent 鈥?per-session object with its own emitter, state, and pipeline
-// 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+
+
 export class SessionAgent extends EventEmitter {
   readonly sessionId: string;
   /** Per-session mutable state: messages, streaming flags, token breakdown, etc. */
@@ -425,7 +424,7 @@ export class SessionAgent extends EventEmitter {
     });
   }
 
-  // 鈹€鈹€ WS event entry point 鈹€鈹€
+
 
   /** Handle a WS event for THIS session. No global swap, no silent mode.
    *  Dispatches to the matching handler function, which mutates this.state
@@ -463,7 +462,7 @@ export class SessionAgent extends EventEmitter {
     }
   }
 
-  // 鈹€鈹€ Send message 鈹€鈹€
+
 
   /** Build the user message, wire attachments, send via WS, start streaming.
    *  Auto-generates a session title for unnamed sessions. Guarded by _sendingLock. */
@@ -502,7 +501,7 @@ export class SessionAgent extends EventEmitter {
       const node = vm.sessions.getById(targetSessionId);
       await vm.ensureRunnableAgentForSession(targetSessionId);
 
-      // Auto-title for new sessions 鈥?fire-and-forget, don't block the message
+
       if (node && (node.title === 'New Session' || !node.title || node.title === content.slice(0, 30))) {
         this._generateSessionTitle(targetSessionId, content).then(title => {
           if (title) vm.renameSession(targetSessionId, title).catch(() => {});
@@ -518,7 +517,7 @@ export class SessionAgent extends EventEmitter {
 
       this.state.messages.appendMessage(userMsg);
 
-      // Reset streaming state for the new turn 鈥?prevents appending to stale messages
+
       finalizeThink(this);
       this.state.streamMsgId = null;
       this.state.currentStreamMessage = '';
@@ -557,7 +556,7 @@ export class SessionAgent extends EventEmitter {
     }
   }
 
-  // 鈹€鈹€ Stop generation 鈹€鈹€
+
 
   /** Stop the current generation: send stop to backend, finalize state, emit streamingStopped. */
   async stopGeneration(): Promise<void> {
@@ -573,7 +572,7 @@ export class SessionAgent extends EventEmitter {
     this.emit('streamingStopped');
   }
 
-  // 鈹€鈹€ Load history 鈹€鈹€
+
 
   /** Fetch stored messages for this session from the backend. Aborts any in-flight load.
    *  Reconstructs the message list, streaming state, and token breakdown. */
@@ -663,7 +662,7 @@ export class SessionAgent extends EventEmitter {
       s.messages.appendMessage({ id: m.id || generateId(), sessionId, type: 'status', content: String(m.content || ''), timestamp: ts, agentId, agentName });
       return;
     }
-    // User messages pass through directly 鈥?unless they're task notifications persisted as raw XML
+
     if (m.role === 'user') {
       const rawContent = String(m.content || '');
       if (rawContent.startsWith('<task-notification>')) {
@@ -694,7 +693,7 @@ export class SessionAgent extends EventEmitter {
     }
     if (m.role !== 'assistant') return;
     const tcs: any[] = Array.isArray(m.toolCalls) ? m.toolCalls : [];
-    // Detect flat (legacy) formats 鈥?single-content-type messages
+
     const isFlatThink = !tcs.length && !m.content && m.thinking;
     const isFlatToolCall = tcs.length > 0 && !m.content && !m.thinking;
     const isFlatText = !tcs.length && m.content && !m.thinking;
@@ -747,7 +746,7 @@ export class SessionAgent extends EventEmitter {
     }
   }
 
-  // 鈹€鈹€ Other 鈹€鈹€
+
 
   /** Handle WS disconnection mid-stream: stop streaming, show error card. */
   onConnectionLost(): void {

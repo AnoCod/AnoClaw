@@ -1,10 +1,4 @@
-/**
- * ThinkDelegate 鈥?pulse indicator, click to expand/collapse.
- * Shows "THINKING - X.Xs" with an animated dot while the agent is reasoning.
- * While running (status 'pending' or _running flag), the body starts expanded so
- * the user sees live thought output. When done, it collapses 鈥?click the header
- * line to toggle the think body content on/off.
- */
+
 
 import type { ThinkEvent } from '../types.js';
 
@@ -27,7 +21,7 @@ export class ThinkDelegate {
   render(): HTMLElement {
     const wrapper = document.createElement('div');
 
-    // 鈹€鈹€ Header: pulse dot + "THINKING - X.Xs" label 鈹€鈹€
+
     const indicator = document.createElement('div');
     indicator.className = 'cinema-think-indicator';
 
@@ -58,7 +52,7 @@ export class ThinkDelegate {
 
     wrapper.appendChild(indicator);
 
-    // 鈹€鈹€ Body: think content, visible only when expanded 鈹€鈹€
+
     this._bodyEl = document.createElement('div');
     this._bodyEl.className = 'cinema-think-body';
     this._bodyEl.hidden = !this._expanded;

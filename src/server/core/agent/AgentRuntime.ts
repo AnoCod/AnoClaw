@@ -1,12 +1,4 @@
-﻿/**
- * AgentRuntime 鈥?singleton runtime manager.
- *
- * Extends EventEmitter. Entry point for processing messages, delegating tasks,
- * and spawning SubAgents. Coordinates WorkerPool, AgentLoop, and LLMProvider.
- * Delegation and SubAgent lifecycle helpers live in {@link AgentDelegation}.
- *
- * @module AgentRuntime
- */
+﻿
 
 import { EventEmitter } from 'events';
 import { AgentRegistry } from './AgentRegistry.js';
@@ -58,7 +50,7 @@ interface UserTaskResolution {
 }
 
 export class AgentRuntime extends EventEmitter {
-  // 鈹€鈹€ Singleton 鈹€鈹€
+
   private static _instance: AgentRuntime | null = null;
 
   static getInstance(): AgentRuntime {
@@ -77,13 +69,13 @@ export class AgentRuntime extends EventEmitter {
     AgentRuntime._instance = null;
   }
 
-  // 鈹€鈹€ Task notification wiring 鈹€鈹€
+
   private _taskNotificationsWired = false;
   private _unsubTaskCompleted: (() => void) | null = null;
   private _unsubTaskFailed: (() => void) | null = null;
 
-  // 鈹€鈹€ Session tracking 鈹€鈹€
-  /** Map of sessionId 鈫?active AgentLoop instance */
+
+
   private _activeLoops: Map<string, AgentLoop> = new Map();
 
   private constructor() {
@@ -91,7 +83,7 @@ export class AgentRuntime extends EventEmitter {
     this._subscribeToTaskNotifications();
   }
 
-  // 鈹€鈹€ Core: process message 鈹€鈹€
+
 
   /**
    * Main entry point for processing a user message through an AgentLoop.
@@ -137,7 +129,7 @@ export class AgentRuntime extends EventEmitter {
     // Guard: prevent concurrent AgentLoop on the same session.
     // Instead of rejecting, queue the message as a pending interrupt.
     if (this.isSessionActive(sessionId)) {
-      logger.info('Session active 鈥?queuing as pending message (soft interrupt)', { sid: sessionId, aid: agentId });
+      logger.info('Session active - queuing as pending message (soft interrupt)', { sid: sessionId, aid: agentId });
       InterruptController.getInstance().setPendingUserMessage(sessionId, message.content as string);
       InterruptController.getInstance().requestInterrupt(sessionId, InterruptReason.UserSteer);
       yield {
@@ -166,10 +158,10 @@ export class AgentRuntime extends EventEmitter {
       }
     }
 
-    // Acquire lease 鈥?reject if too many concurrent sessions
+
     const lease = SessionLeaseManager.getInstance().acquire(sessionId);
     if (!lease) {
-      logger.warn('Too many concurrent sessions 鈥?rejecting', { sid: sessionId });
+      logger.warn('Too many concurrent sessions - rejecting', { sid: sessionId });
       yield {
         type: SSEEventType.Error,
         errorMessage: 'Server busy -- too many concurrent sessions. Please wait and try again.',
@@ -226,7 +218,7 @@ export class AgentRuntime extends EventEmitter {
       });
       logger.debug('Agent loop completed', { sid: sessionId, aid: agentId });
 
-      // 鈹€鈹€ Memory lifecycle: post-loop extraction, decay, consolidation 鈹€鈹€
+
       runMemoryLifecycle(agentId, sessionId).catch(() => {});
 
       // Goal mode: keep advancing the active root-session goal after completion.
@@ -257,7 +249,7 @@ export class AgentRuntime extends EventEmitter {
     }
   }
 
-  // 鈹€鈹€ Main loop execution 鈹€鈹€
+
 
   /**
    * Run the AgentLoop, emitting AgentRuntime events, heartbeating supervision,
@@ -591,7 +583,7 @@ export class AgentRuntime extends EventEmitter {
     };
   }
 
-  // 鈹€鈹€ Delegate task 鈹€鈹€
+
 
   /**
    * Delegate a task to a subordinate agent. Creates a sub-session
@@ -606,7 +598,7 @@ export class AgentRuntime extends EventEmitter {
     parentAgentId: string,
     priority: string = 'normal',
   ): Promise<ToolResult> {
-    // Role check 鈥?only CEO(0) and Manager(1) can delegate tasks
+
     const delegator = AgentRegistry.getInstance().findAgent(parentAgentId);
     if (!delegator || !delegator.isManagerRole()) {
       return {
@@ -654,7 +646,7 @@ export class AgentRuntime extends EventEmitter {
       };
     }
 
-    // 鈹€鈹€ Validate org-tree relationship 鈹€鈹€
+
     // Tasks can ONLY be delegated to direct subordinates (immediate children).
     if (targetAgent.parentAgentId !== parentAgentId) {
       return {
@@ -678,10 +670,10 @@ export class AgentRuntime extends EventEmitter {
       const subSession = await sessionManager.createSubSession(parentSessionId, actualAgentId,
         `Task: ${task.slice(0, 40)}`);
       subSessionId = subSession.id;
-      // Link parent鈫抍hild for interrupt propagation
+
       InterruptController.getInstance().linkChild(parentSessionId, subSessionId);
       logger.info('Sub-session created for delegation', { parentSid: parentSessionId, subSid: subSessionId, targetAid: actualAgentId });
-      // Notify via TypedEventBus 鈫?WsForwardSubscriber so the frontend tree updates
+
       TypedEventBus.emit('delegation:subsession_created', {
         sessionId: subSessionId,
         parentSessionId,
@@ -702,7 +694,7 @@ export class AgentRuntime extends EventEmitter {
       };
     }
 
-    // 鈹€鈹€ Inject parent context into delegation message 鈹€鈹€
+
     // Append a structured summary of the parent conversation so the sub-agent
     // understands the broader goal (prevents "memory rupture").
     const taskParts: string[] = [task];
@@ -723,7 +715,7 @@ export class AgentRuntime extends EventEmitter {
         }
         taskParts.push('\n\n---\n# Parent Session Context\n' + contextParts.join('\n'));
       }
-    } catch { /* parent history unavailable 鈥?proceed with task only */ }
+    } catch {}
 
     // Store parent context in sub-session metadata for DelegationContextSection
     try {
@@ -738,7 +730,7 @@ export class AgentRuntime extends EventEmitter {
       }
     } catch { /* non-critical */ }
 
-    // Populate SharedContextStore for bidirectional parent鈫攃hild context sharing
+
     const teamScope = delegator?.teamName || parentSessionId;
     try {
       SharedContextStore.getInstance().set(teamScope, `task:${subSessionId}`, task, parentAgentId);
@@ -776,7 +768,7 @@ export class AgentRuntime extends EventEmitter {
 
     const startedAt = Date.now();
 
-    // Shared mutable state 鈥?the heartbeat callback reads turnCount/currentTool live
+
     const state: DelegationState = {
       fullContent: '',
       thinking: '',
@@ -784,7 +776,7 @@ export class AgentRuntime extends EventEmitter {
       currentTool: undefined,
     };
 
-    // 鈹€鈹€ Re-delegation guard: if this session already has an active AgentLoop,
+
     // inject the task as a soft interrupt instead of creating a new background task.
     // This keeps the "one agent = one session = one AgentLoop" contract intact.
     if (this.isSessionActive(subSessionId)) {
@@ -810,7 +802,7 @@ export class AgentRuntime extends EventEmitter {
       };
     }
 
-    // 鈹€鈹€ Register with BackgroundTaskManager 鈹€鈹€
+
     const bgManager = BackgroundTaskManager.getInstance();
     const taskId = bgManager.register({
       type: 'subagent',
@@ -819,7 +811,7 @@ export class AgentRuntime extends EventEmitter {
       summary: task.slice(0, 60),
     });
 
-    // 鈹€鈹€ Subscribe parent agent to task completion/failure events 鈹€鈹€
+
     // oneShot: true = auto-unsubscribe after first delivery, no manual cleanup needed
     const esm = EventSubscriptionManager.getInstance();
     esm.subscribe(parentSessionId, parentAgentId, `task:completed:${taskId}`, { oneShot: true });
@@ -832,18 +824,18 @@ export class AgentRuntime extends EventEmitter {
     const { StreamPersister } = await import('../../infra/StreamPersister.js');
     const persister = new StreamPersister(store, subSessionId, turnMsgId, initialPrevUuid, actualAgentId);
 
-    // 鈹€鈹€ Start sub-agent loop in background (non-blocking) 鈹€鈹€
+
     (async () => {
       let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
       let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
       try {
-        // Heartbeat timer 鈥?sends 'working' status every 5 seconds (WS-only, no message injection)
+
         // Also detects unresponsive sub-agents and auto-kills them.
         heartbeatInterval = setInterval(() => {
           const supMgr = SupervisionManager.getInstance();
 
-          // 鈹€鈹€ Unresponsive detection: kill sub-agent if heartbeat overdue 鈹€鈹€
+
           if (supMgr.isUnresponsive(subSessionId)) {
             logger.warn('Sub-agent unresponsive, auto-killing', {
               subSid: subSessionId,
@@ -856,7 +848,7 @@ export class AgentRuntime extends EventEmitter {
           }
 
           supMgr.setCurrentTool(subSessionId, state.currentTool);
-          // Keep the SupervisionManager heartbeat alive 鈥?processMessage can't
+
           // heartbeat when the AgentLoop is in its background-task wait loop.
           supMgr.heartbeat(subSessionId);
           emitDelegationStatus(this, parentSessionId, subSessionId, actualAgentId, {
@@ -870,14 +862,14 @@ export class AgentRuntime extends EventEmitter {
           bgManager.updateProgress(taskId, { turnCount: state.turnCount, currentTool: state.currentTool });
         }, 5000);
 
-        // 鈹€鈹€ Timeout protection: terminate sub-agent loop after 10 minutes 鈹€鈹€
+
         const DELEGATION_TIMEOUT_MS = 600000;
         timeoutHandle = setTimeout(() => {
           logger.warn('Delegation timeout, aborting sub-session', { subSid: subSessionId, targetAid: actualAgentId });
           InterruptController.getInstance().requestInterrupt(subSessionId, InterruptReason.Timeout);
         }, DELEGATION_TIMEOUT_MS);
 
-        // Run the sub-agent's AgentLoop 鈥?per-event persistence + event bubbling
+
         await handleSubAgentOutput(
           this,
           this.processMessage(subSessionId, actualAgentId, delegationMessage),
@@ -892,12 +884,12 @@ export class AgentRuntime extends EventEmitter {
 
         const durationMs = Date.now() - startedAt;
 
-        // 鈹€鈹€ Detect silent failure: AgentLoop produced zero output 鈹€鈹€
+
         if (state.turnCount === 0 && !state.fullContent.trim()) {
           const abortReason = state.fullContent.includes('[ERROR]')
             ? `Sub-agent process error: ${state.fullContent.replace('[ERROR] ', '')}`
             : 'Sub-agent exited immediately with no output. The agent may have failed to start (check model config, API key, or agent setup).';
-          logger.warn('Delegation aborted 鈥?sub-agent produced no output', { parentSid: parentSessionId, subSid: subSessionId, targetAid: actualAgentId, durationMs });
+          logger.warn('Delegation aborted - sub-agent produced no output', { parentSid: parentSessionId, subSid: subSessionId, targetAid: actualAgentId, durationMs });
 
           emitDelegationStatus(this, parentSessionId, subSessionId, actualAgentId, {
             phase: 'error',
@@ -907,7 +899,7 @@ export class AgentRuntime extends EventEmitter {
 
           await bgManager.fail(taskId, abortReason, durationMs);
         } else {
-          // 鈹€鈹€ Normal completion 鈹€鈹€
+
           emitDelegationStatus(this, parentSessionId, subSessionId, actualAgentId, {
             phase: 'completed',
             taskSummary: task.slice(0, 60),
@@ -925,7 +917,7 @@ export class AgentRuntime extends EventEmitter {
 
         logger.error('Delegation failed (background)', { parentSid: parentSessionId, subSid: subSessionId, targetAid: actualAgentId, error: errorMessage.slice(0, 200) });
 
-        // 鈹€鈹€ Emit delegation_status: error 鈹€鈹€
+
         emitDelegationStatus(this, parentSessionId, subSessionId, actualAgentId, {
           phase: 'error',
           taskSummary: task.slice(0, 60),
@@ -941,7 +933,7 @@ export class AgentRuntime extends EventEmitter {
       }
     })();
 
-    // 鈹€鈹€ Return immediately 鈥?the CEO continues working 鈹€鈹€
+
     return {
       toolCallId: `delegate-${actualAgentId}`,
       success: true,
@@ -957,7 +949,7 @@ export class AgentRuntime extends EventEmitter {
   }
 
 
-  // 鈹€鈹€ Spawn SubAgent 鈹€鈹€
+
 
   /**
    * Create a temporary SubAgent and execute a task synchronously. The SubAgent
@@ -968,7 +960,7 @@ export class AgentRuntime extends EventEmitter {
     return spawnSubAgent(this, config, callerAgentId, parentSessionId);
   }
 
-  // 鈹€鈹€ Parallel task orchestration 鈹€鈹€
+
 
   /**
    * Execute multiple delegated tasks in dependency-ordered parallel batches.
@@ -1019,7 +1011,7 @@ export class AgentRuntime extends EventEmitter {
     return summary;
   }
 
-  // 鈹€鈹€ Session management 鈹€鈹€
+
 
   /** Check if a session has an active AgentLoop running. */
   isSessionActive(sessionId: string): boolean {
@@ -1070,7 +1062,7 @@ export class AgentRuntime extends EventEmitter {
         if (this.isSessionActive(payload.parentSessionId)) {
           InterruptController.getInstance().requestSteerInterrupt(payload.parentSessionId);
         } else {
-          // Session is idle 鈥?start a background AgentLoop with StreamConsumer
+
           // so the user sees the CEO's streaming response via WebSocket.
           (async () => {
             try {
@@ -1263,7 +1255,7 @@ function buildImmediateDoneEvent(): SSEEvent {
   };
 }
 
-// 鈹€鈹€ Memory lifecycle helper (lazy-import, fire-and-forget) 鈹€鈹€鈹€
+
 
 /** Run post-loop memory lifecycle: auto-extract facts, decay old memories, prune archives. Non-blocking. */
 async function runMemoryLifecycle(agentId: string, sessionId: string): Promise<void> {

@@ -1,16 +1,4 @@
-/**
- * ToolActivityDelegate 鈥?compact tool card matching ThinkDelegate visual style.
- * Layout: pulse-dot - TOOLNAME - ran <subject> - X.Xs
- * Click to expand result body (always present when result is non-empty).
- *
- * States:
- *   running 鈥?animated pulse dot (ta-pulse keyframes), body auto-expanded
- *   success 鈥?static muted dot, body collapsed by default
- *   error   鈥?dim-red dot, body collapsed by default
- *
- * Long results (>200 chars or >5 lines) show a truncated preview with a
- * "Show more" / "Show less" button below the collapsible body.
- */
+
 import type { ToolCall } from '../types.js';
 import { injectStyle } from '../../../utils/domUtils.js';
 import { TOOL_REGISTRY as TOOL } from './ToolRegistry.js';
@@ -65,7 +53,7 @@ export class ToolActivityDelegate {
     }
   }
 
-  /* 鈹€鈹€ main render 鈹€鈹€ */
+
 
   /** Build the card: dot indicator line + collapsible result body. */
   private render(s: ToolActivityState): HTMLElement {
@@ -73,7 +61,7 @@ export class ToolActivityDelegate {
     wrapper.className = 'tool-activity-inline tool-activity-inline--' + s.status;
     wrapper.dataset.toolName = s.toolName;
 
-    // 鈹€鈹€ Indicator line: dot - TOOLNAME - verb subject - duration 鈹€鈹€
+
     const indicator = document.createElement('div');
     indicator.style.cssText = `
       font-size: 9px; color: var(--cinema-text-muted); letter-spacing: 1px;
@@ -108,7 +96,7 @@ export class ToolActivityDelegate {
     action.style.cssText = `letter-spacing: 0;`;
     indicator.appendChild(action);
 
-    // Duration 鈥?only shown once the tool has completed
+
     if (typeof s.durationMs === 'number' && s.durationMs > 0) {
       const dur = document.createElement('span');
       dur.textContent = `- ${s.durationMs >= 1000 ? `${(s.durationMs / 1000).toFixed(1)}s` : `${s.durationMs}ms`}`;
@@ -127,7 +115,7 @@ export class ToolActivityDelegate {
 
     wrapper.appendChild(indicator);
 
-    // 鈹€鈹€ Collapsible result body 鈹€鈹€
+
     if (hasBody) {
       const isLong = this._fullResult.length > 200 || this._fullResult.split('\n').length > 5;
 
@@ -150,7 +138,7 @@ export class ToolActivityDelegate {
       this._bodyEl = body;
       wrapper.appendChild(body);
 
-      // Show more / less toggle button 鈥?only for long results
+
       if (isLong) {
         const btn = document.createElement('button');
         btn.textContent = this._expanded ? 'Show less' : 'Show more';
@@ -223,9 +211,9 @@ export class ToolActivityDelegate {
       this._showMoreBtn.style.display = 'block';
     }
   }
-  /* 鈹€鈹€ helpers 鈹€鈹€ */
 
-  /** Look up tool metadata; unknown tools get a camelCase 鈫?space-separated verb. */
+
+
   private _meta(name: string) {
     return TOOL[name] || { verb: name.toLowerCase().replace(/([A-Z])/g, ' $1').trim(), result: () => null as string | null };
   }

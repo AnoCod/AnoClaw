@@ -1,4 +1,4 @@
-﻿// AnoClaw v2.0 鈥?Main entry point
+﻿
 // HTTP + WebSocket server: serves API, static files, real-time agent communication
 
 import * as http from 'http';
@@ -27,11 +27,11 @@ import { writablePath, ensureWritableDir, appPath } from './infra/WritablePath.j
 const REPO_ROOT = writablePath();
 process.chdir(REPO_ROOT);
 
-// Static files (src/public/) are INSIDE the asar 鈥?use __dirname-based path.
+
 // process.cwd() is the unpacked root (or project root in dev) and won't find these.
 const PUBLIC_DIR = appPath('src', 'public');
 
-// 鈹€鈹€ CORS helper 鈹€鈹€
+
 function isAllowedLocalOrigin(origin: string | undefined): boolean {
   if (!origin) return true;
   if (origin === 'null') return false;
@@ -78,7 +78,7 @@ function safeRelativeFilePath(value: string): string {
   return normalized;
 }
 
-// 鈹€鈹€ HTTP request handler 鈹€鈹€
+
 async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   try {
   setCors(req, res);
@@ -109,7 +109,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
   }
 
   // Plugin management endpoints
-  // DELETE /api/v1/plugins/:name 鈥?uninstall a plugin
+
   const pluginDeleteMatch = url.match(/^\/api\/v1\/plugins\/([a-zA-Z0-9_\-\.]+)$/);
   if (pluginDeleteMatch && req.method === 'DELETE') {
     const name = pluginDeleteMatch[1];
@@ -237,7 +237,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
                 fs.writeFileSync(fullPath, content);
                 fetched++;
               }
-            } catch { /* file may not exist 鈥?skip */ }
+            } catch {}
           }
           if (fetched === 0) {
             res.writeHead(502, { 'Content-Type': 'application/json' });
@@ -274,7 +274,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     return;
   }
 
-  // Skills list endpoint 鈥?GET list + POST import (standard SKILL.md format)
+
   if (url === '/api/skills') {
     if (req.method === 'POST') {
       const chunks: Buffer[] = [];
@@ -305,7 +305,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       });
       return;
     }
-    // GET 鈥?list skills (nested dir/SKILL.md standard + deprecated flat .md fallback)
+
     const skillsDir = path.resolve(process.cwd(), 'skills');
     try {
       const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
@@ -350,7 +350,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     return;
   }
 
-  // Skills PATCH 鈥?enable/disable a skill (handles both nested and flat)
+
   const skillsPatchMatch = url.match(/^\/api\/skills\/([a-zA-Z0-9_-]+)$/);
   if (skillsPatchMatch && req.method === 'PATCH') {
     const skillId = skillsPatchMatch[1];
@@ -387,14 +387,14 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     return;
   }
 
-  // API passthrough 鈥?delegate to ApiServer
+
   if (url.startsWith('/api/')) {
     const { ApiServer } = await import('./gateway/ApiServer.js');
     await ApiServer.getInstance().handleApiRequest(req, res);
     return;
   }
 
-  // Reject non-upgrade HTTP requests to WebSocket path 鈥?upgrades are handled by WsServer
+
   if (url.startsWith('/ws')) {
     res.writeHead(426, {
       'Content-Type': 'text/plain',
@@ -419,7 +419,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
   }
 }
 
-// 鈹€鈹€ Startup initialization 鈹€鈹€
+
 async function initialize(): Promise<void> {
   // 1. Initialize logging
   const logManager = LogManager.getInstance();
@@ -432,7 +432,7 @@ async function initialize(): Promise<void> {
   // Apply logging.level from settings
   logManager.setMinLevel(settings.get<string>('logging.level', 'info'));
 
-  // 2. Load agents from data/agents/ 鈥?create MainAgent on first run
+
   const registry = AgentRegistry.getInstance();
   const agentsDir = ensureWritableDir('data', 'agents');
   const files = fs.readdirSync(agentsDir).filter((f) => f.endsWith('.json'));
@@ -450,7 +450,7 @@ async function initialize(): Promise<void> {
   }
 
   // Auto-create a main agent on first run only if setup is done (apiKey exists).
-  // If settings.yaml has no apiKey, the setup wizard hasn't run yet 鈥?skip creation.
+
   if (registry.allAgents().length === 0) {
     const hasApiKey = !!settings.get('apiKey');
     if (!hasApiKey) {
@@ -508,7 +508,7 @@ async function initialize(): Promise<void> {
   // 4.5 Initialize API auth tokens
   await initAuthStore('config');
 
-  // 4.6 Restart checkpoint recovery 鈥?inject system message into JSONL on startup.
+
   // Don't try to wake the agent directly (AgentLoop needs agent registry, session cache,
   // and WS connection all ready). Instead, inject a system message into the session's
   // JSONL. When the user sends their first message after restart, the agent naturally
@@ -523,10 +523,10 @@ async function initialize(): Promise<void> {
       if (age < MAX_AGE && checkpoint.sessionId && checkpoint.resumeMessage) {
         const { SessionStore } = await import('./core/session/SessionStore.js');
         const store = SessionStore.getInstance();
-        // Check if session EXISTS ON DISK 鈥?in-memory SessionManager is empty on startup.
+
         const sessDir = path.join(store.getSessionsDir(), checkpoint.sessionId);
         if (fs.existsSync(sessDir)) {
-          // Inject system message directly into JSONL 鈥?SessionManager isn't loaded yet.
+
           const now = new Date().toISOString();
           const evId = () => `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
           await store.persistEvent(checkpoint.sessionId, {
@@ -546,13 +546,13 @@ async function initialize(): Promise<void> {
           // Only delete checkpoint after successful injection
           fs.unlinkSync(checkpointPath);
         } else {
-          logManager.logger('anochat.core').warn('Restart checkpoint skipped 鈥?session not found on disk', {
+          logManager.logger('anochat.core').warn('Restart checkpoint skipped - session not found on disk', {
             sid: checkpoint.sessionId, ageMs: age,
           });
           fs.unlinkSync(checkpointPath);
         }
       } else {
-        // Expired or invalid 鈥?clean up
+
         fs.unlinkSync(checkpointPath);
       }
     }
@@ -595,12 +595,12 @@ async function initialize(): Promise<void> {
     logManager.logger('anochat.core').warn('PluginHost start failed', { error: (err as Error).message });
   }
 
-  // 11. Register and start Extensions 鈥?gated by plugin existence
+
   try {
     const { ExtensionManager } = await import('./core/extensible/ExtensionManager.js');
     const extMgr = ExtensionManager.getInstance();
 
-    // Kernel subsystems (always start 鈥?not optional)
+
     const { SkillsExtension } = await import('./core/skills/SkillsExtension.js');
     const { MemoryExtension } = await import('./core/memory/MemoryExtension.js');
     const { EvolutionExtension } = await import('./core/evolution/EvolutionExtension.js');
@@ -619,7 +619,7 @@ async function initialize(): Promise<void> {
   }
   // Gateway adapters are registered by the anoclaw-gateway plugin via extension.js
 
-  // 鈹€鈹€ Dependency Injection: inject ILogger into core singletons 鈹€鈹€
+
   try {
     AgentRegistry.getInstance().setLogger(logManager.logger('anochat.agent'));
     ToolRegistry.getInstance().setLogger(logManager.logger('anochat.tools'));
@@ -630,7 +630,7 @@ async function initialize(): Promise<void> {
     logManager.logger('anochat.core').warn('ILogger injection failed', { error: (err as Error).message });
   }
 
-  // 鈹€鈹€ Dependency Injection: wire profiler into core singletons 鈹€鈹€
+
   try {
     ToolRegistry.getInstance().setProfiler(ToolProfiler.getInstance());
     logManager.logger('anochat.core').info('Repository and profiler injected');
@@ -638,7 +638,7 @@ async function initialize(): Promise<void> {
     logManager.logger('anochat.core').warn('Repository/profiler injection failed', { error: (err as Error).message });
   }
 
-  // Install TypedEventBus 鈫?WebSocket forwarding (bridges core events to browser)
+
   try {
     const { installWsForwarding } = await import('./infra/network/WsForwardSubscriber.js');
     installWsForwarding();
@@ -659,7 +659,7 @@ async function initialize(): Promise<void> {
   logManager.logger('anochat.core').info('Init complete', { agentCount: registry.allAgents().length, toolCount: ToolRegistry.getInstance().allTools().length });
 }
 
-// 鈹€鈹€ Server startup (exported for Electron) 鈹€鈹€
+
 const server = http.createServer(handleRequest);
 const wsServer = WsServer.getInstance();
 wsServer.attach(server);

@@ -6,6 +6,8 @@ describe('frontend user mode helpers', () => {
     expect(normalizeUserMode('simple')).toBe('simple');
     expect(normalizeUserMode('office')).toBe('office');
     expect(normalizeUserMode('work')).toBe('office');
+    expect(normalizeUserMode('programming')).toBe('coding');
+    expect(normalizeUserMode('developer')).toBe('coding');
     expect(normalizeUserMode('child')).toBe('child');
     expect(normalizeUserMode('education')).toBe('child');
     expect(normalizeUserMode('pro')).toBe('professional');
@@ -16,8 +18,9 @@ describe('frontend user mode helpers', () => {
     expect(USER_MODE_OPTIONS.map((mode) => mode.value)).toEqual([
       'simple',
       'office',
-      'child',
+      'coding',
       'professional',
+      'child',
     ]);
   });
 });

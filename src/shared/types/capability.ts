@@ -16,7 +16,46 @@ export type CapabilityKind =
   | 'memory'
   | 'utility';
 
-export type UserMode = 'simple' | 'office' | 'child' | 'professional';
+export type UserMode = 'simple' | 'office' | 'coding' | 'child' | 'professional';
+
+export type CapabilityPluginRecommendationStatus =
+  | 'activated'
+  | 'installed'
+  | 'missing'
+  | 'error'
+  | 'unknown';
+
+export type CapabilityPluginRecommendationAction =
+  | 'none'
+  | 'activate'
+  | 'install'
+  | 'reload'
+  | 'inspect';
+
+export type CapabilityPluginRecommendationReason =
+  | 'recommended'
+  | 'capability_provider'
+  | 'missing_tools'
+  | 'plugin_not_active'
+  | 'plugin_error';
+
+export interface CapabilityPluginRecommendation {
+  pluginName: string;
+  displayName: string;
+  status: CapabilityPluginRecommendationStatus;
+  action: CapabilityPluginRecommendationAction;
+  reason: CapabilityPluginRecommendationReason;
+  source: 'local' | 'marketplace' | 'official' | 'community' | 'unknown';
+  installable: boolean;
+  missingTools: string[];
+  version?: string;
+  publisher?: string;
+  description?: string;
+  installUrl?: string;
+  installRoute?: string;
+  activateRoute?: string;
+  errorMessage?: string;
+}
 
 export interface CapabilityInputField {
   name: string;
@@ -108,6 +147,7 @@ export interface TaskResolveResult {
   missingInputs: CapabilityInputField[];
   missingTools: string[];
   recommendedPlugins: string[];
+  pluginRecommendations: CapabilityPluginRecommendation[];
   assumptions: string[];
   reason: string;
   suggestedResponse: string;

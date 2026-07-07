@@ -7,6 +7,7 @@ import type {
   UserMode,
 } from '../../../shared/types/capability.js';
 import { CapabilityRegistry } from './CapabilityRegistry.js';
+import { CapabilityPluginRecommender } from './CapabilityPluginRecommender.js';
 
 const MIN_CAPABILITY_SCORE = 6;
 
@@ -29,7 +30,10 @@ const CREATE_INTENT_TERMS = [
 ];
 
 export class TaskResolver {
-  constructor(private readonly _capabilities = CapabilityRegistry.getInstance()) {}
+  constructor(
+    private readonly _capabilities = CapabilityRegistry.getInstance(),
+    private readonly _pluginRecommender = new CapabilityPluginRecommender(),
+  ) {}
 
   async resolve(request: TaskResolveRequest): Promise<TaskResolveResult> {
     const query = (request.message || '').trim();
@@ -60,6 +64,7 @@ export class TaskResolver {
         missingInputs: [],
         missingTools: [],
         recommendedPlugins: [],
+        pluginRecommendations: [],
         assumptions: [],
         reason: 'No user-level capability matched strongly enough.',
         suggestedResponse: 'I can answer directly, or you can ask me to create, analyze, organize, research, or automate something.',
@@ -74,6 +79,11 @@ export class TaskResolver {
     ]);
     const canStart = capability.status === 'available' && missingInputs.length === 0;
     const nextAction = chooseNextAction(capability, missingInputs);
+    const pluginRecommendations = await this._pluginRecommender.recommend({
+      capability,
+      recommendedPlugins,
+      missingTools: capability.missingTools,
+    });
 
     return {
       intent: 'capability',
@@ -88,9 +98,10 @@ export class TaskResolver {
       missingInputs,
       missingTools: capability.missingTools,
       recommendedPlugins,
+      pluginRecommendations,
       assumptions: buildAssumptions(capability),
       reason: buildReason(capability, best),
-      suggestedResponse: buildSuggestedResponse(capability, nextAction, missingInputs, recommendedPlugins),
+      suggestedResponse: buildSuggestedResponse(capability, nextAction, missingInputs, recommendedPlugins, pluginRecommendations),
     };
   }
 }
@@ -201,6 +212,7 @@ function buildSuggestedResponse(
   nextAction: TaskResolveResult['nextAction'],
   missingInputs: CapabilityInputField[],
   recommendedPlugins: string[],
+  pluginRecommendations: TaskResolveResult['pluginRecommendations'],
 ): string {
   if (nextAction === 'execute_capability') {
     return `I found the "${capability.title}" capability and can start now.`;
@@ -209,7 +221,10 @@ function buildSuggestedResponse(
     const names = missingInputs.map((input) => input.label || input.name).join(', ');
     return `I found the "${capability.title}" capability. I need: ${names}.`;
   }
-  const plugins = recommendedPlugins.length > 0 ? recommendedPlugins.join(', ') : 'a plugin that provides this capability';
+  const pluginNames = pluginRecommendations.length > 0
+    ? pluginRecommendations.map((plugin) => plugin.displayName || plugin.pluginName)
+    : recommendedPlugins;
+  const plugins = pluginNames.length > 0 ? pluginNames.join(', ') : 'a plugin that provides this capability';
   return `This looks like "${capability.title}", but the required capability is not ready yet. Recommended plugin: ${plugins}.`;
 }
 
@@ -234,6 +249,7 @@ function emptyResult(query: string, reason: string, userMode: UserMode, locale?:
     missingInputs: [],
     missingTools: [],
     recommendedPlugins: [],
+    pluginRecommendations: [],
     assumptions: [],
     reason,
     suggestedResponse: 'Tell me what you want AnoClaw to create, analyze, organize, research, or automate.',
@@ -243,6 +259,7 @@ function emptyResult(query: string, reason: string, userMode: UserMode, locale?:
 function normalizeUserMode(value: unknown): UserMode {
   const raw = String(value || '').trim().toLowerCase();
   if (raw === 'office' || raw === 'work') return 'office';
+  if (raw === 'coding' || raw === 'programming' || raw === 'developer' || raw === 'dev') return 'coding';
   if (raw === 'child' || raw === 'kids' || raw === 'education') return 'child';
   if (raw === 'professional' || raw === 'pro' || raw === 'expert') return 'professional';
   return 'simple';
@@ -258,7 +275,12 @@ function userModeScoreBoost(capability: CapabilityRecord, userMode: UserMode): n
     if (capability.id.startsWith('education.')) return 5;
     if (capability.kind === 'knowledge') return 1;
   }
+  if (userMode === 'coding') {
+    if (capability.domain === 'coding') return 6;
+    if (capability.kind === 'automation' || capability.domain === 'files') return 1;
+  }
   if (userMode === 'professional') {
+    if (capability.domain === 'coding') return 5;
     if (['automation', 'memory', 'files'].includes(capability.domain)) return 2;
     if (capability.kind === 'automation' || capability.kind === 'utility') return 2;
   }

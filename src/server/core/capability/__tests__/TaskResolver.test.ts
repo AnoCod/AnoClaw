@@ -22,6 +22,9 @@ describe('TaskResolver', () => {
     expect(result.canStart).toBe(false);
     expect(result.missingTools).toContain('office.create_pptx');
     expect(result.recommendedPlugins).toContain('anoclaw-office');
+    expect(result.pluginRecommendations[0]).toMatchObject({
+      pluginName: 'anoclaw-office',
+    });
   });
 
   it('matches Chinese presentation wording', async () => {
@@ -74,6 +77,16 @@ describe('TaskResolver', () => {
     expect(result.bestCapability?.id).toBe('education.explain');
     expect(result.nextAction).toBe('recommend_plugin');
     expect(result.recommendedPlugins).toContain('education');
+  });
+
+  it('routes programming requests to code implementation capability', async () => {
+    const result = await new TaskResolver().resolve({
+      message: '帮我修复这个 bug 并跑测试',
+      userMode: 'programming',
+    });
+
+    expect(result.userMode).toBe('coding');
+    expect(result.bestCapability?.id).toBe('code.implement');
   });
 
   it('prefers an available plugin capability over a catalog placeholder with the same id', async () => {

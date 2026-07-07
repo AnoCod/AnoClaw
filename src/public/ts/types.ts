@@ -12,7 +12,7 @@
 
 import type { LocaleCode } from './i18n/index.js';
 
-export type UserMode = 'simple' | 'office' | 'child' | 'professional';
+export type UserMode = 'simple' | 'office' | 'coding' | 'child' | 'professional';
 
 export type MessageRole = 'user' | 'assistant' | 'system';
 

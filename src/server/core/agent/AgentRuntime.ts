@@ -525,26 +525,26 @@ export class AgentRuntime extends EventEmitter {
     }
 
     if (taskResolution.result.nextAction === 'recommend_plugin') {
-      const plugins = taskResolution.result.recommendedPlugins.length > 0
-        ? taskResolution.result.recommendedPlugins.join(', ')
-        : 'a plugin that provides this capability';
+      const pluginLines = formatPluginRecommendationLines(taskResolution.result, isLikelyChinese(taskResolution.result.query));
       const tools = taskResolution.result.missingTools.length > 0
-        ? ` Missing tools: ${taskResolution.result.missingTools.join(', ')}.`
+        ? taskResolution.result.missingTools.join(', ')
         : '';
       if (isLikelyChinese(taskResolution.result.query)) {
         return [
-          `我识别到你想使用「${capability.title}」能力，但 AnoClaw 当前还缺少对应插件/工具。`,
+          `我识别到你想使用「${capability.title}」能力，但 AnoClaw 当前还没有准备好对应能力。`,
           '',
-          `建议插件：${plugins}。${tools}`,
-          '插件准备好后，你可以直接用同一句话让我继续完成。',
-        ].join('\n');
+          ...pluginLines,
+          tools ? `缺少工具：${tools}。` : '',
+          '插件启用或安装完成后，你可以直接用同一句话让我继续完成。',
+        ].filter(Boolean).join('\n');
       }
       return [
         `I recognized this as "${capability.title}", but AnoClaw does not have the required plugin/tool ready yet.`,
         '',
-        `Recommended plugin: ${plugins}.${tools}`,
+        ...pluginLines,
+        tools ? `Missing tools: ${tools}.` : '',
         'Once it is ready, you can ask the same request again and I can continue.',
-      ].join('\n');
+      ].filter(Boolean).join('\n');
     }
 
     return taskResolution.result.suggestedResponse;
@@ -1227,6 +1227,7 @@ function summarizeTaskResolution(result: TaskResolveResult): Record<string, unkn
     })),
     missingTools: result.missingTools,
     recommendedPlugins: result.recommendedPlugins,
+    pluginRecommendations: result.pluginRecommendations,
     reason: result.reason,
   };
 }
@@ -1249,6 +1250,38 @@ function taskResolutionToolNames(result: TaskResolveResult): string[] {
 
 function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean)));
+}
+
+function formatPluginRecommendationLines(result: TaskResolveResult, chinese: boolean): string[] {
+  const recommendations = result.pluginRecommendations;
+  if (recommendations.length === 0) {
+    const fallback = result.recommendedPlugins.length > 0
+      ? result.recommendedPlugins.join(', ')
+      : (chinese ? '能提供该能力的插件' : 'a plugin that provides this capability');
+    return [chinese ? `建议插件：${fallback}。` : `Recommended plugin: ${fallback}.`];
+  }
+
+  return recommendations.map((plugin) => {
+    const name = plugin.displayName && plugin.displayName !== plugin.pluginName
+      ? `${plugin.displayName} (${plugin.pluginName})`
+      : plugin.pluginName;
+
+    if (chinese) {
+      if (plugin.status === 'installed') return `建议启用插件：${name}。`;
+      if (plugin.status === 'activated' && plugin.action === 'reload') return `建议重载插件：${name}。`;
+      if (plugin.status === 'activated') return `插件 ${name} 已启用，但能力仍未完整就绪。`;
+      if (plugin.status === 'error') return `插件 ${name} 当前加载异常，需要检查插件详情。`;
+      if (plugin.installable) return `建议从插件市场安装：${name}。`;
+      return `建议插件：${name}，但当前未安装。`;
+    }
+
+    if (plugin.status === 'installed') return `Recommended action: activate ${name}.`;
+    if (plugin.status === 'activated' && plugin.action === 'reload') return `Recommended action: reload ${name}.`;
+    if (plugin.status === 'activated') return `${name} is active, but the capability is still incomplete.`;
+    if (plugin.status === 'error') return `${name} has a load error; inspect the plugin details.`;
+    if (plugin.installable) return `Recommended action: install ${name} from the plugin marketplace.`;
+    return `Recommended plugin: ${name}, but it is not installed.`;
+  });
 }
 
 function isLikelyChinese(value: string): boolean {

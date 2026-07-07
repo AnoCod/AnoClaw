@@ -84,10 +84,12 @@ export function createDefaultCapabilityCatalog(): CapabilityDefinition[] {
       outputs: [
         { type: 'artifact', label: 'Summary', artifactType: 'report' },
         { type: 'file', label: 'Extracted notes', extension: 'md', artifactType: 'document' },
+        { type: 'preview', label: 'Summary preview', artifactType: 'pdf' },
       ],
-      requiredTools: ['Read', 'Write'],
-      recommendedPlugins: ['pdf'],
-      priority: 75,
+      requiredTools: ['pdf.summarize'],
+      artifactTypes: ['pdf', 'document', 'report'],
+      recommendedPlugins: ['anoclaw-pdf'],
+      priority: 84,
     },
     {
       id: 'web.research',

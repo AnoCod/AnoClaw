@@ -192,6 +192,33 @@ describe('TaskResolver', () => {
     expect(result.missingInputs).toEqual([]);
     expect(result.nextAction).toBe('execute_capability');
   });
+
+  it('routes PDF summary requests to the official PDF capability', async () => {
+    ToolRegistry.getInstance().registerTool(new SummarizePdfFixtureTool(), 'PDF', { source: 'plugin', pluginName: 'anoclaw-pdf' });
+    const registry = CapabilityRegistry.getInstance();
+    registry.registerRuntimeCapabilities('anoclaw-pdf', [
+      {
+        id: 'pdf.summarize',
+        title: 'Summarize a PDF',
+        domain: 'pdf',
+        kind: 'analysis',
+        triggers: ['pdf', 'PDF总结', '总结PDF'],
+        inputs: [{ name: 'filePath', type: 'file', required: false }],
+        requiredTools: ['pdf.summarize'],
+        outputs: [{ type: 'file', extension: 'md', artifactType: 'document' }],
+      },
+    ], { source: 'plugin', pluginName: 'anoclaw-pdf', pluginStatus: 'activated' });
+
+    const result = await new TaskResolver(registry).resolve({
+      message: '把这个PDF总结成一页报告',
+      userMode: 'office',
+    });
+
+    expect(result.bestCapability?.id).toBe('pdf.summarize');
+    expect(result.bestCapability?.source).toBe('plugin');
+    expect(result.missingInputs).toEqual([]);
+    expect(result.nextAction).toBe('execute_capability');
+  });
 });
 
 class CreatePptFixtureTool extends Tool {
@@ -233,6 +260,18 @@ class CreateDocFixtureTool extends Tool {
 class AnalyzeSpreadsheetFixtureTool extends Tool {
   name(): string { return 'office.analyze_spreadsheet'; }
   description(): string { return 'Analyze spreadsheet data.'; }
+  parametersSchema(): Record<string, unknown> {
+    return { type: 'object', properties: {}, required: [] };
+  }
+  riskLevel(): RiskLevel { return RiskLevel.Safe; }
+  async execute(_params: Record<string, unknown>, _ctx: ExecutionContext): Promise<ToolResult> {
+    return this.makeResult('ok');
+  }
+}
+
+class SummarizePdfFixtureTool extends Tool {
+  name(): string { return 'pdf.summarize'; }
+  description(): string { return 'Summarize a PDF file.'; }
   parametersSchema(): Record<string, unknown> {
     return { type: 'object', properties: {}, required: [] };
   }

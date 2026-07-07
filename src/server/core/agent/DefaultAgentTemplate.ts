@@ -47,6 +47,7 @@ export const DEFAULT_CEO_TOOLS = [
   'office.create_pptx',
   'office.create_docx',
   'office.analyze_spreadsheet',
+  'pdf.summarize',
 ];
 
 export const DEFAULT_MANAGER_TOOLS = [

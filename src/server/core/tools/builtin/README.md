@@ -251,16 +251,25 @@ Searches the web and returns results formatted as search blocks. Supports domain
 
 ### SleepTool — `Sleep`
 
-Pauses execution for a specified duration. Used to wait for background tasks or rate limits.
+Pauses execution for a specified duration, or waits for a background task to finish without polling.
 
 | Property | Value |
 |---|---|
 | Risk | `Safe` |
+| Is read-only | Yes |
+| Max wait | 300 seconds |
 
 **Parameters:**
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `duration` | number | ✓ | Sleep duration in seconds |
+| `delaySeconds` | number | No | Sleep duration in seconds, or max wait when `wait_for_task_id` is provided |
+| `reason` | string | No | Why the agent is sleeping |
+| `wait_for_task_id` | string | No | Background task ID to wait for |
+
+**Behavior notes:**
+- Requires either `delaySeconds` or `wait_for_task_id`.
+- Waiting for a background task wakes on completion/failure and also recognizes recently completed tasks.
+- Unknown, failed, killed, timed-out, or interrupted waits return failed tool results with structured task status.
 
 ---
 

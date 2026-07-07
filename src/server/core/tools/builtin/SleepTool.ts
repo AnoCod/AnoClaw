@@ -14,6 +14,7 @@ import { createLogger } from '../../logger.js';
 
 const log = createLogger('anochat.tool');
 const MAX_WAIT_MS = 300000; // 5 minutes
+const DEFAULT_WAIT_SECONDS = 300;
 
 export class SleepTool extends Tool {
 
@@ -70,7 +71,11 @@ export class SleepTool extends Tool {
   }
 
   defaultTimeoutMs(): number {
-    return 300000; // 5 minutes max
+    return MAX_WAIT_MS + 1000; // Tool-level wait plus pipeline grace.
+  }
+
+  maxRetries(): number {
+    return 0;
   }
 
   async execute(
@@ -80,6 +85,13 @@ export class SleepTool extends Tool {
     const delaySeconds = params.delaySeconds as number | undefined;
     const reason = (params.reason as string) || 'No reason provided';
     const waitForTaskId = params.wait_for_task_id as string | undefined;
+
+    if (waitForTaskId !== undefined && waitForTaskId !== null && typeof waitForTaskId !== 'string') {
+      return this.makeError('wait_for_task_id must be a string');
+    }
+    if (delaySeconds !== undefined && delaySeconds !== null && (typeof delaySeconds !== 'number' || !Number.isFinite(delaySeconds))) {
+      return this.makeError('delaySeconds must be a finite number');
+    }
 
     // ── Task-completion wait mode ──
     if (waitForTaskId) {
@@ -91,32 +103,56 @@ export class SleepTool extends Tool {
       return this.makeError('Either delaySeconds or wait_for_task_id is required');
     }
 
-    if (typeof delaySeconds !== 'number' || delaySeconds < 0) {
-      return this.makeError('delaySeconds must be a positive number');
+    if (delaySeconds < 0) {
+      return this.makeError('delaySeconds must be a non-negative number');
     }
 
     // Cap at 5 minutes to prevent infinite sleep
     const cappedDelay = Math.min(delaySeconds, 300);
     const startedAt = Date.now();
+    let interrupted = false;
 
     // Abort-aware sleep - resolve immediately when user interjects
     await new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, cappedDelay * 1000);
       if (ctx.signal) {
         if (ctx.signal.aborted) {
+          interrupted = true;
           clearTimeout(timer);
           resolve();
           return;
         }
-        const onAbort = () => { clearTimeout(timer); resolve(); };
+        const onAbort = () => { interrupted = true; clearTimeout(timer); resolve(); };
         ctx.signal.addEventListener('abort', onAbort, { once: true });
       }
     });
 
     const actualMs = Date.now() - startedAt;
+    if (interrupted) {
+      return this.makeError(
+        `Sleep interrupted by user after ${(actualMs / 1000).toFixed(1)} seconds. Reason: ${reason}`,
+        {
+          startedAt,
+          structured: {
+            sleepStatus: 'aborted',
+            requestedDelaySeconds: delaySeconds,
+            actualMs,
+          },
+        },
+      );
+    }
+
     return this.makeResult(
       `Slept for ${(actualMs / 1000).toFixed(1)} seconds. Reason: ${reason}`,
-      { startedAt },
+      {
+        startedAt,
+        structured: {
+          sleepStatus: 'completed',
+          requestedDelaySeconds: delaySeconds,
+          cappedDelaySeconds: cappedDelay,
+          actualMs,
+        },
+      },
     );
   }
 
@@ -128,15 +164,54 @@ export class SleepTool extends Tool {
     ctx: ExecutionContext,
   ): Promise<ToolResult> {
     const startedAt = Date.now();
-    const maxWaitMs = Math.min((maxDelaySeconds ?? 300) * 1000, MAX_WAIT_MS);
+    if (!taskId.trim()) {
+      return this.makeError('wait_for_task_id must not be empty', { startedAt });
+    }
+    if (maxDelaySeconds !== undefined && (!Number.isFinite(maxDelaySeconds) || maxDelaySeconds < 0)) {
+      return this.makeError('delaySeconds must be a non-negative finite number when waiting for a task', { startedAt });
+    }
+    const maxWaitMs = Math.min((maxDelaySeconds ?? DEFAULT_WAIT_SECONDS) * 1000, MAX_WAIT_MS);
 
     // Check if task already finished (fast path)
     const bgManager = BackgroundTaskManager.getInstance();
     if (!bgManager.hasTask(taskId)) {
-      log.info('SleepTool: task not found (already completed or never existed)', { taskId });
-      return this.makeResult(
-        `Task ${taskId} is not running (already completed, failed, or never existed).`,
-        { startedAt, structured: { taskId, taskStatus: 'not_found' } },
+      const recent = bgManager.getRecentTaskResult(taskId);
+      if (recent) {
+        const waitedMs = Date.now() - startedAt;
+        if (recent.status === 'completed') {
+          return this.makeResult(
+            `Task ${taskId} had already completed.\nOutput: ${recent.content || '(no output)'}`,
+            {
+              startedAt,
+              structured: {
+                taskId,
+                taskStatus: 'completed',
+                waitedMs,
+                recent: true,
+                durationMs: recent.durationMs,
+              },
+            },
+          );
+        }
+        return this.makeError(
+          `Task ${taskId} had already ${recent.status}: ${recent.error || 'unknown error'}`,
+          {
+            startedAt,
+            structured: {
+              taskId,
+              taskStatus: recent.status,
+              waitedMs,
+              recent: true,
+              durationMs: recent.durationMs,
+            },
+          },
+        );
+      }
+
+      log.info('SleepTool: task not found', { taskId });
+      return this.makeError(
+        `Task ${taskId} was not found. It may have expired from the recent task result cache, or the task ID may be incorrect.`,
+        { startedAt, structured: { taskId, taskStatus: 'not_found', waitedMs: 0 } },
       );
     }
 
@@ -207,12 +282,12 @@ export class SleepTool extends Tool {
           { startedAt, structured: { taskId, taskStatus: 'failed', waitedMs: actualMs } },
         );
       case 'timeout':
-        return this.makeResult(
+        return this.makeError(
           `Waited ${waitedSec}s for task ${taskId} - timed out. The task may still be running in the background.`,
           { startedAt, structured: { taskId, taskStatus: 'timeout', waitedMs: actualMs } },
         );
       case 'aborted':
-        return this.makeResult(
+        return this.makeError(
           `Wait for task ${taskId} interrupted by user after ${waitedSec}s.`,
           { startedAt, structured: { taskId, taskStatus: 'aborted', waitedMs: actualMs } },
         );

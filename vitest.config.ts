@@ -8,6 +8,9 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    // Keep singleton-heavy server tests stable on Windows/Node 24.
+    minWorkers: 2,
+    maxWorkers: 2,
     include: [
       'src/**/__tests__/**/*.test.ts',
       'plugins/**/__tests__/**/*.test.ts',

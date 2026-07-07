@@ -19,6 +19,9 @@ const log = createLogger('anochat.system');
 export type BackgroundTaskType = 'subagent' | 'bash' | 'command';
 export type BackgroundTaskStatus = 'running' | 'completed' | 'failed' | 'killed';
 
+const RECENT_TASK_RESULT_TTL_MS = 10 * 60 * 1000;
+const MAX_RECENT_TASK_RESULTS = 200;
+
 export interface BackgroundTaskEntry {
   id: string;
   type: BackgroundTaskType;
@@ -32,6 +35,23 @@ export interface BackgroundTaskEntry {
   fullContent?: string;
   error?: string;
   durationMs?: number;
+  pid?: number;
+  command?: string;
+}
+
+export interface BackgroundTaskResultSnapshot {
+  id: string;
+  type: BackgroundTaskType;
+  parentSessionId: string;
+  parentAgentId: string;
+  summary: string;
+  startedAt: number;
+  finishedAt: number;
+  status: Exclude<BackgroundTaskStatus, 'running'>;
+  content?: string;
+  error?: string;
+  durationMs?: number;
+  turnCount?: number;
   pid?: number;
   command?: string;
 }
@@ -57,6 +77,7 @@ export class BackgroundTaskManager extends EventEmitter {
   }
 
   private _tasks: Map<string, BackgroundTaskEntry> = new Map();
+  private _recentResults: Map<string, BackgroundTaskResultSnapshot> = new Map();
 
   private constructor() {
     super();
@@ -95,6 +116,7 @@ export class BackgroundTaskManager extends EventEmitter {
     if (result.turnCount !== undefined) task.turnCount = result.turnCount;
     task.durationMs = result.durationMs;
     this._emitUpdate(task);
+    this._rememberResult(task, 'completed');
 
     // Legacy path: EventSubscriptionManager for agent-to-agent pub/sub
     EventSubscriptionManager.getInstance().publish(`task:completed:${taskId}`, {
@@ -138,6 +160,7 @@ export class BackgroundTaskManager extends EventEmitter {
     task.error = error.slice(0, 500);
     task.durationMs = durationMs;
     this._emitUpdate(task);
+    this._rememberResult(task, 'failed');
 
     EventSubscriptionManager.getInstance().publish(`task:failed:${taskId}`, {
       subSessionId: taskId,
@@ -175,7 +198,35 @@ export class BackgroundTaskManager extends EventEmitter {
     if (!task || task.status !== 'running') return false;
     task.status = 'killed';
     task.durationMs = Date.now() - task.startedAt;
+    task.error = 'Task killed';
     this._emitUpdate(task);
+    this._rememberResult(task, 'killed');
+
+    EventSubscriptionManager.getInstance().publish(`task:failed:${taskId}`, {
+      subSessionId: taskId,
+      parentSessionId: task.parentSessionId,
+      subAgentId: task.parentAgentId,
+      taskSummary: task.summary,
+      durationMs: task.durationMs,
+      error: task.error,
+    }).catch(err => log.warn('Failed to publish task:killed event', { taskId, error: (err as Error).message }));
+
+    TypedEventBus.emit('task:failed', {
+      taskId,
+      parentSessionId: task.parentSessionId,
+      parentAgentId: task.parentAgentId,
+      type: task.type,
+      summary: task.summary,
+      durationMs: task.durationMs,
+      error: task.error,
+    });
+
+    this.emit('taskCompletedInSession', {
+      parentSessionId: task.parentSessionId,
+      taskId,
+      status: 'failed',
+    } satisfies TaskCompletedInSessionPayload);
+
     this._tasks.delete(taskId);
     return true;
   }
@@ -202,6 +253,11 @@ export class BackgroundTaskManager extends EventEmitter {
     return this._tasks.has(taskId);
   }
 
+  getRecentTaskResult(taskId: string): BackgroundTaskResultSnapshot | undefined {
+    this._pruneRecentResults();
+    return this._recentResults.get(taskId);
+  }
+
   get activeCount(): number {
     return this._tasks.size;
   }
@@ -210,5 +266,42 @@ export class BackgroundTaskManager extends EventEmitter {
 
   private _emitUpdate(task: BackgroundTaskEntry): void {
     TypedEventBus.emit('task:registry_update', { task });
+  }
+
+  private _rememberResult(
+    task: BackgroundTaskEntry,
+    status: Exclude<BackgroundTaskStatus, 'running'>,
+  ): void {
+    this._recentResults.set(task.id, {
+      id: task.id,
+      type: task.type,
+      parentSessionId: task.parentSessionId,
+      parentAgentId: task.parentAgentId,
+      summary: task.summary,
+      startedAt: task.startedAt,
+      finishedAt: Date.now(),
+      status,
+      content: task.fullContent,
+      error: task.error,
+      durationMs: task.durationMs,
+      turnCount: task.turnCount,
+      pid: task.pid,
+      command: task.command,
+    });
+    this._pruneRecentResults();
+  }
+
+  private _pruneRecentResults(): void {
+    const now = Date.now();
+    for (const [id, snapshot] of this._recentResults) {
+      if (now - snapshot.finishedAt > RECENT_TASK_RESULT_TTL_MS) {
+        this._recentResults.delete(id);
+      }
+    }
+    while (this._recentResults.size > MAX_RECENT_TASK_RESULTS) {
+      const oldest = this._recentResults.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this._recentResults.delete(oldest);
+    }
   }
 }

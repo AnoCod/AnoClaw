@@ -1098,6 +1098,16 @@ export class AgentRuntime extends EventEmitter {
 
         const sm = SessionManager.getInstance();
         const timestamp = new Date().toISOString();
+        const parentAgent = AgentRegistry.getInstance().agent(payload.parentAgentId);
+        if (!parentAgent) {
+          log.warn('Skipping task notification for missing parent agent', {
+            taskId: payload.taskId,
+            sid: payload.parentSessionId,
+            aid: payload.parentAgentId,
+          });
+          return;
+        }
+
         sm.appendMessage(payload.parentSessionId, {
           id: `tn-${payload.taskId}`,
           sessionId: payload.parentSessionId,

@@ -160,12 +160,15 @@ Powerful regex search built on ripgrep. Supports full regex, file type filtering
 | `path` | string | | File or directory to search |
 | `glob` | string | | Glob filter (e.g., `*.ts`) |
 | `type` | string | | File type filter (e.g., `js`, `py`) |
+| `literal` | boolean | | Treat pattern as exact text instead of regex |
+| `include_hidden` | boolean | | Include hidden files/directories except `.git` and `node_modules` |
 | `output_mode` | string | | `content`, `files_with_matches`, or `count` |
 | `-i` | boolean | | Case insensitive |
 | `-n` | boolean | | Show line numbers |
 | `-A` / `-B` / `-C` | number | | Context lines after/before/both |
 | `head_limit` | number | | Max output entries (default 250) |
 | `multiline` | boolean | | Enable multiline matching |
+| `timeout_ms` | number | | Ripgrep timeout (default 15000, max 60000) |
 
 ---
 

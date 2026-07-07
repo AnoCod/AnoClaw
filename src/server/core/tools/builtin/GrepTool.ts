@@ -5,7 +5,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import micromatch from 'micromatch';
 import { Tool } from '../Tool.js';
 import type { ToolResult } from '../../../../shared/types/tool.js';
@@ -17,6 +17,15 @@ type OutputMode = 'content' | 'files_with_matches' | 'count';
 
 /** Maximum total output characters. */
 const MAX_OUTPUT_CHARS = 25000;
+const DEFAULT_HEAD_LIMIT = 250;
+const MAX_HEAD_LIMIT = 5000;
+const DEFAULT_RG_TIMEOUT_MS = 15000;
+const MAX_RG_TIMEOUT_MS = 60000;
+const MAX_RG_BUFFER_BYTES = 10 * 1024 * 1024;
+const MAX_MANUAL_SCANNED_FILES = 50000;
+const MAX_MANUAL_FILE_BYTES = 2 * 1024 * 1024;
+
+let cachedRipgrepPath: string | null | undefined;
 
 export class GrepTool extends Tool {
 
@@ -27,7 +36,7 @@ export class GrepTool extends Tool {
   }
 
   description(): string {
-    return 'Search file contents using regular expressions. Supports full regex syntax, glob file filtering, and multiple output modes (content with context, file paths, or match counts). Use multiline mode for cross-line patterns. Output limit: 25,000 characters. For broad searches, prefer files_with_matches output mode to avoid truncation.';
+    return 'Search file contents using regular expressions or literal text. Supports ripgrep syntax, glob and type filtering, hidden-file opt-in, multiple output modes (content with context, file paths, or match counts), multiline mode, cancellation, and explicit timeout feedback. Output limit: 25,000 characters. For broad searches, prefer files_with_matches output mode to avoid truncation.';
   }
 
   prompt(): string {
@@ -35,6 +44,7 @@ export class GrepTool extends Tool {
       '- ALWAYS use Grep for content search - NEVER invoke grep or rg via Bash\n' +
       '- For open-ended searches requiring multiple rounds, use the Agent tool instead\n' +
       '- Pattern syntax uses ripgrep (not grep) - literal braces need escaping: use `interface\\{\\}` to find `interface{}` in Go code\n' +
+      '- Use literal=true for exact text searches so special regex characters are not interpreted\n' +
       '- Files with matches output mode is fastest for broad searches\n' +
       '- Output limit: 25,000 characters max. Use head_limit parameter for narrower results. Beyond the limit, output is head/tail truncated.';
   }
@@ -56,6 +66,14 @@ export class GrepTool extends Tool {
           type: 'string',
           description:
             'Glob pattern to filter files (e.g. "*.js", "*.{ts,tsx}"). Maps to rg --glob.',
+        },
+        literal: {
+          type: 'boolean',
+          description: 'Treat pattern as literal text instead of a regular expression (rg -F).',
+        },
+        include_hidden: {
+          type: 'boolean',
+          description: 'Include hidden files and directories. .git and node_modules remain excluded.',
         },
         output_mode: {
           type: 'string',
@@ -92,11 +110,15 @@ export class GrepTool extends Tool {
         head_limit: {
           type: 'number',
           description:
-            'Limit output to first N lines/entries. Defaults to 250. Pass 0 for unlimited.',
+            `Limit output to first N lines/entries. Defaults to ${DEFAULT_HEAD_LIMIT}. Pass 0 for unlimited. Maximum ${MAX_HEAD_LIMIT}.`,
         },
         multiline: {
           type: 'boolean',
           description: 'Enable multiline mode where . matches newlines (rg -U --multiline-dotall). Default: false.',
+        },
+        timeout_ms: {
+          type: 'number',
+          description: `Ripgrep execution timeout in milliseconds. Default ${DEFAULT_RG_TIMEOUT_MS}, maximum ${MAX_RG_TIMEOUT_MS}.`,
         },
       },
       required: ['pattern'],
@@ -134,18 +156,24 @@ export class GrepTool extends Tool {
     const pattern = params.pattern as string;
     const searchPath = (params.path as string) || ctx.workspace;
     const globFilter = params.glob as string | undefined;
-    const outputMode = (params.output_mode as OutputMode) || 'files_with_matches';
-    const after = (params['-A'] as number) ?? 0;
-    const before = (params['-B'] as number) ?? 0;
-    const contextLines = (params['-C'] as number) ?? 0;
+    const outputMode = normalizeOutputMode(params.output_mode as string | undefined);
+    const after = clampNonNegativeInt(params['-A'] as number | undefined);
+    const before = clampNonNegativeInt(params['-B'] as number | undefined);
+    const contextLines = clampNonNegativeInt(params['-C'] as number | undefined);
     const caseInsensitive = (params['-i'] as boolean) ?? false;
     const showLineNumbers = (params['-n'] as boolean) ?? true;
     const fileType = params.type as string | undefined;
-    const headLimit = (params.head_limit as number) ?? 250;
+    const headLimit = clampHeadLimit(params.head_limit as number | undefined);
     const multiline = (params.multiline as boolean) ?? false;
+    const literal = (params.literal as boolean) ?? false;
+    const includeHidden = (params.include_hidden as boolean) ?? false;
+    const timeoutMs = clampTimeout(params.timeout_ms as number | undefined);
 
     if (!pattern || typeof pattern !== 'string') {
       return this.makeError('pattern is required');
+    }
+    if (!outputMode) {
+      return this.makeError('output_mode must be one of: content, files_with_matches, count');
     }
 
     const startedAt = Date.now();
@@ -155,9 +183,14 @@ export class GrepTool extends Tool {
         ? searchPath
         : path.resolve(ctx.workspace, searchPath);
 
+      if (ctx.signal?.aborted) {
+        return this.makeError('Grep cancelled by user before search started', { startedAt });
+      }
+
       // Verify path exists
+      let stat: Awaited<ReturnType<typeof fs.stat>>;
       try {
-        await fs.stat(resolved);
+        stat = await fs.stat(resolved);
       } catch (err: unknown) {
         if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
           return this.makeError(`Path does not exist: ${searchPath}`);
@@ -167,27 +200,51 @@ export class GrepTool extends Tool {
 
       // Try ripgrep first, fall back to manual search
       let output: string;
-      const rgResult = tryRipgrep(pattern, resolved, {
+      let wasTruncated = false;
+      const rgResult = await tryRipgrep(pattern, resolved, {
         glob: globFilter,
         after, before, context: contextLines,
         caseInsensitive, showLineNumbers, fileType, headLimit, multiline,
-        outputMode,
-      });
+        outputMode, literal, includeHidden, timeoutMs,
+        cwd: stat.isDirectory() ? resolved : path.dirname(resolved),
+      }, ctx.signal);
 
-      if (rgResult !== null) {
-        output = rgResult;
-      } else {
-        output = await manualGrep(resolved, pattern, {
-          glob: globFilter,
-          caseInsensitive, headLimit, outputMode,
-          contextLines: contextLines || 0,
+      if (rgResult.kind === 'success') {
+        output = rgResult.output;
+        wasTruncated = rgResult.wasTruncated;
+      } else if (rgResult.kind === 'error') {
+        return this.makeError(rgResult.message, {
+          startedAt,
+          structured: {
+            backend: 'ripgrep',
+            failure: rgResult.failure,
+          },
         });
+      } else {
+        const manualResult = await manualGrep(resolved, pattern, {
+          glob: globFilter,
+          caseInsensitive, headLimit, outputMode, literal, includeHidden, multiline,
+          showLineNumbers,
+          beforeLines: contextLines || before,
+          afterLines: contextLines || after,
+        }, ctx.signal);
+        if (manualResult.error) {
+          return this.makeError(manualResult.error, {
+            startedAt,
+            structured: { backend: 'manual', failure: manualResult.failure },
+          });
+        }
+        output = manualResult.output;
+        wasTruncated = manualResult.wasTruncated;
+        if (manualResult.notes.length > 0) {
+          output = output.trimEnd() + `\n(${manualResult.notes.join(' ')})`;
+        }
       }
 
       // Trim and let pipeline normalize via outputLimit: 25000
       let trimmed = output.trim();
       if (!trimmed) trimmed = '(no matches)';
-      const wasTruncated = trimmed.length > MAX_OUTPUT_CHARS;
+      wasTruncated = wasTruncated || trimmed.length > MAX_OUTPUT_CHARS;
 
       return this.makeResult(trimmed, { startedAt, wasTruncated });
     } catch (err: unknown) {
@@ -231,33 +288,100 @@ interface RipgrepOptions {
   headLimit: number;
   multiline: boolean;
   outputMode: OutputMode;
+  literal: boolean;
+  includeHidden: boolean;
+  timeoutMs: number;
+  cwd: string;
 }
 
-function tryRipgrep(
+type RipgrepResult =
+  | { kind: 'unavailable' }
+  | { kind: 'success'; output: string; wasTruncated: boolean }
+  | { kind: 'error'; message: string; failure: 'aborted' | 'timeout' | 'invalid_pattern' | 'runtime' };
+
+async function tryRipgrep(
   pattern: string,
   searchPath: string,
   opts: RipgrepOptions,
-): string | null {
+  signal?: AbortSignal,
+): Promise<RipgrepResult> {
+  const rgBin = findRipgrep();
+  if (!rgBin) return { kind: 'unavailable' };
+
+  const args = buildRipgrepArgs(pattern, searchPath, opts);
+  const result = await runProcess(rgBin, args, opts.cwd, opts.timeoutMs, signal);
+
+  if (result.aborted) {
+    return { kind: 'error', message: 'Grep cancelled by user', failure: 'aborted' };
+  }
+  if (result.timedOut) {
+    return {
+      kind: 'error',
+      message: `Grep timed out after ${opts.timeoutMs}ms. Narrow path/pattern or increase timeout_ms.`,
+      failure: 'timeout',
+    };
+  }
+  if (result.spawnError) {
+    return { kind: 'unavailable' };
+  }
+  if (result.exitCode !== 0 && result.exitCode !== 1) {
+    const stderr = result.stderr.trim();
+    const failure = stderr.toLowerCase().includes('regex parse error') ? 'invalid_pattern' : 'runtime';
+    return {
+      kind: 'error',
+      message: stderr || `ripgrep exited with code ${result.exitCode}`,
+      failure,
+    };
+  }
+
+  let output = result.stdout;
+  if (result.stderr.trim()) {
+    output = output.trimEnd() + `\n[warnings]\n${result.stderr.trim()}`;
+  }
+
+  const limited = applyHeadLimit(output, opts.headLimit);
+  if (result.bufferExceeded) {
+    limited.output = limited.output.trimEnd() +
+      `\n... [output buffer exceeded ${MAX_RG_BUFFER_BYTES} bytes; results truncated]`;
+  }
+
+  return {
+    kind: 'success',
+    output: limited.output,
+    wasTruncated: limited.wasTruncated || result.bufferExceeded,
+  };
+}
+
+function findRipgrep(): string | null {
+  if (cachedRipgrepPath !== undefined) return cachedRipgrepPath;
+
   const rgPaths = [
     'rg',
     'C:\\Program Files\\Git\\usr\\bin\\rg.exe',
   ];
 
-  let rgBin = '';
   for (const p of rgPaths) {
     try {
-      const check = spawnSync(p, ['--version'], { timeout: 3000, encoding: 'utf-8' });
+      const check = spawnSync(p, ['--version'], {
+        timeout: 3000,
+        encoding: 'utf-8',
+        windowsHide: true,
+      });
       if (check.status === 0 && check.stdout?.includes('ripgrep')) {
-        rgBin = p;
-        break;
+        cachedRipgrepPath = p;
+        return cachedRipgrepPath;
       }
     } catch {
       // continue
     }
   }
-  if (!rgBin) return null;
+  cachedRipgrepPath = null;
+  return cachedRipgrepPath;
+}
 
+function buildRipgrepArgs(pattern: string, searchPath: string, opts: RipgrepOptions): string[] {
   const args: string[] = [];
+  args.push('--color=never', '--no-heading', '--with-filename');
 
   if (opts.outputMode === 'files_with_matches') {
     args.push('-l');
@@ -265,81 +389,281 @@ function tryRipgrep(
     args.push('-c');
   }
 
-  if (opts.after) args.push('-A', String(opts.after));
-  if (opts.before) args.push('-B', String(opts.before));
-  if (opts.context) args.push('-C', String(opts.context));
+  if (opts.context) {
+    args.push('-C', String(opts.context));
+  } else {
+    if (opts.after) args.push('-A', String(opts.after));
+    if (opts.before) args.push('-B', String(opts.before));
+  }
 
   if (opts.caseInsensitive) args.push('-i');
   if (opts.showLineNumbers) args.push('-n');
   if (opts.multiline) args.push('-U', '--multiline-dotall');
+  if (opts.literal) args.push('-F');
+  if (opts.includeHidden) args.push('--hidden');
 
   if (opts.fileType) args.push('--type', opts.fileType);
   if (opts.glob) args.push('--glob', opts.glob);
 
-  args.push('-e', pattern, searchPath);
   args.push('--no-ignore-vcs');
   args.push('-g', '!.git');
   args.push('-g', '!node_modules');
+  args.push('-e', pattern, searchPath);
+  return args;
+}
 
-  try {
-    const result = spawnSync(rgBin, args, {
-      encoding: 'utf-8',
-      timeout: 15000,
-      maxBuffer: 10 * 1024 * 1024,
-      cwd: searchPath,
+interface ProcessResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  spawnError?: string;
+  timedOut: boolean;
+  aborted: boolean;
+  bufferExceeded: boolean;
+}
+
+function runProcess(
+  command: string,
+  args: string[],
+  cwd: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<ProcessResult> {
+  return new Promise(resolve => {
+    let stdout = '';
+    let stderr = '';
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let settled = false;
+    let timedOut = false;
+    let aborted = false;
+    let bufferExceeded = false;
+
+    const child = spawn(command, args, {
+      cwd,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
 
-    let output = result.stdout || '';
-    // If ripgrep failed entirely (no stdout), surface the error
-    if (!output && result.error) return null;
-    // If ripgrep produced stderr but it's just informational (e.g. "permission denied" warnings),
-    // surface it separately rather than mixing into search results
-    if (result.stderr && result.stderr.trim()) {
-      output = output.trimEnd() + '\n[stderr]\n' + result.stderr.trim();
-    }
-    if (result.error) return null;
+    const cleanupFns: Array<() => void> = [];
+    const cleanup = () => {
+      for (const cleanupFn of cleanupFns) cleanupFn();
+    };
 
-    if (opts.headLimit > 0 && output) {
-      const lines = output.split('\n');
-      if (lines.length > opts.headLimit) {
-        output = lines.slice(0, opts.headLimit).join('\n') +
-          `\n... [${lines.length - opts.headLimit} more results]`;
+    const settle = (result: ProcessResult) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(result);
+    };
+
+    const killChild = () => {
+      if (!child.killed) {
+        try { child.kill(); } catch { /* ignore */ }
+      }
+    };
+
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      killChild();
+    }, timeoutMs);
+    cleanupFns.push(() => clearTimeout(timeoutId));
+
+    if (signal) {
+      const onAbort = () => {
+        aborted = true;
+        killChild();
+      };
+      if (signal.aborted) {
+        onAbort();
+      } else {
+        signal.addEventListener('abort', onAbort, { once: true });
+        cleanupFns.push(() => signal.removeEventListener('abort', onAbort));
       }
     }
 
-    return output || null;
-  } catch {
-    return null;
-  }
+    const appendChunk = (target: 'stdout' | 'stderr', chunk: Buffer) => {
+      const nextBytes = chunk.byteLength;
+      if (target === 'stdout') {
+        stdoutBytes += nextBytes;
+        if (stdoutBytes <= MAX_RG_BUFFER_BYTES) {
+          stdout += chunk.toString('utf-8');
+        } else {
+          bufferExceeded = true;
+          killChild();
+        }
+      } else {
+        stderrBytes += nextBytes;
+        if (stderrBytes <= MAX_RG_BUFFER_BYTES) {
+          stderr += chunk.toString('utf-8');
+        } else {
+          bufferExceeded = true;
+          killChild();
+        }
+      }
+    };
+
+    child.stdout.on('data', chunk => appendChunk('stdout', chunk));
+    child.stderr.on('data', chunk => appendChunk('stderr', chunk));
+
+    child.on('error', err => {
+      settle({
+        stdout,
+        stderr,
+        exitCode: null,
+        spawnError: err.message,
+        timedOut,
+        aborted,
+        bufferExceeded,
+      });
+    });
+
+    child.on('close', code => {
+      settle({
+        stdout,
+        stderr,
+        exitCode: code,
+        timedOut,
+        aborted,
+        bufferExceeded,
+      });
+    });
+  });
 }
 
-// ── Manual grep fallback ──
+// Manual grep fallback
 
 interface ManualGrepOptions {
   glob?: string;
   caseInsensitive: boolean;
   headLimit: number;
   outputMode: OutputMode;
-  contextLines: number;
+  beforeLines: number;
+  afterLines: number;
+  showLineNumbers: boolean;
+  literal: boolean;
+  includeHidden: boolean;
+  multiline: boolean;
+}
+
+interface ManualGrepResult {
+  output: string;
+  wasTruncated: boolean;
+  notes: string[];
+  error?: string;
+  failure?: string;
 }
 
 async function manualGrep(
   searchPath: string,
   pattern: string,
   opts: ManualGrepOptions,
-): Promise<string> {
+  signal?: AbortSignal,
+): Promise<ManualGrepResult> {
+  if (opts.multiline) {
+    return {
+      output: '',
+      wasTruncated: false,
+      notes: [],
+      error: 'multiline search requires ripgrep, but ripgrep is unavailable',
+      failure: 'unsupported_mode',
+    };
+  }
+
   let regex: RegExp;
+  let countRegex: RegExp;
   try {
-    regex = new RegExp(pattern, (opts.caseInsensitive ? 'i' : ''));
-  } catch {
-    return `Invalid regex pattern: ${pattern}`;
+    const source = opts.literal ? escapeRegExp(pattern) : pattern;
+    const flags = opts.caseInsensitive ? 'i' : '';
+    regex = new RegExp(source, flags);
+    countRegex = new RegExp(source, flags + 'g');
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      output: '',
+      wasTruncated: false,
+      notes: [],
+      error: `Invalid regex pattern: ${msg}`,
+      failure: 'invalid_pattern',
+    };
   }
 
   const results: string[] = [];
   const fileCounts: Map<string, number> = new Map();
+  const notes: string[] = [];
+  let scannedFiles = 0;
+  let scanTruncated = false;
+  let skippedLargeFiles = 0;
+
+  const isLimited = () => opts.headLimit > 0 && results.length >= opts.headLimit;
+  const ensureNotAborted = () => {
+    if (signal?.aborted) throw new Error('Grep cancelled by user');
+  };
+
+  async function processFile(fullPath: string, displayPath: string): Promise<void> {
+    ensureNotAborted();
+    if (isLimited()) return;
+    scannedFiles++;
+    if (scannedFiles > MAX_MANUAL_SCANNED_FILES) {
+      scanTruncated = true;
+      return;
+    }
+
+    try {
+      const fileStat = await fs.stat(fullPath);
+      if (fileStat.size > MAX_MANUAL_FILE_BYTES) {
+        skippedLargeFiles++;
+        return;
+      }
+    } catch {
+      return;
+    }
+
+    try {
+      const content = await fs.readFile(fullPath, 'utf-8');
+      if (content.includes('\u0000')) return;
+      const lines = content.split('\n');
+
+      for (let i = 0; i < lines.length; i++) {
+        ensureNotAborted();
+        if (isLimited()) break;
+
+        const line = lines[i];
+        if (!regex.test(line)) continue;
+
+        if (opts.outputMode === 'files_with_matches') {
+          if (!fileCounts.has(displayPath)) {
+            results.push(displayPath);
+            fileCounts.set(displayPath, 1);
+          }
+          continue;
+        }
+
+        if (opts.outputMode === 'count') {
+          fileCounts.set(displayPath, (fileCounts.get(displayPath) || 0) + countMatches(line, countRegex));
+          continue;
+        }
+
+        if (opts.beforeLines > 0 || opts.afterLines > 0) {
+          const start = Math.max(0, i - opts.beforeLines);
+          const end = Math.min(lines.length, i + opts.afterLines + 1);
+          results.push(`--- ${formatLocation(displayPath, i + 1, opts.showLineNumbers)} ---`);
+          for (let j = start; j < end; j++) {
+            const marker = j === i ? '>' : ' ';
+            results.push(`${marker}${formatLocation('', j + 1, opts.showLineNumbers)}${lines[j]}`);
+          }
+        } else {
+          results.push(`${formatLocation(displayPath, i + 1, opts.showLineNumbers)}${line.trim()}`);
+        }
+      }
+    } catch {
+      // Skip unreadable files
+    }
+  }
 
   async function walk(dir: string): Promise<void> {
-    if (results.length >= opts.headLimit && opts.headLimit > 0) return;
+    ensureNotAborted();
+    if (isLimited() || scanTruncated) return;
 
     let entries: Array<{ name: string; isDirectory(): boolean; isFile(): boolean }>;
     try {
@@ -347,11 +671,13 @@ async function manualGrep(
     } catch {
       return;
     }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
 
     for (const entry of entries) {
-      if (results.length >= opts.headLimit && opts.headLimit > 0) break;
-      if (entry.name.startsWith('.')) continue;
-      if (entry.name === 'node_modules') continue;
+      ensureNotAborted();
+      if (isLimited() || scanTruncated) break;
+      if (entry.name === '.git' || entry.name === 'node_modules') continue;
+      if (!opts.includeHidden && entry.name.startsWith('.')) continue;
 
       const fullPath = path.join(dir, entry.name);
       const relative = path.relative(searchPath, fullPath).replace(/\\/g, '/');
@@ -360,56 +686,7 @@ async function manualGrep(
         await walk(fullPath);
       } else if (entry.isFile()) {
         if (opts.glob && !micromatch.isMatch(relative, opts.glob)) continue;
-
-        const ext = path.extname(entry.name).toLowerCase();
-        const textExts = new Set([
-          '.ts', '.tsx', '.js', '.jsx', '.json', '.md', '.txt', '.css', '.html', '.xml',
-          '.yaml', '.yml', '.toml', '.ini', '.cfg', '.env', '.sh', '.bash', '.zsh',
-          '.py', '.rb', '.go', '.rs', '.java', '.c', '.cpp', '.h', '.hpp',
-          '.vue', '.svelte', '.graphql', '.sql', '.csv', '.log',
-        ]);
-        if (ext && !textExts.has(ext)) continue;
-
-        try {
-          const content = await fs.readFile(fullPath, 'utf-8');
-          const lines = content.split('\n');
-
-          for (let i = 0; i < lines.length; i++) {
-            if (results.length >= opts.headLimit && opts.headLimit > 0) break;
-
-            const line = lines[i];
-            const match = line.match(regex);
-            if (match) {
-              if (opts.outputMode === 'files_with_matches') {
-                if (!fileCounts.has(relative)) {
-                  results.push(relative);
-                  fileCounts.set(relative, 1);
-                }
-                continue;
-              }
-
-              if (opts.outputMode === 'count') {
-                fileCounts.set(relative, (fileCounts.get(relative) || 0) + 1);
-                continue;
-              }
-
-              // Content mode
-              if (opts.contextLines > 0) {
-                const start = Math.max(0, i - opts.contextLines);
-                const end = Math.min(lines.length, i + opts.contextLines + 1);
-                results.push(`--- ${relative}:${i + 1} ---`);
-                for (let j = start; j < end; j++) {
-                  const marker = j === i ? '>' : ' ';
-                  results.push(`${marker}${j + 1}: ${lines[j]}`);
-                }
-              } else {
-                results.push(`${relative}:${i + 1}: ${line.trim()}`);
-              }
-            }
-          }
-        } catch {
-          // Skip unreadable files
-        }
+        await processFile(fullPath, fullPath);
       }
     }
   }
@@ -418,23 +695,24 @@ async function manualGrep(
   try {
     stat = await fs.stat(searchPath);
   } catch {
-    return '';
+    return { output: '', wasTruncated: false, notes: [] };
   }
 
-  if (stat.isFile()) {
-    try {
-      const content = await fs.readFile(searchPath, 'utf-8');
-      const lines = content.split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        if (regex.test(lines[i])) {
-          results.push(`${searchPath}:${i + 1}: ${lines[i].trim()}`);
-        }
-      }
-    } catch {
-      // skip
+  try {
+    if (stat.isFile()) {
+      await processFile(searchPath, searchPath);
+    } else {
+      await walk(searchPath);
     }
-  } else {
-    await walk(searchPath);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      output: '',
+      wasTruncated: false,
+      notes: [],
+      error: message,
+      failure: signal?.aborted ? 'aborted' : 'runtime',
+    };
   }
 
   if (opts.outputMode === 'count') {
@@ -442,8 +720,74 @@ async function manualGrep(
     for (const [file, count] of fileCounts) {
       formatted.push(`${file}: ${count} matches`);
     }
-    return formatted.join('\n');
+    const limited = applyHeadLimit(formatted.join('\n'), opts.headLimit);
+    if (scanTruncated) notes.push(`Manual scan stopped after ${MAX_MANUAL_SCANNED_FILES} files.`);
+    if (skippedLargeFiles > 0) notes.push(`${skippedLargeFiles} files over ${MAX_MANUAL_FILE_BYTES} bytes were skipped by manual fallback.`);
+    return {
+      output: limited.output,
+      wasTruncated: limited.wasTruncated || scanTruncated || skippedLargeFiles > 0,
+      notes,
+    };
   }
 
-  return results.join('\n');
+  if (scanTruncated) notes.push(`Manual scan stopped after ${MAX_MANUAL_SCANNED_FILES} files.`);
+  if (skippedLargeFiles > 0) notes.push(`${skippedLargeFiles} files over ${MAX_MANUAL_FILE_BYTES} bytes were skipped by manual fallback.`);
+  return {
+    output: results.join('\n'),
+    wasTruncated: isLimited() || scanTruncated || skippedLargeFiles > 0,
+    notes,
+  };
+}
+
+function normalizeOutputMode(value: string | undefined): OutputMode | null {
+  if (!value) return 'files_with_matches';
+  if (value === 'content' || value === 'files_with_matches' || value === 'count') return value;
+  return null;
+}
+
+function clampNonNegativeInt(value: number | undefined): number {
+  if (!Number.isFinite(value) || !value || value < 0) return 0;
+  return Math.floor(value);
+}
+
+function clampHeadLimit(value: number | undefined): number {
+  if (value === 0) return 0;
+  if (!Number.isFinite(value) || !value || value < 0) return DEFAULT_HEAD_LIMIT;
+  return Math.min(MAX_HEAD_LIMIT, Math.floor(value));
+}
+
+function clampTimeout(value: number | undefined): number {
+  if (!Number.isFinite(value) || !value || value <= 0) return DEFAULT_RG_TIMEOUT_MS;
+  return Math.min(MAX_RG_TIMEOUT_MS, Math.max(1000, Math.floor(value)));
+}
+
+function applyHeadLimit(output: string, headLimit: number): { output: string; wasTruncated: boolean } {
+  if (headLimit <= 0 || !output) return { output, wasTruncated: false };
+  const lines = output.split(/\r?\n/);
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  if (lines.length <= headLimit) return { output: lines.join('\n'), wasTruncated: false };
+  return {
+    output: lines.slice(0, headLimit).join('\n') + `\n... [${lines.length - headLimit} more results]`,
+    wasTruncated: true,
+  };
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function countMatches(line: string, regex: RegExp): number {
+  regex.lastIndex = 0;
+  let count = 0;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(line)) !== null) {
+    count++;
+    if (match[0] === '') regex.lastIndex++;
+  }
+  return count;
+}
+
+function formatLocation(file: string, line: number, showLineNumbers: boolean): string {
+  if (!file) return showLineNumbers ? `${line}: ` : '';
+  return showLineNumbers ? `${file}:${line}: ` : `${file}: `;
 }

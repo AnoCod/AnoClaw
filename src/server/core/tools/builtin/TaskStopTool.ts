@@ -5,6 +5,8 @@ import { Tool, RiskLevel } from '../Tool.js';
 import type { ToolResult } from '../Tool.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
 import { InterruptController, InterruptReason } from '../../agent/supervision/InterruptController.js';
+import { BackgroundTaskManager } from '../../agent/supervision/BackgroundTaskManager.js';
+import { BashTool } from './BashTool.js';
 
 export class TaskStopTool extends Tool {
 
@@ -33,8 +35,12 @@ export class TaskStopTool extends Tool {
           type: 'string',
           description: 'The sub-session ID of the delegated task to stop',
         },
+        task_id: {
+          type: 'string',
+          description: 'Alias for taskId. Kept for older prompts and integrations.',
+        },
       },
-      required: ['taskId'],
+      required: [],
     };
   }
 
@@ -46,7 +52,14 @@ export class TaskStopTool extends Tool {
     params: Record<string, unknown>,
     _ctx: ExecutionContext,
   ): Promise<ToolResult> {
-    const taskId = params.taskId as string;
+    const taskId = normalizeTaskId(params);
+    if (!taskId) {
+      return this.makeError('taskId is required');
+    }
+
+    if (taskId.startsWith('bt-')) {
+      return this._stopBackgroundTask(taskId);
+    }
 
     const interruptController = InterruptController.getInstance();
 
@@ -67,4 +80,67 @@ export class TaskStopTool extends Tool {
       'Any partial results may have been saved to the transcript.',
     );
   }
+
+  private _stopBackgroundTask(taskId: string): ToolResult {
+    const bgManager = BackgroundTaskManager.getInstance();
+    const task = bgManager.getTask(taskId);
+
+    if (!task) {
+      const recent = bgManager.getRecentTaskResult(taskId);
+      if (recent) {
+        return this.makeError(
+          `Background task '${taskId}' is already ${recent.status}; nothing to stop.`,
+          {
+            structured: {
+              taskId,
+              status: recent.status,
+              recent: true,
+              durationMs: recent.durationMs,
+            },
+          },
+        );
+      }
+      return this.makeError(
+        `No active background task found for '${taskId}'. It may have already completed or expired from recent results.`,
+        { structured: { taskId, status: 'not_found' } },
+      );
+    }
+
+    let killedProcess = false;
+    if (task.type === 'bash' && typeof task.pid === 'number') {
+      killedProcess = BashTool.killBackgroundProcessByPid(task.pid);
+    }
+
+    const killedTask = bgManager.kill(taskId);
+    if (!killedTask) {
+      return this.makeError(
+        `Background task '${taskId}' could not be stopped because it is no longer running.`,
+        { structured: { taskId, status: 'not_running', killedProcess } },
+      );
+    }
+
+    return this.makeResult(
+      `Background task '${taskId}' has been stopped.` +
+      (task.type === 'bash'
+        ? ` Process ${killedProcess ? 'was terminated' : 'was not found in the local process registry'}.`
+        : ''),
+      {
+        structured: {
+          taskId,
+          status: 'killed',
+          type: task.type,
+          summary: task.summary,
+          pid: task.pid,
+          killedProcess,
+        },
+      },
+    );
+  }
+}
+
+function normalizeTaskId(params: Record<string, unknown>): string | null {
+  const value = params.taskId ?? params.task_id;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed || null;
 }

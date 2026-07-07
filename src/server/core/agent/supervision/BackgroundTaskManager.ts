@@ -258,6 +258,13 @@ export class BackgroundTaskManager extends EventEmitter {
     return this._recentResults.get(taskId);
   }
 
+  getRecentTaskResultsForParent(parentSessionId: string): BackgroundTaskResultSnapshot[] {
+    this._pruneRecentResults();
+    return [...this._recentResults.values()]
+      .filter(task => task.parentSessionId === parentSessionId)
+      .sort((a, b) => b.finishedAt - a.finishedAt);
+  }
+
   get activeCount(): number {
     return this._tasks.size;
   }

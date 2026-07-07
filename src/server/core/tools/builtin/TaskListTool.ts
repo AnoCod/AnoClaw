@@ -57,15 +57,13 @@ export class TaskListTool extends Tool {
     // Find sub-sessions that are children of the current session
     const subSessions = sessionManager.subsessionsOf(ctx.sessionId);
 
-    if (subSessions.length === 0) {
-      return this.makeResult(
-        'No delegated tasks found. No active sub-sessions exist for this session.\n\n' +
-        'Use TaskAssign to delegate tasks to subordinate agents.',
-      );
-    }
-
     const now = Date.now();
-    const lines: string[] = [`${subSessions.length} delegated task(s):\n`];
+    const lines: string[] = [];
+    const structuredSubSessions: Array<Record<string, unknown>> = [];
+
+    if (subSessions.length > 0) {
+      lines.push(`${subSessions.length} delegated task(s):\n`);
+    }
 
     for (const sub of subSessions) {
       const status = sub.status;
@@ -98,14 +96,28 @@ export class TaskListTool extends Tool {
       }
 
       lines.push(infoLine);
+      structuredSubSessions.push({
+        id: sub.id,
+        title: sub.title,
+        status,
+        agentId: sub.agentId,
+        elapsedSec,
+        currentTool,
+        isUnresponsive,
+        secondsSinceHeartbeat: secondsSinceHb,
+      });
     }
 
     // Also report on background tasks from BackgroundTaskManager
     const bgManager = BackgroundTaskManager.getInstance();
     const bgTasks = bgManager.getTasksForParent(ctx.sessionId);
+    const recentBgTasks = bgManager.getRecentTaskResultsForParent(ctx.sessionId);
+    const structuredBgTasks: Array<Record<string, unknown>> = [];
+    const structuredRecentTasks: Array<Record<string, unknown>> = [];
 
     if (bgTasks.length > 0) {
-      lines.push(`\n${bgTasks.length} background task(s) dispatched, not yet completed:`);
+      if (lines.length > 0) lines.push('');
+      lines.push(`${bgTasks.length} background task(s) dispatched, not yet completed:`);
       for (const task of bgTasks) {
         const elapsedSec = Math.round((Date.now() - task.startedAt) / 1000);
         const elapsedStr = elapsedSec > 60
@@ -119,6 +131,54 @@ export class TaskListTool extends Tool {
           taskLine += `  |  Tool: ${task.currentTool}`;
         }
         lines.push(taskLine);
+        structuredBgTasks.push({
+          id: task.id,
+          type: task.type,
+          status: task.status,
+          summary: task.summary,
+          parentAgentId: task.parentAgentId,
+          turnCount: task.turnCount,
+          elapsedSec,
+          currentTool: task.currentTool,
+          pid: task.pid,
+          command: task.command,
+        });
+      }
+    }
+
+    if (recentBgTasks.length > 0) {
+      if (lines.length > 0) lines.push('');
+      lines.push(`${recentBgTasks.length} recent background task result(s):`);
+      for (const task of recentBgTasks) {
+        const ageSec = Math.round((now - task.finishedAt) / 1000);
+        const ageStr = ageSec > 60
+          ? `${Math.floor(ageSec / 60)}m ${ageSec % 60}s ago`
+          : `${ageSec}s ago`;
+        const statusIcon =
+          task.status === 'completed' ? '[done]' :
+          task.status === 'failed' ? '[failed]' :
+          '[killed]';
+        let taskLine = `  ${statusIcon} [${task.status}] ${task.summary}`;
+        taskLine += `  |  Task: ${task.id}`;
+        taskLine += `  |  Agent: ${task.parentAgentId}`;
+        taskLine += `  |  Finished: ${ageStr}`;
+        if (task.durationMs !== undefined) {
+          taskLine += `  |  Duration: ${Math.round(task.durationMs / 1000)}s`;
+        }
+        lines.push(taskLine);
+        structuredRecentTasks.push({
+          id: task.id,
+          type: task.type,
+          status: task.status,
+          summary: task.summary,
+          parentAgentId: task.parentAgentId,
+          finishedAt: task.finishedAt,
+          durationMs: task.durationMs,
+          pid: task.pid,
+          command: task.command,
+          hasContent: Boolean(task.content),
+          hasError: Boolean(task.error),
+        });
       }
     }
 
@@ -126,9 +186,25 @@ export class TaskListTool extends Tool {
     const runtime = AgentRuntime.getInstance();
     const activeSessionCount = runtime.activeSessionCount;
     if (activeSessionCount > 0) {
-      lines.push(`\nActive AgentLoops running: ${activeSessionCount}`);
+      if (lines.length > 0) lines.push('');
+      lines.push(`Active AgentLoops running: ${activeSessionCount}`);
     }
 
-    return this.makeResult(lines.join('\n'));
+    if (lines.length === 0) {
+      lines.push(
+        'No delegated or background tasks found for this session.\n\n' +
+        'Use TaskAssign to delegate work to subordinate agents, or Bash with run_in_background for long-running commands.',
+      );
+    }
+
+    return this.makeResult(lines.join('\n'), {
+      structured: {
+        sessionId: ctx.sessionId,
+        delegatedTasks: structuredSubSessions,
+        backgroundTasks: structuredBgTasks,
+        recentBackgroundTasks: structuredRecentTasks,
+        activeAgentLoops: activeSessionCount,
+      },
+    });
   }
 }

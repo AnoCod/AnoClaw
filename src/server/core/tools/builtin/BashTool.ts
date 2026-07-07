@@ -406,6 +406,16 @@ export class BashTool extends Tool {
     return killBgProcess(key);
   }
 
+  /** Kill a background process by child pid. Returns true if found and killed. */
+  static killBackgroundProcessByPid(pid: number): boolean {
+    for (const [key, entry] of backgroundProcesses) {
+      if (entry.child.pid === pid) {
+        return killBgProcess(key);
+      }
+    }
+    return false;
+  }
+
   /** Clean up all background processes for a given session. */
   static cleanupSession(sessionId: string): void {
     for (const [key, entry] of backgroundProcesses) {
@@ -665,7 +675,7 @@ function killBgProcess(key: string): boolean {
   const entry = backgroundProcesses.get(key);
   if (!entry) return false;
   try {
-    entry.child.kill('SIGTERM');
+    terminateChildProcess(entry.child);
   } catch { /* ignore */ }
   clearBgProcess(key);
   return true;

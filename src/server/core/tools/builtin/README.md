@@ -356,11 +356,12 @@ Assigns a task to a subordinate agent in the org hierarchy.
 
 ### TaskListTool — `TaskList`
 
-Lists all tasks assigned to or by the current agent.
+Lists delegated sub-sessions, active background tasks, and recent background task results for the current session.
 
 | Property | Value |
 |---|---|
 | Risk | `Safe` |
+| Is read-only | Yes |
 
 **Parameters:** None (empty object).
 
@@ -368,24 +369,28 @@ Lists all tasks assigned to or by the current agent.
 
 ### TaskOutputTool — `TaskOutput`
 
-Retrieves output from a running or completed background task. Supports blocking and non-blocking modes.
+Retrieves output or status from a delegated sub-session or `bt-*` background task.
 
 | Property | Value |
 |---|---|
 | Risk | `Safe` |
+| Is read-only | Yes |
 
 **Parameters:**
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `task_id` | string | ✓ | ID of the task to retrieve |
-| `block` | boolean | ✓ | Whether to wait for completion |
-| `timeout` | number | ✓ | Max wait time in ms |
+| `taskId` | string | No | Task ID or sub-session ID to retrieve |
+| `task_id` | string | No | Alias for `taskId` |
+
+**Behavior notes:**
+- For `bt-*` IDs, returns active status or a recent completed/failed/killed result.
+- Failed, killed, unknown, or expired `bt-*` task lookups return failed tool results with structured status.
 
 ---
 
 ### TaskStopTool — `TaskStop`
 
-Stops a running background task.
+Stops a running delegated sub-session or `bt-*` background task.
 
 | Property | Value |
 |---|---|
@@ -394,8 +399,12 @@ Stops a running background task.
 **Parameters:**
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `task_id` | string | | Task ID to stop |
-| `shell_id` | string | | (Deprecated) Shell ID |
+| `taskId` | string | No | Task ID or sub-session ID to stop |
+| `task_id` | string | No | Alias for `taskId` |
+
+**Behavior notes:**
+- For `bt-*` Bash tasks, attempts to terminate the local process tree before marking the task killed.
+- Already completed/failed/killed tasks return a clear failure result instead of pretending a stop happened.
 
 ---
 

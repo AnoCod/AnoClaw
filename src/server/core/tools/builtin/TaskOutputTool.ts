@@ -35,10 +35,14 @@ export class TaskOutputTool extends Tool {
       properties: {
         taskId: {
           type: 'string',
-          description: 'The sub-session ID of the delegated task to retrieve output from',
+          description: 'The task ID or sub-session ID to retrieve output from',
+        },
+        task_id: {
+          type: 'string',
+          description: 'Alias for taskId. Kept for older prompts and integrations.',
         },
       },
-      required: ['taskId'],
+      required: [],
     };
   }
 
@@ -54,7 +58,10 @@ export class TaskOutputTool extends Tool {
     params: Record<string, unknown>,
     _ctx: ExecutionContext,
   ): Promise<ToolResult> {
-    const taskId = params.taskId as string;
+    const taskId = normalizeTaskId(params);
+    if (!taskId) {
+      return this.makeError('taskId is required');
+    }
 
     // <task-notification> IDs use bt- prefix (BackgroundTask format),
     // not sub-session IDs. Try BackgroundTaskManager first for bt- IDs.
@@ -62,14 +69,58 @@ export class TaskOutputTool extends Tool {
       const btm = BackgroundTaskManager.getInstance();
       const task = btm.getTask(taskId);
       if (task) {
-        const status = task.status === 'completed' ? 'completed' : task.status === 'failed' ? 'failed' : 'running';
+        const status =
+          task.status === 'completed' ? 'completed' :
+          task.status === 'failed' ? 'failed' :
+          task.status === 'killed' ? 'killed' :
+          'running';
         return this.makeResult(
           `Task "${taskId}" is ${status}.\nSummary: ${task.summary}\nResult: ${task.fullContent || task.error || '(none yet)'}`,
-          { structured: { taskId, status, summary: task.summary, result: task.fullContent, error: task.error, type: task.type } },
+          {
+            structured: {
+              taskId,
+              status,
+              summary: task.summary,
+              result: task.fullContent,
+              error: task.error,
+              type: task.type,
+              durationMs: task.durationMs,
+              pid: task.pid,
+              active: true,
+            },
+          },
+        );
+      }
+      const recent = btm.getRecentTaskResult(taskId);
+      if (recent) {
+        const output = recent.content || recent.error || '(no output)';
+        const structured = {
+          taskId,
+          status: recent.status,
+          summary: recent.summary,
+          result: recent.content,
+          error: recent.error,
+          type: recent.type,
+          durationMs: recent.durationMs,
+          finishedAt: recent.finishedAt,
+          pid: recent.pid,
+          active: false,
+          recent: true,
+        };
+        if (recent.status === 'completed') {
+          return this.makeResult(
+            `Task "${taskId}" completed.\nSummary: ${recent.summary}\nResult: ${output}`,
+            { structured },
+          );
+        }
+        return this.makeError(
+          `Task "${taskId}" ${recent.status}.\nSummary: ${recent.summary}\nResult: ${output}`,
+          { structured },
         );
       }
       return this.makeError(
-        `Task "${taskId}" not found in BackgroundTaskManager. Use TaskList to see all active tasks.`,
+        `Task "${taskId}" not found in BackgroundTaskManager. It may have expired from the recent result cache. Use TaskList to see active and recent tasks.`,
+        { structured: { taskId, status: 'not_found' } },
       );
     }
 
@@ -104,6 +155,14 @@ export class TaskOutputTool extends Tool {
         `Agent: ${session.agentId}\n` +
         `Messages: ${history.length}\n\n` +
         `--- Output ---\n${output || '(no output content)'}`,
+        {
+          structured: {
+            taskId,
+            status: 'completed',
+            agentId: session.agentId,
+            messageCount: history.length,
+          },
+        },
       );
     }
 
@@ -118,6 +177,22 @@ export class TaskOutputTool extends Tool {
       `Messages so far: ${history.length}\n` +
       `Last update: ${lastMessage?.timestamp ?? 'N/A'}\n\n` +
       'Check back later or use TaskList to monitor progress.',
+      {
+        structured: {
+          taskId,
+          status: session.status,
+          agentId: session.agentId,
+          messageCount: history.length,
+          lastUpdate: lastMessage?.timestamp,
+        },
+      },
     );
   }
+}
+
+function normalizeTaskId(params: Record<string, unknown>): string | null {
+  const value = params.taskId ?? params.task_id;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed || null;
 }

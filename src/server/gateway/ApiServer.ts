@@ -312,6 +312,16 @@ export class ApiServer extends EventEmitter {
     LogManager.getInstance().logger('anochat.api').info(`Plugin ${pluginName} registered ${routes.length} route(s)`);
   }
 
+  unregisterPluginRoutes(pluginName: string): number {
+    const before = this._pluginRoutes.length;
+    this._pluginRoutes = this._pluginRoutes.filter(route => route.pluginName !== pluginName);
+    const removed = before - this._pluginRoutes.length;
+    if (removed > 0) {
+      LogManager.getInstance().logger('anochat.api').info(`Plugin ${pluginName} unregistered ${removed} route(s)`);
+    }
+    return removed;
+  }
+
   private _discoverEndpoints(req: http.IncomingMessage): {
     endpoints: EndpointEntry[];
     total: number;

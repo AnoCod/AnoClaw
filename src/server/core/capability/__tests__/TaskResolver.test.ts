@@ -95,6 +95,37 @@ describe('TaskResolver', () => {
     expect(result.bestCapability?.id).toBe('code.implement');
   });
 
+  it('recommends the official web research plugin when research capability is unavailable', async () => {
+    const result = await new TaskResolver().resolve({
+      message: '调研 AI desktop agent platforms 并整理来源',
+    });
+
+    expect(result.bestCapability?.id).toBe('web.research');
+    expect(result.nextAction).toBe('recommend_plugin');
+    expect(result.missingTools).toContain('web.research');
+    expect(result.recommendedPlugins).toContain('anoclaw-web-research');
+  });
+
+  it('suggests the web research artifact tool when it is available', async () => {
+    ToolRegistry.getInstance().registerTool(new NamedFixtureTool('web.research'), 'Web Research', { source: 'plugin', pluginName: 'anoclaw-web-research' });
+
+    const result = await new TaskResolver().resolve({
+      message: 'research AI desktop agent platforms with 3 sources',
+    });
+
+    expect(result.bestCapability?.id).toBe('web.research');
+    expect(result.nextAction).toBe('execute_capability');
+    expect(result.suggestedToolCall).toMatchObject({
+      toolName: 'web.research',
+      parameters: expect.objectContaining({
+        query: 'AI desktop agent platforms with 3 sources',
+        maxSources: 3,
+        fetchPages: true,
+      }),
+    });
+    expect(result.suggestedToolCall?.notes.join(' ')).toContain('source links');
+  });
+
   it('suggests reading an explicit code file from the workspace for implementation tasks', async () => {
     registerCodingTools();
 

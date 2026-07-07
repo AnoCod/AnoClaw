@@ -120,12 +120,24 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         res.end(JSON.stringify({ error: 'Plugin not found' }));
         return;
       }
+      let deactivateWarning = '';
+      try {
+        const { PluginHostManager: PM } = await import('./core/plugin-host/PluginHostManager.js');
+        await PM.getInstance().deactivatePlugin(name);
+      } catch (err) {
+        deactivateWarning = err instanceof Error ? err.message : String(err);
+      }
       // Move to .disabled instead of deleting (recoverable)
       const disabledDir = writablePath('plugins', `${name}.disabled`);
       if (fs.existsSync(disabledDir)) fs.rmSync(disabledDir, { recursive: true, force: true });
       fs.renameSync(pluginDir, disabledDir);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ name, status: 'uninstalled', recoverable: true }));
+      res.end(JSON.stringify({
+        name,
+        status: 'uninstalled',
+        recoverable: true,
+        ...(deactivateWarning ? { warning: `Plugin was moved, but deactivation cleanup reported: ${deactivateWarning}` } : {}),
+      }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       res.writeHead(500, { 'Content-Type': 'application/json' });

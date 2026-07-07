@@ -48,6 +48,7 @@ export const DEFAULT_CEO_TOOLS = [
   'office.create_docx',
   'office.analyze_spreadsheet',
   'pdf.summarize',
+  'web.research',
   'files.organize',
 ];
 

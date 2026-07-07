@@ -16,6 +16,7 @@ import { SessionStore } from '../session/SessionStore.js';
 import { writablePath } from '../../infra/WritablePath.js';
 import { SettingsManager } from '../../infra/storage/SettingsManager.js';
 import { WsServer } from '../../infra/network/WsServer.js';
+import { ApiServer } from '../../gateway/ApiServer.js';
 import { PluginLoader } from './PluginLoader.js';
 import { RpcDispatcher } from './RpcDispatcher.js';
 import { generateRPCLabel } from './PluginRPC.js';
@@ -60,6 +61,7 @@ export class PluginHostManager extends EventEmitter {
         w.removeAllListeners();
         w.terminate().catch(() => {});
         for (const [, p] of inst._pending.get(name) || []) p.reject(new Error('PluginHostManager reset'));
+        inst._cleanupPluginContributions(name);
       }
       inst._workers.clear();
       inst._pending.clear();
@@ -171,6 +173,7 @@ export class PluginHostManager extends EventEmitter {
           }, 2000);
         })
       );
+      this._cleanupPluginContributions(name);
     }
     await Promise.all(shutdowns);
     this._workers.clear();
@@ -270,20 +273,7 @@ export class PluginHostManager extends EventEmitter {
     // NOTE: do NOT close the global fs.watcher — it monitors ALL plugins.
     // Only close it in stop() or resetInstance().
 
-    // Unregister this plugin's tools (worker is gone, tools won't respond)
-    const toRemove: string[] = [];
-    for (const [toolName, pn] of this._installedTools) {
-      if (pn === pluginName) toRemove.push(toolName);
-    }
-    for (const toolName of toRemove) {
-      ToolRegistry.getInstance().deregisterTool(toolName);
-      this._installedTools.delete(toolName);
-    }
-
-    // Clean up event subscriptions for this plugin
-    for (const [, plugins] of this._eventSubs) {
-      plugins.delete(pluginName);
-    }
+    this._cleanupPluginContributions(pluginName);
 
     // Exponential backoff per plugin
     const count = (this._crashCounts.get(pluginName) || 0) + 1;
@@ -309,6 +299,57 @@ export class PluginHostManager extends EventEmitter {
   /** Process a worker→main RPC method. Delegates to RpcDispatcher. */
   private async _dispatchWorkerRPC(method: string, params: unknown): Promise<unknown> {
     return this._rpcDispatcher.dispatch(method, params);
+  }
+
+  private _cleanupPluginContributions(pluginName: string): void {
+    const removedTools: string[] = [];
+    for (const [toolName, pn] of this._installedTools) {
+      if (pn !== pluginName) continue;
+      ToolRegistry.getInstance().deregisterTool(toolName);
+      this._installedTools.delete(toolName);
+      removedTools.push(toolName);
+    }
+
+    const emptyEvents: string[] = [];
+    for (const [eventName, plugins] of this._eventSubs) {
+      plugins.delete(pluginName);
+      if (plugins.size === 0) emptyEvents.push(eventName);
+    }
+    for (const eventName of emptyEvents) {
+      this._eventSubs.delete(eventName);
+    }
+
+    extensionPoints.unregisterAll(pluginName);
+
+    let removedRoutes = 0;
+    try {
+      removedRoutes = ApiServer.getInstance().unregisterPluginRoutes(pluginName);
+    } catch (err) {
+      log.warn('Plugin route cleanup failed', { pluginName, error: (err as Error).message });
+    }
+
+    let removedPromptSections = 0;
+    try {
+      removedPromptSections = PromptAssembler.getInstance().unregisterSectionsByPrefix(`plugin:${pluginName}:`);
+    } catch (err) {
+      log.warn('Plugin prompt cleanup failed', { pluginName, error: (err as Error).message });
+    }
+
+    try {
+      WsServer.getInstance().broadcast({ type: 'plugin:ui:removeByPlugin', pluginName });
+    } catch (err) {
+      log.debug('Plugin UI cleanup broadcast skipped', { pluginName, error: (err as Error).message });
+    }
+
+    if (removedTools.length > 0 || removedRoutes > 0 || removedPromptSections > 0 || emptyEvents.length > 0) {
+      log.info('Plugin contributions cleaned up', {
+        pluginName,
+        tools: removedTools,
+        routes: removedRoutes,
+        promptSections: removedPromptSections,
+        eventSubscriptions: emptyEvents.length,
+      });
+    }
   }
 
   // ── Communication ──
@@ -412,22 +453,7 @@ export class PluginHostManager extends EventEmitter {
     // Terminate old worker first
     const oldWorker = this._workers.get(name);
     if (oldWorker) {
-      // Deregister tools before killing worker (same as deactivate)
-      const toRemove: string[] = [];
-      for (const [toolName, pn] of this._installedTools) {
-        if (pn === name) toRemove.push(toolName);
-      }
-      for (const toolName of toRemove) {
-        ToolRegistry.getInstance().deregisterTool(toolName);
-        this._installedTools.delete(toolName);
-      }
-      // Clean up event subscriptions
-      for (const [, plugins] of this._eventSubs) {
-        plugins.delete(name);
-      }
-
-      // Clean up extension point overrides registered by this plugin
-      extensionPoints.unregisterAll(name);
+      this._cleanupPluginContributions(name);
 
       oldWorker.removeAllListeners();
       try { oldWorker.postMessage({ id: `shutdown-${name}`, method: 'shutdown', params: {} }); } catch {}
@@ -463,17 +489,8 @@ export class PluginHostManager extends EventEmitter {
   /** Deactivate a single plugin (terminate its worker). */
   async deactivatePlugin(name: string): Promise<{ deactivated: boolean }> {
     const worker = this._workers.get(name);
+    this._cleanupPluginContributions(name);
     if (!worker) return { deactivated: false };
-
-    // Deregister tools
-    const toRemove: string[] = [];
-    for (const [toolName, pn] of this._installedTools) {
-      if (pn === name) toRemove.push(toolName);
-    }
-    for (const toolName of toRemove) {
-      ToolRegistry.getInstance().deregisterTool(toolName);
-      this._installedTools.delete(toolName);
-    }
 
     worker.removeAllListeners();
     try { worker.postMessage({ id: `shutdown-${name}`, method: 'shutdown', params: {} }); } catch {}

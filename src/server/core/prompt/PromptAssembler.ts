@@ -211,6 +211,24 @@ export class PromptAssembler extends EventEmitter {
     this.clearAllCaches();
   }
 
+  unregisterSectionsByPrefix(prefix: string): number {
+    const removeMatching = (sections: SystemPromptSection[]) => {
+      const before = sections.length;
+      const kept = sections.filter(section => !section.name.startsWith(prefix));
+      return { kept, removed: before - kept.length };
+    };
+
+    const staticResult = removeMatching(this._staticSections);
+    const dynamicResult = removeMatching(this._dynamicSections);
+    const removed = staticResult.removed + dynamicResult.removed;
+    if (removed > 0) {
+      this._staticSections = staticResult.kept;
+      this._dynamicSections = dynamicResult.kept;
+      this.clearAllCaches();
+    }
+    return removed;
+  }
+
   /** Get all section names for diagnostics */
   get sectionNames(): string[] {
     return [

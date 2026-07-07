@@ -431,6 +431,15 @@ function suggestParametersForCapability(
         apply: /apply|execute|move now|直接整理|直接移动|执行整理/.test(query.toLowerCase()),
       });
     }
+    case 'web.research': {
+      notes.push('Create a cited research artifact with source links; fetch top sources when possible.');
+      return compactObject({
+        query: inferResearchQuery(query),
+        title,
+        maxSources: inferSourceCount(query) || 5,
+        fetchPages: true,
+      });
+    }
     default:
       return {};
   }
@@ -475,6 +484,22 @@ function inferDocumentType(query: string): string | undefined {
   if (/简历|resume|cv/.test(normalized)) return 'resume';
   if (/申请书|application/.test(normalized)) return 'application';
   return undefined;
+}
+
+function inferResearchQuery(query: string): string {
+  return query
+    .replace(/^\s*(帮我|请|麻烦|please)\s*/i, '')
+    .replace(/\s*(查一下|搜索|调研|研究一下|找资料|整理资料|search for|search|research|look up|find sources for)\s*/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 200) || query.trim().slice(0, 200);
+}
+
+function inferSourceCount(query: string): number | undefined {
+  const arabic = query.match(/(\d{1,2})\s*(sources?|results?|links?|websites?|来源|资料|链接|网站)/i)?.[1];
+  if (arabic) return clampNumber(Number(arabic), 1, 10, undefined);
+  const chineseNumber = query.match(/([一二三四五六七八九十]{1,3})\s*(个)?\s*(来源|资料|链接|网站)/)?.[1];
+  return chineseNumber ? clampNumber(chineseNumeralToNumber(chineseNumber) || 0, 1, 10, undefined) : undefined;
 }
 
 function inferFilePath(query: string, extensions: string[]): string | undefined {

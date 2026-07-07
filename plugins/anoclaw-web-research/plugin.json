@@ -1,0 +1,44 @@
+{
+  "name": "anoclaw-web-research",
+  "displayName": "Web Research",
+  "version": "0.1.0",
+  "description": "Official AnoClaw web research tools for collecting sources and creating cited research briefs.",
+  "publisher": "anoclaw",
+  "main": "extension.js",
+  "activationEvents": ["onStartup"],
+  "engines": {
+    "anoclaw": "^2.0.0"
+  },
+  "contributes": {
+    "tools": [
+      { "name": "web.research" }
+    ],
+    "capabilities": [
+      {
+        "id": "web.research",
+        "title": "Research the web",
+        "description": "Search the web, inspect top sources, and generate a markdown research brief with citations.",
+        "domain": "web",
+        "kind": "knowledge",
+        "triggers": ["search", "research", "look up", "web", "internet", "sources", "搜索", "查一下", "调研", "资料", "引用"],
+        "examples": [
+          "Research current AI agent desktop apps and make a cited brief",
+          "查一下最近的AI桌面助手产品并整理来源"
+        ],
+        "inputs": [
+          { "name": "query", "label": "Research query", "type": "string", "required": false, "aliases": ["topic", "question", "主题", "问题"] },
+          { "name": "maxSources", "label": "Source count", "type": "number", "required": false, "defaultValue": 5 },
+          { "name": "title", "label": "Title", "type": "string", "required": false, "defaultValue": "Research brief" }
+        ],
+        "outputs": [
+          { "type": "file", "label": "Markdown research brief", "mimeType": "text/markdown", "extension": "md", "artifactType": "report" },
+          { "type": "preview", "label": "Research preview", "mimeType": "text/markdown", "artifactType": "report" }
+        ],
+        "requiredTools": ["web.research"],
+        "artifactTypes": ["web-research", "report"],
+        "recommendedPlugins": ["anoclaw-web-research"],
+        "priority": 88
+      }
+    ]
+  }
+}

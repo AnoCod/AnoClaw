@@ -180,6 +180,12 @@ export function registerChatHandlers(
     slotRegistry.unmountAll(d.slot, d.pluginName);
   });
 
+  router.on('plugin:ui:removeByPlugin', (ctx) => {
+    const d = ctx.data as { pluginName: string };
+    console.log(`[Plugin] WS removeByPlugin request -> plugin="${d.pluginName}"`);
+    slotRegistry.removeByPlugin(d.pluginName);
+  });
+
   router.on('system:toast', (ctx) => {
     const d = ctx.data as { toastType?: string; message: string; duration?: number };
     const type = (d.toastType === 'error' || d.toastType === 'success' || d.toastType === 'info')

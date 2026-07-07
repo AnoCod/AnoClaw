@@ -99,10 +99,13 @@ export function createDefaultCapabilityCatalog(): CapabilityDefinition[] {
       kind: 'knowledge',
       triggers: ['search', 'research', 'look up', 'web', 'internet', '搜索', '查一下', '调研', '资料'],
       outputs: [
-        { type: 'artifact', label: 'Research brief', artifactType: 'report' },
+        { type: 'file', label: 'Markdown research brief', extension: 'md', artifactType: 'report' },
+        { type: 'preview', label: 'Research preview', artifactType: 'report' },
       ],
-      requiredTools: ['WebSearch', 'WebFetch'],
-      priority: 70,
+      requiredTools: ['web.research'],
+      artifactTypes: ['web-research', 'report'],
+      recommendedPlugins: ['anoclaw-web-research'],
+      priority: 80,
     },
     {
       id: 'files.organize',

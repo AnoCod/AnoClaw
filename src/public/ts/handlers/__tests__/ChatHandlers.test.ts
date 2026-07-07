@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { registerChatHandlers } from '../ChatHandlers.js';
 import { WSMessageRouter } from '../../viewmodel/WSMessageRouter.js';
 import { ToastManager } from '../../ToastManager.js';
+import { slotRegistry } from '../../SlotRegistry.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -52,5 +53,22 @@ describe('registerChatHandlers', () => {
       sessionId: 'artifact-session',
       artifactId: 'art-1',
     }));
+  });
+
+  it('removes all slot content for a deactivated plugin', () => {
+    const router = new WSMessageRouter();
+    const removeSpy = vi.spyOn(slotRegistry, 'removeByPlugin').mockImplementation(() => {});
+
+    registerChatHandlers(
+      router,
+      { getAgent: vi.fn() } as any,
+      {} as any,
+    );
+
+    router.dispatch('plugin:ui:removeByPlugin', {
+      pluginName: 'cleanup-plugin',
+    }, '*broadcast');
+
+    expect(removeSpy).toHaveBeenCalledWith('cleanup-plugin');
   });
 });

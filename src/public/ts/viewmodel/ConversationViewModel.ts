@@ -235,7 +235,16 @@ export class ConversationViewModel extends EventEmitter {
     const content = [
       'Start or continue working toward this active session goal.',
       '',
-      `Goal: ${this.goal.objective}`,
+      '# Active Goal',
+      `Objective: ${this.goal.objective}`,
+      `Run count: ${this.goal.runCount || 0}`,
+      '',
+      '# Current Execution Context',
+      `Workspace: ${root.workspace || '(default workspace)'}`,
+      `Permission mode: ${this._toCanonicalMode(mode)}`,
+      `Effort: ${effort ? 'HIGH' : 'NORMAL'}`,
+      '',
+      'Use the current workspace as the primary context. Advance the next useful step; if the goal is already complete or blocked, say so clearly.',
     ].join('\n');
     await agent.sendMessage(content, mode, effort, []);
   }

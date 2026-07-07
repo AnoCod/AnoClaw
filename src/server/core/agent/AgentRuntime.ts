@@ -4,7 +4,7 @@ import { EventEmitter } from 'events';
 import { AgentRegistry } from './AgentRegistry.js';
 import { AgentLoop } from './AgentLoop.js';
 import type { AgentLoopConfig } from './AgentLoop.js';
-import type { Message } from '../../../shared/types/session.js';
+import type { Message, SessionGoal } from '../../../shared/types/session.js';
 import { MessageRole } from '../../../shared/types/session.js';
 import type { SubAgentConfig } from '../../../shared/types/agent.js';
 import { AgentRole, AgentStatus } from '../../../shared/types/agent.js';
@@ -333,6 +333,9 @@ export class AgentRuntime extends EventEmitter {
     loopConfig: AgentLoopConfig,
     signal: AbortSignal,
   ): AsyncGenerator<SSEEvent> {
+    const session = sessionManager.session(sessionId);
+    if (session && !session.isRoot()) return;
+
     while (true) {
       const goal = sessionManager.getGoal(sessionId);
       if (!goal || goal.status !== 'active') break;
@@ -378,13 +381,35 @@ export class AgentRuntime extends EventEmitter {
       }
 
       try {
-        const content = [
-          'Continue working toward the active session goal.',
-          '',
-          `Goal: ${currentGoal.objective}`,
-          '',
-          'Advance the goal with the next useful step. If the goal is already complete, say so clearly and stop taking further action.',
-        ].join('\n');
+        const freshPermissionMode = resolveSessionPermissionMode(sessionManager, sessionId);
+        const freshEffort = resolveSessionEffort(sessionManager, sessionId);
+        const settings = SettingsManager.getInstance();
+        const userMode = settings.get<string>('ui.userMode', 'simple');
+        const locale = settings.get<string>('ui.lang', 'zh-CN');
+        const root = sessionManager.getRootSession(sessionId);
+        const taskResolution = await this._resolveGoalTask(currentGoal.objective, userMode, locale);
+        const runGoal = await sessionManager.touchGoalRun(sessionId, {
+          workspace: root.workspace,
+          permissionMode: freshPermissionMode,
+          effort: freshEffort,
+          userMode,
+        }) || currentGoal;
+        WsServer.getInstance().send(root.id, {
+          type: SSEEventType.GoalChanged,
+          sessionId: root.id,
+          action: 'run',
+          goal: runGoal,
+        });
+        const content = buildGoalContinuationContent({
+          sessionId,
+          goal: runGoal,
+          workspace: root.workspace,
+          permissionMode: freshPermissionMode,
+          effort: freshEffort,
+          userMode,
+          locale,
+          taskResolution,
+        });
         const goalMessage: Message = {
           id: `goal-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           sessionId,
@@ -395,14 +420,13 @@ export class AgentRuntime extends EventEmitter {
           timestamp: new Date().toISOString(),
         };
         await sessionManager.appendMessage(sessionId, goalMessage, { notify: false });
-        await sessionManager.touchGoalRun(sessionId);
 
         const fullHistory = await sessionManager.getHistory(sessionId);
         const loopHistory = fullHistory.filter((m) => m.id !== goalMessage.id);
         const freshLoopConfig: AgentLoopConfig = {
           ...loopConfig,
-          permissionMode: resolveSessionPermissionMode(sessionManager, sessionId),
-          effort: resolveSessionEffort(sessionManager, sessionId),
+          permissionMode: freshPermissionMode,
+          effort: freshEffort,
         };
         const newLoop = new AgentLoop(freshLoopConfig);
         this._activeLoops.set(sessionId, newLoop);
@@ -459,6 +483,27 @@ export class AgentRuntime extends EventEmitter {
     } catch (err) {
       logger.warn('Task resolution failed; falling back to normal agent loop', {
         sid: sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+  }
+
+  private async _resolveGoalTask(
+    objective: string,
+    userMode: string,
+    locale: string,
+  ): Promise<TaskResolveResult | null> {
+    try {
+      const result = await new TaskResolver().resolve({
+        message: objective,
+        userMode,
+        locale,
+        includeUnavailable: true,
+      });
+      return result.intent === 'capability' && result.bestCapability ? result : null;
+    } catch (err) {
+      createLogger('anochat.agent').debug('Goal task resolution skipped', {
         error: err instanceof Error ? err.message : String(err),
       });
       return null;
@@ -1162,10 +1207,113 @@ export class AgentRuntime extends EventEmitter {
   }
 }
 
+export interface GoalContinuationContext {
+  sessionId: string;
+  goal: SessionGoal;
+  workspace: string;
+  permissionMode: string;
+  effort: 'HIGH' | 'NORMAL';
+  userMode: string;
+  locale?: string;
+  taskResolution?: TaskResolveResult | null;
+}
+
+export function buildGoalContinuationContent(ctx: GoalContinuationContext): string {
+  const lines = [
+    'Continue working toward the active session goal.',
+    '',
+    '# Active Goal',
+    `Objective: ${ctx.goal.objective}`,
+    `Status: ${ctx.goal.status}`,
+    `Run count: ${ctx.goal.runCount || 0}`,
+    ctx.goal.lastRunAt ? `Last run: ${ctx.goal.lastRunAt}` : '',
+    '',
+    '# Current Execution Context',
+    `Session: ${ctx.sessionId}`,
+    `Workspace: ${ctx.workspace || '(default workspace)'}`,
+    `Permission mode: ${ctx.permissionMode}`,
+    `Effort: ${ctx.effort}`,
+    `User mode: ${ctx.userMode}`,
+    ctx.locale ? `Locale: ${ctx.locale}` : '',
+  ].filter(Boolean);
+
+  const routing = formatGoalTaskRouting(ctx.taskResolution || null);
+  if (routing.length > 0) {
+    lines.push('', '# Goal Capability Routing', ...routing);
+  }
+
+  lines.push('', '# Goal Execution Rules');
+  lines.push(
+    '- Treat the workspace as the primary working context. Inspect current files, artifacts, and project state before broad assumptions.',
+    '- Advance exactly one meaningful next step unless the goal clearly requires a short burst of tightly coupled steps.',
+    '- Prefer durable artifacts, code changes, tests, or concrete workspace updates over vague progress summaries.',
+    '- If the goal is already complete, say so clearly and stop taking further action.',
+    '- If blocked, name the blocker, preserve useful partial work, and suggest the next concrete unblock action.',
+  );
+
+  if (ctx.userMode === 'coding') {
+    lines.push(
+      '- Coding mode: start from the current IDE/workspace context, inspect relevant files before edits, and run focused build/test checks after changes.',
+    );
+  } else if (ctx.userMode === 'office') {
+    lines.push(
+      '- Office mode: prefer Artifact and Workspace outputs such as documents, reports, slides, spreadsheets, previews, and downloadable files.',
+    );
+  } else if (ctx.userMode === 'professional') {
+    lines.push(
+      '- Professional mode: expose concise tool/log reasoning when it helps verify correctness, plugin behavior, or workflow state.',
+    );
+  }
+
+  if (ctx.permissionMode === 'Plan') {
+    lines.push(
+      '- Plan mode is active: do not write files or run destructive commands. Produce the next plan, inspection, or verification step only.',
+    );
+  } else if (ctx.permissionMode === 'Ask') {
+    lines.push(
+      '- Ask mode is active: request confirmation before file changes, command execution, or other side effects.',
+    );
+  }
+
+  return lines.join('\n');
+}
+
 function shouldStopForTaskResolution(taskResolution: UserTaskResolution): boolean {
   return taskResolution.agentMissingTools.length > 0
     || taskResolution.result.nextAction === 'ask_user'
     || taskResolution.result.nextAction === 'recommend_plugin';
+}
+
+function formatGoalTaskRouting(result: TaskResolveResult | null): string[] {
+  if (!result?.bestCapability) return [];
+  const capability = result.bestCapability;
+  const lines = [
+    `Resolved capability: ${capability.id}`,
+    `Capability title: ${capability.title}`,
+    `Domain: ${capability.domain}`,
+    `Next action: ${result.nextAction}`,
+    `Confidence: ${result.confidence.toFixed(2)}`,
+    `Reason: ${result.reason}`,
+  ];
+
+  const tools = capabilityToolNames(capability);
+  if (tools.length > 0) lines.push(`Relevant tools: ${tools.join(', ')}`);
+  if (result.missingTools.length > 0) lines.push(`Missing tools: ${result.missingTools.join(', ')}`);
+  if (result.missingInputs.length > 0) {
+    lines.push(`Missing inputs: ${result.missingInputs.map((input) => input.label || input.name).join(', ')}`);
+  }
+  if (result.recommendedPlugins.length > 0) {
+    lines.push(`Recommended plugins: ${result.recommendedPlugins.join(', ')}`);
+  }
+  if (result.suggestedToolCall) {
+    lines.push(`Suggested first tool call: ${result.suggestedToolCall.toolName}`);
+    lines.push(`Suggested tool parameters: ${JSON.stringify(result.suggestedToolCall.parameters)}`);
+    if (result.suggestedToolCall.notes.length > 0) {
+      lines.push(`Tool call notes: ${result.suggestedToolCall.notes.join(' ')}`);
+    }
+  }
+
+  return lines;
 }
 
 function buildTaskResolutionContext(taskResolution: UserTaskResolution): string {

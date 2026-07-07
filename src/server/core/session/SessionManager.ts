@@ -604,12 +604,18 @@ export class SessionManager extends EventEmitter {
     const root = this.getRootSession(sessionId);
     const now = new Date().toISOString();
     const previous = root.metadata.goal as Partial<SessionGoal> | undefined;
+    const canContinuePrevious = previous?.status !== 'deleted';
     const goal: SessionGoal = {
       objective,
       status: 'active',
-      createdAt: typeof previous?.createdAt === 'string' ? previous.createdAt : now,
+      createdAt: canContinuePrevious && typeof previous?.createdAt === 'string' ? previous.createdAt : now,
       updatedAt: now,
-      lastRunAt: typeof previous?.lastRunAt === 'string' ? previous.lastRunAt : undefined,
+      runCount: canContinuePrevious && typeof previous?.runCount === 'number' ? previous.runCount : 0,
+      lastRunAt: canContinuePrevious && typeof previous?.lastRunAt === 'string' ? previous.lastRunAt : undefined,
+      lastWorkspace: canContinuePrevious && typeof previous?.lastWorkspace === 'string' ? previous.lastWorkspace : undefined,
+      lastPermissionMode: canContinuePrevious && typeof previous?.lastPermissionMode === 'string' ? previous.lastPermissionMode : undefined,
+      lastEffort: canContinuePrevious && (previous?.lastEffort === 'HIGH' || previous?.lastEffort === 'NORMAL') ? previous.lastEffort : undefined,
+      lastUserMode: canContinuePrevious && typeof previous?.lastUserMode === 'string' ? previous.lastUserMode : undefined,
     };
     root.setMetadata('goal', goal);
     await this._syncMeta(root.id);
@@ -632,12 +638,30 @@ export class SessionManager extends EventEmitter {
     return goal;
   }
 
-  async touchGoalRun(sessionId: string): Promise<void> {
+  async touchGoalRun(
+    sessionId: string,
+    context: {
+      workspace?: string;
+      permissionMode?: string;
+      effort?: 'HIGH' | 'NORMAL';
+      userMode?: string;
+    } = {},
+  ): Promise<SessionGoal | null> {
     const root = this.getRootSession(sessionId);
     const existing = root.metadata.goal as SessionGoal | undefined;
-    if (!existing || existing.status !== 'active') return;
-    root.setMetadata('goal', { ...existing, lastRunAt: new Date().toISOString() });
+    if (!existing || existing.status !== 'active') return null;
+    const goal: SessionGoal = {
+      ...existing,
+      runCount: (typeof existing.runCount === 'number' ? existing.runCount : 0) + 1,
+      lastRunAt: new Date().toISOString(),
+      lastWorkspace: context.workspace || root.workspace,
+      lastPermissionMode: normalizePermissionMode(context.permissionMode || root.metadata.permissionMode),
+      lastEffort: context.effort || (root.metadata.effortMode === false ? 'NORMAL' : 'HIGH'),
+      lastUserMode: context.userMode || (typeof root.metadata.userMode === 'string' ? root.metadata.userMode : undefined),
+    };
+    root.setMetadata('goal', goal);
     await this._syncMeta(root.id);
+    return goal;
   }
 
   getGoal(sessionId: string): SessionGoal | null {

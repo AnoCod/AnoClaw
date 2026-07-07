@@ -32,7 +32,12 @@ export interface SessionGoal {
   status: 'active' | 'paused' | 'deleted';
   createdAt: string;
   updatedAt: string;
+  runCount?: number;
   lastRunAt?: string;
+  lastWorkspace?: string;
+  lastPermissionMode?: string;
+  lastEffort?: 'HIGH' | 'NORMAL';
+  lastUserMode?: string;
   deletedAt?: string;
 }
 

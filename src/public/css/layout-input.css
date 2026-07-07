@@ -564,6 +564,26 @@
   word-break: break-word;
   padding-top: 2px;
 }
+.input-goal-context {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding-top: 2px;
+}
+.input-goal-context-chip {
+  max-width: 100%;
+  border: 1px solid var(--hairline-cinema, var(--color-hairline));
+  border-radius: 6px;
+  background: var(--cinema-bg-muted, rgba(255,255,255,0.025));
+  color: var(--cinema-text-muted, var(--color-text-tertiary));
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 2px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .input-goal-meta {
   color: var(--cinema-text-muted, var(--color-text-tertiary));
   font-size: 10px;

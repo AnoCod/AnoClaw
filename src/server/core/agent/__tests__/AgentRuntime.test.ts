@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { AgentRuntime } from '../AgentRuntime.js';
+import { AgentRuntime, buildGoalContinuationContent } from '../AgentRuntime.js';
 import { AgentRegistry } from '../AgentRegistry.js';
 import { Agent } from '../Agent.js';
 import { AgentRole, AgentState } from '../../../../shared/types/agent.js';
@@ -471,6 +471,73 @@ describe('AgentRuntime', () => {
       expect(routingContext?.content).toContain('DoThing');
       expect(routingContext?.content).toContain('Suggested first tool call: DoThing');
       expect(events.at(-1)?.type).toBe(SSEEventType.Done);
+    });
+  });
+
+  describe('goal continuation context', () => {
+    it('builds a workspace-aware goal wake prompt with mode and capability routing', () => {
+      const content = buildGoalContinuationContent({
+        sessionId: 'session-1',
+        goal: {
+          objective: '修复 workspace 中的构建错误',
+          status: 'active',
+          createdAt: '2026-07-07T00:00:00.000Z',
+          updatedAt: '2026-07-07T00:01:00.000Z',
+          runCount: 3,
+          lastRunAt: '2026-07-07T00:02:00.000Z',
+        },
+        workspace: 'F:/Projects/AnoClaw',
+        permissionMode: 'Plan',
+        effort: 'NORMAL',
+        userMode: 'coding',
+        locale: 'zh-CN',
+        taskResolution: {
+          intent: 'capability',
+          query: '修复 workspace 中的构建错误',
+          userMode: 'coding',
+          locale: 'zh-CN',
+          confidence: 0.82,
+          nextAction: 'execute_capability',
+          canStart: true,
+          bestCapability: {
+            id: 'code.implement',
+            title: 'Modify a codebase',
+            description: 'Inspect and modify code in the current workspace.',
+            domain: 'coding',
+            kind: 'automation',
+            triggers: ['fix bug'],
+            requiredTools: ['Read', 'Edit', 'Bash'],
+            source: 'catalog',
+            sourceName: 'anoclaw.default',
+            status: 'available',
+            missingTools: [],
+          },
+          candidates: [],
+          missingInputs: [],
+          missingTools: [],
+          recommendedPlugins: [],
+          pluginRecommendations: [],
+          suggestedToolCall: {
+            toolName: 'Glob',
+            parameters: { pattern: '**/*.{ts,tsx,js}' },
+            confidence: 0.55,
+            notes: ['Start from the current IDE/editor context when available.'],
+          },
+          assumptions: [],
+          reason: 'Resolved to code.implement (available).',
+          suggestedResponse: 'I found the "Modify a codebase" capability and can start now.',
+        },
+      });
+
+      expect(content).toContain('Objective: 修复 workspace 中的构建错误');
+      expect(content).toContain('Run count: 3');
+      expect(content).toContain('Workspace: F:/Projects/AnoClaw');
+      expect(content).toContain('Permission mode: Plan');
+      expect(content).toContain('User mode: coding');
+      expect(content).toContain('Resolved capability: code.implement');
+      expect(content).toContain('Suggested first tool call: Glob');
+      expect(content).toContain('Coding mode: start from the current IDE/workspace context');
+      expect(content).toContain('Plan mode is active');
     });
   });
 });

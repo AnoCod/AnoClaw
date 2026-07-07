@@ -73,7 +73,9 @@ export class ModeSelector {
     };
     b.innerHTML = '';
 
-    const prefix = this.goal?.status === 'active' ? 'Goal ' : '';
+    const prefix = this.goal?.status === 'active'
+      ? `Goal${this.goal.runCount ? ` #${this.goal.runCount}` : ''} · `
+      : '';
     const label = document.createElement('span');
     label.textContent = prefix + modeLabels[this.mode];
     b.appendChild(label);
@@ -227,7 +229,9 @@ export class ModeSelector {
 
     const label = document.createElement('span');
     label.className = 'mode-goal-label';
-    label.textContent = this.goal ? `Goal: ${this.goal.status}` : 'Goal';
+    label.textContent = this.goal
+      ? `Goal: ${this.goal.status}${this.goal.runCount ? ` · #${this.goal.runCount}` : ''}`
+      : 'Goal';
     label.title = this.goal?.objective || 'No active goal';
     row.appendChild(label);
 

@@ -338,7 +338,7 @@ export class InputPanel {
     const dot = document.createElement('span');
     dot.className = 'input-goal-dot';
     const statusText = document.createElement('span');
-    statusText.textContent = isActive ? 'Goal active' : 'Goal paused';
+    statusText.textContent = `${isActive ? 'Goal active' : 'Goal paused'}${this._goal.runCount ? ` · #${this._goal.runCount}` : ''}`;
     status.appendChild(dot);
     status.appendChild(statusText);
 
@@ -382,13 +382,53 @@ export class InputPanel {
       detail.textContent = this._goal.objective;
       this._goalCard.appendChild(detail);
 
+      const contextItems = [
+        this._goal.lastPermissionMode ? `Mode ${this._modeLabel(this._goal.lastPermissionMode)}` : '',
+        this._goal.lastEffort ? `Effort ${this._goal.lastEffort}` : '',
+        this._goal.lastUserMode ? `User ${this._goal.lastUserMode}` : '',
+        this._goal.lastWorkspace ? `Workspace ${this._shortPath(this._goal.lastWorkspace)}` : '',
+      ].filter(Boolean);
+      if (contextItems.length > 0) {
+        const context = document.createElement('div');
+        context.className = 'input-goal-context';
+        for (const item of contextItems) {
+          const chip = document.createElement('span');
+          chip.className = 'input-goal-context-chip';
+          chip.textContent = item;
+          if (item.startsWith('Workspace ') && this._goal.lastWorkspace) chip.title = this._goal.lastWorkspace;
+          context.appendChild(chip);
+        }
+        this._goalCard.appendChild(context);
+      }
+
       const meta = document.createElement('div');
       meta.className = 'input-goal-meta';
       const updated = this._goal.updatedAt ? new Date(this._goal.updatedAt).toLocaleString() : '';
       const lastRun = this._goal.lastRunAt ? new Date(this._goal.lastRunAt).toLocaleString() : '';
-      meta.textContent = [updated ? `Updated ${updated}` : '', lastRun ? `Last run ${lastRun}` : ''].filter(Boolean).join(' / ');
+      meta.textContent = [
+        updated ? `Updated ${updated}` : '',
+        lastRun ? `Last run ${lastRun}` : '',
+        this._goal.runCount ? `Runs ${this._goal.runCount}` : '',
+      ].filter(Boolean).join(' / ');
       if (meta.textContent) this._goalCard.appendChild(meta);
     }
+  }
+
+  private _modeLabel(value: string): string {
+    switch (value) {
+      case 'Ask': return 'Ask';
+      case 'AutoEdit': return 'Auto Edit';
+      case 'Plan': return 'Plan';
+      case 'Auto': return 'Safe Auto';
+      default: return value;
+    }
+  }
+
+  private _shortPath(value: string): string {
+    const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '');
+    const parts = normalized.split('/').filter(Boolean);
+    if (parts.length <= 2) return value;
+    return `.../${parts.slice(-2).join('/')}`;
   }
 
   private _makeGoalActionBtn(label: string, action: 'pause' | 'resume' | 'edit' | 'delete'): HTMLButtonElement {

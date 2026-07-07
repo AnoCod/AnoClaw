@@ -3,7 +3,7 @@
 // InterruptBehavior: Block for destructive commands, Cancel otherwise.
 // Based on Claude Code's BashTool pattern.
 
-import { exec, spawnSync, type ExecOptions } from 'child_process';
+import { exec, spawn, spawnSync, type ChildProcess, type ExecOptions } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import { Tool } from '../Tool.js';
@@ -16,8 +16,23 @@ import { BackgroundTaskManager } from '../../agent/supervision/BackgroundTaskMan
 /** Default timeout for bash commands (30 seconds). */
 const DEFAULT_TIMEOUT_MS = 30000;
 
+/** Maximum foreground command timeout (10 minutes). */
+const MAX_TIMEOUT_MS = DEFAULT_TIMEOUT_MS * 20;
+
+/** Grace period before force-killing a command after timeout/interrupt. */
+const COMMAND_KILL_GRACE_MS = 250;
+
+/** Max wait for close after a timeout/interrupt before returning control to the agent. */
+const COMMAND_TERMINATION_FEEDBACK_MS = 600;
+
 /** Maximum output size before truncation. */
 const MAX_OUTPUT_CHARS = 10000;
+
+/** Maximum caller-configurable output size. */
+const MAX_CONFIGURABLE_OUTPUT_CHARS = 100000;
+
+/** Hard cap for captured foreground process output before the process is stopped. */
+const MAX_CAPTURE_CHARS = 5 * 1024 * 1024;
 
 /** Maximum TTL for background processes before forced cleanup (30 minutes). */
 const BG_TTL_MS = 30 * 60 * 1000;
@@ -35,10 +50,17 @@ const backgroundProcesses = new Map<string, {
 const DESTRUCTIVE_PATTERNS = [
   /git\s+push/,
   /git\s+reset/,
+  /git\s+clean\b.*-[^\n]*[fd]/,
   /rm\s+-rf/,
+  /remove-item\b.*-recurse/,
+  /\brd\s+\/s\b/,
+  /\brmdir\s+\/s\b/,
+  /\bdel\s+\/[sq]\b/,
   /sudo\s/,
   /chmod\s/,
   /chown\s/,
+  /\breg\s+delete\b/,
+  /\btaskkill\b.*\/f/,
   /mkfs/,
   /dd\s/,
   />\s*\/dev\//,
@@ -113,7 +135,15 @@ export class BashTool extends Tool {
         },
         timeout: {
           type: 'number',
-          description: `Optional timeout in milliseconds (max ${DEFAULT_TIMEOUT_MS * 20}). Default: ${DEFAULT_TIMEOUT_MS}.`,
+          description: `Optional timeout in milliseconds (max ${MAX_TIMEOUT_MS}). Default: ${DEFAULT_TIMEOUT_MS}.`,
+        },
+        cwd: {
+          type: 'string',
+          description: 'Optional working directory. Relative paths are resolved from the workspace.',
+        },
+        max_output_chars: {
+          type: 'number',
+          description: `Optional output limit in characters (max ${MAX_CONFIGURABLE_OUTPUT_CHARS}). Default: ${MAX_OUTPUT_CHARS}.`,
         },
         run_in_background: {
           type: 'boolean',
@@ -153,7 +183,9 @@ export class BashTool extends Tool {
   }
 
   defaultTimeoutMs(): number {
-    return DEFAULT_TIMEOUT_MS;
+    // Bash enforces the user-requested timeout internally. The pipeline watchdog
+    // is a hard ceiling so a stuck child process cannot hold the session forever.
+    return MAX_TIMEOUT_MS + COMMAND_KILL_GRACE_MS + 5000;
   }
 
   async execute(
@@ -162,11 +194,22 @@ export class BashTool extends Tool {
   ): Promise<ToolResult> {
     const command = params.command as string;
     const description = params.description as string | undefined;
-    const timeout = (params.timeout as number) ?? DEFAULT_TIMEOUT_MS;
+    const timeoutResult = normalizeTimeout(params.timeout);
+    const outputLimitResult = normalizeOutputLimit(params.max_output_chars);
     const runInBackground = (params.run_in_background as boolean) ?? false;
+    const cwdParam = params.cwd;
 
     if (!command || typeof command !== 'string') {
       return this.makeError('command is required');
+    }
+    if (timeoutResult.error) {
+      return this.makeError(timeoutResult.error);
+    }
+    if (outputLimitResult.error) {
+      return this.makeError(outputLimitResult.error);
+    }
+    if (cwdParam !== undefined && cwdParam !== null && typeof cwdParam !== 'string') {
+      return this.makeError('cwd must be a string');
     }
 
     // Check for destructive commands
@@ -178,6 +221,13 @@ export class BashTool extends Tool {
     }
 
     const startedAt = Date.now();
+    const timeout = timeoutResult.value ?? DEFAULT_TIMEOUT_MS;
+    const outputLimit = outputLimitResult.value ?? MAX_OUTPUT_CHARS;
+    const workingDirectory = resolveWorkingDirectory(cwdParam as string | undefined, ctx.workspace);
+    if (workingDirectory.error || !workingDirectory.cwd) {
+      return this.makeError(workingDirectory.error ?? 'cwd could not be resolved', { startedAt });
+    }
+    const cwd = workingDirectory.cwd;
 
     // Background execution
     if (runInBackground) {
@@ -197,8 +247,8 @@ export class BashTool extends Tool {
         });
 
         const child = exec(wrappedCmd, {
-          cwd: ctx.workspace,
-          timeout: Math.min(timeout, DEFAULT_TIMEOUT_MS * 20),
+          cwd,
+          timeout: params.timeout === undefined ? 0 : timeout,
           windowsHide: true,
           shell,
         } as ExecOptions);
@@ -244,7 +294,7 @@ export class BashTool extends Tool {
 
         return this.makeResult(
           `Background task started.\nTask ID: ${bgTaskId}\nPID: ${child.pid || 'unknown'}\nCommand: ${command.slice(0, 100)}\n\nTo wait for completion, use the Sleep tool with wait_for_task_id="${bgTaskId}". You will also receive a <task-notification> when this task completes or fails.`,
-          { startedAt, structured: { taskId: bgTaskId, backgroundKey: bgKey, pid: child.pid } },
+          { startedAt, structured: { taskId: bgTaskId, backgroundKey: bgKey, pid: child.pid, cwd } },
         );
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
@@ -256,68 +306,59 @@ export class BashTool extends Tool {
     try {
       const shell = getShell();
       const wrappedCmd = wrapCommand(command, shell);
-      const result = await new Promise<{ stdout: string; stderr: string; error: string; killed: boolean }>(
-        (resolve) => {
-          const child = exec(
-            wrappedCmd,
-            {
-              cwd: ctx.workspace,
-              timeout: Math.min(timeout, DEFAULT_TIMEOUT_MS * 20),
-              maxBuffer: 5 * 1024 * 1024, // 5 MB
-              windowsHide: true,
-              shell,
-            },
-            (error, stdout, stderr) => {
-              let output = (stdout || '') + (stderr || '');
-              if (error && !output) {
-                output = error.message || String(error);
-              }
-              resolve({
-                stdout: stdout || '',
-                stderr: stderr || '',
-                error: error ? (error.message || String(error)) : '',
-                killed: error?.killed ?? false,
-              });
-            },
-          );
+      const result = await runForegroundCommand(wrappedCmd, shell, cwd, timeout, ctx.signal);
 
-          // Listen for interrupt abort - kill the child process when user interjects
-          if (ctx.signal) {
-            const onAbort = () => {
-              if (child.exitCode === null && !child.killed) {
-                child.kill('SIGTERM');
-                // If still alive after 3s, force kill
-                setTimeout(() => {
-                  if (child.exitCode === null && !child.killed) {
-                    child.kill('SIGKILL');
-                  }
-                }, 3000);
-              }
-            };
-            if (ctx.signal.aborted) {
-              onAbort(); // Already aborted - kill immediately
-            } else {
-              ctx.signal.addEventListener('abort', onAbort, { once: true });
-            }
-          }
-        },
-      );
+      const formatted = formatCommandOutput(result.stdout, result.stderr, outputLimit);
+      const structured = {
+        command,
+        description,
+        cwd,
+        exitCode: result.exitCode,
+        signal: result.signal,
+        timedOut: result.timedOut,
+        interrupted: result.interrupted,
+        outputOverflow: result.outputOverflow,
+        killed: result.killed,
+        durationMs: result.durationMs,
+        stdoutChars: result.stdout.length,
+        stderrChars: result.stderr.length,
+        outputLimit,
+      };
 
-      let output = (result.stdout || '') + (result.stderr || '');
-      // If the process was killed by interrupt, surface it
-      if (result.killed) {
-        output = '[Interrupted by user]\n' + (output || '(no output before interrupt)');
+      const finishedAt = Date.now();
+      if (result.interrupted) {
+        return this.makeError(
+          `Command interrupted by user: ${command.slice(0, 160)}\n${formatted.output}`,
+          { startedAt, finishedAt, durationMs: result.durationMs, wasTruncated: formatted.wasTruncated, structured },
+        );
       }
-      // If no output but exec signalled an error, surface the error message
-      if (!output.trim() && result.error) {
-        output = result.error;
+      if (result.timedOut) {
+        return this.makeError(
+          `Command timed out after ${formatMs(timeout)}: ${command.slice(0, 160)}\n${formatted.output}`,
+          { startedAt, finishedAt, durationMs: result.durationMs, wasTruncated: formatted.wasTruncated, structured },
+        );
       }
-      output = output.trim();
-      if (!output) output = '(no output)';
+      if (result.outputOverflow) {
+        return this.makeError(
+          `Command output exceeded ${MAX_CAPTURE_CHARS} characters and was stopped: ${command.slice(0, 160)}\n${formatted.output}`,
+          { startedAt, finishedAt, durationMs: result.durationMs, wasTruncated: true, structured },
+        );
+      }
+      if (result.exitCode !== 0) {
+        return this.makeError(
+          `Command failed with exit code ${result.exitCode}: ${command.slice(0, 160)}\n${formatted.output || result.errorMessage || '(no output)'}`,
+          { startedAt, finishedAt, durationMs: result.durationMs, wasTruncated: formatted.wasTruncated, structured },
+        );
+      }
 
-      const wasTruncated = output.length > MAX_OUTPUT_CHARS;
-
-      return this.makeResult(output, { startedAt, wasTruncated });
+      const output = formatted.output || '(no output)';
+      return this.makeResult(output, {
+        startedAt,
+        finishedAt,
+        durationMs: result.durationMs,
+        wasTruncated: formatted.wasTruncated,
+        structured,
+      });
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       return this.makeError(`Bash command failed: ${errMsg}`);
@@ -373,6 +414,250 @@ export class BashTool extends Tool {
       }
     }
   }
+}
+
+interface BashExecutionResult {
+  stdout: string;
+  stderr: string;
+  errorMessage: string;
+  exitCode: number;
+  signal: NodeJS.Signals | null;
+  killed: boolean;
+  timedOut: boolean;
+  interrupted: boolean;
+  outputOverflow: boolean;
+  durationMs: number;
+}
+
+function normalizeTimeout(value: unknown): { value: number; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: DEFAULT_TIMEOUT_MS };
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return { error: 'timeout must be a finite number of milliseconds' };
+  }
+  const normalized = Math.floor(value);
+  if (normalized < 100) {
+    return { error: 'timeout must be at least 100 milliseconds' };
+  }
+  if (normalized > MAX_TIMEOUT_MS) {
+    return { error: `timeout must be ${MAX_TIMEOUT_MS} milliseconds or less` };
+  }
+  return { value: normalized };
+}
+
+function normalizeOutputLimit(value: unknown): { value: number; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: MAX_OUTPUT_CHARS };
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return { error: 'max_output_chars must be a finite number' };
+  }
+  const normalized = Math.floor(value);
+  if (normalized < 100) {
+    return { error: 'max_output_chars must be at least 100' };
+  }
+  if (normalized > MAX_CONFIGURABLE_OUTPUT_CHARS) {
+    return { error: `max_output_chars must be ${MAX_CONFIGURABLE_OUTPUT_CHARS} or less` };
+  }
+  return { value: normalized };
+}
+
+function resolveWorkingDirectory(cwd: string | undefined, workspace: string): { cwd: string; error?: undefined } | { cwd?: undefined; error: string } {
+  const resolved = cwd && cwd.trim()
+    ? (path.isAbsolute(cwd) ? path.resolve(cwd) : path.resolve(workspace, cwd))
+    : path.resolve(workspace);
+
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(resolved);
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code === 'ENOENT') return { error: `cwd does not exist: ${resolved}` };
+    return { error: `Cannot access cwd ${resolved}: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  if (!stat.isDirectory()) {
+    return { error: `cwd is not a directory: ${resolved}` };
+  }
+  return { cwd: resolved };
+}
+
+function formatCommandOutput(stdout: string, stderr: string, limit: number): { output: string; wasTruncated: boolean } {
+  const sections: string[] = [];
+  const stdoutTrimmed = stdout.trimEnd();
+  const stderrTrimmed = stderr.trimEnd();
+  if (stdoutTrimmed) sections.push(stdoutTrimmed);
+  if (stderrTrimmed) sections.push(`[stderr]\n${stderrTrimmed}`);
+  const combined = sections.join('\n');
+  return truncateMiddle(combined, limit);
+}
+
+function truncateMiddle(value: string, limit: number): { output: string; wasTruncated: boolean } {
+  if (value.length <= limit) return { output: value, wasTruncated: false };
+  let marker = `\n\n... [truncated] ...\n\n`;
+  let available = Math.max(0, limit - marker.length);
+  let omitted = value.length - available;
+  marker = `\n\n... [${omitted} chars truncated] ...\n\n`;
+  available = Math.max(0, limit - marker.length);
+  const headLength = Math.ceil(available / 2);
+  const tailLength = Math.floor(available / 2);
+  return {
+    output: value.slice(0, headLength) + marker + value.slice(value.length - tailLength),
+    wasTruncated: true,
+  };
+}
+
+function runForegroundCommand(
+  command: string,
+  shell: string,
+  cwd: string,
+  timeout: number,
+  signal: AbortSignal | undefined,
+): Promise<BashExecutionResult> {
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+    let stdout = '';
+    let stderr = '';
+    let errorMessage = '';
+    let timedOut = false;
+    let interrupted = false;
+    let outputOverflow = false;
+    let killed = false;
+    let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+    let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
+    let fallbackResolveTimer: ReturnType<typeof setTimeout> | null = null;
+    let abortCleanup: (() => void) | null = null;
+    let settled = false;
+
+    const invocation = createShellInvocation(shell, command);
+    const child = spawn(invocation.file, invocation.args, {
+      cwd,
+      windowsHide: true,
+      detached: true,
+    });
+
+    const cleanup = () => {
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
+      if (fallbackResolveTimer) clearTimeout(fallbackResolveTimer);
+      abortCleanup?.();
+    };
+
+    const finish = (exitCode: number, closeSignal: NodeJS.Signals | null) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve({
+        stdout,
+        stderr,
+        errorMessage,
+        exitCode,
+        signal: closeSignal,
+        killed,
+        timedOut,
+        interrupted,
+        outputOverflow,
+        durationMs: Date.now() - startTime,
+      });
+    };
+
+    const terminate = (reason: 'timeout' | 'interrupt' | 'output_overflow') => {
+      if (settled) return;
+      if (reason === 'timeout') timedOut = true;
+      if (reason === 'interrupt') interrupted = true;
+      if (reason === 'output_overflow') outputOverflow = true;
+      killed = true;
+      terminateChildProcess(child);
+      forceKillTimer = setTimeout(() => {
+        forceKillProcessTree(child.pid);
+      }, COMMAND_KILL_GRACE_MS);
+      fallbackResolveTimer = setTimeout(() => {
+        finish(1, 'SIGTERM');
+      }, COMMAND_TERMINATION_FEEDBACK_MS);
+    };
+
+    const appendOutput = (target: 'stdout' | 'stderr', chunk: Buffer | string) => {
+      if (outputOverflow) return;
+      const text = chunk.toString();
+      const currentLength = stdout.length + stderr.length;
+      const remaining = MAX_CAPTURE_CHARS - currentLength;
+      if (remaining <= 0) {
+        terminate('output_overflow');
+        return;
+      }
+      const accepted = text.length > remaining ? text.slice(0, remaining) : text;
+      if (target === 'stdout') stdout += accepted;
+      else stderr += accepted;
+      if (text.length > remaining) {
+        errorMessage = `Command output exceeded ${MAX_CAPTURE_CHARS} characters`;
+        terminate('output_overflow');
+      }
+    };
+
+    child.stdout?.on('data', (chunk: Buffer | string) => {
+      appendOutput('stdout', chunk);
+    });
+    child.stderr?.on('data', (chunk: Buffer | string) => {
+      appendOutput('stderr', chunk);
+    });
+    child.on('error', (err: Error) => {
+      errorMessage = err.message;
+      finish(1, null);
+    });
+    child.on('close', (code, closeSignal) => {
+      finish(code ?? (closeSignal ? 1 : 0), closeSignal);
+    });
+
+    timeoutTimer = setTimeout(() => terminate('timeout'), timeout);
+    if (signal) {
+      const onAbort = () => terminate('interrupt');
+      if (signal.aborted) {
+        onAbort();
+      } else {
+        signal.addEventListener('abort', onAbort, { once: true });
+        abortCleanup = () => signal.removeEventListener('abort', onAbort);
+      }
+    }
+  });
+}
+
+function createShellInvocation(shell: string, command: string): { file: string; args: string[] } {
+  const isCmd = shell.toLowerCase().includes('cmd.exe');
+  if (isCmd) {
+    return { file: shell, args: ['/d', '/s', '/c', command] };
+  }
+  return { file: shell, args: ['-lc', command] };
+}
+
+function terminateChildProcess(child: ChildProcess): void {
+  try {
+    if (child.exitCode === null && !child.killed) {
+      child.kill('SIGTERM');
+    }
+  } catch { /* ignore */ }
+  if (process.platform === 'win32') {
+    forceKillProcessTree(child.pid);
+  } else if (child.pid) {
+    try { process.kill(-child.pid, 'SIGTERM'); } catch { /* ignore */ }
+  }
+}
+
+function forceKillProcessTree(pid: number | undefined): void {
+  if (!pid) return;
+  try {
+    if (process.platform === 'win32') {
+      spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore',
+      });
+    } else {
+      try {
+        process.kill(-pid, 'SIGKILL');
+      } catch {
+        process.kill(pid, 'SIGKILL');
+      }
+    }
+  } catch { /* ignore */ }
+}
+
+function formatMs(ms: number): string {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(ms % 1000 === 0 ? 0 : 1)}s` : `${ms}ms`;
 }
 
 /** Kill a single background process and clear its watchdog. Returns true if found. */

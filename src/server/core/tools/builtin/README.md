@@ -49,7 +49,7 @@
 
 ### BashTool — `Bash`
 
-Executes shell commands in a sandboxed environment.
+Executes shell commands with confirmation, timeout, background-task, working-directory, and structured exit-status support.
 
 | Property | Value |
 |---|---|
@@ -64,8 +64,14 @@ Executes shell commands in a sandboxed environment.
 | `command` | string | ✓ | The shell command to execute |
 | `description` | string | ✓ | Clear description of what the command does |
 | `timeout` | number | | Max execution time in ms (max 600000) |
+| `cwd` | string | | Working directory; relative paths resolve from workspace |
+| `max_output_chars` | number | | Max output returned to the model (max 100000) |
 | `run_in_background` | boolean | | Set true for long-running tasks |
-| `dangerouslyDisableSandbox` | boolean | | Override sandbox (requires confirmation) |
+
+**Behavior notes:**
+- Non-zero exit codes, timeouts, and user interrupts return failed tool results with exit metadata.
+- Output includes stdout and labeled stderr, with middle truncation for oversized output.
+- `run_in_background` starts a supervised task; without an explicit `timeout`, the background watchdog TTL applies.
 
 ---
 

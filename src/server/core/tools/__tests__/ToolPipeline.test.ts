@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ToolPipeline } from '../ToolPipeline.js';
-import { RiskLevel, InterruptBehavior } from '../../../../shared/types/tool.js';
+import { RiskLevel, InterruptBehavior, type ToolResult } from '../../../../shared/types/tool.js';
 import type { Tool } from '../Tool.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
 import { makeResult, makeError } from '../ToolResult.js';
@@ -29,9 +29,11 @@ function mockTool(overrides: Record<string, unknown> = {}): Tool {
     isDestructive: () => (overrides.isDestructive as boolean) ?? false,
     workspacePathParams: () => (overrides.workspacePathParams as string[]) ?? [],
     maxRetries: () => (overrides.maxRetries as number) ?? 3,
+    defaultTimeoutMs: () => (overrides.defaultTimeoutMs as number) ?? 30000,
     outputLimit: () => (overrides.outputLimit as number) ?? 10000,
     interruptBehavior: () => (overrides.interruptBehavior as InterruptBehavior) ?? InterruptBehavior.Cancel,
-    _executeWithEvents: vi.fn().mockResolvedValue(makeResult('ok')),
+    _executeWithEvents: (overrides._executeWithEvents as Tool['_executeWithEvents'])
+      ?? vi.fn().mockResolvedValue(makeResult('ok')),
   } as unknown as Tool;
 }
 
@@ -266,6 +268,71 @@ describe('ToolPipeline.securityCheck', () => {
     );
     expect(r).not.toBeNull();
     expect(r!.errorMessage).toContain('read_only');
+  });
+});
+
+// ── Stage 2: execution watchdog ──
+
+describe('ToolPipeline.execute watchdog', () => {
+  it('returns a timeout failure when a tool never settles', async () => {
+    let receivedSignal: AbortSignal | undefined;
+    const tool = mockTool({
+      name: 'SlowTool',
+      defaultTimeoutMs: 10,
+      _executeWithEvents: vi.fn((_params, execCtx: ExecutionContext) => {
+        receivedSignal = execCtx.signal;
+        return new Promise<ToolResult>(() => {});
+      }),
+    });
+
+    const result = await ToolPipeline.execute(tool, {}, ctx(), 'tc-timeout');
+
+    expect(result.success).toBe(false);
+    expect(result.toolCallId).toBe('tc-timeout');
+    expect(result.errorMessage).toContain('timed out');
+    expect(result.structured).toMatchObject({
+      toolName: 'SlowTool',
+      pipelineFailure: 'timeout',
+      timeoutMs: 100,
+    });
+    expect(receivedSignal?.aborted).toBe(true);
+  });
+
+  it('returns an interrupt failure when the session signal aborts during execution', async () => {
+    const controller = new AbortController();
+    const tool = mockTool({
+      name: 'InterruptibleTool',
+      defaultTimeoutMs: 1000,
+      _executeWithEvents: vi.fn(() => new Promise<ToolResult>(() => {})),
+    });
+
+    const pending = ToolPipeline.execute(tool, {}, ctx({ signal: controller.signal }), 'tc-interrupt');
+    controller.abort();
+    const result = await pending;
+
+    expect(result.success).toBe(false);
+    expect(result.toolCallId).toBe('tc-interrupt');
+    expect(result.errorMessage).toContain('interrupted');
+    expect(result.structured).toMatchObject({
+      toolName: 'InterruptibleTool',
+      pipelineFailure: 'interrupted',
+    });
+  });
+
+  it('does not retry watchdog timeout failures', async () => {
+    const tool = mockTool({
+      name: 'SlowRetryTool',
+      maxRetries: 3,
+      _executeWithEvents: vi.fn().mockResolvedValue(makeResult('unexpected retry')),
+    });
+    const original = makeError('Tool "SlowRetryTool" timed out', {
+      structured: { pipelineFailure: 'timeout' },
+    });
+
+    const result = await ToolPipeline.retry(tool, {}, ctx(), original);
+
+    expect(result).toBe(original);
+    expect(tool._executeWithEvents).not.toHaveBeenCalled();
   });
 });
 

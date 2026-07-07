@@ -253,8 +253,65 @@ export class ToolPipeline {
     ctx: ExecutionContext,
     toolCallId: string,
   ): Promise<ToolResult> {
-    // Delegate to tool's existing event-emitting wrapper
-    return tool._executeWithEvents(params, ctx, toolCallId);
+    const startedAt = Date.now();
+    const timeoutMs = normalizeTimeoutMs(tool.defaultTimeoutMs?.());
+
+    if (ctx.signal?.aborted) {
+      return makePipelineFailure(tool, toolCallId, startedAt, 'interrupted', 'Tool execution was interrupted before it started.');
+    }
+
+    const localController = new AbortController();
+    const parentSignal = ctx.signal;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const cleanups: Array<() => void> = [];
+    let timedOut = false;
+
+    if (parentSignal) {
+      const onParentAbort = () => localController.abort();
+      if (parentSignal.aborted) {
+        localController.abort();
+      } else {
+        parentSignal.addEventListener('abort', onParentAbort, { once: true });
+        cleanups.push(() => parentSignal.removeEventListener('abort', onParentAbort));
+      }
+    }
+
+    const guardedCtx: ExecutionContext = {
+      ...ctx,
+      signal: localController.signal,
+    };
+
+    const failure = new Promise<ToolResult>((resolve) => {
+      const onLocalAbort = () => {
+        if (timedOut) return;
+        resolve(makePipelineFailure(tool, toolCallId, startedAt, 'interrupted', 'Tool execution was interrupted by the user.'));
+      };
+      localController.signal.addEventListener('abort', onLocalAbort, { once: true });
+      cleanups.push(() => localController.signal.removeEventListener('abort', onLocalAbort));
+
+      timeout = setTimeout(() => {
+        timedOut = true;
+        localController.abort();
+        resolve(makePipelineFailure(
+          tool,
+          toolCallId,
+          startedAt,
+          'timeout',
+          `Tool "${tool.name()}" timed out after ${formatMs(timeoutMs)} and was cancelled so the session can continue.`,
+          timeoutMs,
+        ));
+      }, timeoutMs);
+    });
+
+    try {
+      return await Promise.race([
+        tool._executeWithEvents(params, guardedCtx, toolCallId),
+        failure,
+      ]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      for (const cleanup of cleanups) cleanup();
+    }
   }
 
   static async retry(
@@ -265,6 +322,11 @@ export class ToolPipeline {
   ): Promise<ToolResult> {
     const errorMsg = originalResult.errorMessage || '';
     if (!errorMsg) return originalResult;
+
+    const structured = originalResult.structured as { pipelineFailure?: string } | undefined;
+    if (structured?.pipelineFailure === 'timeout' || structured?.pipelineFailure === 'interrupted') {
+      return originalResult;
+    }
 
     // Never retry Block-interrupt tools — repeated execution may compound destructive side-effects
     if (tool.interruptBehavior() === InterruptBehavior.Block) return originalResult;
@@ -337,4 +399,35 @@ export class ToolPipeline {
       wasTruncated: true,
     };
   }
+}
+
+function normalizeTimeoutMs(value: number | undefined): number {
+  if (!Number.isFinite(value) || !value || value <= 0) return 30_000;
+  return Math.max(100, Math.floor(value));
+}
+
+function formatMs(ms: number): string {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(ms % 1000 === 0 ? 0 : 1)}s` : `${ms}ms`;
+}
+
+function makePipelineFailure(
+  tool: Tool,
+  toolCallId: string,
+  startedAt: number,
+  pipelineFailure: 'timeout' | 'interrupted',
+  message: string,
+  timeoutMs?: number,
+): ToolResult {
+  const finishedAt = Date.now();
+  return makeError(message, {
+    toolCallId,
+    startedAt,
+    finishedAt,
+    durationMs: finishedAt - startedAt,
+    structured: {
+      toolName: tool.name(),
+      pipelineFailure,
+      ...(timeoutMs ? { timeoutMs } : {}),
+    },
+  });
 }

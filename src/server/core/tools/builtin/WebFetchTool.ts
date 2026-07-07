@@ -96,6 +96,10 @@ export class WebFetchTool extends Tool {
     return 90000;
   }
 
+  maxRetries(): number {
+    return 0;
+  }
+
   outputLimit(): number {
     return 15000; // WebFetch results can be large
   }

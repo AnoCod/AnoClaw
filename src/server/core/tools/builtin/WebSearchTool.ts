@@ -70,6 +70,7 @@ export class WebSearchTool extends Tool {
   interruptBehavior(): InterruptBehavior { return InterruptBehavior.Cancel; }
   isAsync(): boolean { return true; }
   defaultTimeoutMs(): number { return 15000; }
+  maxRetries(): number { return 0; }
 
   async execute(params: Record<string, unknown>, ctx: ExecutionContext): Promise<ToolResult> {
     const query = params.query as string;

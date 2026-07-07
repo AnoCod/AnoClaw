@@ -1,0 +1,4 @@
+interface:
+  display_name: "Git Submit Push"
+  short_description: "Finish AnoClaw changes by committing and pushing intentionally."
+  default_prompt: "Commit and push the verified AnoClaw changes."

@@ -46,6 +46,17 @@ npm run test:watch
 
 Always run `npm run build:all` if both changed. Path aliases `@shared/*`, `@server/*`, `@public/*` are configured in root tsconfig — they resolve at compile time only (no runtime module aliasing).
 
+## Completion Workflow
+
+AnoClaw uses Git as the durable completion record. Do not write Obsidian/vault work logs for coding sessions.
+
+After verified code, docs, config, or skill changes:
+1. Inspect `git status --short --branch` and review the relevant diff.
+2. Stage only intentional files; never include unrelated user changes, secrets, local data, or build caches.
+3. Create a concise git commit describing the completed work.
+4. Push the current branch to `origin`; if no upstream exists, use `git push -u origin HEAD`.
+5. Report verification, commit hash, branch, and push status to the user.
+
 ## Architecture
 
 ### Four-Layer Design

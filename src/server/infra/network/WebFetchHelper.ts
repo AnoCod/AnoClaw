@@ -114,22 +114,28 @@ function execCurl(url: string, opts: FetchOptions, curlPath: string): Promise<Cu
     }
 
     let settled = false;
+    let removeAbortListener: (() => void) | null = null;
+
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      removeAbortListener?.();
+      removeAbortListener = null;
+      fn();
+    };
 
     if (opts.signal) {
       if (opts.signal.aborted) {
-        settled = true;
         child.kill();
-        reject(new DOMException('Aborted', 'AbortError'));
+        settle(() => reject(new DOMException('Aborted', 'AbortError')));
         return;
       }
-      opts.signal.addEventListener(
-        'abort',
-        () => {
-          settled = true;
-          child.kill();
-        },
-        { once: true },
-      );
+      const onAbort = () => {
+        child.kill();
+        settle(() => reject(new DOMException('Aborted', 'AbortError')));
+      };
+      opts.signal.addEventListener('abort', onAbort, { once: true });
+      removeAbortListener = () => opts.signal?.removeEventListener('abort', onAbort);
     }
 
     let stdout = '';
@@ -145,32 +151,30 @@ function execCurl(url: string, opts: FetchOptions, curlPath: string): Promise<Cu
 
     child.on('error', (err: Error & { code?: string }) => {
       if (settled) return;
-      settled = true;
 
       // ENOENT → binary not found; try next candidate
       if (err.code === 'ENOENT') {
-        reject(new Error('CURL_NOT_FOUND'));
+        settle(() => reject(new Error('CURL_NOT_FOUND')));
         return;
       }
-      reject(err);
+      settle(() => reject(err));
     });
 
     child.on('close', (code: number | null) => {
       if (settled) return;
-      settled = true;
 
       if (opts.signal?.aborted) {
-        reject(new DOMException('Aborted', 'AbortError'));
+        settle(() => reject(new DOMException('Aborted', 'AbortError')));
         return;
       }
 
       if (code !== 0 && code !== null) {
-        reject(new Error(stderr.trim() || `curl exited with code ${code}`));
+        settle(() => reject(new Error(stderr.trim() || `curl exited with code ${code}`)));
         return;
       }
 
       const { status, headers, body } = parseHeadersAndBody(stdout);
-      resolve(new CurlResponse(status, headers, body));
+      settle(() => resolve(new CurlResponse(status, headers, body)));
     });
   });
 }

@@ -28,6 +28,12 @@ plugins/*/data/
 
 # Local agent/editor state
 .agents/
+!.agents/
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/git-submit-push/
+!.agents/skills/git-submit-push/**
 .claude/
 .codex/
 

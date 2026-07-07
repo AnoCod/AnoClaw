@@ -92,7 +92,7 @@
 - `docs/README.md` 有新入口或相关链接。
 - `docs/manifest.json` 有新条目、tags、summary。
 - 如果改了代码或 prompt，运行构建/测试。
-- 如果是重大变更，记录到工作日志。
+- 如果完成了已验证的代码、文档、配置或 skill 变更，提交 git commit 并推送当前分支；不要写 Obsidian/工作日志。
 
 ## 回答规范
 

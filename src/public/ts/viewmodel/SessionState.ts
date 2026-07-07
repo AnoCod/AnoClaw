@@ -4,11 +4,12 @@
 // WS events always land in the correct SessionState regardless of active status.
 
 import { MessageListModel } from './MessageListModel.js';
-import type { Message, TokenBreakdown } from '../types.js';
+import type { ArtifactRecord, Message, TokenBreakdown } from '../types.js';
 
 export class SessionState {
   readonly sessionId: string;
   messages: MessageListModel = new MessageListModel();
+  artifacts: ArtifactRecord[] = [];
   isStreaming: boolean = false;
   currentStreamMessage: string = '';
   tokenBreakdown: TokenBreakdown | null = null;

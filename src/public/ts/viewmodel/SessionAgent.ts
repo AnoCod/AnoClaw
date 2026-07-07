@@ -6,7 +6,7 @@
 
 import { EventEmitter } from '../EventEmitter.js';
 import { SessionState } from './SessionState.js';
-import type { Message, TokenBreakdown, TodoItem } from '../types.js';
+import type { ArtifactRecord, Message, TokenBreakdown, TodoItem } from '../types.js';
 import { MessageListModel } from './MessageListModel.js';
 import { ClientLogger } from '../ClientLogger.js';
 import { ToastManager } from '../ToastManager.js';
@@ -379,6 +379,12 @@ export function onWake(agent: SessionAgent, content?: string): void {
   }
 }
 
+export function onArtifactEvent(agent: SessionAgent, data: Record<string, unknown>): void {
+  const artifact = data.artifact as ArtifactRecord | undefined;
+  if (!artifact?.id) return;
+  agent.upsertArtifact(artifact);
+}
+
 /** Format a delegation activity card's content based on the original event type. */
 function formatDelegationContent(
   subAgentId: string,
@@ -454,6 +460,12 @@ export class SessionAgent extends EventEmitter {
         case 'status': onStatus(this, data.content as string | undefined); break;
         case 'sleep': onSleep(this, data.content as string | undefined); break;
         case 'wake': onWake(this, data.content as string | undefined); break;
+        case 'artifact_created':
+        case 'artifact_updated':
+        case 'artifact_preview':
+        case 'artifact_done':
+          onArtifactEvent(this, data);
+          break;
       }
     } catch (err) {
       ClientLogger.vm.error('Error handling WS event in SessionAgent', {
@@ -619,11 +631,34 @@ export class SessionAgent extends EventEmitter {
       ClientLogger.vm.debug('Conversation history loaded', { sid: this.sessionId, messageCount: (data.messages || []).length });
       this.emit('historyLoaded', { sessionId: this.sessionId });
       if (s.tokenBreakdown) this.emit('tokensUpdated', s.tokenBreakdown);
+      this.loadArtifacts().catch((err) => {
+        ClientLogger.vm.warn('Failed to load artifacts after history', { sid: this.sessionId, error: (err as Error).message });
+      });
     } catch (e) {
       if (signal.aborted) return;
       ClientLogger.vm.error('Failed to load conversation history', { sid: this.sessionId, error: (e as Error).message });
       this.emit('historyLoadError', { sessionId: this.sessionId, error: (e as Error).message });
     }
+  }
+
+  async loadArtifacts(): Promise<void> {
+    const resp = await fetch(`/api/v1/artifacts?sessionId=${encodeURIComponent(this.sessionId)}&limit=100`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json() as { artifacts?: ArtifactRecord[] };
+    this.setArtifacts(Array.isArray(data.artifacts) ? data.artifacts : []);
+  }
+
+  setArtifacts(artifacts: ArtifactRecord[]): void {
+    this.state.artifacts = sortArtifacts(artifacts);
+    this.emit('artifactsLoaded', { sessionId: this.sessionId, artifacts: this.state.artifacts });
+  }
+
+  upsertArtifact(artifact: ArtifactRecord): void {
+    const existingIndex = this.state.artifacts.findIndex((item) => item.id === artifact.id);
+    if (existingIndex >= 0) this.state.artifacts[existingIndex] = artifact;
+    else this.state.artifacts.unshift(artifact);
+    this.state.artifacts = sortArtifacts(this.state.artifacts);
+    this.emit('artifactUpdated', { sessionId: this.sessionId, artifact, artifacts: this.state.artifacts });
   }
 
   /** Convert a stored message (flat or tool-call-rich) into the UI message model.
@@ -771,6 +806,7 @@ export class SessionAgent extends EventEmitter {
   reset(): void {
     const s = this.state;
     s.messages.clear();
+    s.artifacts = [];
     s.isStreaming = false;
     s.currentStreamMessage = '';
     s.streamMsgId = null;
@@ -808,4 +844,12 @@ function parseTaskNotificationXML(xml: string): { taskId: string; status: string
   } catch {
     return null;
   }
+}
+
+function sortArtifacts(artifacts: ArtifactRecord[]): ArtifactRecord[] {
+  return [...artifacts].sort((a, b) => {
+    const bTime = Date.parse(b.updatedAt || b.createdAt || '');
+    const aTime = Date.parse(a.updatedAt || a.createdAt || '');
+    return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+  });
 }

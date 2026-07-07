@@ -7,6 +7,7 @@ import type { RouteHandler } from '../RouteHandler.js';
 import { ArtifactManager } from '../../core/artifacts/ArtifactManager.js';
 import {
   CreateArtifactRoute,
+  DownloadArtifactFileRoute,
   GetArtifactRoute,
   ListArtifactsRoute,
   UpdateArtifactRoute,
@@ -26,6 +27,7 @@ describe('artifact API routes', () => {
     api.registerRoute(new ListArtifactsRoute(manager));
     api.registerRoute(new CreateArtifactRoute(manager));
     api.registerRoute(new GetArtifactRoute(manager));
+    api.registerRoute(new DownloadArtifactFileRoute(manager));
     api.registerRoute(new UpdateArtifactRoute(manager));
   });
 
@@ -71,5 +73,22 @@ describe('artifact API routes', () => {
 
     expect(result.statusCode).toBe(400);
     expect(result.body.error).toBe('kind is required');
+  });
+
+  it('downloads an artifact file by index', async () => {
+    const filePath = path.join(root, 'deck.pptx');
+    await fs.writeFile(filePath, 'pptx-bytes');
+    const created = await api.callInternal('POST', '/api/v1/artifacts', {
+      sessionId: 'session-1',
+      title: 'Downloadable PPT',
+      kind: 'presentation',
+      files: [{ path: filePath, label: 'deck.pptx', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' }],
+    });
+    const artifactId = (created.body.artifact as { id: string }).id;
+
+    const downloaded = await api.callInternal('GET', `/api/v1/artifacts/session-1/${artifactId}/files/0`);
+
+    expect(downloaded.statusCode).toBe(200);
+    expect(downloaded.body._raw).toBe('pptx-bytes');
   });
 });

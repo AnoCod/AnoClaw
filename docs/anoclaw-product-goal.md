@@ -1,7 +1,10 @@
 # AnoClaw Product Goal
 
-> This document is the long-term product goal reference for AnoClaw.
-> When implementation details are unclear, use this as the north star: users should not need to understand agents, plugins, or tool calls. AnoClaw should understand the user and deliver finished artifacts.
+> 长期方向：用户不需要理解 Agent、插件或工具调用。AnoClaw 应该理解用户，一句话判断真实目标，自动找到能力，补齐必要信息，交付可预览、可下载、可继续修改的成品。
+
+## 开发期原则
+
+AnoClaw 目前仍处于开发阶段，没有真实用户需要迁移。因此当旧接口、旧数据结构、旧 UI 或旧交互妨碍产品目标时，可以优先重构或替换，不需要为了历史兼容牺牲正确的长期架构。
 
 ## 核心定位
 
@@ -9,7 +12,7 @@ AnoClaw 未来不应该只回答“我有哪些工具”，而应该回答：
 
 > 用户说一句自然语言，我能不能判断他的真实目标，自动找到能力，补齐信息，生成成品，并允许继续修改？
 
-产品核心闭环：
+核心闭环：
 
 ```text
 用户一句话
@@ -23,7 +26,7 @@ AnoClaw 未来不应该只回答“我有哪些工具”，而应该回答：
 
 ## 一、能力系统 CapabilityRegistry
 
-插件不能只暴露工具，必须声明“我能帮用户完成什么事”。
+插件不能只暴露工具，必须声明“我能帮用户完成什么事”。普通用户看到的是能力，不是插件清单。
 
 能力声明示例：
 
@@ -38,7 +41,7 @@ AnoClaw 未来不应该只回答“我有哪些工具”，而应该回答：
   "tools": ["office.create_pptx", "web.search", "image.generate"],
   "examples": [
     "帮我做一个介绍太阳系的小学生PPT",
-    "做一份AI Agent项目汇报PPT"
+    "做一份 AI Agent 项目汇报 PPT"
   ]
 }
 ```
@@ -50,16 +53,7 @@ AnoClaw 未来不应该只回答“我有哪些工具”，而应该回答：
 - `src/server/core/capability/TaskResolver.ts`
 - `GET /api/v1/capabilities`
 - `POST /api/v1/tasks/resolve`
-
-插件的 `plugin.json` 增加：
-
-```json
-{
-  "contributes": {
-    "capabilities": []
-  }
-}
-```
+- 插件 `plugin.json` 支持 `contributes.capabilities`
 
 ## 二、任务解析 TaskResolver
 
@@ -74,11 +68,11 @@ AnoClaw 未来不应该只回答“我有哪些工具”，而应该回答：
 - 是否需要推荐插件？
 - 是否应该进入某个专业模式？
 
-例如：
+示例：
 
-> 帮我做一个公司年终总结PPT
+> 帮我做一个公司年终总结 PPT
 
-TaskResolver 应该解析成：
+期望解析：
 
 ```json
 {
@@ -90,11 +84,9 @@ TaskResolver 应该解析成：
 }
 ```
 
-然后 AnoClaw 可以直接说：
+AnoClaw 应该尽量先开始，而不是一上来追问一堆问题：
 
-> 我先按“公司内部汇报、10页、商务简洁风”开始做，缺少的公司信息我会用占位内容标注，你可以之后替换。
-
-这对普通用户非常重要：不要每次都问一堆问题，能先做就先做。
+> 我先按“公司内部汇报、10 页、商务简洁风”开始做，缺少的公司信息我会用占位内容标注，你可以之后替换。
 
 ## 三、Artifact 成品系统
 
@@ -112,20 +104,22 @@ Artifact 类型包括：
 - 思维导图
 - 自动化结果
 
-建议新增：
+工程目标：
 
 - `src/server/core/artifacts/ArtifactManager.ts`
 - `data/artifacts/<sessionId>/<artifactId>/`
 - WebSocket 事件：`artifact_created`、`artifact_updated`、`artifact_preview`、`artifact_done`
 - 前端组件：`ArtifactPanel`
 
-用户体验应该是：
+用户体验：
 
-> “帮我做个PPT”
-> AnoClaw 生成 PPT 预览
-> 用户说“第三页更简洁一点”
-> AnoClaw 修改第三页
-> 用户下载 `.pptx`
+```text
+“帮我做个 PPT”
+→ AnoClaw 生成 PPT 预览
+→ 用户说“第三页更简洁一点”
+→ AnoClaw 修改第三页
+→ 用户下载 .pptx
+```
 
 ## 四、默认日常能力包
 
@@ -133,7 +127,7 @@ Artifact 类型包括：
 
 优先级：
 
-1. `office`：PPT、Word、Excel
+1. `anoclaw-office`：PPT、Word、Excel
 2. `pdf`：阅读、总结、合并、导出、转图片
 3. `web-research`：搜索、资料整理、引用来源
 4. `image`：生成图片、改图、OCR、截图理解
@@ -143,13 +137,11 @@ Artifact 类型包括：
 8. `browser-automation`：网页操作、表单填写、重复任务
 9. `data-analysis`：CSV/Excel 分析、图表、报告
 
-插件仍然是扩展核心，但普通用户看到的是“能力”，不是“插件”。
-
 ## 五、用户模式
 
 AnoClaw 要面对儿童、老人、普通办公用户、专业用户，不能只有一种交互。
 
-建议内置模式：
+内置模式：
 
 - 简洁模式：大字、少按钮、语音优先、一步一步确认
 - 儿童模式：安全内容、耐心解释、学习引导、家长控制
@@ -163,14 +155,14 @@ AnoClaw 要面对儿童、老人、普通办公用户、专业用户，不能只
 - 默认能力排序
 - 是否主动追问
 - 解释深度
-- UI复杂度
+- UI 复杂度
 - 安全策略
 
 ## 六、Memory 升级
 
 Memory 不能只记聊天历史，要记用户偏好和交付习惯。
 
-例如：
+示例：
 
 ```json
 {
@@ -183,17 +175,13 @@ Memory 不能只记聊天历史，要记用户偏好和交付习惯。
 }
 ```
 
-以后用户说：
-
-> 再做一个类似的
-
-AnoClaw 应该知道“类似”是什么意思。
+以后用户说“再做一个类似的”，AnoClaw 应该知道“类似”是什么意思。
 
 ## 七、缺能力时的处理
 
-这是插件平台的关键。
+当用户请求当前做不了的事时，AnoClaw 不应该只说“我没有这个工具”，而应该说明缺什么能力、推荐什么插件，以及可否先做降级版本。
 
-当用户请求当前做不了的事时，AnoClaw 不应该说“我没有这个工具”，而应该说：
+示例：
 
 > 这个任务需要“视频剪辑能力”。当前未安装相关插件。我可以为你推荐并安装官方视频插件，或者先生成脚本和分镜。
 
@@ -207,8 +195,6 @@ AnoClaw 应该知道“类似”是什么意思。
 → 安装后继续原任务
 ```
 
-未来甚至可以支持“临时能力”：没有插件时，先用已有工具完成降级版本。
-
 ## 八、自动更新系统
 
 AnoClaw 本体、官方自带插件、社区插件都应该能被独立检查和更新。
@@ -217,17 +203,17 @@ AnoClaw 本体、官方自带插件、社区插件都应该能被独立检查和
 
 - AnoClaw 可以检查 GitHub 仓库是否有新版本。
 - 有新版本时，用户可以选择自动下载并更新。
-- AnoClaw 自带官方插件可以独立更新，不必每次等待主程序发版。
+- 官方插件可以独立更新，不必每次等待主程序发布。
 - 社区插件可以通过社区插件仓库检查版本、下载、更新和回滚。
-- 更新过程必须保护用户数据、会话、设置、Memory 和插件本地存储。
+- 更新必须保护用户数据、会话、设置、Memory 和插件本地存储。
 
 工程方向：
 
-- `UpdateManager`：检查 AnoClaw 本体版本、下载更新包、校验签名或哈希。
+- `UpdateManager`：检查 AnoClaw 本体版本，下载更新包，校验签名或哈希。
 - `PluginUpdateManager`：检查官方插件和社区插件版本。
-- 插件 manifest 增加 `version`、`updateUrl`、`repository`、`channel`、`checksum`。
+- 插件 manifest 增加 `repository`、`updateUrl`、`channel`、`checksum`。
 - 插件市场增加更新元数据，支持 stable/beta channel。
-- 前端设置页提供更新状态、更新日志、更新按钮和失败恢复提示。
+- 设置页提供更新状态、更新日志、更新按钮和失败恢复提示。
 
 社区插件更新链路：
 
@@ -241,7 +227,19 @@ AnoClaw 本体、官方自带插件、社区插件都应该能被独立检查和
 → 失败则回滚旧版本
 ```
 
-## 九、推荐实现顺序
+## 九、前端 UI 与多语言
+
+当前前端 UI 仍有大量硬编码英文。目标不是一次性翻完，而是逐步迁移到按地区拆分的语言文件。
+
+工程方向：
+
+- 设置页支持切换语言。
+- 文案通过稳定 key 索引，而不是组件里硬编码。
+- 每个地区语言独立文件，例如 `zh-CN`、`en-US`、`ja-JP`。
+- 新增或重构前端 UI 时，优先使用语言 key，旧页面逐步迁移。
+- 涉及前端 UI 时参考根目录 `design.md`：深色 Raycast 风、紧凑产品界面、hairline 边框、8px 左右圆角、少量高饱和强调色。
+
+## 十、推荐实现顺序
 
 第一阶段：打通 PPT 作为样板任务。
 
@@ -258,33 +256,44 @@ AnoClaw 本体、官方自带插件、社区插件都应该能被独立检查和
 
 第二阶段：扩展 Office/PDF。
 
-做 Word、PDF、Excel。这样 AnoClaw 立刻从技术工具变成日常办公助手。
+- Word
+- PDF
+- Excel
 
 第三阶段：能力路由全面接入。
 
-所有插件声明 capability，AgentLoop 执行前先过 TaskResolver。
+- 所有插件声明 capability
+- AgentLoop 执行前先过 TaskResolver
+- 缺能力时推荐插件或降级执行
 
 第四阶段：用户模式与新手体验。
 
-做简洁模式、办公模式、儿童模式、专业模式。
+- 简洁模式
+- 办公模式
+- 儿童模式
+- 专业模式
 
 第五阶段：插件市场智能推荐。
 
-用户不懂插件没关系，AnoClaw 自己知道缺什么能力。
+- 用户不懂插件没关系，AnoClaw 自己知道缺什么能力。
 
 第六阶段：行业能力包。
 
-比如教育包、法律包、财务包、设计包、程序员包。
+- 教育包
+- 法律包
+- 财务包
+- 设计包
+- 程序员包
 
 ## 最终判断标准
 
 AnoClaw 完成这次进化，不是看插件数量，而是看这些场景能不能自然完成：
 
-- “帮我做个十页PPT”
-- “把这个PDF总结成一页报告”
+- “帮我做个十页 PPT”
+- “把这个 PDF 总结成一页报告”
 - “帮我整理这个文件夹”
 - “给我孩子讲一下这道数学题”
-- “把这个Excel做成图表并写分析”
+- “把这个 Excel 做成图表并写分析”
 - “帮我规划三天上海旅行”
 - “根据这些资料写一份合同初稿”
 - “我不懂插件，你自己看需要什么就用什么”

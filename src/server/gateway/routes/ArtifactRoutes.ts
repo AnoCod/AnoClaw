@@ -1,4 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { RouteHandler, RouteMatch } from '../RouteHandler.js';
 import type { ApiToken } from '../ApiAuth.js';
 import { readBody, sendJson } from '../RouteHelpers.js';
@@ -91,6 +93,45 @@ export class GetArtifactRoute implements RouteHandler {
   }
 }
 
+export class DownloadArtifactFileRoute implements RouteHandler {
+  method = 'GET' as const;
+  path = '/api/v1/artifacts/:sessionId/:artifactId/files/:fileIndex';
+  category = 'Artifacts';
+  description = 'Download a file attached to an artifact';
+
+  constructor(private readonly _manager = ArtifactManager.getInstance()) {}
+
+  async handle(match: RouteMatch, _req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): Promise<boolean> {
+    try {
+      const artifact = await this._manager.get(match.params.sessionId, match.params.artifactId);
+      const index = Number(match.params.fileIndex);
+      if (!Number.isInteger(index) || index < 0 || index >= artifact.files.length) {
+        sendJson(res, 400, { error: 'Invalid artifact file index' });
+        return true;
+      }
+
+      const file = artifact.files[index];
+      const filePath = path.resolve(file.path);
+      if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+        sendJson(res, 404, { error: 'Artifact file not found' });
+        return true;
+      }
+
+      const stat = fs.statSync(filePath);
+      const fileName = downloadFileName(file.label, filePath);
+      res.writeHead(200, {
+        'Content-Type': file.mimeType || 'application/octet-stream',
+        'Content-Length': stat.size,
+        'Content-Disposition': `attachment; filename="${encodeHeaderFileName(fileName)}"`,
+      });
+      fs.createReadStream(filePath).pipe(res);
+    } catch (err) {
+      if (!res.headersSent) sendJson(res, 404, { error: (err as Error).message });
+    }
+    return true;
+  }
+}
+
 export class UpdateArtifactRoute implements RouteHandler {
   method = 'PATCH' as const;
   path = '/api/v1/artifacts/:sessionId/:artifactId';
@@ -124,4 +165,13 @@ export class UpdateArtifactRoute implements RouteHandler {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function downloadFileName(label: string | undefined, filePath: string): string {
+  if (label && /\.[a-z0-9]{2,8}$/i.test(label)) return label;
+  return path.basename(filePath);
+}
+
+function encodeHeaderFileName(value: string): string {
+  return value.replace(/[\r\n"]/g, '_');
 }

@@ -7,6 +7,7 @@ import { handlePathClick } from '../../utils/ClickablePathHandler.js';
 import { BackgroundTasksTab } from '../tabs/BackgroundTasksTab.js';
 import { ToastManager } from '../../ToastManager.js';
 import { slotRegistry } from '../../SlotRegistry.js';
+import { ArtifactPanel } from './ArtifactPanel.js';
 
 export class SessionsPageOverfly {
   private _panel: HTMLElement | null = null;
@@ -14,6 +15,7 @@ export class SessionsPageOverfly {
   private _activeSessionId: string | null = null;
   private _workspacePath: string = '';
   private _clickHandler: ((e: MouseEvent) => void) | null = null;
+  private _artifactPanel: ArtifactPanel | null = null;
 
   get isOpen(): boolean { return this._panel !== null; }
 
@@ -48,6 +50,7 @@ export class SessionsPageOverfly {
 
     switch (panel) {
       case 'overview': this._renderOverviewPanel(overfly, activeSessionId); break;
+      case 'artifacts': this._renderArtifactsPanel(overfly, activeSessionId); break;
       case 'plan': this._renderPlanPanel(overfly); break;
       case 'tasks': this._renderTasksPanel(overfly, activeSessionId); break;
       default:
@@ -78,6 +81,7 @@ export class SessionsPageOverfly {
 
   close(): void {
     console.log('[Overfly] close');
+    if (this._artifactPanel) { this._artifactPanel.dispose(); this._artifactPanel = null; }
     if (this._panel) { this._panel.remove(); this._panel = null; }
     this._currentPanel = null;
     this._activeSessionId = null;
@@ -119,6 +123,12 @@ export class SessionsPageOverfly {
       `;
       overfly.appendChild(row);
     }
+  }
+
+  private _renderArtifactsPanel(overfly: HTMLElement, activeSessionId: string | null): void {
+    const host = document.createElement('div');
+    overfly.appendChild(host);
+    this._artifactPanel = new ArtifactPanel(host, activeSessionId);
   }
 
 

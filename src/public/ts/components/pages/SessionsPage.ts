@@ -1124,7 +1124,7 @@ export class SessionsPage implements Page {
 
   private _showInlineCard(panel: string): void {
     if (!this._activeSessionId) return;
-    if (!['overview', 'plan', 'tasks'].includes(panel)) return;
+    if (!['overview', 'artifacts', 'plan', 'tasks'].includes(panel)) return;
     this._overfly.show(panel, this._activeSessionId, this._workspacePath);
     this._rightBar.setActivePanel(panel);
   }

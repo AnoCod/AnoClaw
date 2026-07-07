@@ -231,19 +231,28 @@ Fetches content from a URL, converts HTML to markdown, and processes it with an 
 
 ### WebSearchTool — `WebSearch`
 
-Searches the web and returns results formatted as search blocks. Supports domain filtering.
+Searches the web and returns results formatted as search blocks. Supports bounded total timeouts, backend-level diagnostics, max-result control, and exact/subdomain domain filtering.
 
 | Property | Value |
 |---|---|
 | Risk | `Low` |
 | Is read-only | Yes |
+| Timeout | 15s internal default, configurable via `timeout_ms` up to 60s |
 
 **Parameters:**
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `query` | string | ✓ | Search query (≥2 chars) |
-| `allowed_domains` | string[] | | Only include these domains |
-| `blocked_domains` | string[] | | Exclude these domains |
+| `query` | string | ✓ | Search query (2-500 chars after trimming) |
+| `allowed_domains` | string[] | | Only include these domains or their subdomains |
+| `blocked_domains` | string[] | | Exclude these domains or their subdomains |
+| `max_results` | number | | Max results returned, default 10, max 10 |
+| `timeout_ms` | number | | Total search timeout, default 15000, max 60000 |
+
+**Behavior notes:**
+- Tries DuckDuckGo Lite, DuckDuckGo HTML, then Bing within one total timeout budget.
+- Failed searches return structured backend attempts instead of hanging or hiding the failure reason.
+- User interrupts cancel in-flight network work and return a clear cancelled result.
+- DuckDuckGo redirect URLs are decoded before filtering and returning results.
 
 ---
 

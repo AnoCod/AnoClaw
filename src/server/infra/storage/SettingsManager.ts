@@ -69,7 +69,7 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
 
   // UI
   ui: {
-    lang: 'zh',
+    lang: 'zh-CN',
     theme: 'dark',
     accentColor: '#ffffff',
     showThinkCards: true,

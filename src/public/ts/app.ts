@@ -22,11 +22,12 @@ import { ToolConfirmationQueue } from './viewmodel/ToolConfirmationQueue.js';
 import type { AppSettings, PluginPageContribution } from './types.js';
 import { ClientLogger } from './ClientLogger.js';
 import { initAnoClawAPI } from './anoclaw-api.js';
+import { localeDirection, normalizeLocale, setLocale } from './i18n/index.js';
 
 const SETTINGS_KEY = 'anoclaw-settings';
 
 const DEFAULT_SETTINGS: AppSettings = {
-  lang: 'zh',
+  lang: 'zh-CN',
   showThinkCards: true,
   showToolCards: true,
   theme: 'dark',
@@ -94,6 +95,8 @@ class App {
     console.log('[App] init() called');
     ClientLogger.app.info('Frontend initializing');
     console.log('[AnoClaw] Initializing frontend...');
+
+    this._applyPreferences();
 
     // Connect WebSocket once at init (single global connection, not per-session)
     this._sseClient.connect();
@@ -264,8 +267,9 @@ class App {
   updateSettings(patch: Partial<AppSettings>): void {
     console.log('[App] updateSettings:', JSON.stringify(patch));
     Object.assign(this._settings, patch);
+    this._settings = this._normalizeSettings(this._settings);
     this._saveSettings();
-    this._applyTheme();
+    this._applyPreferences();
 
     window.dispatchEvent(new CustomEvent('settings-changed', {
       detail: { ...this._settings },
@@ -279,7 +283,7 @@ class App {
     try {
       const raw = localStorage.getItem(SETTINGS_KEY);
       if (raw) {
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+        return this._normalizeSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(raw) });
       }
     } catch (e) {
       ClientLogger.app.warn('Failed to load settings, using defaults', { error: (e as Error).message });
@@ -298,8 +302,8 @@ class App {
         (k) => (server as unknown as Record<string, unknown>)[k] !== (this._settings as unknown as Record<string, unknown>)[k]
       );
       if (changed) {
-        Object.assign(this._settings, server);
-        this._applyTheme();
+        this._settings = this._normalizeSettings({ ...this._settings, ...server });
+        this._applyPreferences();
         window.dispatchEvent(new CustomEvent('settings-changed', {
           detail: { ...this._settings },
         }));
@@ -323,6 +327,20 @@ class App {
     }).catch(() => {});
   }
 
+  private _normalizeSettings(settings: Partial<AppSettings>): AppSettings {
+    return {
+      ...DEFAULT_SETTINGS,
+      ...settings,
+      lang: normalizeLocale((settings as { lang?: unknown }).lang),
+      theme: settings.theme === 'light' ? 'light' : 'dark',
+    };
+  }
+
+  private _applyPreferences(): void {
+    this._applyTheme();
+    this._applyLocale();
+  }
+
   /** Set data-theme and data-accent attributes on <html> for CSS variable switching. */
   private _applyTheme(): void {
     console.log('[App] _applyTheme: theme=' + this._settings.theme + ', accent=' + this._settings.accentColor);
@@ -338,6 +356,17 @@ class App {
     root.style.setProperty('--color-accent-cinema-glow', `${this._settings.accentColor}26`);
     window.dispatchEvent(new CustomEvent('theme-changed', {
       detail: { theme: this._settings.theme, accent: accentName },
+    }));
+  }
+
+  private _applyLocale(): void {
+    const locale = setLocale(this._settings.lang);
+    this._settings.lang = locale;
+    const root = document.documentElement;
+    root.lang = locale;
+    root.dir = localeDirection(locale);
+    window.dispatchEvent(new CustomEvent('locale-changed', {
+      detail: { locale },
     }));
   }
 

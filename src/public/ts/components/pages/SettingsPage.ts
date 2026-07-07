@@ -10,6 +10,7 @@ import { ClientLogger } from '../../ClientLogger.js';
 import { ToastManager } from '../../ToastManager.js';
 import { slotRegistry } from '../../SlotRegistry.js';
 import { Toggle } from '../ui/Toggle.js';
+import { normalizeLocale, SUPPORTED_LOCALES, t } from '../../i18n/index.js';
 
 const SVG_REVIEW = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18h8"/><path d="M3 22h18"/><path d="M14 22a7 7 0 0 0-7-7"/><path d="M10 14 21 3"/><path d="m21 3-4 12-7-5z"/></svg>`;
 
@@ -49,27 +50,27 @@ export class SettingsPage implements Page {
         grid.innerHTML = `
           <div class="evo-stat-card">
             <div class="evo-stat-value">${data.toolCount}</div>
-            <div class="evo-stat-label">Tools Tracked</div>
+            <div class="evo-stat-label">${t('settings.evolution.toolsTracked')}</div>
           </div>
           <div class="evo-stat-card">
             <div class="evo-stat-value">${data.patterns.total}</div>
-            <div class="evo-stat-label">Patterns Found</div>
+            <div class="evo-stat-label">${t('settings.evolution.patternsFound')}</div>
           </div>
           <div class="evo-stat-card">
             <div class="evo-stat-value">${data.scores.totalScores}</div>
-            <div class="evo-stat-label">Scores Collected</div>
+            <div class="evo-stat-label">${t('settings.evolution.scoresCollected')}</div>
           </div>
           <div class="evo-stat-card">
             <div class="evo-stat-value">${data.tags.totalPairs}</div>
-            <div class="evo-stat-label">Tags Applied</div>
+            <div class="evo-stat-label">${t('settings.evolution.tagsApplied')}</div>
           </div>
           <div class="evo-stat-card">
             <div class="evo-stat-value">${data.tags.uniqueLabels}</div>
-            <div class="evo-stat-label">Unique Tags</div>
+            <div class="evo-stat-label">${t('settings.evolution.uniqueTags')}</div>
           </div>
           <div class="evo-stat-card">
             <div class="evo-stat-value">${data.skills.tracked}</div>
-            <div class="evo-stat-label">Skills Tracked</div>
+            <div class="evo-stat-label">${t('settings.evolution.skillsTracked')}</div>
           </div>
         `;
       }
@@ -77,7 +78,7 @@ export class SettingsPage implements Page {
       // Tool table
       const toolsEl = el('#evo-tools');
       if (toolsEl && data.tools.length > 0) {
-        let th = '<table class="evo-tool-table"><thead><tr><th>Tool</th><th>Calls</th><th>Success</th><th>Avg Tokens</th><th>Avg ms</th></tr></thead><tbody>';
+        let th = `<table class="evo-tool-table"><thead><tr><th>${t('settings.evolution.table.tool')}</th><th>${t('settings.evolution.table.calls')}</th><th>${t('settings.evolution.table.success')}</th><th>${t('settings.evolution.table.avgTokens')}</th><th>${t('settings.evolution.table.avgMs')}</th></tr></thead><tbody>`;
         for (const t of data.tools) {
           const pct = Math.round(t.successRate * 100);
           th += `<tr><td>${t.name}</td><td>${t.callCount}</td><td>${pct}%</td><td>${t.avgTokens}</td><td>${t.avgDurationMs}</td></tr>`;
@@ -85,7 +86,7 @@ export class SettingsPage implements Page {
         th += '</tbody></table>';
         toolsEl.innerHTML = th;
       } else if (toolsEl) {
-        toolsEl.innerHTML = '<div class="evo-empty">No tool data yet — start using tools to see stats.</div>';
+        toolsEl.innerHTML = `<div class="evo-empty">${t('settings.evolution.noToolData')}</div>`;
       }
 
       // Patterns
@@ -93,9 +94,9 @@ export class SettingsPage implements Page {
       if (patEl) {
         const p = data.patterns;
         if (p.total === 0) {
-          patEl.innerHTML = '<div class="evo-empty">No patterns detected yet.</div>';
+          patEl.innerHTML = `<div class="evo-empty">${t('settings.evolution.noPatterns')}</div>`;
         } else {
-          patEl.innerHTML = `<div style="font-size:11px;color:var(--color-cinema-text-secondary);">${p.total} total · ${p.skillCandidates} ready for skill creation · ${p.withSkills} linked to skills</div>`;
+          patEl.innerHTML = `<div style="font-size:11px;color:var(--color-cinema-text-secondary);">${t('settings.evolution.patternSummary', { total: p.total, skillCandidates: p.skillCandidates, withSkills: p.withSkills })}</div>`;
         }
       }
 
@@ -104,21 +105,21 @@ export class SettingsPage implements Page {
       if (scrEl) {
         const s = data.scores;
         if (s.totalScores === 0) {
-          scrEl.innerHTML = '<div class="evo-empty">No quality scores yet — rate messages using the ★ widget.</div>';
+          scrEl.innerHTML = `<div class="evo-empty">${t('settings.evolution.noScores')}</div>`;
         } else {
           const agentCount = Object.keys(s.byAgent).length;
-          scrEl.innerHTML = `<div style="font-size:11px;color:var(--color-cinema-text-secondary);">Global avg: <strong>${s.globalAvg.toFixed(2)}</strong> / 5 across ${s.totalScores} ratings · ${agentCount} agents</div>`;
+          scrEl.innerHTML = `<div style="font-size:11px;color:var(--color-cinema-text-secondary);">${t('settings.evolution.scoreSummary', { avg: s.globalAvg.toFixed(2), total: s.totalScores, agents: agentCount })}</div>`;
         }
       }
 
       // Tags
       const tagEl = el('#evo-tags');
       if (tagEl) {
-        const t = data.tags;
-        if (t.totalPairs === 0) {
-          tagEl.innerHTML = '<div class="evo-empty">No tags yet — tags appear automatically as you use the app.</div>';
+        const tags = data.tags;
+        if (tags.totalPairs === 0) {
+          tagEl.innerHTML = `<div class="evo-empty">${t('settings.evolution.noTags')}</div>`;
         } else {
-          const chips = (t.labels as string[]).slice(0, 10).map((l: string) =>
+          const chips = (tags.labels as string[]).slice(0, 10).map((l: string) =>
             `<span class="stn-tag stn-tag--auto" style="margin-right:4px;">${l}</span>`
           ).join('');
           tagEl.innerHTML = `<div style="font-size:11px;color:var(--color-cinema-text-secondary);">${chips}</div>`;
@@ -133,41 +134,56 @@ export class SettingsPage implements Page {
     const s = app.settings;
     const form = this.container.querySelector('#settings-form') as HTMLFormElement;
     if (!form) return;
+    const currentLocale = normalizeLocale(s.lang);
+    const languageOptions = SUPPORTED_LOCALES.map((locale) =>
+      `<option value="${locale.code}" ${currentLocale === locale.code ? 'selected' : ''}>${locale.nativeName}</option>`
+    ).join('');
 
     form.innerHTML = `
       <div class="cinema-section">
-        <div class="cinema-section-legend">Appearance</div>
+        <div class="cinema-section-legend">${t('settings.appearance')}</div>
         <div style="display:flex;flex-direction:column;gap:12px;">
           <div>
-            <div style="font-size:10px;color:var(--color-cinema-text-muted);letter-spacing:1px;margin-bottom:8px;">Theme</div>
+            <div style="font-size:10px;color:var(--color-cinema-text-muted);letter-spacing:1px;margin-bottom:8px;">${t('settings.theme')}</div>
             <span id="appearance-theme"></span>
           </div>
           <div>
-            <div style="font-size:10px;color:var(--color-cinema-text-muted);letter-spacing:1px;margin-bottom:8px;">Accent</div>
+            <div style="font-size:10px;color:var(--color-cinema-text-muted);letter-spacing:1px;margin-bottom:8px;">${t('settings.accent')}</div>
             <span id="appearance-accent"></span>
           </div>
         </div>
       </div>
 
       <div class="cinema-section">
-        <div class="cinema-section-legend">Display</div>
+        <div class="cinema-section-legend">${t('settings.language')}</div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <label style="display:flex;align-items:center;justify-content:space-between;gap:16px;">
+            <span style="font-size:12px;color:var(--color-cinema-text-secondary);">${t('settings.interfaceLanguage')}</span>
+            <select name="lang" class="cinema-select" style="min-width:150px;">${languageOptions}</select>
+          </label>
+          <div style="font-size:10px;color:var(--color-cinema-text-muted);line-height:1.5;">${t('settings.languageHint')}</div>
+        </div>
+      </div>
+
+      <div class="cinema-section">
+        <div class="cinema-section-legend">${t('settings.display')}</div>
         <div style="display:flex;flex-direction:column;gap:8px;">
           <label style="display:flex;align-items:center;justify-content:space-between;">
-            <span style="font-size:12px;color:var(--color-cinema-text-secondary);">Show thinking cards</span>
+            <span style="font-size:12px;color:var(--color-cinema-text-secondary);">${t('settings.showThinkingCards')}</span>
             <span id="toggle-think"></span>
           </label>
           <label style="display:flex;align-items:center;justify-content:space-between;">
-            <span style="font-size:12px;color:var(--color-cinema-text-secondary);">Show tool cards</span>
+            <span style="font-size:12px;color:var(--color-cinema-text-secondary);">${t('settings.showToolCards')}</span>
             <span id="toggle-tool"></span>
           </label>
         </div>
       </div>
 
       <div class="cinema-section">
-        <div class="cinema-section-legend">Context</div>
+        <div class="cinema-section-legend">${t('settings.context')}</div>
         <div style="display:flex;flex-direction:column;gap:4px;">
           <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--color-cinema-text-muted);">
-            <span>Compaction Threshold</span>
+            <span>${t('settings.compactionThreshold')}</span>
             <span id="compaction-val">${s.compactionThreshold}%</span>
           </div>
           <input type="range" name="compactionThreshold" min="30" max="90" value="${s.compactionThreshold}" step="5"
@@ -177,45 +193,45 @@ export class SettingsPage implements Page {
       </div>
 
       <div class="cinema-section">
-        <div class="cinema-section-legend">Data</div>
+        <div class="cinema-section-legend">${t('settings.data')}</div>
         <div style="display:flex;gap:8px;">
-          <button type="button" id="btn-export" class="cinema-btn">Export Settings</button>
-          <button type="button" id="btn-clear" class="cinema-btn">Clear All Sessions</button>
+          <button type="button" id="btn-export" class="cinema-btn">${t('settings.exportSettings')}</button>
+          <button type="button" id="btn-clear" class="cinema-btn">${t('settings.clearAllSessions')}</button>
         </div>
       </div>
 
       <div class="cinema-section">
-        <div class="cinema-section-legend">Evolution</div>
+        <div class="cinema-section-legend">${t('settings.evolution')}</div>
         <div style="display:flex;flex-direction:column;gap:4px;">
           <div id="evo-stats" class="evo-stats-grid">
             <div class="evo-stat-card">
               <div class="evo-stat-value"><span class="evo-spinner"></span></div>
-              <div class="evo-stat-label">Loading...</div>
+              <div class="evo-stat-label">${t('settings.evolution.loading')}</div>
             </div>
           </div>
 
-          <div class="evo-section-title">Tool Usage</div>
-          <div id="evo-tools"><div class="evo-empty">Loading...</div></div>
+          <div class="evo-section-title">${t('settings.evolution.toolUsage')}</div>
+          <div id="evo-tools"><div class="evo-empty">${t('settings.evolution.loading')}</div></div>
 
-          <div class="evo-section-title">Patterns</div>
-          <div id="evo-patterns"><div class="evo-empty">Loading...</div></div>
+          <div class="evo-section-title">${t('settings.evolution.patterns')}</div>
+          <div id="evo-patterns"><div class="evo-empty">${t('settings.evolution.loading')}</div></div>
 
-          <div class="evo-section-title">Quality Scores</div>
-          <div id="evo-scores"><div class="evo-empty">Loading...</div></div>
+          <div class="evo-section-title">${t('settings.evolution.qualityScores')}</div>
+          <div id="evo-scores"><div class="evo-empty">${t('settings.evolution.loading')}</div></div>
 
-          <div class="evo-section-title">Session Tags</div>
-          <div id="evo-tags"><div class="evo-empty">Loading...</div></div>
+          <div class="evo-section-title">${t('settings.evolution.sessionTags')}</div>
+          <div id="evo-tags"><div class="evo-empty">${t('settings.evolution.loading')}</div></div>
 
           <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
-            <button type="button" id="btn-evolve" class="cinema-btn cinema-btn-with-icon">${SVG_REVIEW}<span>Review Evolution</span></button>
-            <span id="evolve-status" style="font-size:11px;color:var(--color-cinema-text-tertiary);">Deep analysis — runs pattern + score + memory audit</span>
+            <button type="button" id="btn-evolve" class="cinema-btn cinema-btn-with-icon">${SVG_REVIEW}<span>${t('settings.evolution.review')}</span></button>
+            <span id="evolve-status" style="font-size:11px;color:var(--color-cinema-text-tertiary);">${t('settings.evolution.idle')}</span>
           </div>
           <div id="evolve-results" style="display:none;font-size:11px;color:var(--color-cinema-text-secondary);line-height:1.6;"></div>
         </div>
       </div>
 
       <div style="display:flex;justify-content:flex-end;padding-top:8px;">
-        <button type="submit" class="cinema-btn cinema-btn-primary">Save Settings</button>
+        <button type="submit" class="cinema-btn cinema-btn-primary">${t('settings.save')}</button>
       </div>
     `;
 
@@ -256,19 +272,19 @@ export class SettingsPage implements Page {
         return card;
       };
 
-      themeCards.appendChild(buildThemeCard('dark', 'Dark'));
-      themeCards.appendChild(buildThemeCard('light', 'Light'));
+      themeCards.appendChild(buildThemeCard('dark', t('settings.theme.dark')));
+      themeCards.appendChild(buildThemeCard('light', t('settings.theme.light')));
       themeSlot.replaceWith(themeCards);
     }
 
     // ── Appearance: accent swatches ──
     const ACCENTS = [
-      { value: '#da291c', label: 'Red' },
-      { value: '#ffffff', label: 'White' },
-      { value: '#0984E3', label: 'Blue' },
-      { value: '#00B894', label: 'Green' },
-      { value: '#7c3aed', label: 'Purple' },
-      { value: '#E17055', label: 'Orange' },
+      { value: '#da291c', label: t('settings.accent.red') },
+      { value: '#ffffff', label: t('settings.accent.white') },
+      { value: '#0984E3', label: t('settings.accent.blue') },
+      { value: '#00B894', label: t('settings.accent.green') },
+      { value: '#7c3aed', label: t('settings.accent.purple') },
+      { value: '#E17055', label: t('settings.accent.orange') },
     ];
 
     const accentSlot = form.querySelector('#appearance-accent');
@@ -303,6 +319,7 @@ export class SettingsPage implements Page {
       console.log('[Settings] form submit — theme:', currentTheme, 'accent:', currentAccent);
       const fd = new FormData(form);
       const patch: Partial<AppSettings> = {
+        lang: normalizeLocale(fd.get('lang')),
         theme: currentTheme,
         accentColor: currentAccent,
         showThinkCards: thinkToggle.checked,
@@ -310,19 +327,21 @@ export class SettingsPage implements Page {
         compactionThreshold: parseInt(fd.get('compactionThreshold') as string),
       };
       app.updateSettings(patch);
-      ToastManager.getInstance().success('Settings saved');
+      ToastManager.getInstance().success(t('settings.saved'));
       ClientLogger.ui.info('Settings saved');
+      this._buildForm();
+      this._loadEvolutionStats();
     });
 
     form.querySelector('#btn-export')?.addEventListener('click', () => {
       const blob = new Blob([JSON.stringify(app.settings, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = 'anoclaw-settings.json';
+      const a = document.createElement('a'); a.href = url; a.download = t('settings.exportFileName');
       a.click(); URL.revokeObjectURL(url);
     });
 
     form.querySelector('#btn-clear')?.addEventListener('click', async () => {
-      const ok = await ConfirmDialog.show('This will permanently delete all sessions. This cannot be undone.', 'Clear All Sessions');
+      const ok = await ConfirmDialog.show(t('settings.clearConfirm'), t('settings.clearTitle'));
       if (ok) {
         try {
           await fetch('/api/v1/sessions/clear', { method: 'POST' });
@@ -337,7 +356,7 @@ export class SettingsPage implements Page {
       const results = form.querySelector('#evolve-results') as HTMLElement;
       if (!status || !results) return;
 
-      status.textContent = 'Analyzing...';
+      status.textContent = t('settings.evolution.analyzing');
       results.style.display = 'none';
 
       try {
@@ -345,39 +364,42 @@ export class SettingsPage implements Page {
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const report = await resp.json();
 
-        status.textContent = `Analysis complete — ${report.summary.totalFindings} findings (${report.summary.criticalFindings} critical)`;
+        status.textContent = t('settings.evolution.complete', {
+          total: report.summary.totalFindings,
+          critical: report.summary.criticalFindings,
+        });
         results.style.display = 'block';
 
         let html = '';
         if (report.skillChanges.length > 0) {
-          html += `<div style="margin-top:4px;"><strong>Skills:</strong> `;
+          html += `<div style="margin-top:4px;"><strong>${t('settings.evolution.skills')}:</strong> `;
           html += report.skillChanges.map((c: any) =>
             `${c.skillId} → ${c.action}${c.reason ? ': ' + c.reason.slice(0, 60) : ''}`
           ).join('<br>');
           html += '</div>';
         }
         if (report.memoryFindings.length > 0) {
-          html += `<div style="margin-top:4px;"><strong>Memory:</strong> `;
+          html += `<div style="margin-top:4px;"><strong>${t('settings.evolution.memory')}:</strong> `;
           html += report.memoryFindings.map((m: any) =>
             `${m.memoryId} → ${m.action}`
           ).join('<br>');
           html += '</div>';
         }
         if (report.tokenFindings.length > 0) {
-          html += `<div style="margin-top:4px;"><strong>Token waste:</strong> `;
-          html += report.tokenFindings.map((t: any) =>
-            `${t.toolName}: ~${t.estimatedSavings} tokens savings`
+          html += `<div style="margin-top:4px;"><strong>${t('settings.evolution.tokenWaste')}:</strong> `;
+          html += report.tokenFindings.map((finding: any) =>
+            `${finding.toolName}: ${t('settings.evolution.tokenSavings', { tokens: finding.estimatedSavings })}`
           ).join('<br>');
           html += '</div>';
         }
         if (report.promptSuggestions.length > 0) {
-          html += `<div style="margin-top:4px;"><strong>Prompt tweaks suggested for:</strong> `;
+          html += `<div style="margin-top:4px;"><strong>${t('settings.evolution.promptTweaks')}:</strong> `;
           html += report.promptSuggestions.map((p: any) =>
             `${p.agentId} — ${p.reason.slice(0, 60)}`
           ).join('<br>');
           html += '</div>';
         }
-        if (!html) html = '<em>No actionable findings — system is healthy.</em>';
+        if (!html) html = `<em>${t('settings.evolution.noFindings')}</em>`;
         results.innerHTML = html;
 
         // Apply button for skill archives
@@ -388,10 +410,10 @@ export class SettingsPage implements Page {
           applyBtn.type = 'button';
           applyBtn.className = 'cinema-btn';
           applyBtn.style.cssText = 'border-color:var(--color-accent);color:var(--color-accent);';
-          applyBtn.textContent = 'Apply Skill Archives';
+          applyBtn.textContent = t('settings.evolution.applySkillArchives');
           applyBtn.addEventListener('click', async function () {
             try {
-              applyBtn.textContent = 'Applying...';
+              applyBtn.textContent = t('settings.evolution.applying');
               var r = await fetch('/api/v1/evolution/apply', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(report),
@@ -399,28 +421,28 @@ export class SettingsPage implements Page {
               if (!r.ok) throw new Error('Apply failed');
               var res = await r.json();
               if (res.success) {
-                applyBtn.textContent = 'OK Applied';
+                applyBtn.textContent = t('settings.evolution.applied');
                 applyBtn.disabled = true;
-                ToastManager.getInstance().success('Skills archived');
+                ToastManager.getInstance().success(t('settings.evolution.skillsArchived'));
               } else { throw new Error(res.error || 'Apply failed'); }
             } catch (e) {
-              applyBtn.textContent = 'Apply Skill Archives';
-              ToastManager.getInstance().error('Apply failed');
+              applyBtn.textContent = t('settings.evolution.applySkillArchives');
+              ToastManager.getInstance().error(t('settings.evolution.applyFailed'));
             }
           });
           var note = document.createElement('span');
           note.style.cssText = 'font-size:10px;color:rgba(255,255,255,0.3);';
-          note.textContent = 'Archives stale skills to skills/.archived/';
+          note.textContent = t('settings.evolution.archiveNote');
           applyDiv.appendChild(applyBtn);
           applyDiv.appendChild(note);
           results.appendChild(applyDiv);
         }
 
-        ToastManager.getInstance().success('Evolution analysis: ' + report.summary.totalFindings + ' findings');
+        ToastManager.getInstance().success(t('settings.evolution.toast', { total: report.summary.totalFindings }));
       } catch (err) {
-        status.textContent = 'Analysis failed';
+        status.textContent = t('settings.evolution.failed');
         results.style.display = 'block';
-        results.innerHTML = `<span style="color:var(--color-error);">Error: ${(err as Error).message}</span>`;
+        results.innerHTML = `<span style="color:var(--color-error);">${t('settings.evolution.errorPrefix')}: ${(err as Error).message}</span>`;
       }
     });
   }

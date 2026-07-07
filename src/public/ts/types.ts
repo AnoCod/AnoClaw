@@ -10,6 +10,8 @@
 //   - TokenBreakdown (shared: TokenBreakdown in session.ts)
 //   - TodoItem (shared: none — frontend-only)
 
+import type { LocaleCode } from './i18n/index.js';
+
 export type MessageRole = 'user' | 'assistant' | 'system';
 
 export type MessageType =
@@ -267,7 +269,7 @@ export interface Page {
 }
 
 export interface AppSettings {
-  lang: 'zh' | 'en';
+  lang: LocaleCode;
   showThinkCards: boolean;
   showToolCards: boolean;
   theme: 'dark' | 'light';

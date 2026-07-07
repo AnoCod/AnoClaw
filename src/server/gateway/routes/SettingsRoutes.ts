@@ -11,7 +11,7 @@ import { requireWsAny } from "../WsRequired.js";
 import { LogManager } from '../../infra/logging/LogManager.js';
 
 const UI_DEFAULTS: Record<string, unknown> = {
-  lang: 'zh',
+  lang: 'zh-CN',
   theme: 'dark',
   accentColor: '#ffffff',
   showThinkCards: true,

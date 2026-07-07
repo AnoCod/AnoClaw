@@ -52,6 +52,7 @@ describe('buildDefaultAgentConfigs', () => {
       'skill_matching',
       'Browser',
       'ApiCall',
+      'office.create_pptx',
     ]));
     expect(manager.allowedTools).toContain('TaskAssign');
     expect(manager.allowedTools).toContain('HireEmployee');

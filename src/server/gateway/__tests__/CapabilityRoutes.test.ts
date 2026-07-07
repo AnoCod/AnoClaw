@@ -25,7 +25,12 @@ describe('capability API routes', () => {
 
     expect(result.statusCode).toBe(200);
     const body = result.body as {
-      capabilities: Array<{ id: string; status: string; missingTools: string[] }>;
+      capabilities: Array<{
+        id: string;
+        status: string;
+        missingTools: string[];
+        pluginName?: string;
+      }>;
       total: number;
       filters: Record<string, unknown>;
     };
@@ -34,13 +39,15 @@ describe('capability API routes', () => {
     expect(body.filters).toEqual(expect.objectContaining({ search: 'ppt', limit: 5 }));
     expect(body.capabilities[0]).toEqual(expect.objectContaining({
       id: 'presentation.create',
-      status: 'needs_plugin',
+      status: 'disabled',
+      pluginName: 'anoclaw-office',
     }));
+    expect(body.capabilities[0].missingTools).toContain('office.create_pptx');
   });
 
   it('resolves natural-language requests through the API', async () => {
     const result = await api.callInternal('POST', '/api/v1/tasks/resolve', {
-      message: '请帮我做一个10页AI Agent介绍PPT',
+      message: 'Please create a 10-page AI Agent intro PPT',
     });
 
     expect(result.statusCode).toBe(200);

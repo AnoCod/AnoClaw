@@ -38,7 +38,7 @@ export function createDefaultCapabilityCatalog(): CapabilityDefinition[] {
       ],
       requiredTools: ['office.create_pptx'],
       artifactTypes: ['presentation', 'pptx'],
-      recommendedPlugins: ['office'],
+      recommendedPlugins: ['anoclaw-office'],
       priority: 100,
     },
     {
@@ -54,7 +54,7 @@ export function createDefaultCapabilityCatalog(): CapabilityDefinition[] {
       ],
       requiredTools: ['office.create_docx'],
       artifactTypes: ['document', 'docx'],
-      recommendedPlugins: ['office'],
+      recommendedPlugins: ['anoclaw-office'],
       priority: 90,
     },
     {
@@ -70,7 +70,7 @@ export function createDefaultCapabilityCatalog(): CapabilityDefinition[] {
       ],
       requiredTools: ['Read', 'Write', 'Bash'],
       artifactTypes: ['spreadsheet', 'report'],
-      recommendedPlugins: ['office', 'data-analysis'],
+      recommendedPlugins: ['anoclaw-office', 'data-analysis'],
       priority: 80,
     },
     {

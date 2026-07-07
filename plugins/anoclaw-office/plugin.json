@@ -1,0 +1,45 @@
+{
+  "name": "anoclaw-office",
+  "displayName": "Office",
+  "version": "0.1.0",
+  "description": "Official AnoClaw office artifact tools for presentations, documents, and spreadsheets.",
+  "publisher": "anoclaw",
+  "main": "extension.js",
+  "activationEvents": ["onStartup"],
+  "engines": {
+    "anoclaw": "^2.0.0"
+  },
+  "contributes": {
+    "tools": [
+      { "name": "office.create_pptx" }
+    ],
+    "capabilities": [
+      {
+        "id": "presentation.create",
+        "title": "Create a presentation",
+        "description": "Generate a PowerPoint deck with a preview and downloadable .pptx artifact.",
+        "domain": "office",
+        "kind": "artifact",
+        "triggers": ["ppt", "pptx", "presentation", "slides", "slide deck", "做PPT", "制作PPT", "演示文稿", "课件", "汇报材料"],
+        "examples": [
+          "帮我做一个介绍太阳系的小学生PPT",
+          "Create a 10-slide project update presentation"
+        ],
+        "inputs": [
+          { "name": "topic", "label": "Topic", "type": "string", "required": true, "aliases": ["主题", "subject"] },
+          { "name": "audience", "label": "Audience", "type": "string", "required": false, "defaultValue": "general audience", "aliases": ["受众"] },
+          { "name": "slideCount", "label": "Slide count", "type": "number", "required": false, "defaultValue": 8, "aliases": ["页数"] },
+          { "name": "style", "label": "Style", "type": "string", "required": false, "defaultValue": "clean business", "aliases": ["风格"] }
+        ],
+        "outputs": [
+          { "type": "file", "label": "PowerPoint deck", "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "extension": "pptx", "artifactType": "presentation" },
+          { "type": "preview", "label": "Markdown outline", "mimeType": "text/markdown", "artifactType": "presentation" }
+        ],
+        "requiredTools": ["office.create_pptx"],
+        "artifactTypes": ["presentation", "pptx"],
+        "recommendedPlugins": ["anoclaw-office"],
+        "priority": 100
+      }
+    ]
+  }
+}

@@ -11,9 +11,9 @@ describe('TaskResolver', () => {
     ToolRegistry.resetInstance();
   });
 
-  it('maps an everyday PPT request to the presentation capability and recommends the missing office plugin', async () => {
+  it('maps an everyday PPT request to the presentation capability and recommends the official office plugin', async () => {
     const result = await new TaskResolver().resolve({
-      message: '帮我做一个公司年终总结PPT',
+      message: 'Create a company year-end summary PPT',
     });
 
     expect(result.intent).toBe('capability');
@@ -21,7 +21,16 @@ describe('TaskResolver', () => {
     expect(result.nextAction).toBe('recommend_plugin');
     expect(result.canStart).toBe(false);
     expect(result.missingTools).toContain('office.create_pptx');
-    expect(result.recommendedPlugins).toContain('office');
+    expect(result.recommendedPlugins).toContain('anoclaw-office');
+  });
+
+  it('matches Chinese presentation wording', async () => {
+    const result = await new TaskResolver().resolve({
+      message: '帮我做一个公司年终总结PPT',
+    });
+
+    expect(result.intent).toBe('capability');
+    expect(result.bestCapability?.id).toBe('presentation.create');
   });
 
   it('prefers an available plugin capability over a catalog placeholder with the same id', async () => {
@@ -40,7 +49,7 @@ describe('TaskResolver', () => {
     ], { source: 'plugin', pluginName: 'office', pluginStatus: 'activated' });
 
     const result = await new TaskResolver(registry).resolve({
-      message: '做一个新品发布PPT',
+      message: 'Create a new product launch PPT',
     });
 
     expect(result.bestCapability?.id).toBe('presentation.create');
@@ -59,7 +68,7 @@ describe('TaskResolver', () => {
         title: 'Create a QR code',
         domain: 'utility',
         kind: 'artifact',
-        triggers: ['二维码', 'qr code'],
+        triggers: ['qr code'],
         inputs: [{ name: 'content', type: 'string', required: true }],
         requiredTools: ['generateQRCode'],
         outputs: [{ type: 'file', extension: 'png', artifactType: 'image' }],
@@ -67,7 +76,7 @@ describe('TaskResolver', () => {
     ], { source: 'plugin', pluginName: 'qrcode', pluginStatus: 'activated' });
 
     const result = await new TaskResolver(registry).resolve({
-      message: '帮我把 https://example.com 生成二维码',
+      message: 'Create a QR code for https://example.com',
     });
 
     expect(result.bestCapability?.id).toBe('qrcode.create');

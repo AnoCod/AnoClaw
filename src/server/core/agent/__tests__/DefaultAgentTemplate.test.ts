@@ -56,6 +56,7 @@ describe('buildDefaultAgentConfigs', () => {
       'office.create_docx',
       'office.analyze_spreadsheet',
       'pdf.summarize',
+      'files.organize',
     ]));
     expect(manager.allowedTools).toContain('TaskAssign');
     expect(manager.allowedTools).toContain('HireEmployee');

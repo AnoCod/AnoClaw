@@ -1,0 +1,43 @@
+{
+  "name": "anoclaw-files",
+  "displayName": "Files",
+  "version": "0.1.0",
+  "description": "Official AnoClaw file organization tools for scanning, planning, and safely organizing local folders.",
+  "publisher": "anoclaw",
+  "main": "extension.js",
+  "activationEvents": ["onStartup"],
+  "engines": {
+    "anoclaw": "^2.0.0"
+  },
+  "contributes": {
+    "tools": [
+      { "name": "files.organize" }
+    ],
+    "capabilities": [
+      {
+        "id": "files.organize",
+        "title": "Organize local files",
+        "description": "Scan a folder, classify files, optionally move them into tidy category folders, and generate a change report.",
+        "domain": "files",
+        "kind": "automation",
+        "triggers": ["organize files", "rename files", "folder", "archive files", "整理文件", "重命名", "文件夹", "归档", "整理下载"],
+        "examples": [
+          "帮我整理这个文件夹",
+          "Organize my Downloads folder by file type"
+        ],
+        "inputs": [
+          { "name": "folderPath", "label": "Folder", "type": "folder", "required": false, "defaultValue": "workspace", "aliases": ["文件夹", "目录", "folder", "path"] },
+          { "name": "apply", "label": "Apply moves", "type": "boolean", "required": false, "defaultValue": false, "aliases": ["执行", "移动"] },
+          { "name": "recursive", "label": "Recursive", "type": "boolean", "required": false, "defaultValue": false, "aliases": ["递归", "子文件夹"] }
+        ],
+        "outputs": [
+          { "type": "artifact", "label": "Organization report", "mimeType": "text/markdown", "artifactType": "automation_result" }
+        ],
+        "requiredTools": ["files.organize"],
+        "artifactTypes": ["automation_result", "report"],
+        "recommendedPlugins": ["anoclaw-files"],
+        "priority": 82
+      }
+    ]
+  }
+}

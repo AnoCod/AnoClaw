@@ -219,6 +219,33 @@ describe('TaskResolver', () => {
     expect(result.missingInputs).toEqual([]);
     expect(result.nextAction).toBe('execute_capability');
   });
+
+  it('routes folder organization requests to the official files capability', async () => {
+    ToolRegistry.getInstance().registerTool(new OrganizeFilesFixtureTool(), 'Files', { source: 'plugin', pluginName: 'anoclaw-files' });
+    const registry = CapabilityRegistry.getInstance();
+    registry.registerRuntimeCapabilities('anoclaw-files', [
+      {
+        id: 'files.organize',
+        title: 'Organize local files',
+        domain: 'files',
+        kind: 'automation',
+        triggers: ['organize files', 'folder', '整理文件', '文件夹'],
+        inputs: [{ name: 'folderPath', type: 'folder', required: false }],
+        requiredTools: ['files.organize'],
+        outputs: [{ type: 'artifact', artifactType: 'automation_result' }],
+      },
+    ], { source: 'plugin', pluginName: 'anoclaw-files', pluginStatus: 'activated' });
+
+    const result = await new TaskResolver(registry).resolve({
+      message: '帮我整理这个文件夹',
+      userMode: 'office',
+    });
+
+    expect(result.bestCapability?.id).toBe('files.organize');
+    expect(result.bestCapability?.source).toBe('plugin');
+    expect(result.missingInputs).toEqual([]);
+    expect(result.nextAction).toBe('execute_capability');
+  });
 });
 
 class CreatePptFixtureTool extends Tool {
@@ -272,6 +299,18 @@ class AnalyzeSpreadsheetFixtureTool extends Tool {
 class SummarizePdfFixtureTool extends Tool {
   name(): string { return 'pdf.summarize'; }
   description(): string { return 'Summarize a PDF file.'; }
+  parametersSchema(): Record<string, unknown> {
+    return { type: 'object', properties: {}, required: [] };
+  }
+  riskLevel(): RiskLevel { return RiskLevel.Safe; }
+  async execute(_params: Record<string, unknown>, _ctx: ExecutionContext): Promise<ToolResult> {
+    return this.makeResult('ok');
+  }
+}
+
+class OrganizeFilesFixtureTool extends Tool {
+  name(): string { return 'files.organize'; }
+  description(): string { return 'Organize files in a folder.'; }
   parametersSchema(): Record<string, unknown> {
     return { type: 'object', properties: {}, required: [] };
   }

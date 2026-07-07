@@ -112,10 +112,12 @@ export function createDefaultCapabilityCatalog(): CapabilityDefinition[] {
       kind: 'automation',
       triggers: ['organize files', 'rename files', 'folder', '整理文件', '重命名', '文件夹', '归档'],
       outputs: [
-        { type: 'artifact', label: 'Change summary', artifactType: 'report' },
+        { type: 'artifact', label: 'Organization report', artifactType: 'automation_result' },
       ],
-      requiredTools: ['Glob', 'Read', 'Write', 'Bash'],
-      priority: 65,
+      requiredTools: ['files.organize'],
+      artifactTypes: ['automation_result', 'report'],
+      recommendedPlugins: ['anoclaw-files'],
+      priority: 78,
     },
     {
       id: 'code.implement',

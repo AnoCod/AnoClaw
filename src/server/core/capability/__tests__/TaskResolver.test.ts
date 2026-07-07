@@ -11,6 +11,12 @@ describe('TaskResolver', () => {
     ToolRegistry.resetInstance();
   });
 
+  function registerCodingTools(): void {
+    for (const toolName of ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash']) {
+      ToolRegistry.getInstance().registerTool(new NamedFixtureTool(toolName));
+    }
+  }
+
   it('maps an everyday PPT request to the presentation capability and recommends the official office plugin', async () => {
     const result = await new TaskResolver().resolve({
       message: 'Create a company year-end summary PPT',
@@ -87,6 +93,47 @@ describe('TaskResolver', () => {
 
     expect(result.userMode).toBe('coding');
     expect(result.bestCapability?.id).toBe('code.implement');
+  });
+
+  it('suggests reading an explicit code file from the workspace for implementation tasks', async () => {
+    registerCodingTools();
+
+    const result = await new TaskResolver().resolve({
+      message: '帮我修复 src/server/core/foo.ts 里的 bug 并跑测试',
+      userMode: 'programming',
+    });
+
+    expect(result.userMode).toBe('coding');
+    expect(result.bestCapability?.id).toBe('code.implement');
+    expect(result.nextAction).toBe('execute_capability');
+    expect(result.suggestedToolCall).toMatchObject({
+      toolName: 'Read',
+      parameters: {
+        file_path: 'src/server/core/foo.ts',
+      },
+    });
+    expect(result.suggestedToolCall?.notes.join(' ')).toContain('IDE/editor context');
+  });
+
+  it('suggests a read-only git diff command for code review tasks', async () => {
+    registerCodingTools();
+
+    const result = await new TaskResolver().resolve({
+      message: 'review code changes before commit',
+      userMode: 'programming',
+    });
+
+    expect(result.userMode).toBe('coding');
+    expect(result.bestCapability?.id).toBe('code.review');
+    expect(result.nextAction).toBe('execute_capability');
+    expect(result.suggestedToolCall).toMatchObject({
+      toolName: 'Bash',
+      parameters: expect.objectContaining({
+        description: 'Inspect changed files',
+      }),
+    });
+    expect(String(result.suggestedToolCall?.parameters.command)).toContain('git diff --name-only');
+    expect(result.suggestedToolCall?.notes.join(' ')).toContain('IDE/editor context');
   });
 
   it('prefers an available plugin capability over a catalog placeholder with the same id', async () => {
@@ -347,6 +394,22 @@ class SummarizePdfFixtureTool extends Tool {
 class OrganizeFilesFixtureTool extends Tool {
   name(): string { return 'files.organize'; }
   description(): string { return 'Organize files in a folder.'; }
+  parametersSchema(): Record<string, unknown> {
+    return { type: 'object', properties: {}, required: [] };
+  }
+  riskLevel(): RiskLevel { return RiskLevel.Safe; }
+  async execute(_params: Record<string, unknown>, _ctx: ExecutionContext): Promise<ToolResult> {
+    return this.makeResult('ok');
+  }
+}
+
+class NamedFixtureTool extends Tool {
+  constructor(private readonly toolName: string) {
+    super();
+  }
+
+  name(): string { return this.toolName; }
+  description(): string { return `${this.toolName} fixture.`; }
   parametersSchema(): Record<string, unknown> {
     return { type: 'object', properties: {}, required: [] };
   }

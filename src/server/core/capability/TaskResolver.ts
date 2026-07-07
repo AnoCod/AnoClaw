@@ -30,6 +30,36 @@ const CREATE_INTENT_TERMS = [
   '规划',
 ];
 
+const CODE_FILE_EXTENSIONS = [
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.py',
+  '.go',
+  '.rs',
+  '.java',
+  '.cs',
+  '.cpp',
+  '.c',
+  '.h',
+  '.hpp',
+  '.css',
+  '.scss',
+  '.html',
+  '.vue',
+  '.svelte',
+  '.json',
+  '.yaml',
+  '.yml',
+  '.toml',
+  '.md',
+];
+
+const CODE_GLOB_PATTERN = '**/*.{ts,tsx,js,jsx,mjs,cjs,py,go,rs,java,cs,cpp,c,h,hpp,css,scss,html,vue,svelte,json,yaml,yml,toml,md}';
+
 export class TaskResolver {
   constructor(
     private readonly _capabilities = CapabilityRegistry.getInstance(),
@@ -264,6 +294,9 @@ function buildSuggestedToolCall(
 ): TaskResolveToolCallSuggestion | undefined {
   if (nextAction !== 'execute_capability') return undefined;
   if (missingInputs.length > 0) return undefined;
+  const codingSuggestion = buildCodingSuggestedToolCall(capability.id, query);
+  if (codingSuggestion) return codingSuggestion;
+
   const toolName = capabilityToolName(capability);
   if (!toolName) return undefined;
 
@@ -289,6 +322,68 @@ function capabilityToolName(capability: CapabilityRecord): string {
     ...(capability.requiredTools || []),
     ...(capability.tools || []),
   ].find(Boolean) || '';
+}
+
+function buildCodingSuggestedToolCall(
+  capabilityId: string,
+  query: string,
+): TaskResolveToolCallSuggestion | undefined {
+  if (capabilityId === 'code.review') {
+    return {
+      toolName: 'Bash',
+      parameters: {
+        command: 'git status --short && git diff --stat && git diff --name-only',
+        description: 'Inspect changed files',
+      },
+      confidence: 0.72,
+      notes: [
+        'Use the current IDE/editor context alongside git diff; prioritize changed files and selected code.',
+        'Return findings first, with file and line references when possible.',
+      ],
+    };
+  }
+
+  if (capabilityId !== 'code.implement') return undefined;
+
+  const filePath = inferCodeFilePath(query);
+  if (filePath) {
+    return {
+      toolName: 'Read',
+      parameters: { file_path: filePath },
+      confidence: 0.78,
+      notes: [
+        'Use the current IDE/editor context first; if the active file or selection matches the request, inspect that target before broad search.',
+        'After editing, run focused tests or the relevant build command.',
+      ],
+    };
+  }
+
+  const searchPattern = inferCodeSearchPattern(query);
+  if (searchPattern) {
+    return {
+      toolName: 'Grep',
+      parameters: {
+        pattern: searchPattern,
+        output_mode: 'files_with_matches',
+        head_limit: 50,
+      },
+      confidence: 0.66,
+      notes: [
+        'Use the current IDE/editor context first; search the workspace only when the active file or selection is not enough.',
+        'Prefer Read/Grep/Glob/Edit for code work and Bash for tests, builds, or git inspection.',
+      ],
+    };
+  }
+
+  return {
+    toolName: 'Glob',
+    parameters: { pattern: CODE_GLOB_PATTERN },
+    confidence: 0.55,
+    notes: [
+      'Start from the current IDE/editor context when available; if the request says this, here, or current file, treat the active file/selection as the target.',
+      'If no active file is relevant, inspect likely code entry points before editing and run focused tests afterward.',
+    ],
+  };
 }
 
 function suggestParametersForCapability(
@@ -388,9 +483,32 @@ function inferFilePath(query: string, extensions: string[]): string | undefined 
     .find((value) => extensions.some((extension) => value.toLowerCase().endsWith(extension)));
   if (quoted) return quoted;
 
-  const extensionPattern = extensions.map((extension) => extension.replace('.', '\\.')).join('|');
+  const extensionPattern = [...extensions]
+    .sort((a, b) => b.length - a.length)
+    .map((extension) => extension.replace('.', '\\.'))
+    .join('|');
   const pattern = new RegExp(`([A-Za-z]:[^\\s"'“”]+(?:${extensionPattern})|(?:\\.{1,2}[\\\\/])?[^\\s"'“”，。]+(?:${extensionPattern}))`, 'i');
   return query.match(pattern)?.[1];
+}
+
+function inferCodeFilePath(query: string): string | undefined {
+  return inferFilePath(query, CODE_FILE_EXTENSIONS);
+}
+
+function inferCodeSearchPattern(query: string): string | undefined {
+  const quoted = Array.from(query.matchAll(/[`"“']([^`"”']{2,160})[`"”']/g))
+    .map((match) => match[1].trim())
+    .find((value) => value && !inferCodeFilePath(value));
+  if (quoted) return escapeRegExp(quoted);
+
+  const errorMessage = query.match(/(?:error|exception|报错|异常|错误)[:：]\s*([^\n。]{2,160})/i)?.[1]?.trim();
+  if (errorMessage) return escapeRegExp(errorMessage);
+
+  const namedSymbol = query.match(/(?:function|class|method|component|symbol|identifier|函数|方法|类|组件|变量|标识符)\s*[:：]?\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?)/i)?.[1];
+  if (namedSymbol) return escapeRegExp(namedSymbol);
+
+  const dottedSymbol = query.match(/\b[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*\b/)?.[0];
+  return dottedSymbol ? escapeRegExp(dottedSymbol) : undefined;
 }
 
 function inferFolderPath(query: string): string | undefined {
@@ -408,6 +526,10 @@ function inferPageRange(query: string): string | undefined {
 
 function compactObject(value: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined && entry !== ''));
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function clampNumber(value: number, min: number, max: number, fallback: number | undefined): number | undefined {

@@ -1192,6 +1192,13 @@ function buildTaskResolutionContext(taskResolution: UserTaskResolution): string 
   if (requiredTools.length > 0) {
     lines.push(`Prefer these tools for this task when available: ${requiredTools.join(', ')}`);
   }
+  if (capability.domain === 'coding') {
+    lines.push(
+      'Coding route: use the existing workspace/IDE context as the first signal. If the Editor Context section shows an active file, open files, or selected text, inspect that before broad repository search.',
+      'For implementation tasks, prefer Read/Grep/Glob/Edit/Write for code changes and Bash only for git inspection, tests, builds, or package commands.',
+      'For review tasks, inspect changed lines first and return findings first with file and line references when possible.',
+    );
+  }
   if (result.suggestedToolCall) {
     lines.push(`Suggested first tool call: ${result.suggestedToolCall.toolName}`);
     lines.push(`Suggested tool parameters: ${JSON.stringify(result.suggestedToolCall.parameters)}`);

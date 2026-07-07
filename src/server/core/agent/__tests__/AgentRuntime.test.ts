@@ -368,6 +368,59 @@ describe('AgentRuntime', () => {
       expect(routingContext?.content).toContain('Suggested tool parameters: {}');
     });
 
+    it('injects workspace IDE guidance for coding routes', async () => {
+      CapabilityRegistry.getInstance().setCatalogCapabilities([
+        {
+          id: 'code.implement',
+          title: 'Modify a codebase',
+          description: 'Inspect and modify code in the current workspace.',
+          domain: 'coding',
+          kind: 'automation',
+          triggers: ['fix bug'],
+          requiredTools: ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash'],
+        },
+      ]);
+      for (const toolName of ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash']) {
+        ToolRegistry.getInstance().registerTool(new FixtureTool(toolName));
+      }
+
+      const agent = makeAgent('main-1', 'MainAgent', AgentRole.MainAgent);
+      AgentRegistry.getInstance().registerAgent(agent);
+
+      const runtime = AgentRuntime.getInstance();
+      let capturedHistory: Message[] = [];
+      (runtime as any)._runGoalMode = vi.fn(async function* () {});
+      (runtime as any)._executeAndForwardLoop = vi.fn(async function* (
+        _loop: unknown,
+        _message: Message,
+        history: Message[],
+      ) {
+        capturedHistory = history;
+        yield { type: SSEEventType.Text, content: 'loop ran' };
+      });
+
+      const events: any[] = [];
+      for await (const event of runtime.processMessage(
+        'session-1',
+        'main-1',
+        { id: 'm1', sessionId: 'session-1', role: 'user', content: 'fix bug in src/app.ts', tokenCount: 0, compressed: false, timestamp: new Date().toISOString() },
+      )) {
+        events.push(event);
+      }
+
+      expect(events[0].type).toBe(SSEEventType.StatusInfo);
+      expect(events[0].taskResolution.bestCapability.id).toBe('code.implement');
+      expect(events[0].taskResolution.suggestedToolCall).toMatchObject({
+        toolName: 'Read',
+        parameters: { file_path: 'src/app.ts' },
+      });
+      const routingContext = capturedHistory.find((msg) => msg.id.startsWith('task-resolution-'));
+      expect(routingContext?.content).toContain('Coding route: use the existing workspace/IDE context');
+      expect(routingContext?.content).toContain('Editor Context');
+      expect(routingContext?.content).toContain('Suggested first tool call: Read');
+      expect(routingContext?.content).toContain('Suggested tool parameters: {"file_path":"src/app.ts"}');
+    });
+
     it('auto-grants registered capability tools for the current routed task', async () => {
       CapabilityRegistry.getInstance().setCatalogCapabilities([
         {

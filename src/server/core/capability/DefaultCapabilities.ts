@@ -171,7 +171,7 @@ export function createDefaultCapabilityCatalog(): CapabilityDefinition[] {
       outputs: [
         { type: 'artifact', label: 'Review findings', artifactType: 'report' },
       ],
-      requiredTools: ['Read', 'Glob', 'Grep'],
+      requiredTools: ['Read', 'Glob', 'Grep', 'Bash'],
       artifactTypes: ['code-review', 'report'],
       priority: 82,
     },

@@ -7,6 +7,8 @@
  * constants are retained for backward compat during migration.
  */
 
+import type { ArtifactPreview, ArtifactRecord } from './artifact.js';
+
 /** Events emitted by individual Agent instances. */
 export const AgentEvents = {
   NameChanged: 'nameChanged',
@@ -138,6 +140,12 @@ export interface CoreEventMap {
   // subscription
   'subscription:delivered': { sessionId: string; agentId: string; topic: string; subscriberCount: number }; // @internal — emitted by EventSubscriptionManager.publish() for observability
 
+  // artifacts
+  'artifact:created': { sessionId: string; artifactId: string; artifact: ArtifactRecord };
+  'artifact:updated': { sessionId: string; artifactId: string; artifact: ArtifactRecord };
+  'artifact:preview': { sessionId: string; artifactId: string; artifact: ArtifactRecord; preview: ArtifactPreview };
+  'artifact:done': { sessionId: string; artifactId: string; artifact: ArtifactRecord };
+
   // plugin
   'plugin:load_failed': { pluginName: string; error: string };
 }
@@ -212,6 +220,10 @@ export enum WsMessageType {
   TaskListUpdate = 'task_list_update',
   QualityScoreAck = 'quality_score_ack',
   QualityScoreError = 'quality_score_error',
+  ArtifactCreated = 'artifact_created',
+  ArtifactUpdated = 'artifact_updated',
+  ArtifactPreview = 'artifact_preview',
+  ArtifactDone = 'artifact_done',
 }
 
 /** Generic WebSocket message shape for event dispatch (backward compat). */
@@ -270,6 +282,10 @@ export type WsTypedMessage =
   | { type: WsMessageType.TalentPoolChanged; action?: string; [key: string]: unknown }
   | { type: WsMessageType.SessionTitleChanged; sessionId?: string; title?: string; [key: string]: unknown }
   | { type: WsMessageType.SessionHardDeleted; sessionId?: string; [key: string]: unknown }
+  | { type: WsMessageType.ArtifactCreated; sessionId: string; artifactId: string; artifact?: ArtifactRecord; [key: string]: unknown }
+  | { type: WsMessageType.ArtifactUpdated; sessionId: string; artifactId: string; artifact?: ArtifactRecord; [key: string]: unknown }
+  | { type: WsMessageType.ArtifactPreview; sessionId: string; artifactId: string; preview?: ArtifactPreview; artifact?: ArtifactRecord; [key: string]: unknown }
+  | { type: WsMessageType.ArtifactDone; sessionId: string; artifactId: string; artifact?: ArtifactRecord; [key: string]: unknown }
   // Catch-all for forward compat
   | { type: string; [key: string]: unknown };
 

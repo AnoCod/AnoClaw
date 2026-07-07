@@ -4,6 +4,7 @@ import type { ApiServer } from '../ApiServer.js';
 import { HealthRoute } from './HealthRoute.js';
 import { ToolsListRoute, CommandsListRoute, ToolsStatsRoute } from './ToolsRoute.js';
 import { ListCapabilitiesRoute, ResolveTaskRoute } from './CapabilityRoutes.js';
+import { ListArtifactsRoute, CreateArtifactRoute, GetArtifactRoute, UpdateArtifactRoute } from './ArtifactRoutes.js';
 import { ToolsGroupRoute } from './ToolsGroupRoute.js';
 import { GetToolDetailRoute, ToolsForAgentRoute } from './ToolsDetailRoute.js';
 import { OpenFileRoute, StatsRoute, GetLogEntriesRoute } from './SystemRoutes.js';
@@ -72,6 +73,10 @@ export function registerAllRoutes(api: ApiServer): void {
   api.registerRoute(new CommandsListRoute());
   api.registerRoute(new ListCapabilitiesRoute());
   api.registerRoute(new ResolveTaskRoute());
+  api.registerRoute(new ListArtifactsRoute());
+  api.registerRoute(new CreateArtifactRoute());
+  api.registerRoute(new GetArtifactRoute());
+  api.registerRoute(new UpdateArtifactRoute());
   api.registerRoute(new ToolsGroupRoute());
   api.registerRoute(new ToolsStatsRoute());
   api.registerRoute(new GetToolDetailRoute());

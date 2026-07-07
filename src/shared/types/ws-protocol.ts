@@ -12,6 +12,7 @@
 export { WsMessageType } from './events.js';
 import type { WsMessageType } from './events.js';
 import type { TokenBreakdown } from './session.js';
+import type { ArtifactPreview, ArtifactRecord } from './artifact.js';
 
 /** Message sent from the browser client to the server. */
 export interface WsClientMessage {
@@ -73,4 +74,7 @@ export interface WsServerMessage {
   taskStatus?: 'completed' | 'failed';
   taskSummary?: string;
   taskResult?: string;
+  artifactId?: string;
+  artifact?: ArtifactRecord;
+  preview?: ArtifactPreview;
 }

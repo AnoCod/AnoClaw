@@ -419,4 +419,53 @@ export function installWsForwarding(): void {
       });
     }
   });
+
+  TypedEventBus.on('artifact:created', (payload) => {
+    const rootId = resolveRootSessionId(payload.sessionId);
+    if (ws.isConnected(rootId)) {
+      ws.send(rootId, {
+        type: WsMessageType.ArtifactCreated,
+        sessionId: payload.sessionId,
+        artifactId: payload.artifactId,
+        artifact: payload.artifact,
+      });
+    }
+  });
+
+  TypedEventBus.on('artifact:updated', (payload) => {
+    const rootId = resolveRootSessionId(payload.sessionId);
+    if (ws.isConnected(rootId)) {
+      ws.send(rootId, {
+        type: WsMessageType.ArtifactUpdated,
+        sessionId: payload.sessionId,
+        artifactId: payload.artifactId,
+        artifact: payload.artifact,
+      });
+    }
+  });
+
+  TypedEventBus.on('artifact:preview', (payload) => {
+    const rootId = resolveRootSessionId(payload.sessionId);
+    if (ws.isConnected(rootId)) {
+      ws.send(rootId, {
+        type: WsMessageType.ArtifactPreview,
+        sessionId: payload.sessionId,
+        artifactId: payload.artifactId,
+        preview: payload.preview,
+        artifact: payload.artifact,
+      });
+    }
+  });
+
+  TypedEventBus.on('artifact:done', (payload) => {
+    const rootId = resolveRootSessionId(payload.sessionId);
+    if (ws.isConnected(rootId)) {
+      ws.send(rootId, {
+        type: WsMessageType.ArtifactDone,
+        sessionId: payload.sessionId,
+        artifactId: payload.artifactId,
+        artifact: payload.artifact,
+      });
+    }
+  });
 }

@@ -9,6 +9,8 @@ export interface PromptContext {
   effort?: string;
   /** Hide tools that pause for direct user input from prompt/tool listings. */
   hideUserInteractionTools?: boolean;
+  /** Tool names granted only for the active run, usually by capability routing. */
+  extraAllowedTools?: string[];
 }
 
 export interface SystemPromptSection {

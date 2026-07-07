@@ -359,7 +359,7 @@ describe('AgentRuntime', () => {
       expect(routingContext?.content).toContain('DoThing');
     });
 
-    it('does not start the loop when capability tools are registered but not enabled for MainAgent', async () => {
+    it('auto-grants registered capability tools for the current routed task', async () => {
       CapabilityRegistry.getInstance().setCatalogCapabilities([
         {
           id: 'widget.create',
@@ -377,8 +377,19 @@ describe('AgentRuntime', () => {
       AgentRegistry.getInstance().registerAgent(agent);
 
       const runtime = AgentRuntime.getInstance();
-      const loopSpy = vi.fn();
-      (runtime as any)._executeAndForwardLoop = loopSpy;
+      let grantedTools: string[] = [];
+      let capturedHistory: Message[] = [];
+      (runtime as any)._runGoalMode = vi.fn(async function* () {});
+      (runtime as any)._executeAndForwardLoop = vi.fn(async function* (
+        loop: { extraAllowedTools: string[] },
+        _message: Message,
+        history: Message[],
+      ) {
+        grantedTools = loop.extraAllowedTools;
+        capturedHistory = history;
+        yield { type: SSEEventType.Text, content: 'loop ran' };
+        yield { type: SSEEventType.Done };
+      });
 
       const events: any[] = [];
       for await (const event of runtime.processMessage(
@@ -389,10 +400,13 @@ describe('AgentRuntime', () => {
         events.push(event);
       }
 
-      expect(loopSpy).not.toHaveBeenCalled();
       expect(events[0].type).toBe(SSEEventType.StatusInfo);
-      expect(events[0].agentMissingTools).toEqual(['DoThing']);
-      expect(events.some((event) => event.type === SSEEventType.Text && String(event.content).includes('DoThing'))).toBe(true);
+      expect(events[0].agentMissingTools).toEqual([]);
+      expect(events.some((event) => event.type === SSEEventType.Text && event.content === 'loop ran')).toBe(true);
+      expect(grantedTools).toEqual(['DoThing']);
+      expect(agent.allowedTools()).toEqual([]);
+      const routingContext = capturedHistory.find((msg) => msg.id.startsWith('task-resolution-'));
+      expect(routingContext?.content).toContain('DoThing');
       expect(events.at(-1)?.type).toBe(SSEEventType.Done);
     });
   });

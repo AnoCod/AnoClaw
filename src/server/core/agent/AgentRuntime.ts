@@ -193,6 +193,7 @@ export class AgentRuntime extends EventEmitter {
       contextWindow: agent.contextWindow,
       permissionMode: options.permissionMode,
       effort: options.effort,
+      extraAllowedTools: taskResolutionExtraTools(taskResolution),
     };
 
     const loop = new AgentLoop(loopConfig);
@@ -435,16 +436,13 @@ export class AgentRuntime extends EventEmitter {
       });
       if (result.intent !== 'capability' || !result.bestCapability) return null;
 
-      const requiredTools = capabilityToolNames(result.bestCapability);
-      const allowedTools = new Set(agent.allowedTools());
-      const unavailableTools = new Set(result.missingTools);
-      const agentMissingTools = requiredTools.filter((toolName) => !unavailableTools.has(toolName) && !allowedTools.has(toolName));
+      const agentMissingTools: string[] = [];
       logger.info('User task resolved to capability', {
         sid: sessionId,
         capabilityId: result.bestCapability.id,
         nextAction: result.nextAction,
         missingTools: result.missingTools,
-        agentMissingTools,
+        autoGrantedTools: taskResolutionToolNames(result),
       });
       return { result, agentMissingTools };
     } catch (err) {
@@ -1231,6 +1229,15 @@ function capabilityToolNames(capability: CapabilityRecord): string[] {
     ...(capability.requiredTools || []),
     ...(capability.tools || []),
   ]);
+}
+
+function taskResolutionExtraTools(taskResolution: UserTaskResolution | null): string[] {
+  if (!taskResolution || shouldStopForTaskResolution(taskResolution)) return [];
+  return taskResolutionToolNames(taskResolution.result);
+}
+
+function taskResolutionToolNames(result: TaskResolveResult): string[] {
+  return result.bestCapability ? capabilityToolNames(result.bestCapability) : [];
 }
 
 function uniqueStrings(values: string[]): string[] {

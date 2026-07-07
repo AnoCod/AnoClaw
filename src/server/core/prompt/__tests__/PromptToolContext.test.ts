@@ -124,6 +124,25 @@ describe('prompt tool context', () => {
     expect(prompt).toContain('ASK_PROBE_GUIDE');
   });
 
+  it('includes run-scoped capability tools without changing the agent allowlist', () => {
+    const registry = ToolRegistry.getInstance();
+    registry.registerTool(new PromptProbeTool('OfficeCreatePptx', 'OFFICE_PPTX_GUIDE'), 'Office');
+    registerAgent({
+      allowedTools: [],
+    });
+
+    const prompt = PromptAssembler.getInstance().buildEffectivePrompt(
+      'agent-prompt-test',
+      'session-prompt-test',
+      undefined,
+      { extraAllowedTools: ['OfficeCreatePptx'] },
+    );
+
+    expect(prompt).toContain('OfficeCreatePptx');
+    expect(prompt).toContain('OFFICE_PPTX_GUIDE');
+    expect(AgentRegistry.getInstance().agent('agent-prompt-test')?.allowedTools()).toEqual([]);
+  });
+
   it('normalizes legacy underscore permission mode spelling in prompt context', () => {
     registerAgent({ allowedTools: [] });
 

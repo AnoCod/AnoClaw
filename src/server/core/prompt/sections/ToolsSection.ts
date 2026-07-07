@@ -20,7 +20,7 @@ export function createToolsSection(): SystemPromptSection {
       }
 
       const toolRegistry = ToolRegistry.getInstance();
-      const allowedNames = agent.allowedTools();
+      const allowedNames = mergeAllowedToolNames(agent.allowedTools(), ctx.extraAllowedTools);
       const agentTools = toolRegistry.toolsForAgent(allowedNames, {
         hideUserInteractionTools: ctx.hideUserInteractionTools,
       });
@@ -85,4 +85,11 @@ export function createToolsSection(): SystemPromptSection {
       return lines.join('\n');
     },
   };
+}
+
+function mergeAllowedToolNames(base: string[], extra: string[] | undefined): string[] {
+  return Array.from(new Set([
+    ...(base || []),
+    ...(extra || []),
+  ].filter(Boolean)));
 }

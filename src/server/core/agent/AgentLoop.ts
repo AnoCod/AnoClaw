@@ -64,6 +64,7 @@ export interface AgentLoopConfig {
   sessionId: string;
   permissionMode?: string;
   effort?: string;
+  extraAllowedTools?: string[];
 }
 
 
@@ -78,6 +79,7 @@ export class AgentLoop {
   readonly contextWindow: number;
   readonly permissionMode?: string;
   readonly effort?: string;
+  readonly extraAllowedTools: string[];
 
   private stallDetector: StallDetector;
   private toolCallHistory: Array<{ name: string; result: string; ts: number }> = [];
@@ -90,6 +92,7 @@ export class AgentLoop {
     this.contextWindow = config.contextWindow;
     this.permissionMode = config.permissionMode;
     this.effort = config.effort;
+    this.extraAllowedTools = uniqueToolNames(config.extraAllowedTools || []);
     this.stallDetector = new StallDetector();
   }
 
@@ -146,6 +149,7 @@ export class AgentLoop {
       permissionMode: this.permissionMode,
       effort: this.effort,
       hideUserInteractionTools: this._isAutoMode(),
+      extraAllowedTools: this.extraAllowedTools,
     });
     let systemPrompt = promptAssembler.buildEffectivePrompt(
       this.agentId,
@@ -161,7 +165,7 @@ export class AgentLoop {
     createLogger('anochat.agent').debug('AgentLoop system prompt built', { sid: this.sessionId, promptLen: systemPrompt.length });
 
     const toolRegistry = ToolRegistry.getInstance();
-    let allowedNames = agent.allowedTools();
+    let allowedNames = mergeAllowedToolNames(agent.allowedTools(), this.extraAllowedTools);
     let agentTools = toolRegistry.toolsForAgent(allowedNames, {
       hideUserInteractionTools: this._isAutoMode(),
     });
@@ -252,7 +256,7 @@ export class AgentLoop {
         break;
       }
       // Reload tools if allowedTools or model changed
-      const newAllowedNames = currentAgent.allowedTools();
+      const newAllowedNames = mergeAllowedToolNames(currentAgent.allowedTools(), this.extraAllowedTools);
       const allowedChanged = newAllowedNames.length !== allowedNames.length
         || newAllowedNames.some((n, i) => n !== allowedNames[i]);
       if (allowedChanged || currentAgent.modelName !== agent.modelName
@@ -1031,3 +1035,10 @@ export class AgentLoop {
   }
 }
 
+function mergeAllowedToolNames(base: string[], extra: string[]): string[] {
+  return uniqueToolNames([...(base || []), ...(extra || [])]);
+}
+
+function uniqueToolNames(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)));
+}

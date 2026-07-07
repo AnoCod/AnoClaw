@@ -126,6 +126,13 @@ export interface TaskResolveCandidate {
   missingInputs: CapabilityInputField[];
 }
 
+export interface TaskResolveToolCallSuggestion {
+  toolName: string;
+  parameters: Record<string, unknown>;
+  confidence: number;
+  notes: string[];
+}
+
 export type TaskResolveIntent = 'capability' | 'chat' | 'unknown';
 
 export type TaskResolveNextAction =
@@ -148,6 +155,7 @@ export interface TaskResolveResult {
   missingTools: string[];
   recommendedPlugins: string[];
   pluginRecommendations: CapabilityPluginRecommendation[];
+  suggestedToolCall?: TaskResolveToolCallSuggestion;
   assumptions: string[];
   reason: string;
   suggestedResponse: string;

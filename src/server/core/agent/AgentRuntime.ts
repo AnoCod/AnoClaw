@@ -1192,6 +1192,13 @@ function buildTaskResolutionContext(taskResolution: UserTaskResolution): string 
   if (requiredTools.length > 0) {
     lines.push(`Prefer these tools for this task when available: ${requiredTools.join(', ')}`);
   }
+  if (result.suggestedToolCall) {
+    lines.push(`Suggested first tool call: ${result.suggestedToolCall.toolName}`);
+    lines.push(`Suggested tool parameters: ${JSON.stringify(result.suggestedToolCall.parameters)}`);
+    if (result.suggestedToolCall.notes.length > 0) {
+      lines.push(`Tool call notes: ${result.suggestedToolCall.notes.join(' ')}`);
+    }
+  }
   if (capability.skills?.length) {
     lines.push(`Relevant skills: ${capability.skills.join(', ')}`);
   }
@@ -1235,6 +1242,7 @@ function summarizeTaskResolution(result: TaskResolveResult): Record<string, unkn
     missingTools: result.missingTools,
     recommendedPlugins: result.recommendedPlugins,
     pluginRecommendations: result.pluginRecommendations,
+    suggestedToolCall: result.suggestedToolCall,
     reason: result.reason,
   };
 }

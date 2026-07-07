@@ -355,11 +355,17 @@ describe('AgentRuntime', () => {
 
       expect(events[0].type).toBe(SSEEventType.StatusInfo);
       expect(events[0].taskResolution.bestCapability.id).toBe('widget.create');
+      expect(events[0].taskResolution.suggestedToolCall).toMatchObject({
+        toolName: 'DoThing',
+        parameters: {},
+      });
       expect(events.some((event) => event.type === SSEEventType.Text && event.content === 'loop ran')).toBe(true);
       const routingContext = capturedHistory.find((msg) => msg.id.startsWith('task-resolution-'));
       expect(routingContext?.role).toBe('system');
       expect(routingContext?.content).toContain('widget.create');
       expect(routingContext?.content).toContain('DoThing');
+      expect(routingContext?.content).toContain('Suggested first tool call: DoThing');
+      expect(routingContext?.content).toContain('Suggested tool parameters: {}');
     });
 
     it('auto-grants registered capability tools for the current routed task', async () => {
@@ -410,6 +416,7 @@ describe('AgentRuntime', () => {
       expect(agent.allowedTools()).toEqual([]);
       const routingContext = capturedHistory.find((msg) => msg.id.startsWith('task-resolution-'));
       expect(routingContext?.content).toContain('DoThing');
+      expect(routingContext?.content).toContain('Suggested first tool call: DoThing');
       expect(events.at(-1)?.type).toBe(SSEEventType.Done);
     });
   });

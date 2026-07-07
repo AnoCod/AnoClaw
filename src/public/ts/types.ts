@@ -354,6 +354,12 @@ export interface TaskResolutionSummary {
   missingTools?: string[];
   recommendedPlugins?: string[];
   pluginRecommendations?: CapabilityPluginRecommendation[];
+  suggestedToolCall?: {
+    toolName: string;
+    parameters: Record<string, unknown>;
+    confidence: number;
+    notes: string[];
+  };
   reason?: string;
 }
 

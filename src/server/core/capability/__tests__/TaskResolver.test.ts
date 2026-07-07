@@ -113,6 +113,13 @@ describe('TaskResolver', () => {
     expect(result.bestCapability?.sourceName).toBe('office');
     expect(result.nextAction).toBe('execute_capability');
     expect(result.canStart).toBe(true);
+    expect(result.suggestedToolCall).toMatchObject({
+      toolName: 'office.create_pptx',
+      parameters: expect.objectContaining({
+        topic: expect.stringContaining('product launch PPT'),
+        slideCount: 8,
+      }),
+    });
   });
 
   it('treats primary freeform inputs as supplied by the user message', async () => {
@@ -138,6 +145,10 @@ describe('TaskResolver', () => {
     expect(result.bestCapability?.id).toBe('qrcode.create');
     expect(result.missingInputs).toEqual([]);
     expect(result.nextAction).toBe('execute_capability');
+    expect(result.suggestedToolCall).toMatchObject({
+      toolName: 'generateQRCode',
+      parameters: {},
+    });
   });
 
   it('treats document titles as supplied by the user message', async () => {
@@ -191,6 +202,15 @@ describe('TaskResolver', () => {
     expect(result.bestCapability?.source).toBe('plugin');
     expect(result.missingInputs).toEqual([]);
     expect(result.nextAction).toBe('execute_capability');
+    expect(result.suggestedToolCall).toMatchObject({
+      toolName: 'office.analyze_spreadsheet',
+      parameters: expect.objectContaining({
+        title: expect.stringContaining('CSV'),
+      }),
+      notes: expect.arrayContaining([
+        expect.stringContaining('No spreadsheet path'),
+      ]),
+    });
   });
 
   it('routes PDF summary requests to the official PDF capability', async () => {
@@ -210,7 +230,7 @@ describe('TaskResolver', () => {
     ], { source: 'plugin', pluginName: 'anoclaw-pdf', pluginStatus: 'activated' });
 
     const result = await new TaskResolver(registry).resolve({
-      message: '把这个PDF总结成一页报告',
+      message: '把 C:\\Docs\\report.pdf 总结成一页报告',
       userMode: 'office',
     });
 
@@ -218,6 +238,12 @@ describe('TaskResolver', () => {
     expect(result.bestCapability?.source).toBe('plugin');
     expect(result.missingInputs).toEqual([]);
     expect(result.nextAction).toBe('execute_capability');
+    expect(result.suggestedToolCall).toMatchObject({
+      toolName: 'pdf.summarize',
+      parameters: expect.objectContaining({
+        filePath: 'C:\\Docs\\report.pdf',
+      }),
+    });
   });
 
   it('routes folder organization requests to the official files capability', async () => {
@@ -245,6 +271,16 @@ describe('TaskResolver', () => {
     expect(result.bestCapability?.source).toBe('plugin');
     expect(result.missingInputs).toEqual([]);
     expect(result.nextAction).toBe('execute_capability');
+    expect(result.suggestedToolCall).toMatchObject({
+      toolName: 'files.organize',
+      parameters: expect.objectContaining({
+        apply: false,
+        recursive: false,
+      }),
+      notes: expect.arrayContaining([
+        expect.stringContaining('No folder path'),
+      ]),
+    });
   });
 });
 

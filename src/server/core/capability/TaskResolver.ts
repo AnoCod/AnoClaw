@@ -4,6 +4,7 @@ import type {
   TaskResolveCandidate,
   TaskResolveRequest,
   TaskResolveResult,
+  TaskResolveToolCallSuggestion,
   UserMode,
 } from '../../../shared/types/capability.js';
 import { CapabilityRegistry } from './CapabilityRegistry.js';
@@ -84,6 +85,7 @@ export class TaskResolver {
       recommendedPlugins,
       missingTools: capability.missingTools,
     });
+    const suggestedToolCall = buildSuggestedToolCall(capability, query, missingInputs, nextAction);
 
     return {
       intent: 'capability',
@@ -99,6 +101,7 @@ export class TaskResolver {
       missingTools: capability.missingTools,
       recommendedPlugins,
       pluginRecommendations,
+      suggestedToolCall,
       assumptions: buildAssumptions(capability),
       reason: buildReason(capability, best),
       suggestedResponse: buildSuggestedResponse(capability, nextAction, missingInputs, recommendedPlugins, pluginRecommendations),
@@ -141,6 +144,9 @@ function scoreCapability(capability: CapabilityRecord, query: string, userMode: 
     }
   }
 
+  const fileTypeBoost = explicitFileTypeBoost(capability, normalizedQuery);
+  if (fileTypeBoost > 0) score += fileTypeBoost;
+
   if (hasCreateIntent(normalizedQuery) && capability.kind === 'artifact') score += 2;
   score += userModeScoreBoost(capability, userMode);
   if (capability.status === 'available') score += 2;
@@ -171,6 +177,28 @@ function keywordTerms(capability: CapabilityRecord): string[] {
     .toLowerCase()
     .split(/[^a-z0-9._-]+/)
     .filter(Boolean);
+}
+
+function explicitFileTypeBoost(capability: CapabilityRecord, normalizedQuery: string): number {
+  const artifactTypes = new Set((capability.artifactTypes || [])
+    .map(normalize)
+    .filter(Boolean));
+  for (const output of capability.outputs || []) {
+    if (output.artifactType) artifactTypes.add(normalize(output.artifactType));
+    if (output.extension) artifactTypes.add(normalize(output.extension));
+  }
+  artifactTypes.add(normalize(capability.domain));
+
+  let score = 0;
+  for (const type of artifactTypes) {
+    if (!type) continue;
+    if (normalizedQuery.includes(`.${type}`)) score += 10;
+  }
+  if (artifactTypes.has('pdf') && /\bpdf\b|\.pdf\b/.test(normalizedQuery)) score += 6;
+  if (artifactTypes.has('spreadsheet') && /\.(xlsx|xls|csv|tsv)\b/.test(normalizedQuery)) score += 8;
+  if (artifactTypes.has('presentation') && /\.(pptx|ppt)\b/.test(normalizedQuery)) score += 8;
+  if (artifactTypes.has('document') && /\.(docx|doc)\b/.test(normalizedQuery)) score += 8;
+  return score;
 }
 
 function requiredMissingInputs(capability: CapabilityRecord, query: string): CapabilityInputField[] {
@@ -226,6 +254,177 @@ function buildSuggestedResponse(
     : recommendedPlugins;
   const plugins = pluginNames.length > 0 ? pluginNames.join(', ') : 'a plugin that provides this capability';
   return `This looks like "${capability.title}", but the required capability is not ready yet. Recommended plugin: ${plugins}.`;
+}
+
+function buildSuggestedToolCall(
+  capability: CapabilityRecord,
+  query: string,
+  missingInputs: CapabilityInputField[],
+  nextAction: TaskResolveResult['nextAction'],
+): TaskResolveToolCallSuggestion | undefined {
+  if (nextAction !== 'execute_capability') return undefined;
+  if (missingInputs.length > 0) return undefined;
+  const toolName = capabilityToolName(capability);
+  if (!toolName) return undefined;
+
+  const notes: string[] = [];
+  const parameters = suggestParametersForCapability(capability.id, query, notes);
+  if (Object.keys(parameters).length === 0) return {
+    toolName,
+    parameters,
+    confidence: 0.45,
+    notes: [`Use ${toolName} as the first tool if it is visible. Fill parameters from the user message and current workspace context.`],
+  };
+
+  return {
+    toolName,
+    parameters,
+    confidence: notes.length > 0 ? 0.62 : 0.78,
+    notes,
+  };
+}
+
+function capabilityToolName(capability: CapabilityRecord): string {
+  return [
+    ...(capability.requiredTools || []),
+    ...(capability.tools || []),
+  ].find(Boolean) || '';
+}
+
+function suggestParametersForCapability(
+  capabilityId: string,
+  query: string,
+  notes: string[],
+): Record<string, unknown> {
+  const title = inferTaskTitle(query);
+  switch (capabilityId) {
+    case 'presentation.create':
+      return compactObject({
+        topic: title,
+        slideCount: inferSlideCount(query) || 8,
+        style: inferStyle(query),
+      });
+    case 'document.create':
+      return compactObject({
+        title,
+        documentType: inferDocumentType(query),
+        style: inferStyle(query),
+      });
+    case 'spreadsheet.analyze': {
+      const filePath = inferFilePath(query, ['.csv', '.tsv', '.xlsx', '.xls']);
+      if (!filePath) notes.push('No spreadsheet path was explicit; use an attached/current spreadsheet if available, otherwise ask for the file.');
+      return compactObject({
+        title,
+        filePath,
+      });
+    }
+    case 'pdf.summarize': {
+      const filePath = inferFilePath(query, ['.pdf']);
+      if (!filePath) notes.push('No PDF path was explicit; use an attached/current PDF if available, otherwise ask for the file.');
+      return compactObject({
+        title,
+        filePath,
+        pages: inferPageRange(query),
+      });
+    }
+    case 'files.organize': {
+      const folderPath = inferFolderPath(query);
+      if (!folderPath) notes.push('No folder path was explicit; use the current workspace folder as the default target.');
+      return compactObject({
+        folderPath,
+        recursive: /recursive|recursively|子文件夹|递归/.test(query.toLowerCase()),
+        apply: /apply|execute|move now|直接整理|直接移动|执行整理/.test(query.toLowerCase()),
+      });
+    }
+    default:
+      return {};
+  }
+}
+
+function inferTaskTitle(query: string): string {
+  return query
+    .replace(/^\s*(帮我|请|麻烦|please)\s*/i, '')
+    .replace(/\s*(做一个|做一份|制作|创建|生成|写一份|写一个|总结|分析|整理|create|make|generate|write|summarize|analyze|organize)\s*/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120) || query.trim().slice(0, 120);
+}
+
+function inferSlideCount(query: string): number | undefined {
+  const arabic = query.match(/(\d{1,2})\s*(页|张|slides?|slide deck)/i)?.[1];
+  if (arabic) return clampNumber(Number(arabic), 1, 60, undefined);
+  const chineseNumber = query.match(/([一二三四五六七八九十]{1,3})\s*(页|张)/)?.[1];
+  return chineseNumber ? chineseNumeralToNumber(chineseNumber) : undefined;
+}
+
+function inferStyle(query: string): string | undefined {
+  const styles = [
+    ['商务', '简洁商务'],
+    ['简洁', '简洁'],
+    ['正式', '正式'],
+    ['专业', '专业'],
+    ['可爱', '轻松友好'],
+    ['business', 'clean business'],
+    ['professional', 'professional'],
+    ['concise', 'concise'],
+  ];
+  const normalized = query.toLowerCase();
+  return styles.find(([term]) => normalized.includes(term))?.[1];
+}
+
+function inferDocumentType(query: string): string | undefined {
+  const normalized = query.toLowerCase();
+  if (/合同|contract/.test(normalized)) return 'contract draft';
+  if (/报告|report/.test(normalized)) return 'report';
+  if (/方案|proposal/.test(normalized)) return 'proposal';
+  if (/简历|resume|cv/.test(normalized)) return 'resume';
+  if (/申请书|application/.test(normalized)) return 'application';
+  return undefined;
+}
+
+function inferFilePath(query: string, extensions: string[]): string | undefined {
+  const quoted = Array.from(query.matchAll(/["“']([^"”']+)["”']/g))
+    .map((match) => match[1])
+    .find((value) => extensions.some((extension) => value.toLowerCase().endsWith(extension)));
+  if (quoted) return quoted;
+
+  const extensionPattern = extensions.map((extension) => extension.replace('.', '\\.')).join('|');
+  const pattern = new RegExp(`([A-Za-z]:[^\\s"'“”]+(?:${extensionPattern})|(?:\\.{1,2}[\\\\/])?[^\\s"'“”，。]+(?:${extensionPattern}))`, 'i');
+  return query.match(pattern)?.[1];
+}
+
+function inferFolderPath(query: string): string | undefined {
+  const quoted = query.match(/["“']([^"”']+)["”']/)?.[1];
+  if (quoted && !/\.[A-Za-z0-9]{1,8}$/.test(quoted)) return quoted;
+  const windowsPath = query.match(/([A-Za-z]:[^\s"'“”，。]+)/)?.[1];
+  if (windowsPath) return windowsPath;
+  const relativePath = query.match(/((?:\.{1,2}[\\/])?[^\s"'“”，。]+[\\/][^\s"'“”，。]+)/)?.[1];
+  return relativePath;
+}
+
+function inferPageRange(query: string): string | undefined {
+  return query.match(/(?:pages?|第)\s*(\d+\s*(?:-|到|至)\s*\d+|\d+)/i)?.[1]?.replace(/[到至]/g, '-');
+}
+
+function compactObject(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined && entry !== ''));
+}
+
+function clampNumber(value: number, min: number, max: number, fallback: number | undefined): number | undefined {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function chineseNumeralToNumber(value: string): number | undefined {
+  const digits: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+  if (value === '十') return 10;
+  const tenParts = value.split('十');
+  if (tenParts.length === 2) {
+    const tens = tenParts[0] ? digits[tenParts[0]] || 0 : 1;
+    const ones = tenParts[1] ? digits[tenParts[1]] || 0 : 0;
+    return tens * 10 + ones;
+  }
+  return digits[value];
 }
 
 function compareCandidates(a: TaskResolveCandidate, b: TaskResolveCandidate): number {

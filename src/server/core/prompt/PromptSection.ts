@@ -3,6 +3,12 @@
 export interface PromptContext {
   agentId: string;
   sessionId: string;
+  /** Per-run permission mode selected by the active AgentLoop. */
+  permissionMode?: string;
+  /** Per-run effort level selected by the active AgentLoop. */
+  effort?: string;
+  /** Hide tools that pause for direct user input from prompt/tool listings. */
+  hideUserInteractionTools?: boolean;
 }
 
 export interface SystemPromptSection {
@@ -10,7 +16,7 @@ export interface SystemPromptSection {
   name: string;
   /** Compute function that returns the section text */
   compute: (ctx: PromptContext) => string;
-  /** true = recompute every request, breaks prefix caching */
+  /** true = recompute every request for local section caching */
   cacheBreak: boolean;
 }
 

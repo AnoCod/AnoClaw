@@ -1,0 +1,58 @@
+appId: com.anoclaw.app
+productName: AnoClaw
+directories:
+  output: release9
+files:
+  - dist/**/*
+  - "!dist/**/*.map"
+  - "!dist/electron/bridge.js.map"
+  - src/public/**/*
+  - "!src/public/ts/**"
+  - "!src/public/tsconfig.json"
+  - "!src/public/js/**/*.js.map"
+  - src/electron/setup-wizard.html
+  - docs/**/*
+  - plugins/**/*
+  - plugins/**/node_modules/**/*
+  - skills/**/*
+  - node_modules/**/*
+  - "!**/*.map"
+  - "!node_modules/.cache"
+  - "!node_modules/@types"
+asar: true
+asarUnpack:
+  # dist/** — fully unpacked: Worker threads use ESM imports which resolve
+  # via real filesystem. Electron's asar-patched require() doesn't cover ESM.
+  - "dist/**"
+  # node_modules/** — fully unpacked: Worker thread code transitively imports
+  # core modules (e.g. PluginAPI → SessionManager → pino/ws/zod). ESM imports
+  # from Worker context cannot read from asar.
+  - "node_modules/**"
+  - "!node_modules/.cache"
+  - "!node_modules/@types"
+  # User-writable / agent-readable directories
+  - "plugins/**"
+  - "plugins/**/node_modules/**"
+  - "skills/**"
+  - "docs/**"
+extraResources:
+  - from: plugins
+    to: app.asar.unpacked/plugins
+    filter:
+      - "**/node_modules/**/*"
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: AnoClaw
+  installerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+extraMetadata:
+  main: dist/electron/bridge.cjs

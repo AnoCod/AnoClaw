@@ -99,14 +99,39 @@ export class InterruptController {
   }
 
   removeController(sessionId: string): void {
+    // Collect all descendant session IDs before deleting (avoid mutation during iteration)
+    const descendants = this._collectDescendants(sessionId);
+
+    // Remove the parent session itself
     this._controllers.delete(sessionId);
     this._reasons.delete(sessionId);
     this._parentMap.delete(sessionId);
     this._pendingMessages.delete(sessionId);
-    for (const [childId, parentId] of this._parentMap) {
-      if (parentId === sessionId) this._parentMap.delete(childId);
+
+    // Remove all descendant sessions recursively
+    for (const childId of descendants) {
+      this._controllers.delete(childId);
+      this._reasons.delete(childId);
+      this._parentMap.delete(childId);
+      this._pendingMessages.delete(childId);
     }
-    log.debug('Interrupt controller removed', { sid: sessionId });
+
+    log.debug('Interrupt controller removed', { sid: sessionId, descendants: descendants.size });
+  }
+
+  /** Collect all descendant session IDs (children, grandchildren, etc.) for the given session. */
+  private _collectDescendants(sessionId: string): Set<string> {
+    const result = new Set<string>();
+    for (const [childId, parentId] of this._parentMap) {
+      if (parentId === sessionId) {
+        result.add(childId);
+        // Recurse into grandchildren
+        for (const grandchildId of this._collectDescendants(childId)) {
+          result.add(grandchildId);
+        }
+      }
+    }
+    return result;
   }
 
   isInterrupted(sessionId: string): boolean {

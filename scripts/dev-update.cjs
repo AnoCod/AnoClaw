@@ -13,7 +13,7 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 const INSTALL_DIR = 'D:/ANOCLAW';
-const RELEASE_DIR = 'release9/win-unpacked';
+const RELEASE_DIR = process.env.ANOCLAW_RELEASE_DIR || 'release9/win-unpacked';
 
 // 1. Kill running instances
 console.log('[dev-update] Killing running AnoClaw...');
@@ -24,7 +24,7 @@ try {
 // 2. Verify source and target exist
 const srcAsar = path.join(RELEASE_DIR, 'resources', 'app.asar');
 if (!fs.existsSync(srcAsar)) {
-  console.error('[dev-update] ERROR: app.asar not found. Build release9 first.');
+  console.error('[dev-update] ERROR: app.asar not found. Build output first: ' + RELEASE_DIR);
   process.exit(1);
 }
 if (!fs.existsSync(INSTALL_DIR)) {

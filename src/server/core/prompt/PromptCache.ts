@@ -71,7 +71,10 @@ export class PromptCache {
 
   // ─── Conditional invalidation ───────────────────────────────
 
-  /** Clear memory section for a specific agent */
+  /** Clear memory section for a specific agent.
+   *  Cache key format: `agentId:sessionId:sectionName` where sectionName
+   *  is the PascalCase `name` field from the section object (e.g. `Memory`),
+   *  NOT the lowercase `sectionMeta.name` (e.g. `memory`). */
   onMemoryWritten(agentId: string): void {
     const prefix = `${agentId}:`;
     const suffix = ':Memory';

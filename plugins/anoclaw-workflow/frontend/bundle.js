@@ -1890,7 +1890,7 @@
         this._nodesLayer.appendChild(el);
       }
     }
-    /** Lightweight selection update — toggle class without full DOM rebuild */
+    /** Lightweight selection update - toggle class without full DOM rebuild */
     _updateNodeSelection() {
       this._nodesLayer.querySelectorAll(".workflow-node").forEach((el) => {
         const id = el.getAttribute("data-node-id");

@@ -1,10 +1,10 @@
-// AnoClaw MCP Plugin — World-class MCP (Model Context Protocol) integration.
+// AnoClaw MCP Plugin - World-class MCP (Model Context Protocol) integration.
 // Feature-parity with Claude Code's MCP: dynamic tool proxy, auto-reconnect,
 // health monitoring, full specification support, zero-config recovery.
 //
 // Architecture:
 //   MCPPlugin (PluginBase)
-//   ├── MCPClient per server — transport agnostic (stdio / sse / http)
+//   ├── MCPClient per server - transport agnostic (stdio / sse / http)
 //   │   ├── JSON-RPC 2.0 protocol engine
 //   │   ├── Tool discovery + execution proxy
 //   │   ├── Resource + prompt enumeration
@@ -26,7 +26,7 @@ const RECONNECT_CAP = 30_000;
 const HEALTH_INTERVAL = 30_000;
 
 // ═══════════════════════════════════════════════════════════════
-// JSON-RPC 2.0 engine — shared by all transports
+// JSON-RPC 2.0 engine - shared by all transports
 // ═══════════════════════════════════════════════════════════════
 
 class JsonRpcEngine {
@@ -80,7 +80,7 @@ class JsonRpcEngine {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// MCPClient — one per connected MCP server
+// MCPClient - one per connected MCP server
 // ═══════════════════════════════════════════════════════════════
 
 class MCPClient {
@@ -131,9 +131,9 @@ class MCPClient {
       this._connecting = false;
       this._reconnectAttempts = 0;
       this._plugin._emitState(this.name, 'connected');
-      this._plugin._addLog('info', this.name, `Connected — ${this._tools.length} tools, ${this._resources.length} resources, ${this._prompts.length} prompts`);
+      this._plugin._addLog('info', this.name, `Connected - ${this._tools.length} tools, ${this._resources.length} resources, ${this._prompts.length} prompts`);
       this._startHealthCheck();
-      this._plugin.log(`MCP server "${this.name}" connected — ${this._tools.length} tools, ${this._resources.length} resources`);
+      this._plugin.log(`MCP server "${this.name}" connected - ${this._tools.length} tools, ${this._resources.length} resources`);
     } catch (err) {
       this._connecting = false;
       this._plugin._emitState(this.name, 'error', err.message);
@@ -376,12 +376,12 @@ class MCPClient {
       ? new URL(url).origin + endpoint
       : endpoint;
 
-    // Start background SSE listener for server→client messages
+    // Start background SSE listener for server->client messages
     this._startSSEListener(baseUrl);
   }
 
   async _startSSEListener(sseUrl) {
-    // Keep SSE connection alive for server→client notifications
+    // Keep SSE connection alive for server->client notifications
     try {
       const resp = await fetch(sseUrl, { signal: AbortSignal.timeout(0) }); // no timeout
       const reader = resp.body?.getReader();
@@ -478,7 +478,7 @@ class MCPClient {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// MCP Plugin — PluginBase class
+// MCP Plugin - PluginBase class
 // ═══════════════════════════════════════════════════════════════
 
 export default class MCPPlugin extends PluginBase {
@@ -489,10 +489,10 @@ export default class MCPPlugin extends PluginBase {
   async onload() {
     this.log('MCP plugin activating');
 
-    // Load config from memory (first run → seed from filesystem if exists)
+    // Load config from memory (first run -> seed from filesystem if exists)
     const config = await this._loadConfig();
 
-    // Register agent tools — always available
+    // Register agent tools - always available
     await this.registerTool({
       name: 'MCPListTools',
       description: 'List all connected MCP servers and their available tools. Use this to discover what external tools you can call via MCPExecute.',
@@ -534,7 +534,7 @@ export default class MCPPlugin extends PluginBase {
       category: 'Integration',
     });
 
-    // Fix #1: MCPListPrompts — discover prompts across servers
+    // Fix #1: MCPListPrompts - discover prompts across servers
     await this.registerTool({
       name: 'MCPListPrompts',
       description: 'List all prompts exposed by connected MCP servers. Use MCPGetPrompt to invoke a specific prompt with arguments.',
@@ -548,7 +548,7 @@ export default class MCPPlugin extends PluginBase {
       category: 'Integration',
     });
 
-    // Fix #1: MCPGetPrompt — execute a prompt on an MCP server
+    // Fix #1: MCPGetPrompt - execute a prompt on an MCP server
     await this.registerTool({
       name: 'MCPGetPrompt',
       description: 'Execute a prompt on a connected MCP server by name, passing required arguments. Use MCPListPrompts first to discover available prompts and their arguments.',
@@ -584,7 +584,7 @@ export default class MCPPlugin extends PluginBase {
     await this.registerRoute('DELETE', '/api/mcp/servers/:id', 'handleDeleteServer');
     await this.registerRoute('POST', '/api/mcp/servers/:id/reconnect', 'handleReconnectServer');
     await this.registerRoute('GET', '/api/mcp/servers/:id', 'handleGetServer');
-    // Fix #3: PUT route — edit server config without delete+recreate
+    // Fix #3: PUT route - edit server config without delete+recreate
     await this.registerRoute('PUT', '/api/mcp/servers/:id', 'handleEditServer');
     // Connection logs endpoint
     await this.registerRoute('GET', '/api/mcp/logs', 'handleGetLogs');
@@ -602,15 +602,25 @@ export default class MCPPlugin extends PluginBase {
       }
     }
 
+    await this._mountSlotBadge();
     this.log(`MCP: ${this._clients.size} server(s) configured`);
   }
 
   async onunload() {
     this.log('MCP plugin deactivating');
+    await this.api.ui?.unmountAll('titlebar-right');
     for (const [name, client] of this._clients) {
       try { await client.disconnect(); } catch {}
     }
     this._clients.clear();
+  }
+
+  async _mountSlotBadge() {
+    const total = this._clients.size;
+    const connected = Array.from(this._clients.values()).filter(c => c.connected).length;
+    const tone = total === 0 ? 'warn' : connected > 0 ? 'ok' : 'danger';
+    const html = `<span class="anoclaw-slot-pill" data-tone="${tone}"><span class="slot-dot"></span><strong>MCP</strong><span>${connected}/${total}</span></span>`;
+    await this.api.ui?.mount('titlebar-right', html, { id: 'mcp-status', priority: 55, position: 'append', replace: true });
   }
 
   // ── Agent tool execution ──
@@ -630,7 +640,7 @@ export default class MCPPlugin extends PluginBase {
           if (client.connected) {
             for (const t of client.tools) {
               const schema = t.inputSchema?.properties
-                ? ` — params: ${Object.keys(t.inputSchema.properties).join(', ')}`
+                ? ` - params: ${Object.keys(t.inputSchema.properties).join(', ')}`
                 : '';
               lines.push(`  - \`${t.name}\`: ${(t.description || '').slice(0, 150)}${schema}`);
             }
@@ -646,7 +656,7 @@ export default class MCPPlugin extends PluginBase {
       case 'MCPExecute': {
         const client = this._clients.get(params.server);
         if (!client) return `MCP server "${params.server}" not found. Use MCPListTools to see available servers.`;
-        if (!client.connected) return `MCP server "${params.server}" is not connected. It may be reconnecting — try again shortly.`;
+        if (!client.connected) return `MCP server "${params.server}" is not connected. It may be reconnecting - try again shortly.`;
         return client.callTool(params.tool, params.arguments || {});
       }
 
@@ -655,7 +665,7 @@ export default class MCPPlugin extends PluginBase {
         const lines = [];
         for (const [name, client] of this._clients) {
           if (params.server && name !== params.server) continue;
-          lines.push(`## ${name} — ${client.resources.length} resources`);
+          lines.push(`## ${name} - ${client.resources.length} resources`);
           for (const r of client.resources) {
             lines.push(`  - \`${r.uri}\`: ${r.description || r.name || ''} ${r.mimeType ? `[${r.mimeType}]` : ''}`);
           }
@@ -677,11 +687,11 @@ export default class MCPPlugin extends PluginBase {
         for (const [name, client] of this._clients) {
           if (params.server && name !== params.server) continue;
           const status = client.connected ? 'connected' : 'disconnected';
-          lines.push(`## ${name} [${status}] — ${client.prompts.length} prompts`);
+          lines.push(`## ${name} [${status}] - ${client.prompts.length} prompts`);
           if (client.connected) {
             for (const p of client.prompts) {
               const argsStr = (p.arguments || []).map(a => `${a.name}${a.required ? '*' : ''}`).join(', ');
-              lines.push(`  - \`${p.name}\`: ${(p.description || '').slice(0, 150)}${argsStr ? ` — args: ${argsStr}` : ''}`);
+              lines.push(`  - \`${p.name}\`: ${(p.description || '').slice(0, 150)}${argsStr ? ` - args: ${argsStr}` : ''}`);
             }
             if (client.prompts.length === 0) lines.push('  (no prompts exposed)');
           } else {
@@ -695,7 +705,7 @@ export default class MCPPlugin extends PluginBase {
       case 'MCPGetPrompt': {
         const client = this._clients.get(params.server);
         if (!client) return `MCP server "${params.server}" not found. Use MCPListPrompts to see available servers.`;
-        if (!client.connected) return `MCP server "${params.server}" is not connected. It may be reconnecting — try again shortly.`;
+        if (!client.connected) return `MCP server "${params.server}" is not connected. It may be reconnecting - try again shortly.`;
         return client.getPrompt(params.prompt, params.arguments || {});
       }
 
@@ -815,7 +825,7 @@ export default class MCPPlugin extends PluginBase {
     }
   }
 
-  // Fix #3: Edit server — update config and reconnect
+  // Fix #3: Edit server - update config and reconnect
   async handleEditServer(req) {
     const id = req.params?.id || '';
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
@@ -826,7 +836,7 @@ export default class MCPPlugin extends PluginBase {
     if (idx < 0) return { status: 404, body: { error: 'Server not found' } };
 
     const oldEntry = config[idx];
-    // Merge updates — only overwrite provided fields
+    // Merge updates - only overwrite provided fields
     const updated = {
       ...oldEntry,
       name: body.name || oldEntry.name,
@@ -874,7 +884,7 @@ export default class MCPPlugin extends PluginBase {
     }).catch(() => {});
   }
 
-  // Connection log ring buffer — last 200 entries for frontend
+  // Connection log ring buffer - last 200 entries for frontend
 
   _addLog(level, server, message) {
     const entry = { level, server, message, timestamp: Date.now() };

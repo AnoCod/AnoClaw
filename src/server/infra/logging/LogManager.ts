@@ -135,9 +135,8 @@ export class LogManager extends EventEmitter {
   /** Pino rotating-file loggers for per-category file output */
   private _pinoLoggers: Map<string, pino.Logger> = new Map();
 
-  /** Write stream for api_calls.jsonl */
-  private _apiCallsStream: fs.WriteStream | null = null;
-  private _apiCallsSize = 0;
+  /** Write stream for api_calls.jsonl (rotating) */
+  private _apiCallsStream: RotatingFileStream | null = null;
 
   // Separate ring buffer for all entries (for cross-category searching)
   private _allEntries: LogEntry[] = [];
@@ -374,57 +373,22 @@ export class LogManager extends EventEmitter {
 
   private writeApiCall(entry: LogEntry): void {
     try {
-      const line = JSON.stringify(entry) + '\n';
-      const lineBytes = Buffer.byteLength(line, 'utf-8');
-
-      // Rotate api_calls.jsonl if needed
-      if (this._apiCallsStream && this._apiCallsSize + lineBytes > MAX_FILE_BYTES) {
-        this.rotateApiCallsFile();
-      }
-
-      // Lazy-initialize stream
+      // Lazy-initialize rotating stream
       if (!this._apiCallsStream) {
-        const filePath = path.resolve(process.cwd(), this._logDir, API_CALLS_FILE);
-        const dir = path.dirname(filePath);
-        fs.mkdirSync(dir, { recursive: true });
-        this._apiCallsStream = fs.createWriteStream(filePath, { flags: 'a' });
-        this._apiCallsSize = fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
+        const absDir = path.resolve(process.cwd(), this._logDir);
+        fs.mkdirSync(absDir, { recursive: true });
+        this._apiCallsStream = createStream(API_CALLS_FILE, {
+          size: `${MAX_FILE_BYTES / (1024 * 1024)}M`,
+          maxFiles: MAX_FILES,
+          path: absDir,
+        });
       }
 
+      const line = JSON.stringify(entry) + '\n';
       this._apiCallsStream.write(line);
-      this._apiCallsSize += lineBytes;
     } catch {
       // If API call logging fails, emit to stderr but don't crash
       console.error('[LogManager] Failed to write API call log entry');
-    }
-  }
-
-  private rotateApiCallsFile(): void {
-    if (this._apiCallsStream) {
-      this._apiCallsStream.end();
-      this._apiCallsStream = null;
-      this._apiCallsSize = 0;
-    }
-
-    const basePath = path.resolve(process.cwd(), this._logDir, API_CALLS_FILE);
-
-    // Rotate existing files: api_calls.jsonl → api_calls.1.jsonl → api_calls.2.jsonl ...
-    for (let i = MAX_FILES - 1; i >= 1; i--) {
-      const oldPath = i === 1 ? basePath : basePath.replace(/\.jsonl$/, `.${i - 1}.jsonl`);
-      const newPath = basePath.replace(/\.jsonl$/, `.${i}.jsonl`);
-      try {
-        if (fs.existsSync(oldPath)) fs.renameSync(oldPath, newPath);
-      } catch {
-        // Best effort rotation
-      }
-    }
-
-    // Oldest file beyond MAX_FILES gets deleted
-    const oldestPath = basePath.replace(/\.jsonl$/, `.${MAX_FILES}.jsonl`);
-    try {
-      if (fs.existsSync(oldestPath)) fs.unlinkSync(oldestPath);
-    } catch {
-      // Best effort
     }
   }
 

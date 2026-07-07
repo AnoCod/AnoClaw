@@ -9,9 +9,12 @@
  */
 
 import type { Message, SessionMeta } from '../../../shared/types/session.js';
-import { messageToJsonlEvents, jsonlEventsToMessages } from '../../../shared/types/session.js';
+import { messageToJsonlEvents, jsonlEventsToMessages } from '../../../shared/serialization/jsonl-converters.js';
 import type { ISessionRepository } from '../../core/session/ISessionRepository.js';
 import { SessionStore } from '../../core/session/SessionStore.js';
+
+/** Null UUID used as parentUuid when an event has no predecessor. */
+const NULL_UUID = '00000000-0000-0000-0000-000000000000';
 
 /**
  * JSONL-backed implementation of ISessionRepository.
@@ -43,7 +46,7 @@ export class JsonlSessionRepository implements ISessionRepository {
 
   /** Append a message to the session. */
   async appendMessage(sessionId: string, message: Message): Promise<void> {
-    const events = messageToJsonlEvents(message, '00000000-0000-0000-0000-000000000000');
+    const events = messageToJsonlEvents(message, NULL_UUID);
     for (const ev of events) {
       await this._store.persistEvent(sessionId, ev);
     }
@@ -53,7 +56,7 @@ export class JsonlSessionRepository implements ISessionRepository {
   async rewriteMessages(sessionId: string, messages: Message[]): Promise<void> {
     await this._store.truncateSession(sessionId);
     for (const message of messages) {
-      const events = messageToJsonlEvents(message, '00000000-0000-0000-0000-000000000000');
+      const events = messageToJsonlEvents(message, NULL_UUID);
       for (const ev of events) {
         await this._store.persistEvent(sessionId, ev);
       }
@@ -62,7 +65,7 @@ export class JsonlSessionRepository implements ISessionRepository {
 
   /** List all session metadata summaries (via recovery scan). */
   async listSessions(): Promise<SessionMeta[]> {
-    const sessions = await this._store.recoverSessions('');
+    const sessions = await this._store.recoverSessions();
     return sessions.map((s) => s.toJSON() as unknown as SessionMeta);
   }
 

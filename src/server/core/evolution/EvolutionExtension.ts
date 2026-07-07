@@ -38,6 +38,9 @@ export class EvolutionExtension implements Extension {
   /** Per-session tool call buffer for M1 pattern detection */
   private _toolBuffers = new Map<string, Array<{ tool: string; params: string[] }>>();
 
+  /** Per-session lock for _persistTags to prevent concurrent metadata writes */
+  private _tagLocks = new Map<string, Promise<void>>();
+
   // ── M1: Tool sequence tracking ──
 
   private _addToolToBuffer(sessionId: string, toolName: string): void {
@@ -61,13 +64,16 @@ export class EvolutionExtension implements Extension {
       this._toolBuffers.delete(sessionId);
       return;
     }
-    const mgr = EvolutionManager.getInstance();
-    const sig = buf.map(b => ({ tool: b.tool, params: b.params }));
-    await mgr.patterns.recordToolSequence(sessionId, sig, 0);
-    this._toolBuffers.delete(sessionId);
+    try {
+      const mgr = EvolutionManager.getInstance();
+      const sig = buf.map(b => ({ tool: b.tool, params: b.params }));
+      await mgr.patterns.recordToolSequence(sessionId, sig, 0);
 
-    // Check if any pattern reached the skill-creation threshold
-    await this._checkSkillCandidates();
+      // Check if any pattern reached the skill-creation threshold
+      await this._checkSkillCandidates();
+    } finally {
+      this._toolBuffers.delete(sessionId);
+    }
   }
 
   private async _checkSkillCandidates(): Promise<void> {
@@ -113,11 +119,11 @@ export class EvolutionExtension implements Extension {
     this._unsubLoopCompleted = TypedEventBus.on('loop:completed', async (payload) => {
       mgr.tagger.addTag(payload.sessionId, 'completed', 'auto', 0.9);
       await this._flushToolBuffer(payload.sessionId);
-      this._persistTags(payload.sessionId, mgr);
+      await this._persistTags(payload.sessionId, mgr);
     });
 
     // ── M2: Keyword extraction → persist to session metadata ──
-    this._unsubKeywordTurn = TypedEventBus.on('loop:keyword_turn', (payload) => {
+    this._unsubKeywordTurn = TypedEventBus.on('loop:keyword_turn', async (payload) => {
       const result = mgr.keywords.extract(
         payload.userMessages,
         payload.assistantMessages,
@@ -142,7 +148,7 @@ export class EvolutionExtension implements Extension {
       for (const tag of domainTags) {
         mgr.tagger.addTag(payload.sessionId, tag, 'auto', 0.7);
       }
-      this._persistTags(payload.sessionId, mgr);
+      await this._persistTags(payload.sessionId, mgr);
     });
 
     // ── M3: Periodic auto-flush ──
@@ -182,15 +188,28 @@ export class EvolutionExtension implements Extension {
 
   // ── M4 helpers ──
 
-  private _persistTags(sessionId: string, mgr: EvolutionManager): void {
-    const tags = mgr.tagger.toJSON(sessionId);
-    if (tags.length > 0) {
-      try {
+  private async _persistTags(sessionId: string, mgr: EvolutionManager): Promise<void> {
+    // Serialize per-session to prevent concurrent tag writes racing
+    const prev = this._tagLocks.get(sessionId) || Promise.resolve();
+    let release!: () => void;
+    const next = new Promise<void>(r => { release = r; });
+    this._tagLocks.set(sessionId, prev.then(() => next));
+
+    try {
+      await prev;
+      const tags = mgr.tagger.toJSON(sessionId);
+      if (tags.length > 0) {
         const session = SessionManager.getInstance().session(sessionId);
         if (session) {
           session.setMetadata('evolutionTags', tags);
         }
-      } catch { /* non-critical */ }
+      }
+    } catch { /* non-critical */ }
+    finally {
+      release();
+      if (this._tagLocks.get(sessionId) === prev.then(() => next)) {
+        this._tagLocks.delete(sessionId);
+      }
     }
   }
 

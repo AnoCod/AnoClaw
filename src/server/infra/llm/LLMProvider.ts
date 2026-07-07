@@ -3,6 +3,7 @@
 
 import { EventEmitter } from 'events';
 import type { LLMOptions, LLMStreamEvent, LLMResponse } from '../../../shared/types/llm.js';
+import { TokenCounter } from '../../core/context/TokenCounter.js';
 
 export abstract class LLMProvider extends EventEmitter {
   /**
@@ -34,12 +35,11 @@ export abstract class LLMProvider extends EventEmitter {
   abstract providerName(): string;
 
   /**
-   * Rough token-count heuristic: ~4 characters per token.
-   * Subclasses may override with a more accurate tokenizer.
+   * Token estimation using the unified TokenCounter (gpt-tokenizer with heuristic fallback).
+   * Subclasses may override with a more accurate tokenizer if needed.
    */
   protected estimateTokens(text: string): number {
-    if (!text) return 0;
-    return Math.ceil(text.length / 4);
+    return TokenCounter.estimate(text);
   }
 
   /**

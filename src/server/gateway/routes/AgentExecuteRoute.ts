@@ -7,14 +7,15 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RouteMatch, RouteHandler } from '../RouteHandler.js';
 import type { ApiToken } from '../ApiAuth.js';
-import { sendJson, readBody } from '../RouteHelpers.js';
+import { sendJson, readBody, sendRedirect } from '../RouteHelpers.js';
 import { SessionManager } from '../../core/session/SessionManager.js';
 import { AgentRuntime } from '../../core/agent/AgentRuntime.js';
 import { WsMessageType } from '../../../shared/types/events.js';
 import type { Message } from '../../../shared/types/session.js';
 import { MessageRole } from '../../../shared/types/session.js';
-import { DEFAULT_MAIN_AGENT_ID } from '../../../shared/constants.js';
 import { WsServer } from '../../infra/network/WsServer.js';
+import { selectRunnableAgent } from '../../core/agent/AgentSelection.js';
+import { resolveSessionEffort, resolveSessionPermissionMode } from '../../core/agent/PermissionModePolicy.js';
 
 /** Resolve root session ID for WebSocket routing */
 function resolveRootSessionId(sessionId: string): string {
@@ -29,9 +30,10 @@ function resolveRootSessionId(sessionId: string): string {
 
 export class AgentExecuteRoute implements RouteHandler {
   readonly method = 'POST';
-  readonly path = '/api/v1/agent/execute';
+  readonly path = '/api/v1/agents/execute';
   readonly description = 'Submit a task to an agent. Returns the complete response. Streaming events forwarded via WebSocket. Set deleteOnComplete=true to auto-cleanup the session after execution.';
   readonly category = 'Agent';
+  readonly permission = 'messages:send';
 
   async handle(
     _match: RouteMatch,
@@ -43,18 +45,24 @@ export class AgentExecuteRoute implements RouteHandler {
     let sessionId = '';
 
     try {
+      // 1. Parse request body
       const body = await readBody(req);
       const task = body.task as string | undefined;
       if (!task) {
         sendJson(res, 400, { error: 'Missing "task" field' });
         return true;
       }
-      const agentId = (body.agentId as string) || DEFAULT_MAIN_AGENT_ID;
+      const agentSelection = selectRunnableAgent(body.agentId as string | undefined);
+      if (!agentSelection.ok || !agentSelection.agentId) {
+        sendJson(res, 409, { error: 'Agent Required', message: agentSelection.message || 'No runnable agent is configured' });
+        return true;
+      }
+      const agentId = agentSelection.agentId;
       const deleteOnComplete = body.deleteOnComplete === true;
 
+      // 2. Find or create a session
       const sm = SessionManager.getInstance();
       const requestedId = (body.sessionId as string) || '';
-      // Check if a session with this ID already exists
       const existing = requestedId ? sm.session(requestedId) : null;
 
       if (existing) {
@@ -65,6 +73,7 @@ export class AgentExecuteRoute implements RouteHandler {
         sessionCreated = true;
       }
 
+      // 3. Append the task as a system message
       const msg: Message = {
         id: `exec-${Date.now()}`,
         sessionId,
@@ -76,13 +85,18 @@ export class AgentExecuteRoute implements RouteHandler {
       };
       await sm.appendMessage(sessionId, msg);
 
+      // 4. Run the full ReAct loop, streaming to WebSocket
       const history = await sm.getHistory(sessionId);
       const runtime = AgentRuntime.getInstance();
       const ws = WsServer.getInstance();
       const rootId = resolveRootSessionId(sessionId);
 
       let fullContent = '';
-      for await (const event of runtime.processMessage(sessionId, agentId, msg, history)) {
+      const loopOptions = {
+        permissionMode: resolveSessionPermissionMode(sm, sessionId, body.mode),
+        effort: resolveSessionEffort(sm, sessionId, body.effort),
+      };
+      for await (const event of runtime.processMessage(sessionId, agentId, msg, history, loopOptions)) {
         if (ws.isConnected(rootId)) {
           ws.send(rootId, event as Record<string, unknown>);
         }
@@ -91,7 +105,7 @@ export class AgentExecuteRoute implements RouteHandler {
         }
       }
 
-      // Ephemeral: delete session if we created it
+      // 5. Ephemeral cleanup: delete session if we created it and caller requested it
       if (deleteOnComplete && sessionCreated) {
         try { await sm.archiveSession(sessionId); } catch {}
       }
@@ -100,12 +114,23 @@ export class AgentExecuteRoute implements RouteHandler {
       return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      // On error, still clean up ephemeral session
+      // 6. On error, still clean up ephemeral session to avoid leaking
       if (sessionCreated && sessionId) {
         try { await SessionManager.getInstance().archiveSession(sessionId); } catch {}
       }
       sendJson(res, 500, { error: 'Agent execute failed', message: msg });
       return true;
     }
+  }
+}
+
+/** Redirect old singular path to new plural path */
+export class AgentExecuteRedirectRoute implements RouteHandler {
+  readonly method = 'POST';
+  readonly path = '/api/v1/agent/execute';
+
+  handle(_match: RouteMatch, _req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): boolean {
+    sendRedirect(res, '/api/v1/agents/execute');
+    return true;
   }
 }

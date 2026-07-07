@@ -12,12 +12,13 @@ import {
   API_BACKOFF_BASE_MS,
   API_BACKOFF_MAX_MS,
 } from '../../../shared/constants.js';
-import { estimateTokens, interruptibleSleep } from './AgentLoopHelpers.js';
+import { estimateTokens, interruptibleSleep, truncateMessagesToTail } from './AgentLoopHelpers.js';
 import type { ApiMessage } from './AgentLoopHelpers.js';
 import { pickFunMessage } from './StatusMessages.js';
 import { extensionPoints } from '../plugin-host/ExtensionPoints.js';
 import { compactAndRebuildMessages } from '../context/index.js';
 import { TypedEventBus } from '../events/index.js';
+import type { SummarizerFn } from '../context/ContextCompressor.js';
 
 export interface LLMCallResult {
   assistantMessage: ApiMessage | null;
@@ -95,6 +96,7 @@ export interface LLMCallConfig {
   contextWindow: number;
   turn: number;
   postWait: boolean;
+  summarizer?: SummarizerFn;
 }
 
 /**
@@ -211,7 +213,7 @@ export async function* callLLMWithRetry(
             };
             toolCallMap.set(key, merged);
             if (merged.toolName) {
-              yield { type: SSEEventType.ToolCall, id: event.toolId || '', name: merged.toolName, input: merged.toolInput };
+              yield { type: SSEEventType.ToolCall, id: key, name: merged.toolName, input: merged.toolInput };
             }
             break;
           }
@@ -277,12 +279,9 @@ export async function* callLLMWithRetry(
       // 413 / context too long → compact and retry
       if (errMsg.includes('413') || errMsg.includes('too long') || errMsg.includes('context')) {
         yield { type: SSEEventType.Think, content: '(Context too long, compressing and retrying...)' };
-        const compaction = await compactAndRebuildMessages(messages, config.contextWindow, config.sessionId, 15);
+        const compaction = await compactAndRebuildMessages(messages, config.contextWindow, config.sessionId, 15, config.summarizer);
         if (!compaction.wasCompacted) {
-          const sysMsg = messages[0];
-          const tail = messages.slice(-2);
-          messages.length = 0;
-          messages.push(sysMsg, ...tail);
+          truncateMessagesToTail(messages, 2);
         }
         continue;
       }
@@ -297,12 +296,9 @@ export async function* callLLMWithRetry(
       if (attempt < RETRY_MAX && RETRYABLE.some((r) => r.test(errMsg))) {
         if (/timeout|ETIMEDOUT|ECONN|socket|fetch.*failed/i.test(errMsg) && messages.length > 10) {
           yield { type: SSEEventType.Think, content: '(Timeout detected, compressing context before retry...)' };
-          const compaction = await compactAndRebuildMessages(messages, config.contextWindow, config.sessionId, 8);
+          const compaction = await compactAndRebuildMessages(messages, config.contextWindow, config.sessionId, 8, config.summarizer);
           if (!compaction.wasCompacted) {
-            const sysMsg = messages[0];
-            const tail = messages.slice(-8);
-            messages.length = 0;
-            messages.push(sysMsg, ...tail);
+            truncateMessagesToTail(messages, 8);
           }
           yield { type: SSEEventType.Think, content: '(Context compressed, retrying...)' };
         }

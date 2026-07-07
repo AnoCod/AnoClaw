@@ -130,9 +130,9 @@ function requireWs(sessionId: string, res: ServerResponse, sendJson: SendJson): 
 function requireWsAny(res: ServerResponse, sendJson: SendJson): boolean;
 ```
 
-### GatewayRouter (Singleton)
+### GatewayRouter (Singleton) — PLANNED
 
-Bridges external platform messages (Telegram, Discord, WeChat, etc.) into AnoClaw agent sessions.
+**Status: Planned, not yet implemented.** Will bridge external platform messages (Telegram, Discord, WeChat, etc.) into AnoClaw agent sessions.
 
 ```ts
 class GatewayRouter extends EventEmitter {

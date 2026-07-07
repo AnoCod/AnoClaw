@@ -20,6 +20,10 @@ interface KeyState {
   tpm: number;
   requestTimestamps: number[];  // sliding window of request times (ms)
   tokenUsageTimestamps: Array<{ ts: number; tokens: number }>; // sliding window
+  // Head indices for O(1) "shift" — we never remove items, just advance the pointer.
+  // GC-friendly: periodically compact when head exceeds a threshold.
+  reqHead: number;
+  tokHead: number;
   remainingRequests: number;
   remainingTokens: number;
   resetAt: number;
@@ -32,11 +36,13 @@ const DEFAULT_TPM = 50_000_000; // tokens per minute — effectively unlimited f
 const WINDOW_MS = 60_000;    // 1 minute sliding window
 const POLL_INTERVAL_MS = 50; // how often to recheck when waiting
 
-// ── Helper: truncate API key to a safe prefix for logging ──
+// ── Helper: hash API key to a safe prefix for logging ──
+
+import { createHash } from 'node:crypto';
 
 function keyPrefix(apiKey: string): string {
   if (!apiKey) return 'anon';
-  return apiKey.slice(0, 8) + '...';
+  return createHash('sha256').update(apiKey).digest('hex').slice(0, 16);
 }
 
 // ── APIScheduler ──
@@ -87,8 +93,10 @@ export class APIScheduler extends EventEmitter {
       const now = Date.now();
       this._prune(state, now);
 
-      const requestCount = state.requestTimestamps.length;
-      const tokenSum = state.tokenUsageTimestamps.reduce((s, e) => s + e.tokens, 0);
+      const requestCount = state.requestTimestamps.length - state.reqHead;
+      const tokenSum = state.tokenUsageTimestamps
+        .slice(state.tokHead)
+        .reduce((s, e) => s + e.tokens, 0);
 
       const rpmOk = requestCount < state.rpm;
       const tpmOk = (tokenSum + estimatedTokens) <= state.tpm;
@@ -105,16 +113,16 @@ export class APIScheduler extends EventEmitter {
       // Calculate how long to wait
       let waitMs = POLL_INTERVAL_MS;
 
-      if (!rpmOk && state.requestTimestamps.length > 0) {
+      if (!rpmOk && state.reqHead < state.requestTimestamps.length) {
         // Wait until the oldest request expires from the window
-        const oldest = state.requestTimestamps[0];
+        const oldest = state.requestTimestamps[state.reqHead];
         const expiresAt = oldest + WINDOW_MS;
         waitMs = Math.max(waitMs, expiresAt - now + 10);
       }
 
-      if (!tpmOk && state.tokenUsageTimestamps.length > 0) {
+      if (!tpmOk && state.tokHead < state.tokenUsageTimestamps.length) {
         // Wait until enough token budget frees up
-        const oldest = state.tokenUsageTimestamps[0];
+        const oldest = state.tokenUsageTimestamps[state.tokHead];
         const expiresAt = oldest.ts + WINDOW_MS;
         waitMs = Math.max(waitMs, expiresAt - now + 10);
       }
@@ -217,24 +225,37 @@ export class APIScheduler extends EventEmitter {
       tpm: DEFAULT_TPM,
       requestTimestamps: [],
       tokenUsageTimestamps: [],
+      reqHead: 0,
+      tokHead: 0,
       remainingRequests: DEFAULT_RPM,
       remainingTokens: DEFAULT_TPM,
       resetAt: Date.now() + WINDOW_MS,
     };
   }
 
-  /** Remove entries outside the sliding window. */
+  /** Remove entries outside the sliding window using head pointers (O(1) amortized). */
   private _prune(state: KeyState, now: number): void {
     const cutoff = now - WINDOW_MS;
 
-    // Prune request timestamps
-    while (state.requestTimestamps.length > 0 && state.requestTimestamps[0] < cutoff) {
-      state.requestTimestamps.shift();
+    // Prune request timestamps — advance head pointer over expired entries
+    while (state.reqHead < state.requestTimestamps.length && state.requestTimestamps[state.reqHead] < cutoff) {
+      state.reqHead++;
     }
 
-    // Prune token usage timestamps
-    while (state.tokenUsageTimestamps.length > 0 && state.tokenUsageTimestamps[0].ts < cutoff) {
-      state.tokenUsageTimestamps.shift();
+    // Compact when head pointer drifts past threshold
+    if (state.reqHead > 256) {
+      state.requestTimestamps = state.requestTimestamps.slice(state.reqHead);
+      state.reqHead = 0;
+    }
+
+    // Prune token usage timestamps — advance head pointer over expired entries
+    while (state.tokHead < state.tokenUsageTimestamps.length && state.tokenUsageTimestamps[state.tokHead].ts < cutoff) {
+      state.tokHead++;
+    }
+
+    if (state.tokHead > 256) {
+      state.tokenUsageTimestamps = state.tokenUsageTimestamps.slice(state.tokHead);
+      state.tokHead = 0;
     }
   }
 }

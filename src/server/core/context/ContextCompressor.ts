@@ -182,6 +182,7 @@ export class ContextCompressor extends EventEmitter {
     messages: readonly Message[],
     contextWindow: number = DEFAULT_CONTEXT_WINDOW,
     threshold: number = COMPRESSION_TRIGGER_RATIO,
+    summarizer?: SummarizerFn,
   ): Promise<CompactionResult> {
     const msgs = [...messages]; // work on a mutable copy
     let summary: string | null = null;
@@ -213,7 +214,7 @@ export class ContextCompressor extends EventEmitter {
 
     // L4: LLM summary compression — only when strategy says so
     if (level <= CompressionLevel.L4_LLMSummary) {
-      const compacted = await this.generateSummary(pruned, contextWindow, threshold);
+      const compacted = await this.generateSummary(pruned, contextWindow, threshold, summarizer);
       if (compacted.wasCompacted) {
         summary = compacted.summary;
         wasCompacted = true;
@@ -359,6 +360,7 @@ export class ContextCompressor extends EventEmitter {
     messages: Message[],
     contextWindow: number,
     threshold: number = COMPRESSION_TRIGGER_RATIO,
+    summarizer?: SummarizerFn,
   ): Promise<{ messages: Message[]; summary: string | null; wasCompacted: boolean }> {
     const estimatedTokens = TokenCounter.estimateMessages(messages);
     if (estimatedTokens < contextWindow * threshold) {
@@ -401,15 +403,18 @@ export class ContextCompressor extends EventEmitter {
 
     // Call summarizer with timeout
     let summaryText: string | null = null;
-    if (this._summarizer) {
+    const summarize = summarizer ?? this._summarizer;
+    if (summarize) {
+      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
       try {
-        const timeoutPromise = new Promise<null>((_, reject) =>
-          setTimeout(() => reject(new Error('Summarizer timeout')), COMPACTION_TIMEOUT_MS)
-        );
+        const timeoutPromise = new Promise<null>((_, reject) => {
+          timeoutHandle = setTimeout(() => reject(new Error('Summarizer timeout')), COMPACTION_TIMEOUT_MS);
+        });
         summaryText = await Promise.race([
-          this._summarizer(messages.slice(1, messages.length - tailCount), summaryBudget),
+          summarize(messages.slice(1, messages.length - tailCount), summaryBudget),
           timeoutPromise,
         ]);
+        if (timeoutHandle) clearTimeout(timeoutHandle);
       } catch (e) {
         createLogger('anochat.llm').warn('Context compressor summarizer failed', { error: (e as Error).message });
         summaryText = this.buildFallbackSummary(messages, tailCount);

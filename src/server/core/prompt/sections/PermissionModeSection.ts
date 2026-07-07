@@ -1,60 +1,52 @@
-// PermissionModeSection — current permission mode (Ask/AutoEdit/Plan/Auto)
-// For sub-sessions (agent-to-agent), always forces Auto + HIGH effort.
-// cacheBreak: true — recompute every turn so mode changes (Ask→Auto etc.) reflect immediately
 import { SystemPromptSection, PromptContext } from '../PromptSection.js';
 import { SettingsManager } from '../../../infra/storage/SettingsManager.js';
 import { SessionManager } from '../../session/index.js';
-
+import { normalizePermissionMode } from '../../agent/PermissionModePolicy.js';
 
 export const sectionMeta = {
   name: 'permissionmode',
   type: 'dynamic' as const,
   priority: 190,
 };
+
 export function createPermissionModeSection(): SystemPromptSection {
   return {
     name: 'PermissionMode',
     cacheBreak: true,
     compute: (ctx: PromptContext) => {
       const settings = SettingsManager.getInstance();
+      const session = SessionManager.getInstance().session(ctx.sessionId);
+      const isSubSession = session ? !session.isMain() : false;
 
-      // Sub-sessions force Auto + HIGH effort ──
-      // Agent-to-agent communication must not be blocked by Ask/Plan mode.
-      let mode: string;
-      let effort: string;
+      let mode = isSubSession ? 'Auto' : (ctx.permissionMode || settings.get<string>('ui.permissionMode', 'Auto'));
+      let effort = isSubSession ? 'HIGH' : (ctx.effort || settings.get<string>('ui.effort', 'NORMAL'));
 
-      const sessionManager = SessionManager.getInstance();
-      const session = sessionManager.session(ctx.sessionId);
-      const isSubSession = session ? !session.isMain() : ctx.sessionId.includes('-');
-
-      if (isSubSession) {
-        mode = 'Auto';
-        effort = 'HIGH';
-      } else {
-        mode = settings.get<string>('ui.permissionMode', 'Auto');
-        effort = settings.get<string>('ui.effort', 'NORMAL');
-      }
+      mode = normalizePermissionMode(mode);
+      effort = normalizeEffort(effort);
 
       const modePrompts: Record<string, string> = {
-        Ask: 'You are in ASK mode. Ask the user for confirmation before making ANY edit. Do not write or modify files without explicit approval.',
-        AutoEdit: 'You are in AUTO_EDIT mode. You may edit files directly without asking for confirmation. Defer to tool risk levels for other operations.',
-        Plan: 'You are in PLAN mode. Before making any code changes, first explore the codebase and present a plan. Wait for the user to approve the plan before implementing.',
-        Auto: 'You are in AUTO mode. Choose the best permission strategy for each task — ask for risky operations, auto-approve safe ones. Follow tool risk levels as guidance.',
+        Ask: 'You are in ASK mode. The system will pop up confirmation dialogs for non-read-only tools. Call tools directly — no need to ask for permission in text.',
+        AutoEdit: 'You are in AUTO_EDIT mode. All tools are auto-approved. Call any tool without confirmation.',
+        Plan: 'You are in PLAN mode. Explore first, present an implementation plan, and do not change files.',
+        Auto: 'You are in SAFE_AUTO mode. Low/Medium risk tools (Edit, Write) are auto-approved. High-risk tools (Bash) will trigger a confirmation dialog. Call tools directly.',
       };
 
       const effortPrompts: Record<string, string> = {
-        HIGH: 'Effort level: HIGH. Be thorough. Verify your work, test edge cases, don\'t cut corners. Prefer verified correctness over speed.',
-        NORMAL: 'Effort level: NORMAL. Keep it efficient. Prefer simple solutions, don\'t over-engineer. Default to the most straightforward approach.',
+        HIGH: 'Effort level: HIGH. Be thorough, verify edge cases, and prefer correctness over speed.',
+        NORMAL: 'Effort level: NORMAL. Keep work efficient and avoid over-engineering.',
       };
 
       return [
-        '# Permission mode',
+        '# Permission Mode',
         modePrompts[mode] || modePrompts.Auto,
         effortPrompts[effort] || effortPrompts.NORMAL,
         '',
-        'Your current permission mode determines how you handle file edits and',
-        'tool execution. Respect it consistently throughout this session.',
+        'Respect this mode consistently for the current session.',
       ].join('\n');
     },
   };
+}
+
+function normalizeEffort(effort: string): string {
+  return effort.toUpperCase() === 'HIGH' ? 'HIGH' : 'NORMAL';
 }

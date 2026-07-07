@@ -1,6 +1,8 @@
-// AnoClaw Cinema — SubSessionCardDelegate: single annotation line
-// "SUB-AGENT · Agent Beta dispatched · code review"
-// Click navigates to sub-session. Shows parent session info when available.
+/**
+ * SubSessionCardDelegate — single annotation line for sub-agent delegation.
+ * "SUB-AGENT · Agent Beta dispatched · code review"
+ * Click navigates to sub-session. Shows parent session info when available.
+ */
 
 export interface SubSessionCardData {
   subSessionId: string;
@@ -78,7 +80,7 @@ export class SubSessionCardDelegate {
       const parentLabel = this._data.parentSessionTitle
         ? this._data.parentSessionTitle.slice(0, 20)
         : this._data.parentSessionId.slice(0, 8);
-      parentLink.textContent = `↩ ${parentLabel}`;
+      parentLink.textContent = `<- ${parentLabel}`;
       parentLink.title = `Parent: ${this._data.parentSessionId}`;
       parentLink.addEventListener('click', (e) => {
         e.stopPropagation();

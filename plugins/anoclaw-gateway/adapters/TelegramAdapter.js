@@ -1,4 +1,4 @@
-// TelegramAdapter — connects to Telegram Bot API via long-polling or webhook.
+// TelegramAdapter - connects to Telegram Bot API via long-polling or webhook.
 // Outbound: HTTPS POST /bot<token>/<method> (sendMessage, sendPhoto, sendDocument, sendInlineKeyboard)
 // Inbound: Long-poll GET /bot<token>/getUpdates (30s timeout) OR webhook POST
 // Supports: text, images, documents, stickers, audio, video, inline keyboards, callback queries
@@ -11,7 +11,7 @@ const path = require('path');
 const fs = require('fs');
 
 // ═══════════════════════════════════════════════════════════════
-// Deduplication cache — prevents processing the same update twice
+// Deduplication cache - prevents processing the same update twice
 // ═══════════════════════════════════════════════════════════════
 
 const DEDUP_MAX = 1000;

@@ -741,6 +741,50 @@
   line-height: 1.6;
 }
 
+.cinema-welcome-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.cinema-welcome-primary,
+.cinema-welcome-secondary {
+  min-height: 32px;
+  padding: 0 14px;
+  border-radius: 6px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.cinema-welcome-primary {
+  color: var(--color-on-accent, #000);
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent);
+}
+
+.cinema-welcome-primary:hover {
+  background: var(--color-accent-hover);
+}
+
+.cinema-welcome-secondary {
+  color: var(--color-text-secondary);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--color-hairline);
+}
+
+.cinema-welcome-secondary:hover {
+  color: var(--color-text-primary);
+  background: var(--color-overlay-hover);
+  border-color: var(--color-hairline-strong);
+}
+
+.cinema-welcome-secondary[hidden] {
+  display: none;
+}
+
 /* ========================================
    Cinema static pages (non-Sessions pages)
    Full-width black canvas with centered content.
@@ -813,6 +857,11 @@
   font-family: var(--font-sans);
   border-radius: 4px;
   transition: border-color 0.15s, color 0.15s;
+}
+.cinema-btn-with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .cinema-btn:hover {
   border-color: var(--cinema-text-welcome);

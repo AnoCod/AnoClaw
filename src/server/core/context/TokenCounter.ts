@@ -174,6 +174,7 @@ export class TokenCounter {
       messages: messagesTokens,
       freeSpace,
       total,
+      contextWindow,
     };
   }
 

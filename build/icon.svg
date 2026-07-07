@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- 法拉利红三角 — 无边距，缩小时形状自识别 -->
+  <polygon points="370,44 52,460 468,460" fill="#FF2800"/>
+  <!-- 高光面 -->
+  <polygon points="370,44 52,460 260,460" fill="#FF4422" opacity="0.35"/>
+</svg>

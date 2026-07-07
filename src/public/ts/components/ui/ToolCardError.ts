@@ -18,6 +18,7 @@ export class ToolCardError extends ToolCard {
       const msg = document.createElement('div');
       msg.className = 'ui-toolcard-error-msg';
       msg.textContent = s.result.slice(0, 300);
+      this._bodyEl = msg;
       wrapper.appendChild(msg);
     }
 

@@ -14,14 +14,16 @@ export const sectionMeta = {
 export function createToolPromptSection(): SystemPromptSection {
   return {
     name: 'ToolPrompt',
-    cacheBreak: false,
+    cacheBreak: true,
     compute: (ctx: PromptContext) => {
       const agent = AgentRegistry.getInstance().agent(ctx.agentId);
       if (!agent) return '';
 
       const toolRegistry = ToolRegistry.getInstance();
       const allowedNames = agent.allowedTools();
-      const agentTools = toolRegistry.toolsForAgent(allowedNames);
+      const agentTools = toolRegistry.toolsForAgent(allowedNames, {
+        hideUserInteractionTools: ctx.hideUserInteractionTools,
+      });
 
       const prompts: string[] = [];
       for (const t of agentTools) {

@@ -29,6 +29,11 @@ import { TokenCounter } from '../context/index.js';
 
 // ── SubAgent tool filtering ──
 
+/** Event types eligible for bubbling to parent during SubAgent execution. */
+const BUBBLE_TYPES = new Set(['text', 'think', 'tool_call', 'tool_result', 'error']);
+
+// ── SubAgent tool filtering ──
+
 /**
  * Map a SubAgent type to the list of allowed tool names.
  *
@@ -65,8 +70,7 @@ export function bubbleEventToParent(
   subAgentId: string,
   event: SSEEvent,
 ): void {
-  const BUBBLE_TYPES = ['text', 'think', 'tool_call', 'tool_result', 'error'];
-  if (!BUBBLE_TYPES.includes(event.type)) return;
+  if (!BUBBLE_TYPES.has(event.type)) return;
 
   // Truncate content to avoid flooding the WS with large tool outputs
   const content = ((event.content || event.result || '') as string).slice(0, 500);
@@ -222,7 +226,7 @@ export async function handleSubAgentOutput(
         content: (event.result || event.content || '') as string,
       });
     } else if (event.type === SSEEventType.Error) {
-      await persister.persistEvent('error', { content: errorMessage || 'Unknown error' });
+      await persister.persistEvent('error', { error: errorMessage || 'Unknown error', source: 'delegation' });
     }
 
     // ── 3. Bubble to parent WS ──
@@ -350,7 +354,7 @@ export async function spawnSubAgent(
 
       // Create StreamPersister for per-event JSONL persistence
       const turnMsgId = `msg-sub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      persister = new StreamPersister(store, subSessionId, turnMsgId, '00000000-0000-0000-0000-000000000000');
+      persister = new StreamPersister(store, subSessionId, turnMsgId, '00000000-0000-0000-0000-000000000000', tempId);
 
       logger.debug('SubAgent persistent session created', { subSessionId, parentSessionId, tempId });
     } catch (err) {
@@ -382,11 +386,15 @@ export async function spawnSubAgent(
   };
 
   let fullContent = '';
+  let turnCount = 0;
 
   try {
     for await (const event of runtime.processMessage(subSessionId, tempId, taskMessage)) {
       if (event.type === SSEEventType.Text) {
         fullContent += (event.content as string) || '';
+      }
+      if (event.type === 'tool_call') {
+        turnCount++;
       }
       // ── Bubble progress to parent ──
       if (parentSessionId && BUBBLE_TYPES.has(event.type)) {
@@ -410,6 +418,11 @@ export async function spawnSubAgent(
             is_error: (event as Record<string, unknown>).success === false,
             content: (event.result || event.content || '') as string,
           });
+        } else if (event.type === SSEEventType.Error) {
+          await persister.persistEvent('error', {
+            error: ((event as Record<string, unknown>).errorMessage || (event as Record<string, unknown>).message || 'Unknown error') as string,
+            source: 'subagent',
+          });
         }
       }
     }
@@ -430,6 +443,7 @@ export async function spawnSubAgent(
       toolCallId: `subagent-${tempId}`,
       success: true,
       content: fullContent,
+      structured: { subSessionId },
       tokensUsed: Math.ceil(fullContent.length / 4),
       startedAt,
       finishedAt: Date.now(),
@@ -454,6 +468,7 @@ export async function spawnSubAgent(
       toolCallId: `subagent-${tempId}`,
       success: false,
       content: fullContent,
+      structured: { subSessionId },
       errorMessage,
       tokensUsed: Math.ceil(fullContent.length / 4),
       startedAt,
@@ -468,6 +483,3 @@ export async function spawnSubAgent(
     registry.unregisterAgent(tempId);
   }
 }
-
-/** Event types eligible for bubbling to parent during SubAgent execution. */
-const BUBBLE_TYPES = new Set(['text', 'think', 'tool_call', 'tool_result', 'error']);

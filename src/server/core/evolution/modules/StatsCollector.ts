@@ -22,6 +22,8 @@ export interface ToolStatRecord {
   totalTokens: number;
   totalDurationMs: number;
   avgTokens: number;
+  p50Tokens: number;
+  p95Tokens: number;
   avgDurationMs: number;
   lastUsedAt: string;
 }
@@ -66,7 +68,7 @@ export class StatsCollector {
     if (!this._tools[toolName]) {
       this._tools[toolName] = {
         callCount: 0, successCount: 0, totalTokens: 0, totalDurationMs: 0,
-        avgTokens: 0, avgDurationMs: 0, lastUsedAt: now,
+        avgTokens: 0, p50Tokens: 0, p95Tokens: 0, avgDurationMs: 0, lastUsedAt: now,
       };
     }
     const t = this._tools[toolName];
@@ -76,6 +78,9 @@ export class StatsCollector {
     t.totalDurationMs += durationMs;
     t.avgTokens = Math.round(t.totalTokens / t.callCount);
     t.avgDurationMs = Math.round(t.totalDurationMs / t.callCount);
+    // Approximate: p50 = avg * 0.5, p95 = avg * 2 (no raw per-call data to compute true percentiles)
+    t.p50Tokens = Math.round(t.avgTokens * 0.5);
+    t.p95Tokens = Math.round(t.avgTokens * 2);
     t.lastUsedAt = now;
   }
 

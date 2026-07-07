@@ -4,6 +4,8 @@
  * The card auto-removes when replaced by the next status or dismissed.
  */
 
+import { injectStyle } from '../../../utils/domUtils.js';
+
 export class StatusDelegate {
   element: HTMLDivElement;
   private _spinnerEl: SVGElement;
@@ -75,11 +77,7 @@ export class StatusDelegate {
   }
 
   private _injectStyles(): void {
-    const id = 'status-delegate-styles';
-    if (document.getElementById(id)) return;
-    const style = document.createElement('style');
-    style.id = id;
-    style.textContent = `
+    injectStyle('status-delegate-styles', `
       @keyframes status-spin {
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
@@ -92,7 +90,16 @@ export class StatusDelegate {
         from { opacity: 0; transform: translateY(4px); }
         to { opacity: 1; transform: translateY(0); }
       }
-    `;
-    document.head.appendChild(style);
+      .status-spinner-arc {
+        animation: status-spin 1.2s linear infinite;
+        transform-origin: center;
+      }
+      .status-spinner-svg {
+        animation: status-fade-in 0.3s ease-out;
+      }
+      .status-text {
+        animation: status-pulse 2s ease-in-out infinite;
+      }
+    `);
   }
 }

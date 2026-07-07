@@ -1,24 +1,26 @@
 import { WindowManager } from './WindowManager.js';
 import * as path from 'path';
+import type { App, Tray as TrayInst, Menu as MenuType } from 'electron';
+import type { nativeImage as NativeImageAPI } from 'electron';
 
 export class TrayManager {
   private static instance: TrayManager;
-  private tray: any = null;
-  private _Tray: any;
-  private _Menu: any;
-  private _app: any;
-  private _nativeImage: any;
+  private tray: TrayInst | null = null;
+  private _Tray: typeof TrayInst;
+  private _Menu: typeof MenuType;
+  private _app: App;
+  private _nativeImage: typeof NativeImageAPI;
 
-  private constructor(Tray: any, Menu: any, app: any, nativeImage: any) {
+  private constructor(Tray: typeof TrayInst, Menu: typeof MenuType, app: App, nativeImage: typeof NativeImageAPI) {
     this._Tray = Tray; this._Menu = Menu; this._app = app; this._nativeImage = nativeImage;
   }
 
   static getInstance(): TrayManager {
-    if (!TrayManager.instance) TrayManager.instance = new TrayManager(null, null, null, null);
+    if (!TrayManager.instance) TrayManager.instance = new TrayManager(null!, null!, null!, null!);
     return TrayManager.instance;
   }
 
-  static init(Tray: any, Menu: any, app: any, nativeImage: any): void {
+  static init(Tray: typeof TrayInst, Menu: typeof MenuType, app: App, nativeImage: typeof NativeImageAPI): void {
     TrayManager.instance = new TrayManager(Tray, Menu, app, nativeImage);
   }
 

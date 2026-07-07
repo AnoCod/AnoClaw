@@ -1,0 +1,67 @@
+{
+  "name": "qrcode",
+  "displayName": "QR Code Generator",
+  "version": "1.2.0",
+  "description": "Generate QR codes from text, URLs, or data - with batch generation, styling, validation, and export",
+  "publisher": "anoclaw",
+  "main": "extension.ts",
+  "activationEvents": ["onStartup"],
+  "engines": {
+    "anoclaw": "^2.0.0"
+  },
+  "contributes": {
+    "tools": [
+      { "name": "generateQRCode" },
+      { "name": "generateQRCodeSVG" }
+    ],
+    "capabilities": [
+      {
+        "id": "qrcode.create",
+        "title": "Create a QR code",
+        "description": "Generate a QR code from text, URLs, contact data, or other short payloads.",
+        "domain": "utility",
+        "kind": "artifact",
+        "triggers": ["qr", "qrcode", "qr code", "二维码", "生成二维码"],
+        "examples": [
+          "帮我把这个网址生成二维码",
+          "Create a QR code for https://example.com"
+        ],
+        "inputs": [
+          { "name": "content", "label": "Content", "type": "string", "required": true }
+        ],
+        "outputs": [
+          { "type": "file", "label": "PNG QR code", "extension": "png", "artifactType": "image" },
+          { "type": "file", "label": "SVG QR code", "extension": "svg", "artifactType": "image" }
+        ],
+        "requiredTools": ["generateQRCode"],
+        "artifactTypes": ["image", "qrcode"],
+        "priority": 70
+      }
+    ],
+    "pages": [
+      { "id": "qrcode", "title": "QR Code", "html": "frontend/index.html", "order": 6 }
+    ],
+    "apiRoutes": [
+      { "method": "GET", "path": "/api/v1/plugins/qrcode/generate" },
+      { "method": "GET", "path": "/api/v1/plugins/qrcode/config" },
+      { "method": "POST", "path": "/api/v1/plugins/qrcode/config" },
+      { "method": "GET", "path": "/api/v1/plugins/qrcode/history" },
+      { "method": "DELETE", "path": "/api/v1/plugins/qrcode/history" },
+      { "method": "POST", "path": "/api/v1/plugins/qrcode/batch" },
+      { "method": "POST", "path": "/api/v1/plugins/qrcode/validate" }
+    ],
+    "configuration": {
+      "title": "QR Code Settings",
+      "properties": {
+        "defaultSize": { "type": "number", "default": 512, "description": "Default QR code size in pixels" },
+        "errorCorrection": { "type": "string", "default": "M", "enum": ["L", "M", "Q", "H"], "description": "Error correction level" },
+        "darkColor": { "type": "string", "default": "#000000", "description": "Default dark module color" },
+        "lightColor": { "type": "string", "default": "#ffffff", "description": "Default light module color" },
+        "historyLimit": { "type": "number", "default": 50, "description": "Maximum history entries to keep" },
+        "dotStyle": { "type": "string", "default": "square", "enum": ["square", "rounded", "dots"], "description": "QR code dot rendering style" },
+        "cornerStyle": { "type": "string", "default": "square", "enum": ["square", "rounded", "extra-rounded"], "description": "QR code corner finder pattern style" },
+        "margin": { "type": "number", "default": 4, "description": "Default quiet zone margin in modules" }
+      }
+    }
+  }
+}

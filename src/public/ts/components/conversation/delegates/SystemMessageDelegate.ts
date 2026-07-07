@@ -1,5 +1,7 @@
-// AnoClaw Cinema — SystemMessageDelegate: centered annotation line
-// Matches cinema style: no border, no background, just low-opacity text
+/**
+ * SystemMessageDelegate — centered annotation line for system-level messages.
+ * Matches cinema style: no border, no background, just low-opacity text.
+ */
 
 import type { SystemMessageEvent } from '../types.js';
 

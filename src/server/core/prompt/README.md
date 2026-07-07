@@ -1,6 +1,6 @@
 # Prompt System
 
-Assembles the system prompt sent to the LLM before every API call. 20 sections combined into one prompt, sorted by priority, with two-level caching (global + per-session).
+Assembles the system prompt sent to the LLM before every API call. 21 sections are combined into a provider-cache-aware layout: stable global/agent/capability content first, volatile session/run state last. Local section caching remains two-level (global + per-session).
 
 ## Public API
 
@@ -13,10 +13,11 @@ const pa = PromptAssembler.getInstance();
 
 | Method | Parameters | Returns | Description |
 |--------|-----------|---------|-------------|
-| `buildEffectivePrompt(agentId, sessionId, override?)` | `agentId: string`, `sessionId: string`, `override?: PromptOverride` | `string` | Build the full system prompt. Priority chain: ExtensionPoints override → user override → static zone → dynamic zone → agent definition → CustomCLI |
+| `buildEffectivePrompt(agentId, sessionId, override?, buildContext?)` | `agentId: string`, `sessionId: string`, `override?: PromptOverride`, `buildContext?: PromptBuildContext` | `string` | Build the full system prompt. Priority chain: ExtensionPoints override -> user override -> cacheable prefix -> BOUNDARY_MARKER -> volatile suffix |
+| `analyzePromptLayout(agentId, sessionId, buildContext?)` | `agentId: string`, `sessionId: string`, `buildContext?: PromptBuildContext` | `PromptLayoutStats` | Estimate total tokens, provider-cacheable prefix tokens, volatile suffix tokens, and prefix ratio for diagnostics |
+| `analyzePromptText(prompt)` | `prompt: string` | `PromptLayoutStats` | Estimate cache layout from an already-built prompt without recomputing sections |
 | `invalidateCache(scope, agentId?, sessionId?)` | `scope: CacheScope`, `agentId?: string`, `sessionId?: string` | `void` | Invalidate cache at Global/Agent/Session scope |
 | `clearAllCaches()` | — | `void` | Nuke entire cache |
-| `getSection(name)` | `name: string` | `SystemPromptSection \| undefined` | Look up a registered section by name |
 | `registerSection(section, zone?)` | `section: SystemPromptSection`, `zone: 'static' \| 'dynamic'` | `void` | Register a new section dynamically |
 | `setCustomCLI(instructions)` | `instructions: string \| null` | `void` | Inject runtime CLI instructions (Priority 2) |
 | `setExtensionPoints(extPoints)` | `extPoints: ExtensionPointRegistry` | `void` | Inject plugin override registry |
@@ -37,6 +38,9 @@ interface SystemPromptSection {
 interface PromptContext {
   agentId: string;
   sessionId: string;
+  permissionMode?: string;
+  effort?: string;
+  hideUserInteractionTools?: boolean;
 }
 ```
 
@@ -66,57 +70,67 @@ enum CacheScope {
 }
 ```
 
-## 20 Sections (Priority Order)
+## 21 Sections (Priority Order)
 
 | # | Section | Priority | Zone | Description |
 |---|---------|----------|------|-------------|
-| 1 | SystemRulesSection | 10 | static | Core identity, role prompt, org structure |
-| 2 | DocsSection | 15 | static | Reference doc injection |
-| 3 | PluginDevSection | 18 | static | Plugin development guidelines |
-| 4 | TaskExecutionSection | 20 | static | Task execution discipline |
-| 5 | ActionsSection | 22 | static | Available actions/behaviors |
-| 6 | ToolUsageSection | 25 | static | Tool usage rules |
-| 7 | OutputEfficiencySection | 28 | static | Output efficiency rules |
-| 8 | OrgContextSection | 30 | dynamic | Org tree + agent relationships |
-| 9 | ActiveTaskSection | 32 | dynamic | Current active tasks |
-| 10 | UserAwarenessSection | 35 | dynamic | User context awareness |
-| 11 | EditorContextSection | 38 | dynamic | Editor/file state |
-| 12 | SessionGuidanceSection | 40 | dynamic | Session-level guidance |
-| 13 | DelegationContextSection | 45 | dynamic | Delegation rules + state |
-| 14 | MemorySection | 50 | dynamic | Injected memories |
-| 15 | EnvironmentSection | 55 | dynamic | Platform, OS, shell info |
-| 16 | LanguageSection | 58 | dynamic | Response language preference |
-| 17 | ToolPromptSection | 60 | dynamic | Tool-specific prompt instructions |
-| 18 | TokenBudgetSection | 65 | dynamic | Token budget awareness |
-| 19 | ToolsSection | 70 | dynamic | Available tool list |
-| 20 | SkillsSection | 80 | dynamic | Loaded skill list |
-| 21 | PermissionModeSection | 90 | dynamic | Permission/approval mode |
+| 1 | DocsSection | 10 | static | Reference doc injection |
+| 2 | SystemRulesSection | 20 | static | Core identity, role prompt, org structure |
+| 3 | PluginDevSection | 20 | static | Plugin development guidelines |
+| 4 | TaskExecutionSection | 30 | static | Task execution discipline |
+| 5 | ActionsSection | 40 | static | Available actions/behaviors |
+| 6 | ToolUsageSection | 50 | static | Tool usage rules |
+| 7 | OutputEfficiencySection | 70 | static | Output efficiency rules |
+| 8 | OrgContextSection | 80 | dynamic | Org tree + agent relationships |
+| 9 | UserAwarenessSection | 82 | dynamic | User context awareness |
+| 10 | EditorContextSection | 83 | dynamic | Editor/file state |
+| 11 | ActiveTaskSection | 84 | dynamic | Current active tasks |
+| 12 | SessionGuidanceSection | 90 | dynamic | Session-level guidance |
+| 13 | DelegationContextSection | 100 | dynamic | Delegation rules + state |
+| 14 | MemorySection | 110 | dynamic | Injected memories |
+| 15 | EnvironmentSection | 120 | dynamic | Platform, OS, shell info |
+| 16 | LanguageSection | 130 | static | Response language preference |
+| 17 | TokenBudgetSection | 150 | dynamic | Token budget awareness |
+| 18 | ToolPromptSection | 155 | dynamic | Tool-specific prompt instructions |
+| 19 | ToolsSection | 160 | dynamic | Available tool list |
+| 20 | SkillsSection | 170 | dynamic | Loaded skill list |
+| 21 | PermissionModeSection | 190 | dynamic | Permission/approval mode |
+
+Sections with matching priority (e.g. SystemRules + PluginDev both at 20) are ordered by their position in `registerAllSections.ts`. Lower priority = appears earlier inside the same layout group. Layout groups are more important than numeric priority across groups.
+
+**Provider cache layout**: Static sections, agent role/custom prompt, CustomCLI, and stable capability sections (`ToolPrompt`, `Tools`, `Skills`) appear before `BOUNDARY_MARKER`. Volatile sections such as session guidance, org/task/editor context, memory, environment, token budget, and permission mode appear after the marker.
 
 ## Priority Chain (buildEffectivePrompt)
 
 ```
 Priority 0: Plugin Override (ExtensionPoints.promptAssembler)
 Priority 1: User Override (complete replacement via API)
-→ Static Zone (global cache)
-→ BOUNDARY_MARKER
-→ Dynamic Zone (per-session cache)
-→ Priority 2: Agent Definition (role prompt + agent.agentPrompt)
-→ Priority 3: CustomCLI (runtime-injected instructions)
+-> Cacheable Prefix
+   -> Static Zone (global local cache)
+   -> Agent Definition (role prompt + agent.agentPrompt)
+   -> CustomCLI (runtime-injected instructions)
+   -> Capability Zone (ToolPrompt + Tools + Skills)
+-> BOUNDARY_MARKER
+-> Volatile Suffix
+   -> Remaining dynamic sections (per-session/run local cache where safe)
 ```
 
 ## Caching Strategy
 
 - **Static zone**: One key per section (`global:<sectionName>`). Cached forever until explicit `invalidateGlobal()`. Shared across all agents/sessions.
-- **Dynamic zone**: Per-session keys (`<agentId>:<sessionId>:<sectionName>`). Auto-invalidated on:
+- **Capability zone**: Dynamic sections that are usually stable for a given agent/run (`ToolPrompt`, `Tools`, `Skills`) are placed before `BOUNDARY_MARKER` to improve provider-side prefix-cache hits. Sections may still recompute locally when needed.
+- **Volatile suffix**: Dynamic sections that change with the session, workspace, memory, task state, token usage, or permission mode are placed after `BOUNDARY_MARKER` so they do not spoil the stable prefix.
+- **Dynamic local cache**: Per-session keys (`<agentId>:<sessionId>:<sectionName>`). Auto-invalidated on:
   - `/clear` command → `onClear()` busts that session's dynamic zone
   - Memory write → `onMemoryWritten()` busts only the Memory section
   - Session end → `invalidateSession()`
 - **cacheBreak**: A section with `cacheBreak: true` recomputes on every request (never cached). Used for time-sensitive sections.
+- **Diagnostics**: `analyzePromptLayout()` and the `Prompt assembled` debug log expose estimated provider-cacheable prefix tokens.
 
 ## Dependencies
 
 ### Called by
-- `AgentLoopLLM` — calls `buildEffectivePrompt()` before every LLM API call
+- `AgentLoop` — refreshes `buildEffectivePrompt()` before every LLM turn and passes run-scoped mode/effort/tool visibility context
 - `PromptRoutes` — HTTP routes for prompt diagnostics
 - `PluginHostManager` — injects `ExtensionPoints` at startup
 - `MemoryManager` — calls `onMemoryWritten()` on save/remove
@@ -137,22 +151,23 @@ Priority 1: User Override (complete replacement via API)
 import type { SystemPromptSection } from '../PromptSection.js';
 
 export const sectionMeta = {
-  name: 'Xxx',
+  name: 'xxx',         // lowercase stable identifier (used for metadata, not cache key)
   type: 'dynamic' as const,
   priority: 42,
 };
 
 export function createXxxSection(): SystemPromptSection {
   return {
-    name: sectionMeta.name,
+    name: 'Xxx',       // PascalCase display name (used as cache key suffix)
     cacheBreak: false,
     compute: (ctx) => {
-      // Return section content as string
       return `## Xxx\nYour section content here.`;
     },
   };
 }
 ```
+
+**Naming convention**: `sectionMeta.name` is a lowercase stable identifier for metadata. The section object's `name` field is PascalCase and is what gets used in cache keys (`agentId:sessionId:<sectionObjectName>`). They typically match (e.g. `'docs'` / `'Docs'`) but are separate fields with separate purposes.
 
 2. Register in `src/server/core/prompt/sections/registerAllSections.ts`:
    - Import `sectionMeta` and `createXxxSection`

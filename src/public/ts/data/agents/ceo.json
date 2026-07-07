@@ -39,6 +39,7 @@
     "SkillList",
     "EnterPlanMode",
     "ExitPlanMode",
+    "Plan",
     "AskUserQuestion",
     "ApiCall"
   ],

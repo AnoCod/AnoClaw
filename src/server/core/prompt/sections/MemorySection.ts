@@ -1,6 +1,3 @@
-// MemorySection — lightweight memory index with progressive disclosure
-// Shows indexed memory list (~150-200 tokens). Agent calls memory_recall() for full details.
-
 import { SystemPromptSection, PromptContext } from '../PromptSection.js';
 import { MemoryManager } from '../../memory/MemoryManager.js';
 
@@ -13,41 +10,39 @@ export const sectionMeta = {
 export function createMemorySection(): SystemPromptSection {
   return {
     name: 'Memory',
-    cacheBreak: true,
+    cacheBreak: false,
     compute: (ctx: PromptContext) => {
       const mm = MemoryManager.getInstance();
-      const agentMemories = mm.getRecentMemories('agent', ctx.agentId, 5);
-      const teamMemories = mm.getRecentMemories('team', 'team', 3);
-      const sessionMemories = mm.getRecentMemories('session', ctx.sessionId, 5);
-      const recent = [...teamMemories, ...agentMemories, ...sessionMemories];
+      const recent = [
+        ...mm.getRecentMemories('team', 'team', 3),
+        ...mm.getRecentMemories('agent', ctx.agentId, 5),
+        ...mm.getRecentMemories('session', ctx.sessionId, 5),
+      ];
 
       const lines: string[] = [
-        '# Memory System (Lightweight Index)',
+        '# Memory Index',
         '',
-        'Available memories are shown below as a SHORT INDEX. Each entry is a summary line with estimated token cost.',
-        'Use `memory_recall(id)` to fetch the full content of any entry when you need details.',
-        'This saves context — injecting full memory content for all entries would waste precious tokens.',
+        'Memories are shown as a compact index. Recall full content only when it is relevant to the current task.',
         '',
       ];
 
-      if (recent.length > 0) {
-        let totalEstimate = 0;
-        lines.push(`| # | Scope | Type | Summary | Tokens |`);
-        lines.push(`|---|---|---|---|---|`);
-        for (let i = 0; i < recent.length; i++) {
-          const m = recent[i];
-          const estimate = Math.ceil(m.content.length / 4); // rough token estimate
-          totalEstimate += estimate;
-          const summary = m.description.slice(0, 80);
-          lines.push(`| ${i + 1} | ${m.scope || 'agent'} | ${m.type} | ${summary} | ~${estimate} |`);
-        }
-        lines.push('');
-        lines.push(`**Total**: ${recent.length} memories, ~${totalEstimate} tokens if fully loaded. Index cost: ~${lines.join('').length / 4} tokens.`);
-        lines.push('Use `memory_recall(<number>)` to expand any entry by its index number.');
-      } else {
-        lines.push('No recent memories available. New session — use `memory_save` to persist important information.');
+      if (recent.length === 0) {
+        lines.push('No recent memories are available. Save durable facts, decisions, or lessons with memory_save when they will help future work.');
+        return lines.join('\n');
       }
 
+      let totalEstimate = 0;
+      lines.push('| # | Scope | Type | Summary | Est. tokens |');
+      lines.push('|---|---|---|---|---|');
+      for (let i = 0; i < recent.length; i++) {
+        const memory = recent[i];
+        const estimate = Math.ceil(memory.content.length / 4);
+        totalEstimate += estimate;
+        lines.push(`| ${i + 1} | ${memory.scope || 'agent'} | ${memory.type} | ${memory.description.slice(0, 80)} | ~${estimate} |`);
+      }
+
+      lines.push('');
+      lines.push(`Total if fully loaded: ~${totalEstimate} tokens. Use memory_recall with the index number or name when details are needed.`);
       return lines.join('\n');
     },
   };

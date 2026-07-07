@@ -38,7 +38,7 @@ abstract class LLMProvider extends EventEmitter {
 | `think_delta` | `{ content: string }` | Reasoning content (DeepSeek/Qwen) |
 | `tool_use` | `{ id, name, input }` | Completed tool call |
 | `token_usage` | `{ inputTokens, outputTokens, totalTokens }` | Usage stats |
-| `done` | `{ finishReason }` | Stream complete |
+| `done` | — | Stream complete |
 | `error` | `{ errorMessage }` | Stream error |
 
 **Events:** emits `'streamError'` (Error) via EventEmitter.
@@ -129,25 +129,6 @@ class APIScheduler extends EventEmitter {
 
 ---
 
-### TokenBatcher
-
-Accumulates streaming tokens within one event-loop tick, flushing as a batch for WebSocket.
-
-```ts
-class TokenBatcher extends EventEmitter {
-  constructor(flushIntervalMs?: number);  // default 16ms (~60fps)
-
-  addToken(token: string): void;
-  flush(): void;          // Force immediate flush, emits 'flush'(tokens[])
-  bufferSize: number;     // Read-only
-  clear(): void;          // Discard without emitting
-}
-```
-
-**Events:** `'flush'` (`tokens: string[]`).
-
----
-
 ## Dependencies
 
 ```
@@ -156,7 +137,6 @@ OpenAICompatible   → LLMProvider, shared/types/llm
 OllamaProvider     → LLMProvider, shared/types/llm
 provider-factory   → LLMProvider, OpenAICompatible, OllamaProvider
 APIScheduler       → events, shared/constants (RATE_LIMIT_PER_MINUTE)
-TokenBatcher       → events
 ```
 
 ## Usage
@@ -185,7 +165,7 @@ for await (const event of provider.chat(messages, [], 'You are helpful.', option
       process.stdout.write(event.content);
       break;
     case 'done':
-      console.log('\nDone:', event.finishReason);
+      console.log('\nDone');
       break;
   }
 }

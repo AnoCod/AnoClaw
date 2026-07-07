@@ -1,4 +1,4 @@
-// UpdateOrgTool — reassign an agent to a new parent in the org tree
+// UpdateOrgTool - reassign an agent to a new parent in the org tree
 // Validates there are no circular references before reassigning.
 
 import { Tool, RiskLevel, InterruptBehavior } from '../Tool.js';
@@ -85,7 +85,7 @@ export class UpdateOrgTool extends Tool {
     }
 
     if (!newParent.isActive) {
-      return this.makeError(`New parent agent '${newParentId}' is destroyed — cannot reassign under a destroyed agent`);
+      return this.makeError(`New parent agent '${newParentId}' is destroyed - cannot reassign under a destroyed agent`);
     }
 
     // Moving to self is a no-op

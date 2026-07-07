@@ -6,20 +6,23 @@
  * Client -> Server messages: send_message, stop, ping
  * Server -> Client messages: think, text, tool_call, tool_result, todo_write,
  *   plan_enter, plan_exit, subsession_created, error, done,
- *   sleep, wake, delegate_result, approval_request
+ *   sleep, wake
  */
 
 export { WsMessageType } from './events.js';
 import type { WsMessageType } from './events.js';
+import type { TokenBreakdown } from './session.js';
 
 /** Message sent from the browser client to the server. */
 export interface WsClientMessage {
-  type: 'send_message' | 'stop' | 'ping' | 'run_command' | 'set_running_mode' | 'editor_context';
+  type: 'send_message' | 'stop' | 'ping' | 'run_command' | 'set_session_mode' | 'set_goal' | 'quality_score' | 'editor_context' | 'tool_confirm_response';
   messageId?: string;     // for correlation
   content?: string;       // send_message
-  mode?: string;          // send_message: ask / auto-edit / plan / auto
-  runningMode?: string;   // set_running_mode: normal / infinite
+  mode?: string;          // send_message / set_session_mode: ask / auto-edit / plan / auto
+  action?: string;        // set_goal: start / pause / resume / edit / delete
+  objective?: string;     // set_goal
   effort?: boolean;       // send_message
+  score?: number;         // quality_score
   attachments?: Array<{ name: string; path: string; type?: string; size?: number; content?: string }>; // send_message
   parentSessionId?: string; // send_message: parent session for sub-session creation
   command?: string;       // run_command: command name e.g. "init", "clear"
@@ -32,6 +35,9 @@ export interface WsClientMessage {
   selectedText?: string;   // currently selected text in editor
   selectedStartLine?: number;
   selectedEndLine?: number;
+  // tool_confirm_response
+  toolCallId?: string;
+  approved?: boolean;
 }
 
 /** Message sent from the server to the browser client (streaming updates, events, responses). */
@@ -49,7 +55,7 @@ export interface WsServerMessage {
   success?: boolean;
   durationMs?: number;
   turnCount?: number;
-  tokenUsage?: Record<string, unknown>;
+  tokenUsage?: TokenBreakdown;
   sessionId?: string;
   agentId?: string;
   /** agent_status / agent_registered: agent display name */

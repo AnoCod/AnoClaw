@@ -91,6 +91,18 @@ const NAME_LANG_MAP: Record<string, string> = {
 const IMG_EXTS = new Set(['png','jpg','jpeg','gif','webp','svg','bmp','ico','tiff','tif','avif','heic','heif','jfif','pjpeg','pjp','apng','jxl','jpe']);
 const OFFICE_EXTS = new Set(['docx','xlsx','pptx','xls','xlsm','ppt','pptm','odt','ods','odp']);
 type FileType = 'code'|'image'|'pdf'|'markdown'|'binary'|'browser'|'docx'|'xlsx'|'pptx';
+interface AgentBrowserEvent {
+  sessionId: string;
+  viewId: string;
+  action: string;
+  phase: 'start' | 'done' | 'error';
+  url?: string;
+  selector?: string;
+  valuePreview?: string;
+  resultPreview?: string;
+  error?: string;
+  timestamp: number;
+}
 
 /**
  * Check if file content is binary (not human-readable text).
@@ -189,7 +201,7 @@ function _detectLanguage(name: string, content: string): string {
 
   // JSON
   if (/^\s*[\[{]/.test(sample)) {
-    try { JSON.parse(content); return 'json'; } catch {}
+    try { JSON.parse(content); return 'json'; } catch { /* not JSON, continue */ }
   }
 
   // INI-like: key=value or [section]
@@ -221,6 +233,7 @@ interface OpenTab {
   path:string; name:string; fileType:FileType; isDirty:boolean; language:string;
   model:any; viewState:any; browserUrl?:string; wvId?:string;
   browserLoading?:boolean; browserTitle?:string; browserFavicon?:string;
+  agentTrace?: AgentBrowserEvent[];
   originalContent?:string; // snapshot at open — for diff detection
 }
 
@@ -268,7 +281,7 @@ export class WorkspaceTabGroup {
     // Listen for WebContentsView state changes (loading, title, favicon)
     const api = this._api();
     if (api?.onWvStateChange) {
-      this._wvStateCleanup = api.onWvStateChange((data: any) => {
+      this._wvStateCleanup = api.onWvStateChange((data: { viewId: string; type: string; url?: string; title?: string; favicons?: string[]; favicon?: string }) => {
         const tab = this._tabs.find(t => t.wvId === data.viewId);
         if (!tab) return;
         switch (data.type) {
@@ -336,7 +349,7 @@ export class WorkspaceTabGroup {
   private _promptNewFile(): void {
     this._showInputDialog('New File', 'File name (e.g. app.ts, style.css)', (name) => {
       if (!name) return;
-      fetch('/api/v1/workspace/create-file', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path:'/', name}) })
+      fetch('/api/v1/workspace/create-file', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({sessionId:this._sessionId, path:'/', name}) })
         .then(() => this.openFile(name, name)).catch(() => {});
     });
   }
@@ -351,20 +364,53 @@ export class WorkspaceTabGroup {
     const tab: OpenTab = {
       path: tabId, name: url === 'about:blank' ? 'New Tab' : url.replace(/^https?:\/\//,'').substring(0, 30),
       fileType: 'browser', isDirty: false, language: '', model: null, viewState: null,
-      browserUrl: url, wvId: result?.viewId || undefined,
+      browserUrl: url, wvId: result?.viewId || undefined, agentTrace: [],
     };
     this._tabs.push(tab); this._renderTabBtn(tab); this._activate(tab);
   }
 
   /** Public entry point for agent-created browser tabs (view already created via IPC). */
   _createBrowserTab(url: string, viewId: string): void {
+    const existing = this._tabs.find(t => t.wvId === viewId);
+    if (existing) {
+      if (url) this._updateBrowserTabUrl(existing, url);
+      this._activate(existing);
+      return;
+    }
     const tab: OpenTab = {
       path: 'browser:' + Date.now(),
       name: url === 'about:blank' ? 'New Tab' : url.replace(/^https?:\/\//,'').substring(0, 30),
       fileType: 'browser', isDirty: false, language: '', model: null, viewState: null,
-      browserUrl: url, wvId: viewId,
+      browserUrl: url, wvId: viewId, agentTrace: [],
     };
     this._tabs.push(tab); this._renderTabBtn(tab); this._activate(tab);
+  }
+
+  handleAgentBrowserEvent(event: AgentBrowserEvent): void {
+    let tab = this._tabs.find(t => t.wvId === event.viewId);
+    if (!tab) {
+      const url = event.url || 'about:blank';
+      tab = {
+        path: 'browser:' + Date.now(),
+        name: url === 'about:blank' ? 'Agent Browser' : url.replace(/^https?:\/\//,'').substring(0, 30),
+        fileType: 'browser', isDirty: false, language: '', model: null, viewState: null,
+        browserUrl: url, wvId: event.viewId, agentTrace: [],
+      };
+      this._tabs.push(tab);
+      this._renderTabBtn(tab);
+    }
+
+    if (event.url) this._updateBrowserTabUrl(tab, event.url);
+    tab.agentTrace = [...(tab.agentTrace || []), event].slice(-12);
+    this._activate(tab);
+    this._renderAgentTrace(tab);
+  }
+
+  private _updateBrowserTabUrl(tab: OpenTab, url: string): void {
+    tab.browserUrl = url;
+    if (!tab.browserTitle) tab.name = url === 'about:blank' ? 'Agent Browser' : url.replace(/^https?:\/\//,'').substring(0, 30);
+    const btn = this._tabBar.querySelector(`[data-tab-path="${_escAttr(tab.path)}"] .ws-tab-name`) as HTMLElement | null;
+    if (btn) btn.textContent = tab.name;
   }
 
   // ── Input dialog helper (for New File) ──
@@ -572,7 +618,7 @@ export class WorkspaceTabGroup {
         if (active && !active.isDirty) { active.isDirty = true; this._updateDirty(active); }
       });
       // Update status bar on cursor change
-      this._editor.onDidChangeCursorPosition((e: any) => {
+      this._editor.onDidChangeCursorPosition((e: { position: { lineNumber: number; column: number } }) => {
         const status = this._contentArea.querySelector('.ws-editor-status') as HTMLElement;
         if (status) {
           const cp = status.querySelector('[data-role="cursor-pos"]') as HTMLElement | null;
@@ -721,6 +767,11 @@ export class WorkspaceTabGroup {
     }
     this._contentArea.appendChild(progressBar);
 
+    const trace = document.createElement('div');
+    trace.className = 'ws-browser-agent-trace';
+    this._contentArea.appendChild(trace);
+    this._renderAgentTrace(tab);
+
     // Placeholder for WebContentsView
     const placeholder = document.createElement('div');
     placeholder.className = 'ws-browser-placeholder';
@@ -770,6 +821,51 @@ export class WorkspaceTabGroup {
     // Enable right-click element capture
     setTimeout(() => this._api()?.wvEnableContextCapture?.(tab.wvId), 500);
     this._startContextPoll(tab);
+  }
+
+  private _renderAgentTrace(tab: OpenTab): void {
+    const box = this._contentArea.querySelector('.ws-browser-agent-trace') as HTMLElement | null;
+    if (!box || tab.fileType !== 'browser') return;
+    const trace = (tab.agentTrace || []).slice(-8).reverse();
+    if (!trace.length) {
+      box.style.display = 'none';
+      box.innerHTML = '';
+      return;
+    }
+    box.style.display = 'flex';
+    box.innerHTML = '';
+    const label = document.createElement('span');
+    label.className = 'ws-browser-agent-trace-label';
+    label.textContent = 'AGENT';
+    box.appendChild(label);
+
+    for (const item of trace) {
+      const chip = document.createElement('span');
+      chip.className = `ws-browser-agent-trace-chip ${item.phase}`;
+      chip.title = this._formatAgentTraceDetail(item);
+      chip.textContent = this._formatAgentTraceChip(item);
+      box.appendChild(chip);
+    }
+  }
+
+  private _formatAgentTraceChip(item: AgentBrowserEvent): string {
+    const target = item.selector || item.valuePreview || item.url || '';
+    const suffix = target ? ` ${target}` : '';
+    const mark = item.phase === 'start' ? '...' : item.phase === 'error' ? '!' : 'ok';
+    return `${item.action}:${mark}${suffix}`.slice(0, 80);
+  }
+
+  private _formatAgentTraceDetail(item: AgentBrowserEvent): string {
+    const lines = [
+      `Action: ${item.action}`,
+      `Status: ${item.phase}`,
+      item.url ? `URL: ${item.url}` : '',
+      item.selector ? `Selector: ${item.selector}` : '',
+      item.valuePreview ? `Value: ${item.valuePreview}` : '',
+      item.resultPreview ? `Result: ${item.resultPreview}` : '',
+      item.error ? `Error: ${item.error}` : '',
+    ].filter(Boolean);
+    return lines.join('\n');
   }
 
   private _browserBtn(title: string, label: string): HTMLElement {
@@ -893,7 +989,7 @@ export class WorkspaceTabGroup {
           const el = JSON.parse(result.result);
           this._sendToAgent(`[Browser Element] ${el.tag}${el.id ? '#' + el.id : ''}${el.class ? '.' + el.class.split(' ').join('.') : ''}: "${el.text}"`);
         }
-      } catch {}
+      } catch { console.debug('WorkspaceTabGroup: browser element extraction failed'); }
     }, 500);
     setTimeout(() => clearInterval(interval), 15000);
   }
@@ -909,7 +1005,7 @@ export class WorkspaceTabGroup {
     const result = await this._api()?.wvExecJs?.(tab.wvId, 'JSON.stringify(window.__anoclawLogs||[])');
     const logs = result?.ok ? JSON.parse(result.result) : [];
     if (logs.length > 0) {
-      this._sendToAgent(`[Browser Console]\n${logs.map((l: any) => `[${l.level}] ${l.msg}`).join('\n')}`);
+      this._sendToAgent(`[Browser Console]\n${logs.map((l: { level: string; msg: string }) => `[${l.level}] ${l.msg}`).join('\n')}`);
     }
   }
 
@@ -952,7 +1048,7 @@ export class WorkspaceTabGroup {
       try {
         const data = JSON.parse(raw);
         this._handleContextAction(data, tab);
-      } catch {}
+      } catch { console.debug('WorkspaceTabGroup: context action parse failed'); }
     }, 400);
   }
 
@@ -960,7 +1056,11 @@ export class WorkspaceTabGroup {
     if (this._ctxPollTimer) { clearInterval(this._ctxPollTimer); this._ctxPollTimer = null; }
   }
 
-  private _handleContextAction(data: any, tab: OpenTab): void {
+  private _handleContextAction(data: {
+    type: string; text?: string; url?: string; selector?: string;
+    title?: string; tag?: string; id?: string; class?: string;
+    action?: string; href?: string; src?: string; html?: string;
+  }, tab: OpenTab): void {
     const info = `[Browser Element]\nURL: ${data.url || tab.browserUrl}\nTitle: ${data.title || ''}\nElement: ${data.tag}${data.id?'#'+data.id:''}${data.class?'.'+data.class.split(' ').slice(0,3).join('.'):''}`;
 
     switch (data.action) {
@@ -1112,7 +1212,7 @@ export class WorkspaceTabGroup {
   async saveFile(tab: OpenTab): Promise<void> {
     if (!tab.isDirty || tab.fileType!=='code') return;
     try {
-      await fetch('/api/v1/workspace/write', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path:tab.path, content:tab.model.getValue()}) });
+      await fetch('/api/v1/workspace/write', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({sessionId:this._sessionId, path:tab.path, content:tab.model.getValue()}) });
       tab.isDirty = false; this._updateDirty(tab);
     } catch { /* ignore */ }
   }
@@ -1237,7 +1337,7 @@ export class WorkspaceTabGroup {
     const openFiles = this._tabs.filter(t => t.fileType === 'code' || t.fileType === 'markdown').map(t => t.path);
     const tab = this.activeTab;
     if (!tab) return null;
-    const ec: any = { openFiles: openFiles.slice(0, 20), activeFile: tab.path, cursorLine: 1, cursorColumn: 1, selectedText: '', selectedStartLine: 0, selectedEndLine: 0 };
+    const ec: NonNullable<ReturnType<typeof this.getEditorContext>> = { openFiles: openFiles.slice(0, 20), activeFile: tab.path, cursorLine: 1, cursorColumn: 1, selectedText: '', selectedStartLine: 0, selectedEndLine: 0 };
     if (this._editor) {
       const pos = this._editor.getPosition();
       if (pos) { ec.cursorLine = pos.lineNumber; ec.cursorColumn = pos.column; }
@@ -1273,7 +1373,7 @@ export class WorkspaceTabGroup {
           this._showDiffBanner(tab, editorContent, diskContent);
           return; // Only show one banner at a time
         }
-      } catch {}
+      } catch { console.debug('WorkspaceTabGroup: inline completion resolve failed'); }
     }
   }
 
@@ -1370,8 +1470,8 @@ export class WorkspaceTabGroup {
     this._hideDiffBanner();
     // Write original content back to disk
     try {
-      await fetch('/api/v1/workspace/write', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: tab.path, content: originalContent }) });
-    } catch {}
+      await fetch('/api/v1/workspace/write', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId:this._sessionId, path: tab.path, content: originalContent }) });
+    } catch { console.debug('WorkspaceTabGroup: undo write failed for', tab.path); }
     tab.model.setValue(originalContent);
     tab.originalContent = originalContent;
     tab.isDirty = false;

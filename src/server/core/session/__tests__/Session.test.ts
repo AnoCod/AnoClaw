@@ -232,8 +232,7 @@ describe('Session — state machine transitions', () => {
       expect(s.lastActiveAt).not.toBe(before);
     });
 
-    it('Archived → Active (BUG: no guard — revives archived session)', () => {
-      // BUG-FLAG: setActive() has NO guard. It will un-archive a session
+    it('Archived → Active (terminal state preserved)', () => {
       // Archived is a terminal state — setActive should no-op.
       const s = new Session(makeNode({ status: SessionStatus.Archived }));
       s.setActive();
@@ -741,18 +740,18 @@ describe('Session — serialization', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// BUG-FLAG summary
+// Terminal state regression tests
 // ═══════════════════════════════════════════════════════════════════
 
-describe('Session — known state machine gaps (BUG-FLAG)', () => {
-  it('BUG: setActive revives Archived sessions (no guard)', () => {
+describe('Session — terminal state guards', () => {
+  it('setActive no-ops on Archived sessions', () => {
     // FIXED: setActive() now guards against Archived — terminal state stays.
     const s = new Session(makeNode({ status: SessionStatus.Archived }));
     s.setActive();
     expect(s.status).toBe('Archived');
   });
 
-  it('BUG: archive() on already-Archived session bumps timestamp', () => {
+  it('archive() no-ops on already-Archived sessions', () => {
     // FIXED: archive() now guards against re-archiving — no-op if already Archived.
     const s = new Session(makeNode({ status: SessionStatus.Archived }));
     const before = s.lastActiveAt;

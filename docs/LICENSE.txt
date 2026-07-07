@@ -1,0 +1,12 @@
+AnoClaw v2.0 — Your AI Desktop Platform
+
+Thank you for installing AnoClaw.
+
+This is pre-release software. Things may break.
+If they do, tell us — we fix fast.
+
+AnoClaw runs entirely on your machine.
+Your API keys, conversations, and data stay with you.
+Nothing leaves your computer without your permission.
+
+Enjoy.

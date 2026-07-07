@@ -69,6 +69,7 @@ export class EvolutionStore {
   private _statsDir: string;
   private _scoresDir: string;
   private _initialized = false;
+  private _scoresCache: { data: QualityScore[]; loadedAt: number } | null = null;
 
   constructor(dir: string) {
     this._dir = dir;
@@ -136,6 +137,7 @@ export class EvolutionStore {
    */
   async appendScore(score: QualityScore): Promise<void> {
     await this.init();
+    this.invalidateScoresCache();
     const filePath = path.join(this._scoresDir, `${todayStr()}.jsonl`);
     const line = JSON.stringify(score) + '\n';
     await _withLock(filePath, async () => {
@@ -144,11 +146,18 @@ export class EvolutionStore {
   }
 
   /**
-   * Read all quality scores across all daily shards.
+   * Read all quality scores across all daily shards. Results are cached and
+   * deduplicated (latest updatedAt per messageId+sessionId+agentId wins).
    * Optionally filter to a specific date (YYYY-MM-DD).
    */
   async readScores(date?: string): Promise<QualityScore[]> {
     await this.init();
+
+    // Return cached results if available (cache buster: appendScore clears it)
+    if (!date && this._scoresCache) {
+      return this._scoresCache.data;
+    }
+
     const scores: QualityScore[] = [];
 
     let files: string[];
@@ -177,7 +186,28 @@ export class EvolutionStore {
       }
     }
 
-    return scores;
+    // Dedup: keep only the latest updatedAt per (messageId+sessionId+agentId) key
+    const deduped = new Map<string, QualityScore>();
+    for (const s of scores) {
+      const key = `${s.messageId}|${s.sessionId}|${s.agentId}`;
+      const existing = deduped.get(key);
+      if (!existing || (s.updatedAt || '') > (existing.updatedAt || '')) {
+        deduped.set(key, s);
+      }
+    }
+
+    const result = [...deduped.values()];
+    if (!date) {
+      this._scoresCache = { data: result, loadedAt: Date.now() };
+    }
+    return result;
+  }
+
+  /**
+   * Invalidate the scores cache (called by appendScore).
+   */
+  invalidateScoresCache(): void {
+    this._scoresCache = null;
   }
 
   /**

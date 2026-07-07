@@ -8,11 +8,22 @@ import { WorkspaceTabGroup } from './WorkspaceTabGroup.js';
 import { WorkspaceSplitContainer } from './WorkspaceSplitContainer.js';
 import { WorkspaceBindingDialog } from '../../WorkspaceBindingDialog.js';
 
-// Always-on listener: agent calls wvCreate via executeJavaScript, then dispatches
-// this event so the workspace renders the new browser tab.
-window.addEventListener('ws-open-browser-internal', (e: Event) => {
-  const { url, viewId } = (e as CustomEvent).detail || {} as any;
-  if (!url) return;
+interface AgentBrowserEvent {
+  sessionId: string;
+  viewId: string;
+  action: string;
+  phase: 'start' | 'done' | 'error';
+  url?: string;
+  selector?: string;
+  valuePreview?: string;
+  resultPreview?: string;
+  error?: string;
+  timestamp: number;
+}
+
+function openAgentBrowserInWorkspace(detail: Partial<AgentBrowserEvent>): void {
+  const { url, viewId } = detail;
+  if (!viewId) return;
 
   if (pageRegistry.currentPage !== 'workspace') { pageRegistry.navigateTo('workspace'); }
 
@@ -20,16 +31,27 @@ window.addEventListener('ws-open-browser-internal', (e: Event) => {
   const cb = () => {
     const page = pageRegistry.getPage('workspace') as WorkspacePage | undefined;
     const g = page?._browserGroup();
-    if (g) { g._createBrowserTab(url, viewId); return; }
+    if (g) { g.handleAgentBrowserEvent(detail as AgentBrowserEvent); return; }
     if (++tries < 30) setTimeout(cb, 200);
   };
   setTimeout(cb, 300);
+}
+
+// Legacy renderer bridge kept for callers that dispatch this custom event.
+window.addEventListener('ws-open-browser-internal', (e: Event) => {
+  openAgentBrowserInWorkspace((e as CustomEvent).detail || {});
 });
+
+const electronApi = (window as any).electronAPI;
+if (electronApi?.onAgentBrowserEvent) {
+  electronApi.onAgentBrowserEvent((event: AgentBrowserEvent) => openAgentBrowserInWorkspace(event));
+}
 
 export class WorkspacePage implements Page {
   name = 'workspace';
   container: HTMLElement;
   private _sessionId = '';
+  private _loadingSessionId: string | null = null;
   private _workspacePath = '';
   private _toolbarPath!: HTMLElement;
   private _fileTree!: WorkspaceFileTree;
@@ -88,9 +110,9 @@ export class WorkspacePage implements Page {
     try {
       if (this._onSessionChange) { App.getInstance().sessionVM?.off('sessionSelected', this._onSessionChange); this._onSessionChange = null; }
       if (this._extChangeTimer) { clearInterval(this._extChangeTimer); this._extChangeTimer = 0; }
-      for (const g of this._tabCache.values()) { try { g.dispose(); } catch {} }
+      for (const g of this._tabCache.values()) { try { g.dispose(); } catch { console.debug('WorkspacePage: dispose tab group failed'); } }
       this._tabCache.clear(); this._currentGroup = null;
-    } catch {}
+    } catch { console.debug('WorkspacePage: onExit cleanup failed'); }
   }
 
   private async _onSessionSwitched(): Promise<void> {
@@ -100,10 +122,19 @@ export class WorkspacePage implements Page {
   }
 
   private async _loadWorkspaceForSession(sid: string): Promise<void> {
+    // Guard against concurrent loads when rapidly switching sessions
+    if (this._loadingSessionId === sid) return;
+    if (this._loadingSessionId) {
+      // Another load is in progress; let it finish, then re-issue with the latest sid
+      return;
+    }
+    this._loadingSessionId = sid;
     try {
       const resp = await fetch(`/api/v1/sessions/${encodeURIComponent(sid)}/workspace`);
       if (!resp.ok) return;
       const newPath = (await resp.json()).workspace || '';
+      // Verify we're still loading the intended session (didn't get stale)
+      if (this._loadingSessionId !== sid) return;
       if (this._sessionId && this._currentGroup?.hasTabs) { this._tabCache.set(this._sessionId, this._currentGroup); }
       this._sessionId = sid; this._workspacePath = newPath;
       this._toolbarPath.textContent = newPath || '(default workspace)';
@@ -121,7 +152,8 @@ export class WorkspacePage implements Page {
       setTimeout(() => this._pushEditorContext(), 500);
       // Start polling for external changes (Agent edits)
       this._startExternalChangePolling();
-    } catch {}
+    } catch { console.debug('WorkspacePage: failed to load workspace for session', sid); }
+    finally { this._loadingSessionId = null; }
   }
 
   private _extChangeTimer = 0;
@@ -156,7 +188,7 @@ export class WorkspacePage implements Page {
       this._tabCache.set(this._sessionId, fresh); this._currentGroup = fresh;
       this._tabMount.appendChild(fresh.element);
       await this._fileTree.loadRoot(this._sessionId);
-    } catch {}
+    } catch { console.debug('WorkspacePage: session switch cleanup failed'); }
   }
 
   private _openFile(path: string, name: string): void {

@@ -1,8 +1,13 @@
 // OllamaProvider — Ollama local API provider with SSE streaming
 // POST to {apiUrl}/api/chat, parse Ollama's native SSE format
 
+import { randomUUID } from 'node:crypto';
 import { LLMProvider } from './LLMProvider.js';
 import type { LLMOptions, LLMStreamEvent } from '../../../shared/types/llm.js';
+import { PROVIDER_OLLAMA } from '../../../shared/constants.js';
+import { createLogger } from '../../core/logger.js';
+
+const log = createLogger('anochat.llm.ollama');
 
 interface OllamaMessage {
   role: string;
@@ -35,7 +40,7 @@ export class OllamaProvider extends LLMProvider {
   private _chunkTimeoutMs = 60_000;  // 1 min — abort if between-chunk pause exceeds this
 
   providerName(): string {
-    return 'ollama';
+    return PROVIDER_OLLAMA;
   }
 
   cancel(): void {
@@ -150,8 +155,8 @@ export class OllamaProvider extends LLMProvider {
           let chunk: OllamaChunk;
           try {
             chunk = JSON.parse(trimmed) as OllamaChunk;
-          } catch {
-            // Skip unparseable lines
+          } catch (e) {
+            log.debug('Ollama JSON parse failed', { line: trimmed.slice(0, 120), error: (e as Error).message });
             continue;
           }
 
@@ -171,7 +176,7 @@ export class OllamaProvider extends LLMProvider {
               for (const tc of msg.tool_calls) {
                 yield {
                   type: 'tool_use',
-                  toolId: `${tc.function.name}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                  toolId: `tc_${randomUUID()}`,
                   toolName: tc.function.name,
                   toolInput: tc.function.arguments,
                 };

@@ -293,28 +293,6 @@
   border-color: var(--color-hairline-strong);
 }
 
-/* ---- File Row (File Browser) ---- */
-.file-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--color-text-secondary);
-}
-
-.file-row:hover {
-  background: var(--color-surface-elevated);
-  color: var(--color-text-primary);
-}
-
-.file-row.selected {
-  background: var(--color-surface-elevated);
-  color: var(--color-text-primary);
-}
-
 /* ---- Settings form sections ---- */
 .form-section {
   border: 1px solid var(--color-hairline);
@@ -680,4 +658,27 @@ input[type="range"]::-webkit-slider-thumb {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 120px;
+}
+
+/* ── Tool Confirm Dialog Risk Badges ── */
+.tool-confirm-risk {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-medium);
+}
+.tool-confirm-risk-Safe,
+.tool-confirm-risk-Low {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+.tool-confirm-risk-Medium {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+.tool-confirm-risk-High,
+.tool-confirm-risk-Critical {
+  background: var(--color-error-soft);
+  color: var(--color-error);
 }

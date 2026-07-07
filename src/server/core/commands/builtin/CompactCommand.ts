@@ -13,7 +13,7 @@ import { makeCommandResult, makeCommandError } from '../CommandResult.js';
 
 export class CompactCommand extends Command {
   name(): string { return 'compact'; }
-  description(): string { return 'Check context usage and estimate compaction savings'; }
+  description(): string { return 'Compact and persist the current session history'; }
   category(): 'session' { return 'session'; }
 
   displayName(): string { return 'Compact Context'; }
@@ -46,20 +46,26 @@ export class CompactCommand extends Command {
     const compressor = ContextCompressor.getInstance();
     const result = await compressor.compact(history, contextWindow);
 
-    if (!result.wasCompacted) {
+    const afterTokenEstimate = TokenCounter.estimateMessages(result.messages);
+    const pctAfter = Math.round((afterTokenEstimate / contextWindow) * 100);
+    const changed = result.wasCompacted
+      || result.prunedCount > 0
+      || result.messages.length !== history.length
+      || afterTokenEstimate < beforeTokens;
+
+    if (!changed) {
       return makeCommandResult(this.name(),
         `Context is within limits (${beforeCount} messages, ~${beforeTokens.toLocaleString()} tokens = ${pctBefore}%). No compaction needed.`);
     }
 
-    const afterTokenEstimate = TokenCounter.estimateMessages(result.messages);
-    const pctAfter = Math.round((afterTokenEstimate / contextWindow) * 100);
+    await sm.rewriteHistory(ctx.sessionId, result.messages);
 
     return makeCommandResult(this.name(),
-      `**Context usage report**  \n` +
-      `Messages: **${beforeCount}**  \n` +
+      `**Context compacted**  \n` +
+      `Messages: **${beforeCount}** -> **${result.messages.length}**  \n` +
       `Tokens: **${beforeTokens.toLocaleString()}** / ${contextWindow.toLocaleString()} (${pctBefore}%)  \n` +
-      `Estimated after compaction: **${afterTokenEstimate.toLocaleString()}** tokens (${pctAfter}%)  \n` +
-      `Freed: ~${(contextWindow - afterTokenEstimate).toLocaleString()} tokens  \n` +
-      `_Note: Compaction is automatic and only affects LLM context — your full history is always preserved._`);
+      `After compaction: **${afterTokenEstimate.toLocaleString()}** tokens (${pctAfter}%)  \n` +
+      `Reduced: ~${Math.max(0, beforeTokens - afterTokenEstimate).toLocaleString()} tokens  \n` +
+      `_The compacted session history has been persisted._`);
   }
 }

@@ -1,4 +1,4 @@
-// SkillInspectTool — inspect a named skill's full documentation
+// SkillInspectTool - inspect a named skill's full documentation
 // Returns metadata + body for a specific skill. Complements SkillList (summary)
 // and Skill (invocation) as the third tool in the skill discovery pipeline.
 
@@ -19,11 +19,11 @@ export class SkillInspectTool extends Tool {
 
   prompt(): string {
     return '## SkillInspect Usage\n' +
-      'Use SkillInspect to read a skill\'s full documentation BEFORE invoking it. Skills can be large — inspecting first lets you decide if the skill is right for your task without loading its entire body into context.\n\n' +
+      'Use SkillInspect to read a skill\'s full documentation BEFORE invoking it. Skills can be large - inspecting first lets you decide if the skill is right for your task without loading its entire body into context.\n\n' +
       '**When to SkillInspect:**\n' +
       '- You\'re curious about a skill listed by SkillList.\n' +
       '- The user\'s request matches a skill\'s trigger keywords.\n' +
-      '- Before invoking a skill with Skill — always inspect first.\n\n' +
+      '- Before invoking a skill with Skill - always inspect first.\n\n' +
       'SkillInspect returns: the skill\'s full body, required tools, model preference, triggers, and its file path on disk.';
   }
 
@@ -41,6 +41,8 @@ export class SkillInspectTool extends Tool {
   }
 
   riskLevel(): RiskLevel { return RiskLevel.Safe; }
+
+  isReadOnly(): boolean { return true; }
 
   async execute(params: Record<string, unknown>, ctx: ExecutionContext): Promise<ToolResult> {
     const skillName = (params.skill as string || '').trim();

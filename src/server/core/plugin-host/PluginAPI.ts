@@ -5,7 +5,7 @@
 import type {
   PluginLLMMessage, PluginLLMOptions, PluginLLMResponse,
   PluginGrepMatch, PluginMemorySaveInput, PluginMemorySearchOptions,
-  PluginEventMessage,
+  PluginEventMessage, RPCCallbacks,
 } from './PluginRPC.js';
 import { generateRPCLabel } from './PluginRPC.js';
 import * as path from 'path';
@@ -80,7 +80,7 @@ export interface AnoClawAPI {
     inject(name: string, content: string, priority?: number): Promise<void>;
   };
   ui: {
-    mount(slot: string, htmlContent: string, opts?: { position?: 'append' | 'prepend'; replace?: boolean }): Promise<void>;
+    mount(slot: string, htmlContent: string, opts?: { position?: 'append' | 'prepend'; replace?: boolean; id?: string; priority?: number }): Promise<void>;
     unmountAll(slot: string): Promise<void>;
   };
 }
@@ -311,7 +311,7 @@ export function createAnoClawAPI(
     // ── New: UI ──
 
     ui: {
-      async mount(slot: string, htmlContent: string, opts?: { position?: 'append' | 'prepend'; replace?: boolean }): Promise<void> {
+      async mount(slot: string, htmlContent: string, opts?: { position?: 'append' | 'prepend'; replace?: boolean; id?: string; priority?: number }): Promise<void> {
         await rpc('ui.mount', { pluginName, slot, htmlContent, opts: opts || {} });
       },
       async unmountAll(slot: string): Promise<void> {
@@ -322,6 +322,3 @@ export function createAnoClawAPI(
 
   return { api, handleMessage };
 }
-
-// Re-export RPCCallbacks for internal use
-import type { RPCCallbacks } from './PluginRPC.js';

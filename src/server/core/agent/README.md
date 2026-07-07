@@ -62,7 +62,7 @@ for await (const event of loop.run(userMessage, history, signal)) {
 - **Stall detection**: 3-level escalation — hint → compact → yield
 - **Keyword extraction**: emits `loop:keyword_turn` event every 10 turns
 - **Background task wait**: polls for pending tasks instead of exiting loop
-- **Infinite mode**: keeps the agent alive after completion, sleeps until new messages
+- **Goal mode**: keeps a root session advancing while an active goal is stored in session metadata
 - **Extension point**: `agentLoop` plugin override can replace the entire ReAct loop
 
 ---
@@ -158,7 +158,7 @@ Lifecycle:
 4. Create `InterruptController` for the session
 5. Build `AgentLoopConfig` from agent settings
 6. Run `AgentLoop.run()`, forwarding events
-7. On completion: `AgentLoopCompleted` event, memory lifecycle, infinite mode sleep/wake
+7. On completion: `AgentLoopCompleted` event, memory lifecycle, goal mode sleep/wake
 8. On error: emits `AgentLoopCompleted(status: 'error')`
 9. Finally: cleanup loop, interrupt controller, session status, lease
 

@@ -1,14 +1,14 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import { app } from 'electron';
+import { app, BrowserWindow as BwType } from 'electron';
 
 export class WindowManager {
   private static instance: WindowManager;
-  private windows = new Set<any>();
-  private mainWindow: any = null;
-  private Bw: any;
+  private windows = new Set<BwType>();
+  private mainWindow: BwType | null = null;
+  private Bw: typeof BwType;
 
-  private constructor(BrowserWindow: any) {
+  private constructor(BrowserWindow: typeof BwType) {
     this.Bw = BrowserWindow;
   }
 
@@ -17,11 +17,11 @@ export class WindowManager {
     return WindowManager.instance;
   }
 
-  static init(BrowserWindow: any): void {
+  static init(BrowserWindow: typeof BwType): void {
     WindowManager.instance = new WindowManager(BrowserWindow);
   }
 
-  createWindow(sessionId?: string): any {
+  createWindow(sessionId?: string): BwType {
     const state = this.loadState();
     const port = 3456;
     // app.getAppPath() works inside asar — Electron patches it to resolve correctly.
@@ -38,7 +38,7 @@ export class WindowManager {
       enableLargerThanScreen: true,
       webPreferences: {
         preload: path.join(appRoot, 'dist', 'electron', 'preload.cjs'),
-        backgroundThrottling: false,
+        backgroundThrottling: true,
       },
     });
 
@@ -59,7 +59,7 @@ export class WindowManager {
       saveTimer = setTimeout(() => { this.saveState(win); saveTimer = null; }, 500);
     });
     win.on('close', () => { if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; } this.saveState(win); });
-    win.on('maximize', () => { win._preBounds = win._preBounds || win.getBounds(); this._notifyMax(win, true); });
+    win.on('maximize', () => { (win as any)._preBounds = (win as any)._preBounds || win.getBounds(); this._notifyMax(win, true); });
     win.on('unmaximize', () => this._notifyMax(win, false));
 
     this.windows.add(win);
@@ -67,12 +67,12 @@ export class WindowManager {
     return win;
   }
 
-  getMainWindow(): any { return this.mainWindow; }
-  getAllWindows(): any[] { return [...this.windows]; }
+  getMainWindow(): BwType | null { return this.mainWindow; }
+  getAllWindows(): BwType[] { return [...this.windows]; }
 
-  private _notifyMax(win: any, v: boolean): void { win.webContents.send('maximize-change', v); }
+  private _notifyMax(win: BwType, v: boolean): void { win.webContents.send('maximize-change', v); }
 
-  private loadState(): any {
+  private loadState(): { width: number; height: number; x?: number; y?: number; maximized: boolean } {
     // In packaged mode, app.getAppPath() is inside asar (read-only).
     // Use userData for writable state — standard Electron API.
     const statePath = path.join(app.getPath('userData'), 'window-state.json');
@@ -80,9 +80,9 @@ export class WindowManager {
     catch { return { width: 1200, height: 800, maximized: false }; }
   }
 
-  private saveState(win: any): void {
+  private saveState(win: BwType): void {
     const maximized = win.isMaximized?.() ?? false;
-    const b = maximized ? (win._preBounds ?? win.getBounds()) : win.getBounds();
+    const b = maximized ? ((win as any)._preBounds ?? win.getBounds()) : win.getBounds();
     try {
       const statePath = path.join(app.getPath('userData'), 'window-state.json');
       const dir = path.dirname(statePath);

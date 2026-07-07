@@ -4,11 +4,8 @@
 import { ToolCard, type ToolCardState } from './ToolCard.js';
 
 export class ToolCardProgress extends ToolCard {
-  private _percent: number;
-
   constructor(state: ToolCardState) {
     super(state);
-    this._percent = this._extractPercent(state.result || '');
   }
 
   private _extractPercent(raw: string): number {
@@ -19,6 +16,7 @@ export class ToolCardProgress extends ToolCard {
   protected render(s: ToolCardState): HTMLElement {
     const wrapper = document.createElement('div');
     wrapper.className = 'ui-toolcard ui-toolcard-progress';
+    const percent = this._extractPercent(s.result || '');
 
     wrapper.appendChild(this._buildIndicator(s));
 
@@ -26,16 +24,16 @@ export class ToolCardProgress extends ToolCard {
     barOuter.className = 'ui-toolcard-progress-track';
 
     const barInner = document.createElement('div');
-    barInner.className = `ui-toolcard-progress-fill ${this._percent < 0 ? 'indeterminate' : ''}`;
-    if (this._percent >= 0) barInner.style.width = `${this._percent}%`;
+    barInner.className = `ui-toolcard-progress-fill ${percent < 0 ? 'indeterminate' : ''}`;
+    if (percent >= 0) barInner.style.width = `${percent}%`;
     barOuter.appendChild(barInner);
 
     wrapper.appendChild(barOuter);
 
-    if (this._percent >= 0) {
+    if (percent >= 0) {
       const label = document.createElement('div');
       label.className = 'ui-toolcard-progress-label';
-      label.textContent = `${this._percent}%`;
+      label.textContent = `${percent}%`;
       wrapper.appendChild(label);
     }
 

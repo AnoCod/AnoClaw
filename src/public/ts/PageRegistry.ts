@@ -66,11 +66,6 @@ class PageRegistry {
     return this._pages.get(name);
   }
 
-  getAllPages(): Page[] {
-    const result: Page[] = [];
-    this._pages.forEach((p) => result.push(p));
-    return result;
-  }
 }
 
 export const pageRegistry = new PageRegistry();

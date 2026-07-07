@@ -44,8 +44,7 @@ export class QualityScoreManager {
     const existingIdx = this._cache.findIndex(
       s => s.messageId === score.messageId
         && s.sessionId === score.sessionId
-        && s.agentId === score.agentId
-        && s.id === score.id,
+        && s.agentId === score.agentId,
     );
 
     if (existingIdx >= 0) {

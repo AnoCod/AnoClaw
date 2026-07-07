@@ -3,6 +3,7 @@
 
 import type { Page, PluginPageContribution } from '../../types.js';
 import { ConfirmDialog } from '../ConfirmDialog.js';
+import { pageRegistry } from '../../PageRegistry.js';
 
 export class PluginPageContainer implements Page {
   readonly name: string;
@@ -21,6 +22,7 @@ export class PluginPageContainer implements Page {
 
     window.addEventListener('theme-changed', this._onThemeChanged);
     this._installDialogBridge();
+    this._installSessionBridge();
   }
 
   private _installDialogBridge(): void {
@@ -34,6 +36,49 @@ export class PluginPageContainer implements Page {
         id: e.data.id,
         result,
       }, '*');
+    });
+  }
+
+  private _installSessionBridge(): void {
+    window.addEventListener('message', async (e: MessageEvent) => {
+      if (!e.data || e.data.type !== 'anoclaw:session:handoff') return;
+      const iframe = this._iframe;
+      if (!iframe?.contentWindow || e.source !== iframe.contentWindow) return;
+
+      const sessionId = String(e.data.sessionId || '');
+      const prompt = String(e.data.prompt || '');
+      if (!sessionId || !prompt) {
+        iframe.contentWindow.postMessage({
+          type: 'anoclaw:session:handoff-result',
+          id: e.data.id,
+          ok: false,
+          error: 'sessionId and prompt are required',
+        }, '*');
+        return;
+      }
+
+      try {
+        const { App } = await import('../../app.js');
+        const app = App.getInstance();
+        app.sessionVM.selectSession(sessionId);
+        app.conversationVM.setActiveSession(sessionId);
+        pageRegistry.navigateTo('sessions');
+        const sessionsPage = pageRegistry.getPage('sessions') as { injectInput?: (text: string) => void } | undefined;
+        sessionsPage?.injectInput?.(prompt);
+        iframe.contentWindow.postMessage({
+          type: 'anoclaw:session:handoff-result',
+          id: e.data.id,
+          ok: true,
+          sessionId,
+        }, '*');
+      } catch (err) {
+        iframe.contentWindow.postMessage({
+          type: 'anoclaw:session:handoff-result',
+          id: e.data.id,
+          ok: false,
+          error: (err as Error).message,
+        }, '*');
+      }
     });
   }
 
@@ -96,8 +141,15 @@ export class PluginPageContainer implements Page {
             return pre + pluginDir + url + post;
           }
         );
-        // Inject anoclaw-ui.js BEFORE the closing </head> tag, or at the start of <body>
-        const uiTag = `<link rel=\"stylesheet\" href=\"${mainBase}css/tokens.css\"><script src=\"${mainBase}anoclaw-ui.js\"></script>`;
+        // Inject shared plugin chrome before the plugin bundle runs.
+        const pluginBoot = `<script>window.__ANOCLAW_PLUGIN_NAME__=${JSON.stringify(this.container.getAttribute('data-plugin') || '')};</script>`;
+        const uiTag = [
+          pluginBoot,
+          `<link rel=\"stylesheet\" href=\"${mainBase}css/tokens.css\">`,
+          `<link rel=\"stylesheet\" href=\"${mainBase}css/plugin-raycast.css\">`,
+          `<script src=\"${mainBase}anoclaw-ui.js\"></script>`,
+          `<script src=\"${mainBase}plugin-raycast.js\"></script>`,
+        ].join('');
         if (fixed.includes('</head>')) {
           fixed = fixed.replace('</head>', uiTag + '</head>');
         } else if (fixed.includes('<body>')) {
@@ -137,16 +189,29 @@ export class PluginPageContainer implements Page {
     // Build paths relative to the main page (not the iframe's base URL)
     const mainBase = window.location.href.substring(0, window.location.href.lastIndexOf('/') + 1);
 
+    const pluginBoot = doc.createElement('script');
+    pluginBoot.textContent = `window.__ANOCLAW_PLUGIN_NAME__=${JSON.stringify(this.container.getAttribute('data-plugin') || '')};`;
+    head.appendChild(pluginBoot);
+
     const link = doc.createElement('link');
     link.rel = 'stylesheet';
     link.href = mainBase + 'css/tokens.css';
     head.appendChild(link);
+
+    const raycastLink = doc.createElement('link');
+    raycastLink.rel = 'stylesheet';
+    raycastLink.href = mainBase + 'css/plugin-raycast.css';
+    head.appendChild(raycastLink);
 
     this._updateIframeThemeAttrs();
 
     const script = doc.createElement('script');
     script.src = mainBase + 'anoclaw-ui.js';
     head.appendChild(script);
+
+    const raycastScript = doc.createElement('script');
+    raycastScript.src = mainBase + 'plugin-raycast.js';
+    head.appendChild(raycastScript);
 
     console.log(`[Plugin] assets injected into iframe — tokens.css + anoclaw-ui.js`);
     this._tokensInjected = true;

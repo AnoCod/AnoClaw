@@ -10,6 +10,7 @@ export class GetSettingsRoute implements RouteHandler {
   path = '/api/v1/settings';
   category = 'System';
   description = 'Read full settings (hides LLM apiKey)';
+  permission = 'admin';
 
   handle(_match: RouteMatch, _req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): boolean {
     try {
@@ -34,6 +35,7 @@ export class PutSettingRoute implements RouteHandler {
   path = '/api/v1/settings/:key';
   category = 'System';
   description = 'Update a setting value (dot-notation key)';
+  permission = 'admin';
 
   async handle(
     match: RouteMatch, req: IncomingMessage, res: ServerResponse, _token: ApiToken | null,

@@ -1,9 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ToolPipeline } from '../ToolPipeline.js';
-import { RiskLevel } from '../../../../shared/types/tool.js';
+import { RiskLevel, InterruptBehavior } from '../../../../shared/types/tool.js';
 import type { Tool } from '../Tool.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
 import { makeResult, makeError } from '../ToolResult.js';
+import { PlanTool } from '../builtin/PlanTool.js';
 
 // ── Helpers ──
 
@@ -23,13 +24,14 @@ function mockTool(overrides: Record<string, unknown> = {}): Tool {
     description: () => 'A test tool',
     parametersSchema: () => (overrides.parametersSchema as Record<string, unknown>) ?? {},
     riskLevel: () => (overrides.riskLevel as RiskLevel) ?? RiskLevel.Low,
+    requiresConfirmation: () => (overrides.requiresConfirmation as boolean) ?? false,
     isReadOnly: () => (overrides.isReadOnly as boolean) ?? true,
+    isDestructive: () => (overrides.isDestructive as boolean) ?? false,
     workspacePathParams: () => (overrides.workspacePathParams as string[]) ?? [],
     maxRetries: () => (overrides.maxRetries as number) ?? 3,
     outputLimit: () => (overrides.outputLimit as number) ?? 10000,
+    interruptBehavior: () => (overrides.interruptBehavior as InterruptBehavior) ?? InterruptBehavior.Cancel,
     _executeWithEvents: vi.fn().mockResolvedValue(makeResult('ok')),
-    on: vi.fn(),
-    emit: vi.fn(),
   } as unknown as Tool;
 }
 
@@ -119,16 +121,16 @@ describe('ToolPipeline.validateParams', () => {
 // ── Stage 1: securityCheck ──
 
 describe('ToolPipeline.securityCheck', () => {
-  it('blocks critical tools without user confirmation', () => {
-    const tool = mockTool({ riskLevel: RiskLevel.Critical });
+  it('blocks tools that require confirmation', () => {
+    const tool = mockTool({ requiresConfirmation: true });
     const r = ToolPipeline.securityCheck(tool, {}, ctx({ userConfirmed: false }));
     expect(r).not.toBeNull();
     expect(r!.errorMessage).toContain('confirmation');
   });
 
-  it('allows critical tools with user confirmation', () => {
-    const tool = mockTool({ riskLevel: RiskLevel.Critical });
-    expect(ToolPipeline.securityCheck(tool, {}, ctx({ userConfirmed: true }))).toBeNull();
+  it('allows tools that do not require confirmation', () => {
+    const tool = mockTool({ requiresConfirmation: false });
+    expect(ToolPipeline.securityCheck(tool, {}, ctx({ userConfirmed: false }))).toBeNull();
   });
 
   it('allows low-risk tools without confirmation', () => {
@@ -138,14 +140,14 @@ describe('ToolPipeline.securityCheck', () => {
 
   it('blocks non-read-only tools in read_only mode', () => {
     const tool = mockTool({ isReadOnly: false });
-    const r = ToolPipeline.securityCheck(tool, {}, ctx({ mode: 'read_only' } as unknown as ExecutionContext));
+    const r = ToolPipeline.securityCheck(tool, {}, ctx({ mode: 'read_only' }));
     expect(r).not.toBeNull();
     expect(r!.errorMessage).toContain('read_only');
   });
 
   it('allows read-only tools in read_only mode', () => {
     const tool = mockTool({ isReadOnly: true });
-    expect(ToolPipeline.securityCheck(tool, {}, ctx({ mode: 'read_only' } as unknown as ExecutionContext))).toBeNull();
+    expect(ToolPipeline.securityCheck(tool, {}, ctx({ mode: 'read_only' }))).toBeNull();
   });
 
   // ── Workspace boundary ──
@@ -213,9 +215,57 @@ describe('ToolPipeline.securityCheck', () => {
 
   it('blocks non-read-only tools in readOnly mode', () => {
     const tool = mockTool({ isReadOnly: false });
-    const r = ToolPipeline.securityCheck(tool, {}, ctx({ mode: 'readOnly' } as unknown as ExecutionContext));
+    const r = ToolPipeline.securityCheck(tool, {}, ctx({ mode: 'readOnly' }));
     expect(r).not.toBeNull();
     expect(r!.errorMessage).toContain('readOnly');
+  });
+
+  it('allows Ask mode writes (confirmation handled by AgentLoop)', () => {
+    const tool = mockTool({ name: 'Write', isReadOnly: false, riskLevel: RiskLevel.Medium });
+    const r = ToolPipeline.securityCheck(tool, {}, ctx({ mode: 'ask' }));
+    expect(r).toBeNull();
+  });
+
+  it('allows low-risk edits in Safe Auto mode (confirmation handled by AgentLoop)', () => {
+    const tool = mockTool({
+      name: 'Edit',
+      isReadOnly: false,
+      isDestructive: true,
+      riskLevel: RiskLevel.Low,
+    });
+    const r = ToolPipeline.securityCheck(tool, {}, ctx({ mode: 'auto' }));
+    expect(r).toBeNull();
+  });
+
+  it('allows non-read-only tools in Safe Auto mode (confirmation handled by AgentLoop)', () => {
+    const tool = mockTool({
+      name: 'MemorySave',
+      isReadOnly: false,
+      isDestructive: false,
+      riskLevel: RiskLevel.Low,
+    });
+    const r = ToolPipeline.securityCheck(tool, {}, ctx({ mode: 'auto' }));
+    expect(r).toBeNull();
+  });
+
+  it('allows low-risk edits in Auto-Edit mode', () => {
+    const tool = mockTool({
+      name: 'Edit',
+      isReadOnly: false,
+      isDestructive: true,
+      riskLevel: RiskLevel.Low,
+    });
+    expect(ToolPipeline.securityCheck(tool, {}, ctx({ mode: 'auto_edit' }))).toBeNull();
+  });
+
+  it('treats PlanTool as file-changing in read_only mode', () => {
+    const r = ToolPipeline.securityCheck(
+      new PlanTool(),
+      { name: 'audit', content: 'steps' },
+      ctx({ mode: 'read_only' }),
+    );
+    expect(r).not.toBeNull();
+    expect(r!.errorMessage).toContain('read_only');
   });
 });
 

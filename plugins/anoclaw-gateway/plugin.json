@@ -2,7 +2,7 @@
   "name": "anoclaw-gateway",
   "displayName": "Gateway",
   "version": "2.1.0",
-  "description": "External platform integration — Telegram, WeChat, Feishu adapters with health monitoring, image support, and real-time updates",
+  "description": "External platform integration - Telegram, WeChat, Feishu adapters with health monitoring, image support, and real-time updates",
   "publisher": "anoclaw",
   "main": "extension.js",
   "activationEvents": ["onStartup"],

@@ -44,7 +44,7 @@ function makeScore(overrides: Partial<QualityScore> = {}): QualityScore {
     id: `score-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     sessionId: 'sess-001',
     agentId: 'agent-001',
-    messageId: `msg-${Date.now()}`,
+    messageId: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     turnNumber: 1,
     score: 4,
     createdAt: new Date().toISOString(),

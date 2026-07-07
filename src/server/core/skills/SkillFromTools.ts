@@ -318,14 +318,16 @@ export async function generateSkillFromTranscript(
   await fs.mkdir(skillDir, { recursive: true });
   const skillMdPath = path.join(skillDir, 'SKILL.md');
 
-  // Don't overwrite existing manual skills
+  // Atomically create file — fail if it already exists (avoids TOCTOU race)
   try {
-    await fs.access(skillMdPath);
-    createLogger('anochat.core').info('Skill already exists, skipping generation', { skill: skillName });
-    return null;
-  } catch { /* file does not exist — proceed */ }
-
-  await fs.writeFile(skillMdPath, content, 'utf8');
+    await fs.writeFile(skillMdPath, content, { encoding: 'utf8', flag: 'wx' });
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+      createLogger('anochat.core').info('Skill already exists, skipping generation', { skill: skillName });
+      return null;
+    }
+    throw err;
+  }
   createLogger('anochat.core').info('LLM-generated skill created', { skill: skillName });
 
   return { skillName, content };

@@ -14,16 +14,16 @@
 //   floating-ball-sessions: getRecentSessions() (provider registered in main.ts)
 
 import * as path from 'path';
-import { app, screen } from 'electron';
+import { app, screen, BrowserWindow as BwType, IpcMain } from 'electron';
 import { WindowManager } from './WindowManager.js';
 
 export class FloatingBallManager {
   private static instance: FloatingBallManager;
-  private _ball: any = null;
-  private _Bw: any = null;
-  private _ipcMain: any = null;
+  private _ball: BwType | null = null;
+  private _Bw: typeof BwType | null = null;
+  private _ipcMain: IpcMain | null = null;
   private _ipcInstalled = false;
-  private _sessionProvider: (() => Promise<any[]>) | null = null;
+  private _sessionProvider: (() => Promise<Array<{ id: string; title: string }>>) | null = null;
   /** Saved main window bounds before minimize, used to position ball at that window's corner. */
   private _mainWinBounds: { x: number; y: number; width: number; height: number } | null = null;
 
@@ -33,14 +33,14 @@ export class FloatingBallManager {
   }
 
   /** Init with Electron dependencies. Call once at app startup. Registers IPC handlers. */
-  static init(BrowserWindow: any, ipcMain: any): void {
+  static init(BrowserWindow: typeof BwType, ipcMain: IpcMain): void {
     const inst = FloatingBallManager.getInstance();
     inst._Bw = BrowserWindow;
     inst._ipcMain = ipcMain;
     // Register IPC handlers once — not per minimize
     if (!inst._ipcInstalled) {
       inst._ipcInstalled = true;
-      ipcMain.on('floating-ball-action', (_: any, action: string, data?: any) => {
+      ipcMain.on('floating-ball-action', (_e, action: string, data?: any) => {
         inst._handleAction(action, data);
       });
       ipcMain.handle('floating-ball-sessions', async () => {
@@ -50,7 +50,7 @@ export class FloatingBallManager {
   }
 
   /** Register a provider for recent sessions (used by satellite display). */
-  setSessionProvider(fn: () => Promise<any[]>): void {
+  setSessionProvider(fn: () => Promise<Array<{ id: string; title: string }>>): void {
     this._sessionProvider = fn;
   }
 
@@ -62,7 +62,13 @@ export class FloatingBallManager {
   /** Show the 400x400 ball window at the main window's top-right corner. */
   show(): void {
     if (!this._Bw) return;
-    if (!this._ball || this._ball.isDestroyed?.()) this._createBall();
+    if (!this._ball || this._ball.isDestroyed?.()) {
+      this._createBall();
+    } else if (this._ball.isVisible()) {
+      return; // Already visible
+    }
+    // At this point _ball is guaranteed non-null
+    const ball = this._ball!;
 
     const bounds = this._mainWinBounds;
     let posX: number, posY: number;
@@ -81,13 +87,13 @@ export class FloatingBallManager {
       posY = wa.y;
     }
 
-    this._ball.setPosition(posX, posY);
-    this._ball.show();
-    this._ball.focus();
+    ball.setPosition(posX, posY);
+    ball.show();
+    ball.focus();
   }
 
   /** Animate main window shrinking to a tiny square, then show ball. */
-  animateMinimize(mainWin: any): void {
+  animateMinimize(mainWin: BwType): void {
     const bounds = mainWin.getBounds();
     this.saveMainWindowBounds(bounds);
 
@@ -135,6 +141,7 @@ export class FloatingBallManager {
 
   /** Create the transparent frameless 400x400 ball window and wire IPC listeners. */
   private _createBall(): void {
+    if (!this._Bw) return;
     const port = 3456;
     this._ball = new this._Bw({
       width: 400, height: 400,
@@ -143,7 +150,7 @@ export class FloatingBallManager {
       backgroundColor: '#00000000',
       webPreferences: {
         preload: path.join(app.getAppPath(), 'dist', 'electron', 'preload.cjs'),
-        backgroundThrottling: false,
+        backgroundThrottling: true,
       },
     });
 

@@ -8,7 +8,7 @@ export function parseSkillMarkdown(
   content: string,
   filePath: string,
 ): { frontmatter: Record<string, unknown>; body: string } {
-  const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n*/);
+  const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n*/);
   if (!fmMatch) {
     throw new Error(
       `Skill file "${filePath}" is missing YAML frontmatter (--- delimiters).\n` +

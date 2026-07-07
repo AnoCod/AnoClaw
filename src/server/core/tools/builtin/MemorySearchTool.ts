@@ -1,4 +1,4 @@
-// MemorySearchTool — search agent memories
+// MemorySearchTool - search agent memories
 // Searches personal and team memories using MemoryManager.
 
 import { Tool, RiskLevel } from '../Tool.js';
@@ -10,33 +10,28 @@ import { MemoryScope } from '../../memory/MemoryEntry.js';
 export class MemorySearchTool extends Tool {
 
   static category = 'Memory & Skills';
-  static toolDescription = 'Searches the persistent memory system for relevant entries.';
+  static toolDescription = 'Searches durable memory for relevant project, user, team, or session knowledge.';
   name(): string { return 'memory_search'; }
 
   description(): string {
-    return 'Search memories across personal, team, or all scopes. Returns matching memory entries with metadata.';
+    return 'Search memory across personal, team, session, or all scopes. Use before unfamiliar work or when past decisions may matter.';
   }
 
   prompt(): string {
-    return '## MemorySearch Usage\n' +
-      'Search the persistent memory system before starting unfamiliar work. Past agents may have left relevant knowledge.\n\n' +
-      '**When to search:**\n' +
-      '- Before modifying a subsystem you haven\'t touched — check for conventions and gotchas.\n' +
-      '- When a user references past work ("like we did last time").\n' +
-      '- After hitting an error — someone may have documented the fix.\n\n' +
-      '**Scope strategy:**\n' +
-      '- Default to `all` for broad lookups.\n' +
-      '- Use `team` for project conventions and shared decisions.\n' +
-      '- Use `personal` for your own past notes.\n' +
-      '- `session_personal` / `session_team` for current-session ephemeral data.\n\n' +
-      'Fuzzy matching is on by default — typo-tolerant, cross-language synonyms work (e.g. "日志" matches "logging").';
+    return [
+      '## memory_search Usage',
+      'Search memory when previous context could improve accuracy: project conventions, past bugs, user preferences, or prior decisions.',
+      '',
+      'Use broad all-scope search for unfamiliar work, team scope for shared project rules, and personal scope for your own lessons.',
+      'After finding a relevant entry, use memory_recall for full content only when the summary is insufficient.',
+    ].join('\n');
   }
 
   parametersSchema(): Record<string, unknown> {
     return {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Search query — keywords or phrases to find in memories. Supports fuzzy matching (typo-tolerant) and cross-language synonyms (e.g. "日志" matches "logging").' },
+        query: { type: 'string', description: 'Search query - keywords or phrases to find in memories. Supports fuzzy matching (typo-tolerant) and cross-language synonyms (e.g. "logging" matches "logging").' },
         scope: { type: 'string', enum: ['team', 'personal', 'session_personal', 'session_team', 'all'], description: 'Scope to search. Default: "all". session_personal/session_team search session-scoped.' },
         fuzzy: { type: 'boolean', description: 'Enable fuzzy/semantic matching with typo tolerance. Default: true (always on).' },
       },
@@ -45,6 +40,8 @@ export class MemorySearchTool extends Tool {
   }
 
   riskLevel(): RiskLevel { return RiskLevel.Safe; }
+
+  isReadOnly(): boolean { return true; }
 
   async execute(params: Record<string, unknown>, ctx: ExecutionContext): Promise<ToolResult> {
     const query = params.query as string;

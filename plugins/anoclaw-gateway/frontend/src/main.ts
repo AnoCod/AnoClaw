@@ -1,4 +1,4 @@
-// Gateway plugin frontend — v4.0.0 Commercial Grade
+// Gateway plugin frontend - v4.0.0 Commercial Grade
 // Features: Dark surface hierarchy, SVG icons, WebSocket real-time inbox,
 // message bubbles, compose box, health dashboard, animated status indicators,
 // message detail view, connection wizard, search/filter, message templates,
@@ -135,8 +135,6 @@ class GatewayPage {
     const style = document.createElement('style');
     style.id = 'gw-styles';
     style.textContent = `
-      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
       :root {
         --gw-canvas: #07080a;
         --gw-surface: #0d0d0d;
@@ -820,7 +818,7 @@ class GatewayPage {
           <span class="gw-detail-value">${esc(msg.chatId || 'N/A')}</span>
           <span class="gw-detail-label">Time</span>
           <span class="gw-detail-value">${msg.timestamp ? new Date(msg.timestamp).toLocaleString() : 'N/A'}</span>
-          ${msg.media_type ? `<span class="gw-detail-label">Media</span><span class="gw-detail-value">${esc(msg.media_type)}${msg.media_url ? ` — ${esc(msg.media_url)}` : ''}</span>` : ''}
+          ${msg.media_type ? `<span class="gw-detail-label">Media</span><span class="gw-detail-value">${esc(msg.media_type)}${msg.media_url ? ` - ${esc(msg.media_url)}` : ''}</span>` : ''}
           ${msg.callback_data ? `<span class="gw-detail-label">Callback</span><span class="gw-detail-value">${esc(msg.callback_data)}</span>` : ''}
           ${msg.connectionId ? `<span class="gw-detail-label">Connection</span><span class="gw-detail-value">${esc(msg.connectionId)}</span>` : ''}
         </div>
@@ -1014,7 +1012,7 @@ class GatewayPage {
         <div class="gw-retry-card">
           <span class="gw-retry-status ${r.status}">${r.status}</span>
           <div style="flex:1;min-width:0;">
-            <div style="font-size:12px;font-weight:500;color:var(--gw-text-primary);">${esc(r.platform)} → ${esc(r.chatId)}</div>
+            <div style="font-size:12px;font-weight:500;color:var(--gw-text-primary);">${esc(r.platform)} -> ${esc(r.chatId)}</div>
             <div style="font-size:10px;color:var(--gw-text-quaternary);margin-top:2px;">Attempt ${r.attempt}/${r.maxAttempts} · ${r.lastError ? esc(r.lastError) : 'Waiting...'}</div>
           </div>
           <div style="font-size:9px;color:var(--gw-text-quaternary);text-align:right;">

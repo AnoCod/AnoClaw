@@ -120,9 +120,12 @@ export class GatewayClient {
     this._setState('closed');
   }
 
-  /** Send a message. If not connected, silently drops (caller should check connectionState). */
+  /** Send a message. Warns if not connected — caller should check connectionState. */
   send(data: Record<string, unknown>): void {
-    if (!this._ws || this._ws.readyState !== WebSocket.OPEN) return;
+    if (!this._ws || this._ws.readyState !== WebSocket.OPEN) {
+      console.warn('[GatewayClient] send() dropped — not connected', { type: data.type });
+      return;
+    }
     this._ws.send(JSON.stringify(data));
   }
 

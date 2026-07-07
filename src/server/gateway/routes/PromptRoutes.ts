@@ -7,14 +7,15 @@ import { PromptAssembler } from '../../core/prompt/PromptAssembler.js';
 
 export class PreviewAgentPromptRoute implements RouteHandler {
   method = 'GET' as const; path = '/api/v1/agents/:id/prompt';
-  category = 'Agents'; description = 'Preview the effective system prompt for an agent (?sessionId=...)';
+  category = 'Agents'; description = 'Preview the effective system prompt and cache layout for an agent (?sessionId=...)';
   handle(m: RouteMatch, req: IncomingMessage, res: ServerResponse): boolean {
     try {
       const url = new URL(req.url || '/', 'http://localhost');
       const sessionId = url.searchParams.get('sessionId') || 'preview';
       const pa = PromptAssembler.getInstance();
       const prompt = pa.buildEffectivePrompt(m.params['id'], sessionId);
-      sendJson(res, 200, { agentId: m.params['id'], sessionId, length: prompt.length, prompt });
+      const layout = pa.analyzePromptText(prompt);
+      sendJson(res, 200, { agentId: m.params['id'], sessionId, length: prompt.length, layout, prompt });
     } catch (err) { sendJson(res, 500, { error: (err as Error).message }); }
     return true;
   }

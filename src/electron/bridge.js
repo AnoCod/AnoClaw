@@ -16,16 +16,26 @@ if (typeof m === 'string') {
   return;
 }
 
-// GPU switches — before app.whenReady
-m.app.commandLine.appendSwitch('disable-gpu-vsync');
-m.app.commandLine.appendSwitch('enable-gpu-rasterization');
-m.app.commandLine.appendSwitch('use-angle', 'direct-composition');
-// Prevent Chrome from throttling renderer during resize
-m.app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
-m.app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+// Rendering switches - before app.whenReady.
+// Auto mode prefers Chromium hardware acceleration (dGPU/iGPU) and keeps
+// software fallback enabled for GPU-less or blocked-driver machines.
+const gpuMode = String(process.env.ANOCLAW_GPU_MODE || 'auto').toLowerCase();
+if (gpuMode === 'cpu' || gpuMode === 'software' || gpuMode === 'off') {
+  m.app.disableHardwareAcceleration();
+} else {
+  m.app.commandLine.appendSwitch('enable-gpu-rasterization');
+  m.app.commandLine.appendSwitch('enable-zero-copy');
+  if (process.platform === 'win32') {
+    m.app.commandLine.appendSwitch('use-angle', 'd3d11');
+  }
+  if (gpuMode === 'force') {
+    m.app.commandLine.appendSwitch('ignore-gpu-blocklist');
+  }
+}
 // Enable CDP debugging port for playwright-core Agent browser automation
-m.app.commandLine.appendSwitch('remote-debugging-port', '9222');
-m.app.commandLine.appendSwitch('remote-allow-origins', 'http://localhost:9222');
+const cdpPort = process.env.ANOCLAW_CDP_PORT || '9222';
+m.app.commandLine.appendSwitch('remote-debugging-port', cdpPort);
+m.app.commandLine.appendSwitch('remote-allow-origins', `http://localhost:${cdpPort}`);
 
 if (!m.app.requestSingleInstanceLock()) process.exit(0);
 m.app.on('second-instance', () => {
@@ -33,7 +43,9 @@ m.app.on('second-instance', () => {
   try {
     const w = require('./WindowManager.js').WindowManager.getInstance().getMainWindow();
     if (w) { if (w.isMinimized()) w.restore(); w.focus(); }
-  } catch {}
+  } catch (err) {
+    console.error('second-instance: failed to focus existing window', err);
+  }
 });
 
 (async () => {

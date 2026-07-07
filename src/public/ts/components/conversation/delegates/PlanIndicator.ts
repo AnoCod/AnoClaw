@@ -1,5 +1,7 @@
-// AnoClaw Cinema — PlanIndicator: inline annotation line
-// Matches ThinkDelegate visual style: pulse dot · label · description
+/**
+ * PlanIndicator — inline annotation line for plan mode enter/exit.
+ * Matches ThinkDelegate visual style: pulse dot · label · description.
+ */
 
 import type { PlanEvent } from '../types.js';
 
@@ -8,7 +10,6 @@ export class PlanIndicator {
 
   constructor(event: PlanEvent) {
     this.element = this.render(event);
-    this._injectStyles();
   }
 
   render(event: PlanEvent): HTMLElement {
@@ -53,13 +54,5 @@ export class PlanIndicator {
 
     wrapper.appendChild(indicator);
     return wrapper;
-  }
-
-  private _injectStyles(): void {
-    if (document.getElementById('plan-indicator-styles')) return;
-    const s = document.createElement('style');
-    s.id = 'plan-indicator-styles';
-    s.textContent = '';
-    document.head.appendChild(s);
   }
 }

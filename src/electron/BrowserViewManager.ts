@@ -1,8 +1,11 @@
-// BrowserViewManager — singleton registry for Electron WebContentsView instances.
+﻿// BrowserViewManager 鈥?singleton registry for Electron WebContentsView instances.
 // Shared between main.ts IPC handlers and BrowserAgentTool so the agent tool
 // can control browser tabs directly through webContents APIs instead of CDP.
+//
+// Dependencies (WindowManager getter + BrowserWindow ref) are injected via init()
+// rather than lazy-required, so this module has no hidden coupling to WindowManager.
 
-import { WebContentsView } from 'electron';
+import { WebContentsView, BrowserWindow } from 'electron';
 
 interface ViewEntry {
   view: WebContentsView;
@@ -10,28 +13,44 @@ interface ViewEntry {
   createdAt: number;
 }
 
+export interface AgentBrowserEvent {
+  sessionId: string;
+  viewId: string;
+  action: string;
+  phase: 'start' | 'done' | 'error';
+  url?: string;
+  selector?: string;
+  valuePreview?: string;
+  resultPreview?: string;
+  error?: string;
+  timestamp: number;
+}
+
 let _instance: BrowserViewManager | null = null;
 
 export class BrowserViewManager {
   private _views = new Map<string, ViewEntry>();
-
-  private _getMainWindow(): any {
-    try {
-      const { WindowManager } = require('./WindowManager.js');
-      return WindowManager.getInstance()?.getMainWindow?.() || null;
-    } catch { return null; }
-  }
+  private _maxViews = 20;
+  private _getMainWindow: (() => BrowserWindow | null) | null = null;
 
   static getInstance(): BrowserViewManager {
     if (!_instance) _instance = new BrowserViewManager();
     return _instance;
   }
 
+  /** Inject the main-window accessor. Call once at startup. */
+  static init(getMainWindow: () => BrowserWindow | null): void {
+    BrowserViewManager.getInstance()._getMainWindow = getMainWindow;
+  }
+
   private constructor() {}
 
-  // ── CRUD ──
+  // 鈹€鈹€ CRUD 鈹€鈹€
 
   create(url: string): string {
+    if (this._views.size >= this._maxViews) {
+      throw new Error(`BrowserView limit reached (max ${this._maxViews})`);
+    }
     const view = new WebContentsView({
       webPreferences: { sandbox: false, nodeIntegration: false, contextIsolation: true },
     });
@@ -41,7 +60,7 @@ export class BrowserViewManager {
     });
     view.webContents.loadURL(url);
 
-    const mainWin = this._getMainWindow();
+    const mainWin = this._getMainWindow?.() ?? null;
     if (mainWin?.contentView) mainWin.contentView.addChildView(view);
     view.setBounds({ x: 0, y: 0, width: 1, height: 1 }); // hidden until positioned
 
@@ -69,7 +88,7 @@ export class BrowserViewManager {
   destroy(viewId: string): boolean {
     const entry = this._views.get(viewId);
     if (!entry) return false;
-    const mainWin = this._getMainWindow();
+    const mainWin = this._getMainWindow?.() ?? null;
     if (mainWin?.contentView) {
       try { mainWin.contentView.removeChildView(entry.view); } catch {}
     }
@@ -119,7 +138,10 @@ export class BrowserViewManager {
 
   count(): number { return this._views.size; }
 
-  // ── Navigation ──
+  /** Set the maximum number of concurrent views. */
+  setMaxViews(n: number): void { this._maxViews = n; }
+
+  // 鈹€鈹€ Navigation 鈹€鈹€
 
   navigate(viewId: string, url: string): void {
     const view = this.get(viewId);
@@ -131,15 +153,20 @@ export class BrowserViewManager {
   goBack(viewId: string): void { this.get(viewId)?.webContents.navigationHistory?.goBack(); }
   goForward(viewId: string): void { this.get(viewId)?.webContents.navigationHistory?.goForward(); }
 
-  // ── JS execution ──
+  // 鈹€鈹€ JS execution 鈹€鈹€
 
   async execJs(viewId: string, code: string): Promise<any> {
     const view = this.get(viewId);
     if (!view) throw new Error(`View ${viewId} not found`);
     return view.webContents.executeJavaScript(code);
   }
+  sendInputEvent(viewId: string, event: Record<string, unknown>): void {
+    const view = this.get(viewId);
+    if (!view) throw new Error(`View ${viewId} not found`);
+    view.webContents.sendInputEvent(event as any);
+  }
 
-  // ── Screenshot ──
+  // 鈹€鈹€ Screenshot 鈹€鈹€
 
   async screenshot(viewId: string): Promise<string> {
     const view = this.get(viewId);
@@ -150,7 +177,13 @@ export class BrowserViewManager {
 
   devTools(viewId: string): void { this.get(viewId)?.webContents.openDevTools(); }
 
-  // ── Info ──
+  emitAgentBrowserEvent(event: AgentBrowserEvent): void {
+    const mainWin = this._getMainWindow?.() ?? null;
+    if (!mainWin || mainWin.isDestroyed()) return;
+    mainWin.webContents.send('agent-browser-event', event);
+  }
+
+  // 鈹€鈹€ Info 鈹€鈹€
 
   getUrl(viewId: string): string {
     try { return this.get(viewId)?.webContents.getURL() || ''; } catch { return ''; }
@@ -160,7 +193,7 @@ export class BrowserViewManager {
     try { return this.get(viewId)?.webContents.getTitle() || ''; } catch { return ''; }
   }
 
-  // ── Waiting ──
+  // 鈹€鈹€ Waiting 鈹€鈹€
 
   /** Wait for the page to finish loading. */
   waitForLoad(viewId: string, timeoutMs = 15000): Promise<void> {
@@ -192,10 +225,10 @@ export class BrowserViewManager {
     throw new Error(`Timeout waiting for selector: ${selector}`);
   }
 
-  // ── Private ──
+  // 鈹€鈹€ Private 鈹€鈹€
 
   private _emit(viewId: string, type: string, extra?: Record<string, unknown>): void {
-    const mainWin = this._getMainWindow();
+    const mainWin = this._getMainWindow?.() ?? null;
     if (!mainWin || mainWin.isDestroyed()) return;
     mainWin.webContents.send('wv-state-change', { viewId, type, ...(extra || {}) });
   }

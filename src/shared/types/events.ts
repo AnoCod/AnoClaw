@@ -81,10 +81,14 @@ export interface CoreEventMap {
   'session:message_appended': { sessionId: string; messageId: string; role: string };
   'session:workspace_changed': { sessionId: string; workspace: string };
   'session:archiving': { sessionId: string };
+  'session:title_changed': { sessionId: string; title: string };
+  'session:hard_deleted': { sessionId: string };
 
   // tool
   'tool:execution_started': { sessionId: string; agentId: string; toolName: string };
   'tool:execution_completed': { sessionId: string; agentId: string; toolName: string; success: boolean; durationMs: number; tokensUsed: number };
+  'tool:executed': { toolName: string; sessionId: string; agentId: string; params: Record<string, unknown> };
+  'tool:error': { toolName: string; sessionId: string; agentId: string; error: string };
 
   // loop
   'loop:completed': { sessionId: string; agentId: string; turnCount: number; totalTokens: number };
@@ -96,13 +100,18 @@ export interface CoreEventMap {
 
   // memory
   'memory:retrieved': { agentId: string; scope: string; query: string; memoryNames: string[] };
+  'memory:changed': { action: 'created' | 'updated' | 'deleted'; name: string; scope: string };
 
   // skill
   'skill:loaded': { agentId: string; skillNames: string[] };
+  'skill:changed': { action: 'created' | 'updated' | 'deleted' | 'reloaded'; name: string };
 
   // evolution
   'evolution:score_saved': { score: { id: string; sessionId: string; agentId: string; messageId: string; score: number } };
   'evolution:analysis_complete': { reportId: string; mode: string; totalFindings: number; criticalFindings: number };
+
+  // talent pool
+  'talent_pool:changed': { action: 'group_created' | 'group_updated' | 'group_deleted' | 'template_created' | 'template_deleted' | 'hired'; entityId: string };
 
   // delegation
   'delegation:started': { parentSessionId: string; subSessionId: string; subAgentId: string; taskSummary: string };
@@ -118,6 +127,8 @@ export interface CoreEventMap {
   'agent:status_changed': { agentId: string; oldStatus: string; newStatus: string };
   'agent:registered': { agentId: string; role: string; name: string };
   'agent:config_updated': { agentId: string; role: string; name: string };
+  'agent:unregistered': { agentId: string; role: string; name: string };
+  'agent:changed': { action: 'state' | 'parent' | 'reloaded'; agentId: string; };
 
   // task
   'task:completed': { taskId: string; parentSessionId: string; parentAgentId: string; type: string; summary: string; turnCount: number; durationMs: number; content: string };
@@ -155,15 +166,18 @@ export enum WsMessageType {
   Sleep       = 'sleep',
   Wake        = 'wake',
   Pong        = 'pong',
+  ToolConfirmRequest = 'tool_confirm_request',
   // Client → Server
   SendMessage   = 'send_message',
   Stop          = 'stop',
   Ping          = 'ping',
   RunCommand    = 'run_command',
+  SetSessionMode = 'set_session_mode',
+  SetGoal       = 'set_goal',
+  QualityScore  = 'quality_score',
   EditorContext = 'editor_context',
+  ToolConfirmResponse = 'tool_confirm_response',
   // Server → Client (delegation / commands)
-  DelegateResult = 'delegate_result',
-  ApprovalRequest = 'approval_request',
   DelegationProgress = 'delegation_progress',
   DelegationStatus = 'delegation_status',
   // Task notification (background task completion/failure)
@@ -173,23 +187,91 @@ export enum WsMessageType {
   // Agent lifecycle events
   AgentStatus = 'agent_status',
   AgentRegistered = 'agent_registered',
+  AgentUnregistered = 'agent_unregistered',
   // Session lifecycle events (from WsForwardSubscriber)
   SessionCreated = 'session_created',
   MessageAppended = 'message_appended',
   WorkspaceChanged = 'workspace_changed',
+  SessionModeChanged = 'session_mode_changed',
+  GoalChanged = 'goal_changed',
   // Tool execution events
   ToolExecutionStarted = 'tool_execution_started',
   ToolExecutionCompleted = 'tool_execution_completed',
   // Loop lifecycle events
   LoopCompleted = 'loop_completed',
   CompactionTriggered = 'compaction_triggered',
+  // Memory/Skill/Agent/TalentPool lifecycle events
+  MemoryChanged = 'memory_changed',
+  SkillChanged = 'skill_changed',
+  AgentChanged = 'agent_changed',
+  TalentPoolChanged = 'talent_pool_changed',
+  SessionTitleChanged = 'session_title_changed',
+  SessionHardDeleted = 'session_hard_deleted',
+  AgentConfigUpdated = 'agent_config_updated',
+  PluginLoadFailed = 'plugin_load_failed',
+  TaskListUpdate = 'task_list_update',
+  QualityScoreAck = 'quality_score_ack',
+  QualityScoreError = 'quality_score_error',
 }
 
-/** Generic WebSocket message shape for event dispatch. */
+/** Generic WebSocket message shape for event dispatch (backward compat). */
 export interface WsMessage {
-  type: WsMessageType;
+  type: WsMessageType | string;
   [key: string]: unknown;
 }
+
+/** Typed discriminated union for typed message handling.
+ *  Use when you know the exact message type at compile time.
+ *  Fall back to WsMessage for dynamic dispatch. */
+export type WsTypedMessage =
+  | { type: WsMessageType.Think; content: string; durationMs?: number; [key: string]: unknown }
+  | { type: WsMessageType.Text; content: string; [key: string]: unknown }
+  | { type: WsMessageType.ToolCall; toolName: string; toolInput?: Record<string, unknown>; [key: string]: unknown }
+  | { type: WsMessageType.ToolResult; success?: boolean; content?: string; [key: string]: unknown }
+  | { type: WsMessageType.PlanEnter; [key: string]: unknown }
+  | { type: WsMessageType.PlanExit; [key: string]: unknown }
+  | { type: WsMessageType.TodoWrite; todos: Array<{ content: string; status: string }>; [key: string]: unknown }
+  | { type: WsMessageType.SubsessionCreated; sessionId: string; parentSessionId: string; [key: string]: unknown }
+  | { type: WsMessageType.Error; errorMessage?: string; code?: string; [key: string]: unknown }
+  | { type: WsMessageType.Done; turnCount?: number; tokenUsage?: import('./session.js').TokenBreakdown; [key: string]: unknown }
+  | { type: WsMessageType.Sleep; content?: string; [key: string]: unknown }
+  | { type: WsMessageType.Wake; content?: string; [key: string]: unknown }
+  | { type: WsMessageType.Pong; [key: string]: unknown }
+  | { type: WsMessageType.ToolConfirmRequest; toolCallId: string; toolName: string; riskLevel: string; params: Record<string, unknown>; [key: string]: unknown }
+  | { type: WsMessageType.SendMessage; content?: string; mode?: string; effort?: boolean; [key: string]: unknown }
+  | { type: WsMessageType.Stop; [key: string]: unknown }
+  | { type: WsMessageType.Ping; [key: string]: unknown }
+  | { type: WsMessageType.RunCommand; command?: string; args?: Record<string, string>; [key: string]: unknown }
+  | { type: WsMessageType.SetSessionMode; mode?: string; effort?: boolean; [key: string]: unknown }
+  | { type: WsMessageType.SetGoal; action?: string; objective?: string; [key: string]: unknown }
+  | { type: WsMessageType.QualityScore; score?: number; [key: string]: unknown }
+  | { type: WsMessageType.EditorContext; openFiles?: string[]; [key: string]: unknown }
+  | { type: WsMessageType.ToolConfirmResponse; toolCallId: string; approved: boolean; [key: string]: unknown }
+  | { type: WsMessageType.DelegationProgress; content?: string; [key: string]: unknown }
+  | { type: WsMessageType.DelegationStatus; content?: string; [key: string]: unknown }
+  | { type: WsMessageType.TaskNotification; taskStatus?: string; taskSummary?: string; taskResult?: string; [key: string]: unknown }
+  | { type: WsMessageType.CommandResult; content?: string; [key: string]: unknown }
+  | { type: WsMessageType.StatusInfo; content?: string; [key: string]: unknown }
+  | { type: WsMessageType.AgentStatus; agentId?: string; name?: string; [key: string]: unknown }
+  | { type: WsMessageType.AgentRegistered; agentId?: string; name?: string; role?: string; [key: string]: unknown }
+  | { type: WsMessageType.AgentUnregistered; agentId?: string; [key: string]: unknown }
+  | { type: WsMessageType.SessionCreated; sessionId?: string; [key: string]: unknown }
+  | { type: WsMessageType.MessageAppended; sessionId?: string; [key: string]: unknown }
+  | { type: WsMessageType.WorkspaceChanged; [key: string]: unknown }
+  | { type: WsMessageType.SessionModeChanged; sessionId?: string; mode?: string; effort?: boolean; locked?: boolean; [key: string]: unknown }
+  | { type: WsMessageType.GoalChanged; sessionId?: string; action?: string; goal?: unknown; [key: string]: unknown }
+  | { type: WsMessageType.ToolExecutionStarted; toolName?: string; [key: string]: unknown }
+  | { type: WsMessageType.ToolExecutionCompleted; toolName?: string; success?: boolean; durationMs?: number; tokensUsed?: number; [key: string]: unknown }
+  | { type: WsMessageType.LoopCompleted; turnCount?: number; totalTokens?: number; [key: string]: unknown }
+  | { type: WsMessageType.CompactionTriggered; beforeTokens?: number; afterTokens?: number; [key: string]: unknown }
+  | { type: WsMessageType.MemoryChanged; action?: string; name?: string; scope?: string; [key: string]: unknown }
+  | { type: WsMessageType.SkillChanged; action?: string; name?: string; [key: string]: unknown }
+  | { type: WsMessageType.AgentChanged; action?: string; agentId?: string; [key: string]: unknown }
+  | { type: WsMessageType.TalentPoolChanged; action?: string; [key: string]: unknown }
+  | { type: WsMessageType.SessionTitleChanged; sessionId?: string; title?: string; [key: string]: unknown }
+  | { type: WsMessageType.SessionHardDeleted; sessionId?: string; [key: string]: unknown }
+  // Catch-all for forward compat
+  | { type: string; [key: string]: unknown };
 
 // Legacy SSEEventType alias — keep for backward compat during migration
 export import SSEEventType = WsMessageType;

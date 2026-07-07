@@ -10,6 +10,7 @@ export class ListPluginStorageRoute implements RouteHandler {
   path = '/api/v1/plugins/:name/storage';
   category = 'Plugins';
   description = 'List all storage keys for a plugin';
+  permission = 'admin';
 
   handle(match: RouteMatch, _req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): boolean {
     try {
@@ -28,6 +29,7 @@ export class GetPluginStorageRoute implements RouteHandler {
   path = '/api/v1/plugins/:name/storage/:key';
   category = 'Plugins';
   description = 'Read a storage value by key for a plugin';
+  permission = 'admin';
 
   handle(match: RouteMatch, _req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): boolean {
     try {
@@ -51,6 +53,7 @@ export class PutPluginStorageRoute implements RouteHandler {
   path = '/api/v1/plugins/:name/storage/:key';
   category = 'Plugins';
   description = 'Write a storage value by key for a plugin';
+  permission = 'admin';
 
   async handle(match: RouteMatch, req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): Promise<boolean> {
     try {

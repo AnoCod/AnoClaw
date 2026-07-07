@@ -9,22 +9,17 @@ import { EventEmitter } from 'events';
 import { ToolRegistry } from '../tools/ToolRegistry.js';
 import { PromptAssembler } from '../prompt/PromptAssembler.js';
 import { MemoryManager } from '../memory/MemoryManager.js';
-import { MemoryScope, MemoryType } from '../memory/MemoryEntry.js';
-import { ApiServer } from '../../gateway/ApiServer.js';
 import { createLogger } from '../logger.js';
-import { PluginToolProxy } from './PluginToolProxy.js';
 import { extensionPoints } from './ExtensionPoints.js';
 import { TypedEventBus } from '../events/index.js';
 import { SessionStore } from '../session/SessionStore.js';
 import { writablePath } from '../../infra/WritablePath.js';
 import { SettingsManager } from '../../infra/storage/SettingsManager.js';
-import { createLLMProvider } from '../../infra/llm/provider-factory.js';
-import { APIScheduler } from '../../infra/llm/APIScheduler.js';
 import { WsServer } from '../../infra/network/WsServer.js';
 import { PluginLoader } from './PluginLoader.js';
-import type { PluginState, PluginLLMMessage, PluginLLMOptions, PluginMemorySearchOptions } from './PluginRPC.js';
-import type { ExecutionContext } from '../../../shared/types/session.js';
-import type { LLMOptions } from '../../../shared/types/llm.js';
+import { RpcDispatcher } from './RpcDispatcher.js';
+import { generateRPCLabel } from './PluginRPC.js';
+import type { PluginListItem, PluginState } from './PluginRPC.js';
 
 const log = createLogger('anochat.plugins');
 const MAX_RESULT_CHARS = 50_000; // Truncate tool/LLM results to prevent OOM
@@ -71,6 +66,10 @@ export class PluginHostManager extends EventEmitter {
       inst._ready.clear();
       inst._installedTools.clear();
       inst._eventSubs.clear();
+      if (inst._kernelEventForwardingUnsub) {
+        inst._kernelEventForwardingUnsub();
+        inst._kernelEventForwardingUnsub = null;
+      }
       inst._kernelEventForwardingInstalled = false;
       inst._backoffs.clear();
       inst._crashCounts.clear();
@@ -88,7 +87,9 @@ export class PluginHostManager extends EventEmitter {
   private _stopping = false;
   private _eventSubs = new Map<string, Set<string>>();               // event → Set<pluginName>
   private _kernelEventForwardingInstalled = false;
+  private _kernelEventForwardingUnsub: (() => void) | null = null;   // onAny() unsubscribe handle
   private _loader = new PluginLoader();
+  private _rpcDispatcher = new RpcDispatcher(this._installedTools, this._eventSubs, this);
 
   // ── Worker lifecycle ──
 
@@ -143,6 +144,7 @@ export class PluginHostManager extends EventEmitter {
     } catch (err) {
       log.error('Failed to spawn plugin worker', { pluginName, error: (err as Error).message });
       this._notifyPluginError(pluginName, (err as Error).message);
+      this.emit('plugin-error', pluginName, err instanceof Error ? err : new Error(String(err)));
       return;
     }
 
@@ -210,8 +212,10 @@ export class PluginHostManager extends EventEmitter {
       // Handle fire-and-forget: auto-activate error
       if (request.id === 'auto-activate-error') {
         const errInfo = request.error as { code: string; message: string } | undefined;
-        log.warn('Plugin auto-activate error', { pluginName, code: errInfo?.code, message: errInfo?.message });
-        this._notifyPluginError(pluginName, errInfo?.message || 'Unknown plugin error');
+        const message = errInfo?.message || 'Unknown plugin error';
+        log.warn('Plugin auto-activate error', { pluginName, code: errInfo?.code, message });
+        this._notifyPluginError(pluginName, message);
+        this.emit('plugin-error', pluginName, new Error(message));
         // Worker will exit after reporting error — clean up
         this._workers.delete(pluginName);
         this._ready.delete(pluginName);
@@ -243,6 +247,7 @@ export class PluginHostManager extends EventEmitter {
 
     worker.on('error', (err: Error) => {
       log.error('Plugin worker error', { pluginName, error: err.message });
+      this.emit('plugin-error', pluginName, err);
       this._onWorkerCrash(pluginName);
     });
 
@@ -301,317 +306,9 @@ export class PluginHostManager extends EventEmitter {
     }, backoff);
   }
 
-  /** Process a worker→main RPC method */
+  /** Process a worker→main RPC method. Delegates to RpcDispatcher. */
   private async _dispatchWorkerRPC(method: string, params: unknown): Promise<unknown> {
-    switch (method) {
-      case 'tools.register': {
-        const p = params as {
-          pluginName: string;
-          toolDef: { name: string; description: string; parametersSchema: Record<string, unknown>; category: string };
-        };
-        this._registerPluginTool(p.pluginName, p.toolDef);
-        return { registered: true };
-      }
-
-      case 'api.call': {
-        const p = params as { method: string; path: string; body?: Record<string, unknown> };
-        const api = ApiServer.getInstance();
-        const result = await api.callInternal(p.method, p.path, p.body);
-        return result;
-      }
-
-      case 'tools.deregister': {
-        const p = params as { pluginName: string };
-        this._deregisterPluginTools(p.pluginName);
-        // Also clean up event subscriptions for this plugin
-        for (const [eventName, plugins] of this._eventSubs) {
-          plugins.delete(p.pluginName);
-          if (plugins.size === 0) this._eventSubs.delete(eventName);
-        }
-        return { deregistered: true };
-      }
-
-      case 'routes.register': {
-        const p = params as { pluginName: string; routes: Array<{ method: string; path: string; handler: string }> };
-        ApiServer.getInstance().registerPluginRoutes(p.pluginName, p.routes);
-        return { registered: p.routes.length };
-      }
-
-      case 'log': {
-        const p = params as { pluginName: string; level: string; message: string };
-        switch (p.level) {
-          case 'error': log.error(`[${p.pluginName}] ${p.message}`); break;
-          case 'warn': log.warn(`[${p.pluginName}] ${p.message}`); break;
-          default: log.info(`[${p.pluginName}] ${p.message}`); break;
-        }
-        return null;
-      }
-
-      // ── MCP / Meeting / Gateway / Workflow services ──
-      // Removed from kernel — plugins must self-host these features.
-      // Plugin extension.js can call anoclaw.api.call() to reach
-      // the plugin's own HTTP endpoints instead.
-      case 'mcp.listServers':
-      case 'mcp.getServer':
-      case 'meeting.create':
-      case 'gateway.send':
-      case 'gateway.status':
-      case 'workflow.list':
-      case 'workflow.get':
-      case 'workflow.save':
-      case 'workflow.delete':
-        throw new Error(`Service '${method}' has moved to plugin — use anoclaw.api.call() instead`);
-
-      // ── Extended Plugin API (Phase 2) ──
-
-      case 'tools.execute': {
-        const p = params as { pluginName: string; toolName: string; toolParams: Record<string, unknown> };
-        const ctx: ExecutionContext = {
-          sessionId: `plugin:${p.pluginName}`,
-          agentId: `plugin:${p.pluginName}`,
-          workspace: process.cwd(),
-          userConfirmed: true,
-        };
-        const result = await ToolRegistry.getInstance().execute(p.toolName, p.toolParams, ctx);
-        return { content: truncateResult(result.content), success: result.success, errorMessage: result.errorMessage };
-      }
-
-      case 'llm.chat': {
-        const p = params as { pluginName: string; messages: PluginLLMMessage[]; options: PluginLLMOptions };
-        const settings = SettingsManager.getInstance();
-        const model = p.options.model || settings.get<string>('model', 'deepseek-chat');
-        const apiUrl = settings.get<string>('apiUrl', 'https://api.deepseek.com');
-        const apiKey = settings.get<string>('apiKey', '');
-        const provider = settings.get<string>('provider', 'openai-compatible');
-        const temperature = p.options.temperature ?? settings.get<number>('llm.temperature', 0.7);
-        const maxTokens = p.options.maxTokens || settings.get<number>('llm.maxTokens', 4096);
-
-        const llmOptions: LLMOptions = {
-          model,
-          maxTokens,
-          temperature,
-          contextWindow: 128000,
-          apiUrl,
-          apiKey,
-        };
-
-        const llmProvider = createLLMProvider(provider, extensionPoints);
-        const rawMsgs = p.messages as Array<{ role: string; content: string }>;
-
-        // Extract system messages — chat() injects them via systemPrompt parameter,
-        // _buildOpenAIMessages skips inline system messages, so passing them inline
-        // causes them to be dropped silently.
-        const systemMsgs = rawMsgs.filter(m => m.role === 'system').map(m => m.content);
-        const systemPrompt = systemMsgs.join('\n\n');
-        const msgs = rawMsgs.filter(m => m.role !== 'system');
-
-        await APIScheduler.getInstance().acquireSlot(apiKey, maxTokens);
-
-        const stream = llmProvider.chat(msgs, [], systemPrompt, llmOptions);
-        let content = '';
-
-        for await (const event of stream) {
-          switch (event.type) {
-            case 'text_delta': content += event.content || ''; break;
-            case 'done': break;
-            case 'error': log.warn('Plugin LLM stream error', { pluginName: p.pluginName, error: event.errorMessage }); break;
-          }
-        }
-
-        return { content: truncateResult(content), finishReason: 'stop', usage: { inputTokens: Math.ceil(JSON.stringify(msgs).length / 4), outputTokens: Math.ceil(content.length / 4) } };
-      }
-
-      case 'fs.read': {
-        const p = params as { pluginName: string; path: string };
-        const resolvedPath = path.resolve(p.path);
-        assertPathWithinWorkspace(resolvedPath);
-        const content = fs.readFileSync(resolvedPath, 'utf-8');
-        return { content };
-      }
-
-      case 'fs.write': {
-        const p = params as { pluginName: string; path: string; content: string };
-        const resolvedPath = path.resolve(p.path);
-        assertPathWithinWorkspace(resolvedPath);
-        const dir = path.dirname(resolvedPath);
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(resolvedPath, p.content, 'utf-8');
-        return { written: true };
-      }
-
-      case 'fs.grep': {
-        const p = params as { pluginName: string; pattern: string; glob: string };
-        const ctx: ExecutionContext = {
-          sessionId: `plugin:${p.pluginName}`,
-          agentId: `plugin:${p.pluginName}`,
-          workspace: process.cwd(),
-          userConfirmed: true,
-        };
-        const result = await ToolRegistry.getInstance().execute('Grep', { pattern: p.pattern, path: p.glob || '.' }, ctx);
-        // Parse grep output "file:line:content" lines
-        const lines = (result.content || '').split('\n').filter(Boolean);
-        const matches = lines.map(line => {
-          const idx = line.indexOf(':');
-          const idx2 = line.indexOf(':', idx + 1);
-          if (idx < 0 || idx2 < 0) return { file: line, line: 0, content: '' };
-          return {
-            file: line.slice(0, idx),
-            line: parseInt(line.slice(idx + 1, idx2), 10) || 0,
-            content: line.slice(idx2 + 1),
-          };
-        });
-        return { matches };
-      }
-
-      case 'fs.glob': {
-        const p = params as { pluginName: string; pattern: string };
-        const ctx: ExecutionContext = {
-          sessionId: `plugin:${p.pluginName}`,
-          agentId: `plugin:${p.pluginName}`,
-          workspace: process.cwd(),
-          userConfirmed: true,
-        };
-        const result = await ToolRegistry.getInstance().execute('Glob', { pattern: p.pattern, path: '.' }, ctx);
-        const files = (result.content || '').split('\n').filter(Boolean);
-        return { files };
-      }
-
-      case 'memory.search': {
-        const p = params as { pluginName: string; query: string; options: PluginMemorySearchOptions };
-        const mm = MemoryManager.getInstance();
-        const agentId = p.options.agentId || p.pluginName;
-        const scope = (p.options.scope as MemoryScope) || MemoryScope.Team;
-        const entries = await mm.search(agentId, scope, p.query, p.options.sessionId, p.options.subScope, p.options.fuzzy ?? true);
-        const limited = p.options.limit ? entries.slice(0, p.options.limit) : entries;
-        return { entries: limited.map(e => ({ ...e })) };
-      }
-
-      case 'memory.save': {
-        const p = params as { pluginName: string; entry: { name: string; type: string; description: string; content: string; scope: string; sessionId?: string; subScope?: 'team' | 'personal' } };
-        const mm = MemoryManager.getInstance();
-        const agentId = p.pluginName;
-        const saved = await mm.saveFromParams(agentId, {
-          scope: p.entry.scope,
-          type: p.entry.type,
-          name: p.entry.name,
-          description: p.entry.description,
-          content: p.entry.content,
-        });
-        return { entry: { ...saved } };
-      }
-
-      case 'memory.list': {
-        const p = params as { pluginName: string; options: PluginMemorySearchOptions };
-        const mm = MemoryManager.getInstance();
-        const agentId = p.options.agentId || p.pluginName;
-        const scope = (p.options.scope as MemoryScope) || MemoryScope.Team;
-        const entries = await mm.search(agentId, scope, '', p.options.sessionId, p.options.subScope, false);
-        const limited = p.options.limit ? entries.slice(0, p.options.limit) : entries;
-        return { entries: limited.map(e => ({ ...e })) };
-      }
-
-      case 'memory.delete': {
-        const p = params as { pluginName: string; name: string; options: PluginMemorySearchOptions };
-        const mm = MemoryManager.getInstance();
-        const agentId = p.options.agentId || p.pluginName;
-        const scope = (p.options.scope as MemoryScope) || MemoryScope.Team;
-        const removed = await mm.remove(agentId, scope, p.name, p.options.sessionId, p.options.subScope);
-        return { deleted: removed };
-      }
-
-      case 'events.subscribe': {
-        const p = params as { pluginName: string; event: string };
-        if (!this._eventSubs.has(p.event)) this._eventSubs.set(p.event, new Set());
-        this._eventSubs.get(p.event)!.add(p.pluginName);
-        log.info('Plugin subscribed to event', { pluginName: p.pluginName, event: p.event });
-        return { subscribed: true };
-      }
-
-      case 'events.unsubscribe': {
-        const p = params as { pluginName: string; event: string };
-        const subs = this._eventSubs.get(p.event);
-        if (subs) {
-          subs.delete(p.pluginName);
-          if (subs.size === 0) this._eventSubs.delete(p.event);
-        }
-        log.info('Plugin unsubscribed from event', { pluginName: p.pluginName, event: p.event });
-        return { unsubscribed: true };
-      }
-
-      case 'ws.broadcast': {
-        const p = params as { pluginName: string; message: Record<string, unknown> };
-        WsServer.getInstance().broadcast(p.message);
-        return { broadcast: true };
-      }
-
-      case 'prompt.inject': {
-        const p = params as { pluginName: string; name: string; content: string; priority: number };
-        const pa = PromptAssembler.getInstance();
-        const sectionName = `plugin:${p.pluginName}:${p.name}`;
-        pa.registerSection({
-          name: sectionName,
-          cacheBreak: false,
-          compute: () => p.content,
-        }, 'dynamic');
-        log.info('Plugin prompt injected', { pluginName: p.pluginName, name: p.name });
-        return { injected: true };
-      }
-
-      case 'ui.mount': {
-        const p = params as { pluginName: string; slot: string; htmlContent: string; opts: { position?: string; replace?: boolean } };
-        WsServer.getInstance().broadcast({
-          type: 'plugin:ui:mount',
-          slot: p.slot,
-          htmlContent: p.htmlContent,
-          opts: p.opts || {},
-          pluginName: p.pluginName,
-        });
-        return { ok: true };
-      }
-
-      case 'ui.unmountAll': {
-        const p = params as { pluginName: string; slot: string };
-        WsServer.getInstance().broadcast({
-          type: 'plugin:ui:unmountAll',
-          slot: p.slot,
-          pluginName: p.pluginName,
-        });
-        return { ok: true };
-      }
-
-      default:
-        throw new Error(`Unknown RPC method: ${method}`);
-    }
-  }
-
-  // ── Tool management ──
-
-  private _registerPluginTool(
-    pluginName: string,
-    toolDef: { name: string; description: string; parametersSchema: Record<string, unknown>; category: string },
-  ): void {
-    // Deregister old tool with same name first (handles reload case)
-    if (this._installedTools.has(toolDef.name)) {
-      ToolRegistry.getInstance().deregisterTool(toolDef.name);
-    }
-    const proxy = new PluginToolProxy(pluginName, toolDef, this);
-    ToolRegistry.getInstance().registerTool(proxy, toolDef.category || 'Plugin');
-    this._installedTools.set(toolDef.name, pluginName);
-    log.info('Plugin tool registered', { pluginName, toolName: toolDef.name });
-  }
-
-  private _deregisterPluginTools(pluginName: string): void {
-    const toRemove: string[] = [];
-    for (const [toolName, pn] of this._installedTools) {
-      if (pn === pluginName) toRemove.push(toolName);
-    }
-    for (const toolName of toRemove) {
-      ToolRegistry.getInstance().deregisterTool(toolName);
-      this._installedTools.delete(toolName);
-    }
-    if (toRemove.length > 0) {
-      log.info('Plugin tools deregistered', { pluginName, count: toRemove.length });
-    }
+    return this._rpcDispatcher.dispatch(method, params);
   }
 
   // ── Communication ──
@@ -625,7 +322,7 @@ export class PluginHostManager extends EventEmitter {
     const worker = this._workers.get(pluginName);
     if (!worker) throw new Error(`Plugin "${pluginName}" worker not running`);
 
-    const id = `${pluginName}:${method}:${Math.random().toString(36).slice(2, 8)}`;
+    const id = `${pluginName}:${method}:${generateRPCLabel(method, pluginName)}`;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         const pending = this._pending.get(pluginName);
@@ -660,9 +357,7 @@ export class PluginHostManager extends EventEmitter {
   }
 
   /** List all plugins with their current status across all workers. */
-  async listPlugins(): Promise<
-    Array<{ name: string; displayName: string; version: string; status: string; errorMessage?: string }>
-  > {
+  async listPlugins(): Promise<PluginListItem[]> {
     const states = this._loader.loadAll();
     return states.map(s => {
       const isActive = this._ready.has(s.manifest.name);
@@ -676,6 +371,39 @@ export class PluginHostManager extends EventEmitter {
         errorMessage: s.errorMessage,
         contributes: s.manifest.contributes,
       };
+    });
+  }
+
+  private _waitForPluginReady(
+    name: string,
+    state: PluginState,
+    timeoutMs: number,
+    timeoutMessage: string,
+  ): Promise<PluginState> {
+    return new Promise<PluginState>((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timeout);
+        this.off('plugin-ready', onReady);
+        this.off('plugin-error', onError);
+      };
+      const onReady = (pluginName: string) => {
+        if (pluginName !== name) return;
+        cleanup();
+        resolve({ ...state, status: 'activated', activatedAt: new Date().toISOString() });
+      };
+      const onError = (pluginName: string, error: Error) => {
+        if (pluginName !== name) return;
+        cleanup();
+        reject(error);
+      };
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error(timeoutMessage));
+      }, timeoutMs);
+
+      this.on('plugin-ready', onReady);
+      this.on('plugin-error', onError);
+      if (this._ready.has(name)) onReady(name);
     });
   }
 
@@ -698,6 +426,9 @@ export class PluginHostManager extends EventEmitter {
         plugins.delete(name);
       }
 
+      // Clean up extension point overrides registered by this plugin
+      extensionPoints.unregisterAll(name);
+
       oldWorker.removeAllListeners();
       try { oldWorker.postMessage({ id: `shutdown-${name}`, method: 'shutdown', params: {} }); } catch {}
       oldWorker.terminate().catch(() => {});
@@ -711,26 +442,12 @@ export class PluginHostManager extends EventEmitter {
     if (state.status === 'error') throw new Error(state.errorMessage || 'Plugin validation failed');
 
     // Spawn new worker
+    const waitForReady = this._waitForPluginReady(name, state, 20_000, `Reload timed out after 20s`);
     this._spawnPluginWorker(name, state.pluginPath);
-
-    // Wait for ready signal (max 20s)
-    const result = await new Promise<PluginState>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error(`Reload timed out after 20s`));
-      }, 20_000);
-      const check = () => {
-        if (this._ready.has(name)) {
-          clearTimeout(timeout);
-          this.off('plugin-ready', check);
-          resolve({ ...state, status: 'activated', activatedAt: new Date().toISOString() });
-        }
-      };
-      this.on('plugin-ready', check);
-    });
-    return result;
+    return waitForReady;
   }
 
-  /** Activate a single plugin (spawn worker on demand). */
+  /** Activate a single plugin (spawn worker on demand, wait for ready). */
   async activatePlugin(name: string): Promise<PluginState> {
     if (this._ready.has(name)) {
       const state = this._loader.loadOne(name);
@@ -738,8 +455,9 @@ export class PluginHostManager extends EventEmitter {
     }
     const state = this._loader.loadOne(name);
     if (!state) throw new Error(`Plugin "${name}" not found`);
+    const waitForReady = this._waitForPluginReady(name, state, 20_000, `Plugin "${name}" activation timed out after 20s`);
     this._spawnPluginWorker(name, state.pluginPath);
-    return { ...state, status: 'loaded' as const };
+    return waitForReady;
   }
 
   /** Deactivate a single plugin (terminate its worker). */
@@ -820,7 +538,9 @@ export class PluginHostManager extends EventEmitter {
       }
     };
 
-    TypedEventBus.onAny((event, payload) => {
+    // Permanent subscription — runs for entire PluginHostManager lifetime.
+    // Plugin workers come and go, but EventBus forwarding is always-on.
+    this._kernelEventForwardingUnsub = TypedEventBus.onAny((event, payload) => {
       forward(event, payload);
     });
   }

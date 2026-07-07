@@ -1,4 +1,4 @@
-// SleepTool — agent-controlled sleep/wait
+// SleepTool - agent-controlled sleep/wait
 // Allows the agent to pause execution for a specified duration,
 // or wait for a background task to complete.
 // RiskLevel: Low (no side effects, just delays).
@@ -27,7 +27,7 @@ export class SleepTool extends Tool {
     return 'Sleep for a specified duration, or wait for a background task to complete.' +
       ' Without wait_for_task_id: pauses for delaySeconds (max 300s).' +
       ' With wait_for_task_id: subscribes to task completion and wakes immediately' +
-      ' when the task finishes — no polling needed. Max wait 5 minutes, then times out.' +
+      ' when the task finishes - no polling needed. Max wait 5 minutes, then times out.' +
       ' Use this instead of polling loops when waiting for background bash commands,' +
       ' installs, downloads, builds, or any long-running operation.';
   }
@@ -46,7 +46,7 @@ export class SleepTool extends Tool {
         },
         wait_for_task_id: {
           type: 'string',
-          description: 'Background task ID to wait for. When provided, Sleep subscribes to task completion and wakes instantly when the task finishes — no polling. Max wait 5 minutes, then times out. Use this instead of sleep-loop polling for background bash commands, installs, downloads, or builds.',
+          description: 'Background task ID to wait for. When provided, Sleep subscribes to task completion and wakes instantly when the task finishes - no polling. Max wait 5 minutes, then times out. Use this instead of sleep-loop polling for background bash commands, installs, downloads, or builds.',
         },
       },
       required: [],
@@ -99,7 +99,7 @@ export class SleepTool extends Tool {
     const cappedDelay = Math.min(delaySeconds, 300);
     const startedAt = Date.now();
 
-    // Abort-aware sleep — resolve immediately when user interjects
+    // Abort-aware sleep - resolve immediately when user interjects
     await new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, cappedDelay * 1000);
       if (ctx.signal) {
@@ -208,7 +208,7 @@ export class SleepTool extends Tool {
         );
       case 'timeout':
         return this.makeResult(
-          `Waited ${waitedSec}s for task ${taskId} — timed out. The task may still be running in the background.`,
+          `Waited ${waitedSec}s for task ${taskId} - timed out. The task may still be running in the background.`,
           { startedAt, structured: { taskId, taskStatus: 'timeout', waitedMs: actualMs } },
         );
       case 'aborted':

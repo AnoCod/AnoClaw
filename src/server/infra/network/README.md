@@ -2,7 +2,7 @@
 
 ## Overview
 
-WebSocket server, message routing, HTTP client, and WebFetch utilities. The WebSocket layer uses a single persistent connection (not per-session) with per-session event buffering and a pluggable typed message dispatch system. An event-bus-to-WS bridge forwards ~20 domain events to the frontend.
+WebSocket server, message routing, WebFetch utilities. The WebSocket layer uses a single persistent connection (not per-session) with per-session event buffering and a pluggable typed message dispatch system. An event-bus-to-WS bridge forwards ~20 domain events to the frontend.
 
 ## Public Interface
 
@@ -84,7 +84,8 @@ Registered via `registerAllWsHandlers(router)`.
 | `stop` | StopHandler | Interrupt agent via `InterruptController` |
 | `ping` | PingHandler | Heartbeat → `{ type: 'pong' }` |
 | `run_command` | RunCommandHandler | Execute slash command |
-| `set_running_mode` | SetRunningModeHandler | Set `normal` or `infinite` mode on session |
+| `set_session_mode` | SetSessionModeHandler | Persist root-session permission and effort mode |
+| `set_goal` | SetGoalHandler | Start, pause, resume, edit, or delete the root-session goal loop |
 | `quality_score` | QualityScoreHandler | Persist 1–5 rating to `EvolutionManager` |
 | `editor_context` | EditorContextHandler | Store editor state (open files, cursor, selection) on session metadata |
 
@@ -103,43 +104,6 @@ function installWsForwarding(): void;
 **Routing rules:**
 - Session/tool/loop events → resolved to root session
 - Delegation/task events → sent to direct parent session only
-
----
-
-### HttpClient
-
-Fetch-based HTTP client with retry, timeout, SSE streaming.
-
-```ts
-interface RequestOptions {
-  timeout?: number;     // default 30000
-  retries?: number;     // default 3
-  headers?: Record<string, string>;
-  signal?: AbortSignal;
-}
-
-interface StreamOptions extends RequestOptions {
-  onChunk?: (chunk: string) => void;
-}
-
-class HttpClient extends EventEmitter {
-  constructor(baseUrl?: string);
-
-  get<T>(path: string, options?: RequestOptions): Promise<T>;
-  post<T>(path: string, body: unknown, options?: RequestOptions): Promise<T>;
-  put<T>(path: string, body: unknown, options?: RequestOptions): Promise<T>;
-  delete<T>(path: string, options?: RequestOptions): Promise<T>;
-  stream(path: string, body: unknown, options?: StreamOptions): Promise<ReadableStream<Uint8Array>>;
-
-  setDefaultHeaders(headers: Record<string, string>): void;
-  setAuthToken(token: string): void;
-  setBaseUrl(url: string): void;
-}
-```
-
-**Retry logic:** exponential backoff (500ms base, 30s cap), jitter. Retryable statuses: 408, 429, 500, 502, 503, 504. Never retries on AbortError or non-retryable 4xx.
-
-**Events:** `response`, `retry`, `streamError`.
 
 ---
 
@@ -184,7 +148,6 @@ interface Transport {
 WsServer          → events, ws (npm), http (types)
 WsMessageRouter   → Transport (type only)
 WsForwardSubscriber → TypedEventBus, WsServer, SessionManager
-HttpClient        → events
 WebFetchHelper    → LogManager
 Handlers          → WsMessageRouter, SessionManager, AgentRuntime, AgentRegistry,
                     InterruptController, EvolutionManager, CommandRegistry, etc.

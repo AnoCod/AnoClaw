@@ -21,8 +21,11 @@ export function createToolsSection(): SystemPromptSection {
 
       const toolRegistry = ToolRegistry.getInstance();
       const allowedNames = agent.allowedTools();
-      const agentTools = toolRegistry.toolsForAgent(allowedNames);
+      const agentTools = toolRegistry.toolsForAgent(allowedNames, {
+        hideUserInteractionTools: ctx.hideUserInteractionTools,
+      });
       const allTools = toolRegistry.allTools();
+      const missingTools = toolRegistry.missingToolNames(allowedNames);
 
       // Categorize by each tool's own static category metadata
       const categories: Record<string, typeof agentTools> = {};
@@ -39,6 +42,17 @@ export function createToolsSection(): SystemPromptSection {
         `You have access to ${agentTools.length} tools (from ${allTools.length} total).`,
         '',
       ];
+
+      if (ctx.hideUserInteractionTools) {
+        lines.push('User-interaction tools are hidden for this turn because the current mode is hands-off.');
+        lines.push('');
+      }
+
+      if (missingTools.length > 0) {
+        lines.push(`Configured but unavailable tools: ${missingTools.join(', ')}.`);
+        lines.push('Do not call unavailable tools; choose one from the available list instead.');
+        lines.push('');
+      }
 
       for (const [cat, tools] of Object.entries(categories)) {
         if (tools.length === 0) continue;

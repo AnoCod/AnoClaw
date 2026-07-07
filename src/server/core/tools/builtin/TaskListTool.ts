@@ -1,4 +1,4 @@
-// TaskListTool — list all delegated tasks and their status
+// TaskListTool - list all delegated tasks and their status
 // Returns the current tasks with elapsed time, current tool, and heartbeat status.
 
 import { Tool, RiskLevel } from '../Tool.js';
@@ -11,28 +11,23 @@ import { BackgroundTaskManager } from '../../agent/supervision/BackgroundTaskMan
 export class TaskListTool extends Tool {
 
   static category = 'Task Delegation';
-  static toolDescription = 'Lists all pending and completed tasks with detailed status.';
+  static toolDescription = 'Lists delegated and background tasks for oversight without repeated polling.';
   name(): string {
     return 'TaskList';
   }
 
   description(): string {
-    return 'List all delegated tasks and their status. Shows active tasks with elapsed time, current tool, and heartbeat status. Use to track progress of work delegated to subordinates.';
+    return 'List delegated and background tasks with status, elapsed time, current tool, and heartbeat details. Use for oversight, not constant polling.';
   }
 
   prompt(): string {
-    return '## TaskList Usage\n' +
-      'Check the status of your delegated tasks. Shows which tasks are running, completed, or stuck.\n\n' +
-      '**When to check:**\n' +
-      '- Once per major conversational turn if you have no other pending work.\n' +
-      '- If a subordinate seems stuck (no progress after 3+ of your turns).\n' +
-      '- Before reporting status to the user.\n\n' +
-      '**When NOT to check:**\n' +
-      '- Right after delegating — subordinates need time to produce results.\n' +
-      '- Repeatedly in the same turn — frequent polling wastes tokens.\n' +
-      '- When you have other work to do — keep working, the notification will arrive.\n\n' +
-      'The system prompt already shows your active background tasks. TaskList gives you more detail.\n' +
-      'Trust the notification system. You do NOT need to babysit your subordinates.';
+    return [
+      '## TaskList Usage',
+      'Use TaskList to inspect delegated work when coordinating multiple tasks, preparing a status report, or investigating a stuck task.',
+      '',
+      'Do not call it immediately after every delegation. Task notifications will arrive automatically.',
+      'Prefer one check at natural milestones, after several turns, or when active task context suggests a problem.',
+    ].join('\n');
   }
 
   parametersSchema(): Record<string, unknown> {
@@ -45,6 +40,10 @@ export class TaskListTool extends Tool {
 
   riskLevel(): RiskLevel {
     return RiskLevel.Safe;
+  }
+
+  isReadOnly(): boolean {
+    return true;
   }
 
   async execute(
@@ -71,9 +70,9 @@ export class TaskListTool extends Tool {
     for (const sub of subSessions) {
       const status = sub.status;
       const statusIcon =
-        status === 'Active' ? '●' :
-        status === 'Idle' ? '◐' :
-        status === 'Archived' ? '✓' : '?';
+        status === 'Active' ? '[active]' :
+        status === 'Idle' ? '[idle]' :
+        status === 'Archived' ? '[done]' : '?';
 
       // Compute elapsed time
       const createdAt = sub.createdAt ? new Date(sub.createdAt).getTime() : now;
@@ -95,7 +94,7 @@ export class TaskListTool extends Tool {
         infoLine += `  |  Tool: ${currentTool}`;
       }
       if (status === 'Active' && isUnresponsive) {
-        infoLine += `  |  ⚠ Unresponsive (${Math.round(secondsSinceHb)}s since heartbeat)`;
+        infoLine += `  |  Warning: Unresponsive (${Math.round(secondsSinceHb)}s since heartbeat)`;
       }
 
       lines.push(infoLine);
@@ -106,13 +105,13 @@ export class TaskListTool extends Tool {
     const bgTasks = bgManager.getTasksForParent(ctx.sessionId);
 
     if (bgTasks.length > 0) {
-      lines.push(`\n${bgTasks.length} background task(s) — dispatched, not yet completed:`);
+      lines.push(`\n${bgTasks.length} background task(s) dispatched, not yet completed:`);
       for (const task of bgTasks) {
         const elapsedSec = Math.round((Date.now() - task.startedAt) / 1000);
         const elapsedStr = elapsedSec > 60
           ? `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`
           : `${elapsedSec}s`;
-        let taskLine = `  ● [running] ${task.summary}`;
+        let taskLine = `  [active] [running] ${task.summary}`;
         taskLine += `  |  Agent: ${task.parentAgentId}`;
         taskLine += `  |  Turn: ${task.turnCount}`;
         taskLine += `  |  Elapsed: ${elapsedStr}`;

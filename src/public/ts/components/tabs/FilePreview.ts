@@ -2,8 +2,8 @@
  * FilePreview — standalone file preview and rendering utilities.
  *
  * Provides markdown rendering, syntax highlighting, file extension detection,
- * language detection, and file size formatting. Extracted from FilesTab.ts
- * to keep that file focused on the file-tree UI.
+ * language detection, and file size formatting. Kept as shared helpers for
+ * chat markdown rendering and workspace preview surfaces.
  *
  * All functions are pure — no DOM dependencies, no class state.
  */

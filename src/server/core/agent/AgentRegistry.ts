@@ -138,6 +138,30 @@ export class AgentRegistry extends EventEmitter {
     );
   }
 
+  /** Get every descendant of an agent using breadth-first traversal. */
+  descendantsOf(parentAgentId: string): Agent[] {
+    const descendants: Agent[] = [];
+    const seen = new Set<string>();
+    const queue = [parentAgentId];
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      for (const child of this.agentsByParent(current)) {
+        if (seen.has(child.id)) continue;
+        seen.add(child.id);
+        descendants.push(child);
+        queue.push(child.id);
+      }
+    }
+
+    return descendants;
+  }
+
+  /** Whether an agent currently owns any child or deeper descendant agents. */
+  hasDescendants(parentAgentId: string): boolean {
+    return this.descendantsOf(parentAgentId).length > 0;
+  }
+
   /** Get agents with a specific role. */
   agentsByRole(role: AgentRole): Agent[] {
     return this.allAgents().filter((a) => a.role === role);
@@ -243,6 +267,7 @@ export class AgentRegistry extends EventEmitter {
       orgRole: children.length > 0 ? OrgRole.Manager : OrgRole.Member,
       teamName: agent.teamName,
       reportChain: this.reportChain(agent.id),
+      children: children.map((child) => this._buildOrgNode(child)),
     };
   }
 }

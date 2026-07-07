@@ -253,7 +253,13 @@ describe('TokenCounter.breakdown — logical closure', () => {
     for (const ctx of [8000, 32000, 100000, 200000, 500000]) {
       const bd = TokenCounter.breakdown(system, tools, skills, messages, ctx);
       expect(bd.freeSpace + bd.total).toBe(ctx);
+      expect(bd.contextWindow).toBe(ctx);
     }
+  });
+
+  it('returns the effective contextWindow for UI and persisted metadata', () => {
+    const bd = TokenCounter.breakdown(system, tools, skills, messages, 1048576);
+    expect(bd.contextWindow).toBe(1048576);
   });
 
   it('freeSpace + total === contextWindow when everything is empty', () => {

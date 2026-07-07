@@ -3,6 +3,7 @@
 
 import type { RouteHandler, RouteMatch } from '../RouteHandler.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { ApiToken } from '../ApiAuth.js';
 import { EvolutionManager } from '../../core/evolution/EvolutionManager.js';
 import { sendJson, readBody } from '../RouteHelpers.js';
 
@@ -16,7 +17,7 @@ export class EvolutionStatsRoute implements RouteHandler {
     _match: RouteMatch,
     _req: IncomingMessage,
     res: ServerResponse,
-    _token: unknown,
+    _token: ApiToken | null,
   ): Promise<boolean> {
     const mgr = EvolutionManager.getInstance();
     if (!mgr.isInitialized) await mgr.init();
@@ -86,7 +87,7 @@ export class EvolutionAnalyzeRoute implements RouteHandler {
     _match: RouteMatch,
     _req: IncomingMessage,
     res: ServerResponse,
-    _token: unknown,
+    _token: ApiToken | null,
   ): Promise<boolean> {
     const mgr = EvolutionManager.getInstance();
     if (!mgr.isInitialized) await mgr.init();
@@ -106,7 +107,7 @@ export class EvolutionApplyRoute implements RouteHandler {
     _match: RouteMatch,
     req: IncomingMessage,
     res: ServerResponse,
-    _token: unknown,
+    _token: ApiToken | null,
   ): Promise<boolean> {
     const mgr = EvolutionManager.getInstance();
     if (!mgr.isInitialized) await mgr.init();

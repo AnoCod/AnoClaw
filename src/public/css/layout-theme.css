@@ -100,16 +100,6 @@
 [data-theme="light"] .log-panel-header { border-bottom-color: rgba(0,0,0,0.08); }
 [data-theme="light"] .log-entry { border-bottom-color: rgba(0,0,0,0.04); }
 
-/* ─── Files tab ─── */
-[data-theme="light"] .file-row { color: rgba(0,0,0,0.5); border-bottom-color: rgba(0,0,0,0.04); }
-[data-theme="light"] .file-row:hover { background: rgba(0,0,0,0.03); }
-[data-theme="light"] .file-context-menu { border-color: rgba(0,0,0,0.1); }
-[data-theme="light"] .file-context-item { color: rgba(0,0,0,0.5); }
-[data-theme="light"] .file-context-item:hover { background: rgba(0,0,0,0.05); }
-[data-theme="light"] .menu-separator { background: rgba(0,0,0,0.06); }
-[data-theme="light"] .file-browse-link { color: rgba(0,0,0,0.5); }
-[data-theme="light"] .file-browse-link:hover { background: rgba(0,0,0,0.04); }
-
 /* ─── Agents page ─── */
 [data-theme="light"] .ag-card { border-color: rgba(0,0,0,0.08); background: rgba(255,255,255,0.5); }
 [data-theme="light"] .ag-card-name { color: rgba(0,0,0,0.7); }

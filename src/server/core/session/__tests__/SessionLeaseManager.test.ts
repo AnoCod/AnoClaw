@@ -51,7 +51,7 @@ describe('SessionLeaseManager', () => {
 
   it('reaps idle sessions after timeout', () => {
     vi.useFakeTimers();
-    const mgr = new SessionLeaseManager(1, 60, 30);
+    const mgr = SessionLeaseManager._createForTest(60, 30);
     mgr.start();
     mgr.acquire('sess_1');
     expect(mgr.activeCount).toBe(1);

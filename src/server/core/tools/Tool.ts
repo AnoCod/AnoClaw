@@ -2,11 +2,10 @@
 // Every tool extends this class. Tools are registered with ToolRegistry
 // and invoked via the AgentLoop during ReAct execution.
 
-import { EventEmitter } from 'events';
 import { RiskLevel, InterruptBehavior } from '../../../shared/types/tool.js';
 import type { ToolResult } from '../../../shared/types/tool.js';
 import type { ExecutionContext } from '../../../shared/types/session.js';
-import { ToolEvents } from '../../../shared/types/events.js';
+import { TypedEventBus } from '../events/TypedEventBus.js';
 import { makeResult, makeError, type MakeResultOptions } from './ToolResult.js';
 
 export { RiskLevel, InterruptBehavior };
@@ -32,7 +31,7 @@ export function canUseTool(callerRole: string | undefined, minRequiredRole: stri
 // Tool — abstract base
 // ---------------------------------------------------------------------------
 
-export abstract class Tool extends EventEmitter {
+export abstract class Tool {
   // ── Static metadata (used for auto-discovery and categorization) ──
 
   /** Category for UI grouping and system prompt organization. */
@@ -144,6 +143,10 @@ export abstract class Tool extends EventEmitter {
   isReadOnly(): boolean { return false; }
   isConcurrencySafe(): boolean { return false; }
 
+  /** Whether this tool has destructive side effects (file writes, deletes, etc).
+   *  Default false. Override in WriteTool, EditTool, BashTool, etc. */
+  isDestructive(): boolean { return false; }
+
   /** Minimum agent role required to use this tool. Default is SubAgent = available to everyone. */
   minRole(): string { return 'SubAgent'; }
 
@@ -222,7 +225,20 @@ export abstract class Tool extends EventEmitter {
     // Set a default toolCallId if not provided
     const effectiveToolCallId = toolCallId ?? `${this.name()}-${startedAt}`;
 
-    this.emit(ToolEvents.Executed, {
+    // Track file state before destructive edits (for withdrawal/rewind)
+    if (this.isDestructive()) {
+      const pathParams = this.workspacePathParams();
+      for (const key of pathParams) {
+        const fp = params[key] as string | undefined;
+        if (fp) {
+          // Lazy-import to avoid circular dependency
+          const { getFileHistoryTracker } = await import('../session/FileHistoryTracker.js');
+          getFileHistoryTracker(ctx.sessionId).trackEdit(ctx.sessionId, fp).catch(() => {});
+        }
+      }
+    }
+
+    TypedEventBus.emit('tool:executed', {
       toolName: this.name(),
       sessionId: ctx.sessionId,
       agentId: ctx.agentId,
@@ -244,7 +260,7 @@ export abstract class Tool extends EventEmitter {
       });
       errorResult.toolCallId = effectiveToolCallId;
 
-      this.emit(ToolEvents.Error, {
+      TypedEventBus.emit('tool:error', {
         toolName: this.name(),
         sessionId: ctx.sessionId,
         agentId: ctx.agentId,

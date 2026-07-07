@@ -7,7 +7,9 @@
 
 import type { Message } from '../../../shared/types/session.js';
 import { ContextCompressor } from './ContextCompressor.js';
+import type { SummarizerFn } from './ContextCompressor.js';
 import { COMPRESSION_TRIGGER_RATIO } from '../../../shared/constants.js';
+import { SettingsManager } from '../../infra/storage/SettingsManager.js';
 
 /** Lightweight API message shape — a subset of what AgentLoopHelpers.ApiMessage provides. */
 export interface ApiMsgLite {
@@ -25,6 +27,37 @@ export interface CompactionResult {
 }
 
 /**
+ * Convert ApiMsgLite to a minimal Message-compatible object for the compressor.
+ * Only populates the fields ContextCompressor actually reads: id, role, content.
+ * toolCalls/toolResults are blank because the compressor only inspects role+content for summarization.
+ */
+function toCompressorMessage(msg: ApiMsgLite, sessionId: string): Message {
+  return {
+    id: msg.id || '',
+    sessionId,
+    role: msg.role as Message['role'],
+    content: msg.content || '',
+    toolCalls: [],
+    toolResults: [],
+    tokenCount: 0,
+    compressed: false,
+    timestamp: '',
+  };
+}
+
+/**
+ * Convert a compressor Message back to ApiMsgLite.
+ * Only copies the fields ApiMsgLite cares about: role, content, id.
+ */
+function fromCompressorMessage(msg: Message): ApiMsgLite {
+  return {
+    role: msg.role,
+    content: msg.content,
+    id: msg.id,
+  };
+}
+
+/**
  * Run context compaction and rebuild the messages array in-place.
  * Compaction affects ONLY the in-memory array — JSONL persists full history.
  * Never calls rewriteHistory — that would permanently delete messages.
@@ -37,15 +70,18 @@ export interface CompactionResult {
 export async function compactAndRebuildMessages(
   messages: ApiMsgLite[],
   contextWindow: number,
-  _sessionId: string,
+  sessionId: string,
   tailCount: number = 15,
+  summarizer?: SummarizerFn,
 ): Promise<CompactionResult> {
   const compressor = ContextCompressor.getInstance();
 
+  const compressorInput = messages.map((m) => toCompressorMessage(m, sessionId));
   const result = await compressor.compact(
-    messages as unknown as Message[],
+    compressorInput,
     contextWindow,
-    COMPRESSION_TRIGGER_RATIO,
+    configuredCompressionTriggerRatio(),
+    summarizer,
   );
 
   if (!result.wasCompacted) {
@@ -58,7 +94,7 @@ export async function compactAndRebuildMessages(
 
   for (const m of result.messages) {
     if (m.id?.startsWith('compact-summary-')) {
-      rebuilt.push(m as unknown as ApiMsgLite);
+      rebuilt.push(fromCompressorMessage(m));
     }
   }
 
@@ -66,7 +102,7 @@ export async function compactAndRebuildMessages(
     (m) => m.role !== 'system' && !m.id?.startsWith('compact-summary-'),
   );
   for (const m of tail.slice(-tailCount)) {
-    rebuilt.push(m as unknown as ApiMsgLite);
+    rebuilt.push(fromCompressorMessage(m));
   }
 
   // Replace in-place
@@ -74,6 +110,16 @@ export async function compactAndRebuildMessages(
   messages.push(...rebuilt);
 
   return { wasCompacted: true, messages };
+}
+
+function configuredCompressionTriggerRatio(): number {
+  try {
+    const pct = SettingsManager.getInstance().get<number>('ui.compactionThreshold', COMPRESSION_TRIGGER_RATIO * 100);
+    if (!Number.isFinite(pct)) return COMPRESSION_TRIGGER_RATIO;
+    return Math.min(0.9, Math.max(0.3, pct / 100));
+  } catch {
+    return COMPRESSION_TRIGGER_RATIO;
+  }
 }
 
 /**

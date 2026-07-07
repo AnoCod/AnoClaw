@@ -1,4 +1,4 @@
-// AnoClaw v2.0 — Main entry point
+﻿// AnoClaw v2.0 鈥?Main entry point
 // HTTP + WebSocket server: serves API, static files, real-time agent communication
 
 import * as http from 'http';
@@ -27,22 +27,74 @@ import { writablePath, ensureWritableDir, appPath } from './infra/WritablePath.j
 const REPO_ROOT = writablePath();
 process.chdir(REPO_ROOT);
 
-// Static files (src/public/) are INSIDE the asar — use __dirname-based path.
+// Static files (src/public/) are INSIDE the asar 鈥?use __dirname-based path.
 // process.cwd() is the unpacked root (or project root in dev) and won't find these.
 const PUBLIC_DIR = appPath('src', 'public');
 
-// ── CORS helper ──
-function setCors(res: http.ServerResponse): void {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+// 鈹€鈹€ CORS helper 鈹€鈹€
+function isAllowedLocalOrigin(origin: string | undefined): boolean {
+  if (!origin) return true;
+  if (origin === 'null') return false;
+  try {
+    const parsed = new URL(origin);
+    const hostname = parsed.hostname.toLowerCase();
+    const port = parsed.port ? Number(parsed.port) : (parsed.protocol === 'https:' ? 443 : 80);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+      && ['localhost', '127.0.0.1', '::1'].includes(hostname)
+      && [DEFAULT_PORT, 15730].includes(port);
+  } catch {
+    return false;
+  }
+}
+
+function setCors(req: http.IncomingMessage, res: http.ServerResponse): void {
+  const origin = req.headers.origin;
+  if (isAllowedLocalOrigin(origin) && origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 }
 
-// ── HTTP request handler ──
+function safePathSegment(value: string, label: string): string {
+  if (!value || value === '.' || value === '..' || /[/\\]/.test(value) || /[<>:"|?*]/.test(value)) {
+    throw new Error(`Invalid ${label}`);
+  }
+  return value;
+}
+
+function safeRelativeFilePath(value: string): string {
+  const normalized = path.normalize(value);
+  if (
+    !value ||
+    path.isAbsolute(value) ||
+    normalized.startsWith('..') ||
+    normalized.includes(`..${path.sep}`) ||
+    /(^|[\\/])\.\.([\\/]|$)/.test(value)
+  ) {
+    throw new Error('Invalid file path');
+  }
+  return normalized;
+}
+
+// 鈹€鈹€ HTTP request handler 鈹€鈹€
 async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   try {
-  setCors(res);
+  setCors(req, res);
   const url = req.url || '/';
+
+  if (!isAllowedLocalOrigin(req.headers.origin)) {
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Forbidden', message: 'Cross-origin localhost API requests are not allowed' }));
+    return;
+  }
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
 
   if (url === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -57,7 +109,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
   }
 
   // Plugin management endpoints
-  // DELETE /api/v1/plugins/:name — uninstall a plugin
+  // DELETE /api/v1/plugins/:name 鈥?uninstall a plugin
   const pluginDeleteMatch = url.match(/^\/api\/v1\/plugins\/([a-zA-Z0-9_\-\.]+)$/);
   if (pluginDeleteMatch && req.method === 'DELETE') {
     const name = pluginDeleteMatch[1];
@@ -161,7 +213,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
           res.end(JSON.stringify({ error: 'Missing "url" field' }));
           return;
         }
-        const destName = body.name as string || `plugin-${Date.now().toString(36)}`;
+        const destName = body.name ? safePathSegment(String(body.name), 'plugin name') : `plugin-${Date.now().toString(36)}`;
         const destDir = writablePath('plugins', destName);
         if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
 
@@ -170,7 +222,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         if (githubMatch) {
           const [, owner, repoSlug] = githubMatch;
           const repo = repoSlug.replace(/\.git$/, '');
-          const branch = body.branch as string || 'main';
+          const branch = encodeURIComponent(body.branch as string || 'main');
           const files = ['plugin.json', 'extension.js', 'frontend/index.html'];
           let fetched = 0;
           for (const f of files) {
@@ -185,7 +237,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
                 fs.writeFileSync(fullPath, content);
                 fetched++;
               }
-            } catch { /* file may not exist — skip */ }
+            } catch { /* file may not exist 鈥?skip */ }
           }
           if (fetched === 0) {
             res.writeHead(502, { 'Content-Type': 'application/json' });
@@ -206,7 +258,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         }
         const data = await resp.json() as { files: Record<string, string> };
         for (const [filePath, fileContent] of Object.entries(data.files)) {
-          const fullPath = path.join(destDir, filePath);
+          const fullPath = path.join(destDir, safeRelativeFilePath(filePath));
           const dir = path.dirname(fullPath);
           if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
           fs.writeFileSync(fullPath, fileContent);
@@ -222,7 +274,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     return;
   }
 
-  // Skills list endpoint — GET list + POST import (standard SKILL.md format)
+  // Skills list endpoint 鈥?GET list + POST import (standard SKILL.md format)
   if (url === '/api/skills') {
     if (req.method === 'POST') {
       const chunks: Buffer[] = [];
@@ -253,7 +305,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       });
       return;
     }
-    // GET — list skills (nested dir/SKILL.md standard + deprecated flat .md fallback)
+    // GET 鈥?list skills (nested dir/SKILL.md standard + deprecated flat .md fallback)
     const skillsDir = path.resolve(process.cwd(), 'skills');
     try {
       const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
@@ -298,7 +350,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     return;
   }
 
-  // Skills PATCH — enable/disable a skill (handles both nested and flat)
+  // Skills PATCH 鈥?enable/disable a skill (handles both nested and flat)
   const skillsPatchMatch = url.match(/^\/api\/skills\/([a-zA-Z0-9_-]+)$/);
   if (skillsPatchMatch && req.method === 'PATCH') {
     const skillId = skillsPatchMatch[1];
@@ -335,14 +387,14 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     return;
   }
 
-  // API passthrough — delegate to ApiServer
+  // API passthrough 鈥?delegate to ApiServer
   if (url.startsWith('/api/')) {
     const { ApiServer } = await import('./gateway/ApiServer.js');
     await ApiServer.getInstance().handleApiRequest(req, res);
     return;
   }
 
-  // Reject non-upgrade HTTP requests to WebSocket path — upgrades are handled by WsServer
+  // Reject non-upgrade HTTP requests to WebSocket path 鈥?upgrades are handled by WsServer
   if (url.startsWith('/ws')) {
     res.writeHead(426, {
       'Content-Type': 'text/plain',
@@ -367,7 +419,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
   }
 }
 
-// ── Startup initialization ──
+// 鈹€鈹€ Startup initialization 鈹€鈹€
 async function initialize(): Promise<void> {
   // 1. Initialize logging
   const logManager = LogManager.getInstance();
@@ -377,7 +429,10 @@ async function initialize(): Promise<void> {
   const settings = SettingsManager.getInstance();
   await settings.load();
 
-  // 2. Load agents from data/agents/ — create MainAgent on first run
+  // Apply logging.level from settings
+  logManager.setMinLevel(settings.get<string>('logging.level', 'info'));
+
+  // 2. Load agents from data/agents/ 鈥?create MainAgent on first run
   const registry = AgentRegistry.getInstance();
   const agentsDir = ensureWritableDir('data', 'agents');
   const files = fs.readdirSync(agentsDir).filter((f) => f.endsWith('.json'));
@@ -395,36 +450,35 @@ async function initialize(): Promise<void> {
   }
 
   // Auto-create a main agent on first run only if setup is done (apiKey exists).
-  // If settings.yaml has no apiKey, the setup wizard hasn't run yet — skip creation.
+  // If settings.yaml has no apiKey, the setup wizard hasn't run yet 鈥?skip creation.
   if (registry.allAgents().length === 0) {
     const hasApiKey = !!settings.get('apiKey');
     if (!hasApiKey) {
-      logManager.logger('anochat.core').info('No agents and no apiKey — skipping auto-create, waiting for setup wizard');
+      logManager.logger('anochat.core').info('No agents and no apiKey - skipping auto-create, waiting for setup wizard');
     } else {
-      logManager.logger('anochat.core').info('First run — creating default MainAgent');
+      logManager.logger('anochat.core').info('First run - creating default agent organization');
       const { Agent } = await import('./core/agent/Agent.js');
-      const { defaultConfig, saveAgentConfig } = await import('./core/agent/AgentConfig.js');
+      const { saveAgentConfig } = await import('./core/agent/AgentConfig.js');
+      const { buildDefaultAgentConfigs } = await import('./core/agent/DefaultAgentTemplate.js');
       const defaultId = DEFAULT_MAIN_AGENT_ID;
       const existingCfg = await loadAgentConfig(defaultId).catch(() => null);
       if (!existingCfg) {
-        const cfg = defaultConfig({
-          id: defaultId,
-          name: 'MainAgent',
-          role: 'MainAgent' as import('../shared/types/agent.js').AgentRole,
-          level: 0,
-          teamName: 'Executive',
+        const configs = buildDefaultAgentConfigs({
+          agentName: 'MainAgent',
           provider: settings.get('provider') || 'openai-compatible',
           apiUrl: settings.get('apiUrl') || '',
           apiKey: settings.get('apiKey') || '',
           model: settings.get('model') || '',
           contextWindow: Number(settings.get('contextWindow')) || 131072,
-          allowedTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash', 'WebFetch', 'WebSearch', 'TodoWrite'],
-          enabledSkills: [],
-        } as Partial<import('../shared/types/agent.js').AgentConfig>);
-        await saveAgentConfig(cfg);
-        const agent = new Agent(cfg);
-        registry.registerAgent(agent);
-        logManager.logger('anochat.core').info('MainAgent auto-created', { aid: agent.id, name: agent.name });
+        });
+        for (const cfg of configs) {
+          await saveAgentConfig(cfg);
+          const agent = new Agent(cfg);
+          registry.registerAgent(agent);
+        }
+        logManager.logger('anochat.core').info('Default agent organization auto-created', {
+          agents: configs.map((cfg) => cfg.id),
+        });
       }
     }
   }
@@ -454,7 +508,7 @@ async function initialize(): Promise<void> {
   // 4.5 Initialize API auth tokens
   await initAuthStore('config');
 
-  // 4.6 Restart checkpoint recovery — inject system message into JSONL on startup.
+  // 4.6 Restart checkpoint recovery 鈥?inject system message into JSONL on startup.
   // Don't try to wake the agent directly (AgentLoop needs agent registry, session cache,
   // and WS connection all ready). Instead, inject a system message into the session's
   // JSONL. When the user sends their first message after restart, the agent naturally
@@ -469,10 +523,10 @@ async function initialize(): Promise<void> {
       if (age < MAX_AGE && checkpoint.sessionId && checkpoint.resumeMessage) {
         const { SessionStore } = await import('./core/session/SessionStore.js');
         const store = SessionStore.getInstance();
-        // Check if session EXISTS ON DISK — in-memory SessionManager is empty on startup.
+        // Check if session EXISTS ON DISK 鈥?in-memory SessionManager is empty on startup.
         const sessDir = path.join(store.getSessionsDir(), checkpoint.sessionId);
         if (fs.existsSync(sessDir)) {
-          // Inject system message directly into JSONL — SessionManager isn't loaded yet.
+          // Inject system message directly into JSONL 鈥?SessionManager isn't loaded yet.
           const now = new Date().toISOString();
           const evId = () => `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
           await store.persistEvent(checkpoint.sessionId, {
@@ -492,13 +546,13 @@ async function initialize(): Promise<void> {
           // Only delete checkpoint after successful injection
           fs.unlinkSync(checkpointPath);
         } else {
-          logManager.logger('anochat.core').warn('Restart checkpoint skipped — session not found on disk', {
+          logManager.logger('anochat.core').warn('Restart checkpoint skipped 鈥?session not found on disk', {
             sid: checkpoint.sessionId, ageMs: age,
           });
           fs.unlinkSync(checkpointPath);
         }
       } else {
-        // Expired or invalid — clean up
+        // Expired or invalid 鈥?clean up
         fs.unlinkSync(checkpointPath);
       }
     }
@@ -541,12 +595,12 @@ async function initialize(): Promise<void> {
     logManager.logger('anochat.core').warn('PluginHost start failed', { error: (err as Error).message });
   }
 
-  // 11. Register and start Extensions — gated by plugin existence
+  // 11. Register and start Extensions 鈥?gated by plugin existence
   try {
     const { ExtensionManager } = await import('./core/extensible/ExtensionManager.js');
     const extMgr = ExtensionManager.getInstance();
 
-    // Kernel subsystems (always start — not optional)
+    // Kernel subsystems (always start 鈥?not optional)
     const { SkillsExtension } = await import('./core/skills/SkillsExtension.js');
     const { MemoryExtension } = await import('./core/memory/MemoryExtension.js');
     const { EvolutionExtension } = await import('./core/evolution/EvolutionExtension.js');
@@ -565,7 +619,7 @@ async function initialize(): Promise<void> {
   }
   // Gateway adapters are registered by the anoclaw-gateway plugin via extension.js
 
-  // ── Dependency Injection: inject ILogger into core singletons ──
+  // 鈹€鈹€ Dependency Injection: inject ILogger into core singletons 鈹€鈹€
   try {
     AgentRegistry.getInstance().setLogger(logManager.logger('anochat.agent'));
     ToolRegistry.getInstance().setLogger(logManager.logger('anochat.tools'));
@@ -576,7 +630,7 @@ async function initialize(): Promise<void> {
     logManager.logger('anochat.core').warn('ILogger injection failed', { error: (err as Error).message });
   }
 
-  // ── Dependency Injection: wire profiler into core singletons ──
+  // 鈹€鈹€ Dependency Injection: wire profiler into core singletons 鈹€鈹€
   try {
     ToolRegistry.getInstance().setProfiler(ToolProfiler.getInstance());
     logManager.logger('anochat.core').info('Repository and profiler injected');
@@ -584,7 +638,7 @@ async function initialize(): Promise<void> {
     logManager.logger('anochat.core').warn('Repository/profiler injection failed', { error: (err as Error).message });
   }
 
-  // Install TypedEventBus → WebSocket forwarding (bridges core events to browser)
+  // Install TypedEventBus 鈫?WebSocket forwarding (bridges core events to browser)
   try {
     const { installWsForwarding } = await import('./infra/network/WsForwardSubscriber.js');
     installWsForwarding();
@@ -605,7 +659,7 @@ async function initialize(): Promise<void> {
   logManager.logger('anochat.core').info('Init complete', { agentCount: registry.allAgents().length, toolCount: ToolRegistry.getInstance().allTools().length });
 }
 
-// ── Server startup (exported for Electron) ──
+// 鈹€鈹€ Server startup (exported for Electron) 鈹€鈹€
 const server = http.createServer(handleRequest);
 const wsServer = WsServer.getInstance();
 wsServer.attach(server);

@@ -82,7 +82,8 @@ export class KeywordExtractor {
 
   /**
    * Keyword extraction algorithm:
-   * 1. Tokenize into words/phrases (split on whitespace/punctuation)
+   * 1. Tokenize into words/phrases (whitespace/punctuation for English;
+   *    Intl.Segmenter for CJK languages)
    * 2. Filter stop words and short tokens (< 3 chars)
    * 3. Count frequency
    * 4. Score by frequency × length (longer words are more specific)
@@ -104,11 +105,28 @@ export class KeywordExtractor {
       '从', '对', '到', '让', '上', '下', '去', '能', '会', '很', '没', '为', '看',
     ]);
 
+    // Detect if text contains CJK characters (Unicode ranges for Chinese, Japanese, Korean)
+    const hasCJK = (s: string): boolean => /[一-鿿㐀-䶿豈-﫿぀-ゟ゠-ヿ가-힯]/.test(s);
+
+    const segmenter = typeof Intl !== 'undefined' && Intl.Segmenter
+      ? new Intl.Segmenter(['zh', 'ja', 'ko'], { granularity: 'word' })
+      : null;
+
     const freq: Map<string, number> = new Map();
 
     for (const text of texts) {
-      // Split into words/tokens
-      const tokens = text.toLowerCase().split(/[\s,.;:!?()\[\]{}"'」」、。，；：！？（）【】""'']+/);
+      let tokens: string[];
+
+      if (hasCJK(text) && segmenter) {
+        // Use Intl.Segmenter for CJK text — proper word boundaries
+        tokens = [...segmenter.segment(text)]
+          .filter(s => s.isWordLike && s.segment.trim().length > 0)
+          .map(s => s.segment.toLowerCase().trim());
+      } else {
+        // Fallback to whitespace/punctuation split for Latin-script text
+        tokens = text.toLowerCase().split(/[\s,.;:!?()\[\]{}"'」」、。，；：！？（）【】""'']+/);
+      }
+
       for (const token of tokens) {
         const trimmed = token.trim();
         if (trimmed.length < 3) continue;

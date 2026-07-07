@@ -42,6 +42,11 @@ export class TalentPoolPanel extends EventEmitter {
 
   get visible(): boolean { return this._visible; }
 
+  /** Reload data if panel is currently visible. */
+  reload(): void {
+    if (this._visible) this._loadData().catch(() => {});
+  }
+
   async toggle(): Promise<void> {
     if (this._visible) { this.close(); return; }
     await this.open();

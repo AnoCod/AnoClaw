@@ -1,5 +1,9 @@
-// AnoClaw Cinema — DelegationActivityDelegate: inline annotation line
-// Matches ThinkDelegate visual style: spinner · DELEGATE · activity text
+/**
+ * DelegationActivityDelegate — inline annotation line for delegation activity.
+ * Matches ThinkDelegate visual style: spinner · DELEGATE · activity text.
+ */
+
+import { injectStyle } from '../../../utils/domUtils.js';
 
 export interface DelegationActivityEvent {
   id: string;
@@ -68,15 +72,11 @@ export class DelegationActivityDelegate {
   }
 
   private _injectStyles(): void {
-    if (document.getElementById('da-styles')) return;
-    const style = document.createElement('style');
-    style.id = 'da-styles';
-    style.textContent = `
+    injectStyle('da-styles', `
       @keyframes da-spin {
         from { transform: rotate(0deg); }
         to { transform: rotate(360deg); }
       }
-    `;
-    document.head.appendChild(style);
+    `);
   }
 }

@@ -1,4 +1,4 @@
-// SkillTool — invoke a named skill
+// SkillTool - invoke a named skill
 // Loads skill prompt from SkillManager and returns it for injection.
 
 import { Tool, RiskLevel } from '../Tool.js';
@@ -9,21 +9,20 @@ import { SkillManager } from '../../skills/SkillManager.js';
 export class SkillTool extends Tool {
 
   static category = 'Memory & Skills';
-  static toolDescription = 'Invokes a named skill to load specialized instructions.';
+  static toolDescription = 'Loads a named skill into the current reasoning context.';
   name(): string { return 'Skill'; }
 
   description(): string {
-    return 'Invoke a named skill. Skills provide specialized instructions and domain knowledge for specific tasks.';
+    return 'Invoke a named skill after confirming it matches the task. The skill body is returned for use as specialized instructions.';
   }
 
   prompt(): string {
-    return '## Skill Usage\n' +
-      'Invoke a skill after you\'ve inspected it and confirmed it fits your task.\n\n' +
-      '**Pipeline: SkillList → SkillInspect → Skill**\n' +
-      '- SkillList first to see what\'s available.\n' +
-      '- SkillInspect the relevant one to read its full body.\n' +
-      '- Skill to invoke it and load its instructions into your context.\n\n' +
-      'Do NOT skip SkillInspect. Skills can be large, and loading the wrong one wastes context.';
+    return [
+      '## Skill Usage',
+      'Use skills for specialized workflows, not as decoration.',
+      'Preferred flow: skill_matching for discovery, SkillInspect for full instructions, then Skill to activate the chosen skill.',
+      'Avoid loading unrelated skills because they consume context and may conflict with the current task.',
+    ].join('\n');
   }
 
   parametersSchema(): Record<string, unknown> {
@@ -38,6 +37,8 @@ export class SkillTool extends Tool {
   }
 
   riskLevel(): RiskLevel { return RiskLevel.Safe; }
+
+  isReadOnly(): boolean { return true; }
 
   shouldDefer(): boolean { return true; }
 

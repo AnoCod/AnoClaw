@@ -10,6 +10,7 @@ export class GetPluginConfigRoute implements RouteHandler {
   path = '/api/v1/plugins/:name/config';
   category = 'Plugins';
   description = 'Read plugin configuration';
+  permission = 'admin';
 
   handle(match: RouteMatch, _req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): boolean {
     try {
@@ -28,6 +29,7 @@ export class PutPluginConfigRoute implements RouteHandler {
   path = '/api/v1/plugins/:name/config';
   category = 'Plugins';
   description = 'Write plugin configuration';
+  permission = 'admin';
 
   async handle(match: RouteMatch, req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): Promise<boolean> {
     try {

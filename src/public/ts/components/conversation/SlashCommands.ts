@@ -6,12 +6,76 @@
 
 import type { CommandDefinition } from '../../types.js';
 
+/**
+ * Protocol prompt for /init — injected as a user message so the agent analyzes
+ * the workspace and writes anoclaw.md. The file is then auto-injected every turn.
+ */
+export const INIT_PROTOCOL_PROMPT = [
+  '## /init — Project Initialization Protocol',
+  '',
+  'You MUST analyze the current workspace and create an `anoclaw.md` file at the workspace root.',
+  'This file will be automatically injected into every future conversation turn.',
+  '',
+  '### Step 1: Explore',
+  '- List the top-level directory structure (Glob or Bash `ls -la`)',
+  '- Read package.json if present (dependencies, scripts, project metadata)',
+  '- Read tsconfig.json / jsconfig.json if present',
+  '- Read any existing AGENTS.md, anoclaw.md, README.md, or .gitignore for conventions',
+  '- Identify the project type, tech stack, build system, and coding patterns',
+  '',
+  '### Step 2: Generate anoclaw.md',
+  'Write the file to `<workspace>/anoclaw.md` using the Write tool. Follow this structure:',
+  '',
+  '```',
+  '# <Project Name>',
+  '',
+  '## Tech Stack',
+  '- Language: <detected>',
+  '- Runtime/Framework: <detected>',
+  '- Build tool: <detected>',
+  '- Test framework: <detected>',
+  '- Key dependencies: <list>',
+  '',
+  '## Build Commands',
+  '- `npm run build` — <what it does>',
+  '- `npm test` — <what it does>',
+  '- `npm run dev` — <what it does>',
+  '',
+  '## Architecture',
+  '```',
+  '<directory tree, 2-3 levels>',
+  '```',
+  '- `src/server/` — <purpose>',
+  '- `src/public/` — <purpose>',
+  '- `src/shared/` — <purpose>',
+  '',
+  '## Conventions',
+  '- <coding standards, naming patterns, import style, etc.>',
+  '- <anything you observe from reading existing code>',
+  '',
+  '## Quick Task Routing',
+  '| Task | Key Files |',
+  '|------|-----------|',
+  '| <common task> | <file paths> |',
+  '```',
+  '',
+  '### Rules',
+  '- Use actual file paths and observed facts. Never invent generic content.',
+  '- If you cannot determine something, write "TODO: <question>" instead of guessing.',
+  '- Keep it between 80-200 lines. Be specific, not verbose.',
+  '- After writing, confirm the file exists and report what you created.',
+  '',
+  '### Important',
+  'This is a ONE-TIME setup task. After creating anoclaw.md, do NOT mention',
+  'or suggest running /init again. The file will be auto-injected from now on.',
+].join('\n');
+
 /** Default command definitions (used before API fetch completes). */
 export const DEFAULT_COMMANDS: CommandDefinition[] = [
   {
     name: 'init',
     displayName: 'Init Project',
-    description: 'Generate a CLAUDE.md file for the current project workspace',
+    description: 'Generate an anoclaw.md file for the current project workspace',
     category: 'project',
   },
   {

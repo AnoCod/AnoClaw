@@ -13,6 +13,7 @@ import * as fs from 'fs/promises';
 import { existsSync, mkdirSync, readFileSync, Dirent } from 'fs';
 import * as path from 'path';
 import { writablePath } from '../../infra/WritablePath.js';
+import { TypedEventBus } from '../events/TypedEventBus.js';
 import { Skill, SkillSource, sourceWeight } from './Skill.js';
 import { generateSkillFromTools, generateSkillFromTranscript, SkillGenLLMOptions } from './SkillFromTools.js';
 import { PromptAssembler } from '../prompt/PromptAssembler.js';
@@ -33,6 +34,9 @@ interface SkillUsageFile {
 }
 
 export type SkillStaleness = 'fresh' | 'stale' | 'archived';
+
+/** Divisor to normalize raw keyword score to 0–1 range. */
+const KEYWORD_SCORE_DIVISOR = 200;
 
 export class SkillManager extends EventEmitter {
   private static _instance: SkillManager;
@@ -239,6 +243,7 @@ export class SkillManager extends EventEmitter {
     }
     PromptAssembler.getInstance().clearAllCaches();
     this.emit('skillsReloaded', this._skills.size);
+    TypedEventBus.emit('skill:changed', { action: 'reloaded', name: '*' });
   }
 
   // ─── Registration (priority-aware) ────────────────────────
@@ -280,6 +285,7 @@ export class SkillManager extends EventEmitter {
     this._register(skill, SkillSource.Project);
     if (!this._loadedDirs.find(d => d.dir === dir)) this._loadedDirs.push({ dir, source: SkillSource.Project });
     PromptAssembler.getInstance().clearAllCaches();
+    TypedEventBus.emit('skill:changed', { action: 'created', name });
   }
 
   async deleteSkill(name: string): Promise<void> {
@@ -292,12 +298,14 @@ export class SkillManager extends EventEmitter {
     this._skillUsage.delete(name);
     await this._saveUsage();
     PromptAssembler.getInstance().clearAllCaches();
+    TypedEventBus.emit('skill:changed', { action: 'deleted', name });
   }
 
   async toggleSkill(name: string, enabled: boolean): Promise<void> {
     if (enabled) this._disabledSkills.delete(name);
     else this._disabledSkills.add(name);
     await this._saveDisabledSkills();
+    TypedEventBus.emit('skill:changed', { action: 'updated', name });
   }
 
   isEnabled(name: string): boolean { return !this._disabledSkills.has(name); }
@@ -419,10 +427,17 @@ export class SkillManager extends EventEmitter {
     }
 
     const result = scored.sort((a, b) => b.score - a.score).map(m => m.skill);
+    return result;
+  }
 
-    // Record usage for matched skills
+  /**
+   * Match skills AND record usage. This is the side-effectful variant —
+   * call this from user-initiated flows (chat, tool execution).
+   * For read-only queries, call matchingSkills() directly.
+   */
+  async matchAndTrack(userMessage: string): Promise<Skill[]> {
+    const result = await this.matchingSkills(userMessage);
     for (const s of result) this.recordUsage(s.name());
-
     return result;
   }
 
@@ -452,7 +467,7 @@ export class SkillManager extends EventEmitter {
       raw = Math.max(raw, skill.name().length * 0.5);
     }
 
-    return Math.min(raw / 200, 1);
+    return Math.min(raw / KEYWORD_SCORE_DIVISOR, 1);
   }
 
   // ─── User-level skills directory support ──────────────────
@@ -482,6 +497,7 @@ export class SkillManager extends EventEmitter {
     const skill = Skill.fromContent(fm + content, fp, entry.source);
     this._skills.set(name, { skill, source: entry.source });
     PromptAssembler.getInstance().clearAllCaches();
+    TypedEventBus.emit('skill:changed', { action: 'updated', name });
   }
 
   /** All enabled skills (filtered by disabled set, excludes archived) */

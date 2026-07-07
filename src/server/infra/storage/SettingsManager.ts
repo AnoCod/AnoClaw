@@ -31,7 +31,7 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
 
   // Agent
   agent: {
-    maxTurns: 25,
+    maxTurns: 0,
     stallDetectionNoToolTurns: 5,
     stallDetectionConsecutiveFailures: 3,
     heartbeatIntervalSec: 60,
@@ -155,7 +155,7 @@ export class SettingsManager extends EventEmitter {
 
   /**
    * Get a setting value by dot-notation key.
-   * Example: get('llm.model'), get('agent.maxTurns', 25)
+   * Example: get('llm.model'), get('agent.maxTurns', 0)
    */
   get<T>(key: string, defaultValue?: T): T {
     if (this._extPoints) {
@@ -253,7 +253,7 @@ export class SettingsManager extends EventEmitter {
         try {
           const raw = await fsp.readFile(this._configPath, 'utf-8');
           const parsed = this.parseConfig(raw, this._configPath);
-          this._settings = this.applyConfig(this.deepClone(DEFAULT_SETTINGS), parsed) as Record<string, unknown>;
+          this._settings = this.deepMerge(this.deepClone(DEFAULT_SETTINGS), parsed) as Record<string, unknown>;
           LogManager.getInstance().logger('anochat.system').info('Config reloaded from disk');
         } catch {
           // File may be temporarily locked or malformed — ignore
@@ -327,17 +327,6 @@ export class SettingsManager extends EventEmitter {
     }
 
     return result;
-  }
-
-  /**
-   * Apply parsed config over defaults, preserving default structure
-   * (same as deepMerge but the merged object is the return value)
-   */
-  private applyConfig(
-    defaults: Record<string, unknown>,
-    overrides: Record<string, unknown>,
-  ): Record<string, unknown> {
-    return this.deepMerge(defaults, overrides);
   }
 
   // -----------------------------------------------------------------------

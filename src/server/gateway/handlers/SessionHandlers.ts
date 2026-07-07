@@ -13,9 +13,8 @@ import { sendMessageHandler } from '../../infra/network/handlers/SendMessageHand
 import { TypedEventBus } from '../../core/events/TypedEventBus.js';
 import { requireWs, requireWsAny } from '../WsRequired.js';
 import { LogManager } from '../../infra/logging/LogManager.js';
-import { DEFAULT_MAIN_AGENT_ID } from '../../../shared/constants.js';
 import { createLLMProvider } from '../../infra/llm/provider-factory.js';
-import type { Message } from '../../../shared/types/session.js';
+import type { Message, TokenBreakdown } from '../../../shared/types/session.js';
 import { MessageRole, SessionStatus } from '../../../shared/types/session.js';
 import type { SSEEvent } from '../../../shared/types/events.js';
 import { SSEEventType } from '../../../shared/types/events.js';
@@ -26,19 +25,27 @@ import { MemoryScope } from '../../core/memory/MemoryEntry.js';
 import { extensionPoints } from '../../core/plugin-host/ExtensionPoints.js';
 import { TokenCounter } from '../../core/context/TokenCounter.js';
 import type { Session } from '../../core/session/index.js';
-
-// ---------------------------------------------------------------------------
-// Utility types
-// ---------------------------------------------------------------------------
-
-type SendJson = (res: http.ServerResponse, statusCode: number, data: Record<string, unknown>) => void;
-type ReadBody = (req: http.IncomingMessage) => Promise<Record<string, unknown>>;
+import type { SendJson, ReadBody } from '../RouteHelpers.js';
+import { selectRunnableAgent } from '../../core/agent/AgentSelection.js';
 
 // ---------------------------------------------------------------------------
 // Internal helpers for send-message flow
 // ---------------------------------------------------------------------------
 
-/** Collect agent output and return as single JSON response (non-streaming mode) */
+/**
+ * Collect agent output and return as single JSON response (non-streaming mode).
+ *
+ * Iterates the agent's async generator for the given session, accumulating all
+ * text, thinking, and events. Once the stream completes, persists the assistant
+ * message to the session store and returns the collected content as a JSON body.
+ *
+ * @param sessionId   - Target session ID.
+ * @param agentId     - Agent to run.
+ * @param userMessage - User message to submit.
+ * @param history     - Conversation history (already persisted).
+ * @param res         - HTTP response object.
+ * @param sendJson    - JSON response helper.
+ */
 async function collectAndRespond(
   sessionId: string,
   agentId: string,
@@ -164,7 +171,7 @@ async function streamResponse(
 
   let assistantText = '';
   let thinkContent = '';
-  let lastTokenUsage: Record<string, unknown> | null = null;
+  let lastTokenUsage: TokenBreakdown | null = null;
 
   try {
     for await (const event of runtime.processMessage(
@@ -203,8 +210,8 @@ async function streamResponse(
           break;
         case SSEEventType.Done:
           payload.turnCount = event.turnCount as number;
-          payload.tokenUsage = event.tokenUsage as Record<string, unknown>;
-          lastTokenUsage = event.tokenUsage as Record<string, unknown>;
+          payload.tokenUsage = event.tokenUsage;
+          lastTokenUsage = event.tokenUsage as TokenBreakdown;
           break;
         default:
           for (const [k, v] of Object.entries(event)) {
@@ -219,7 +226,7 @@ async function streamResponse(
     // Persist tokenUsage to session meta so page refresh loads correct stats
     if (lastTokenUsage) {
       const store = JsonlStore.getInstance();
-      await store.updateMeta(sessionId, { tokenBreakdown: lastTokenUsage as any }).catch(err => {
+      await store.updateMeta(sessionId, { tokenBreakdown: lastTokenUsage }).catch(err => {
         LogManager.getInstance().logger('anochat.api').error('Failed to persist token breakdown', { sid: sessionId, error: (err as Error).message });
       });
     }
@@ -307,7 +314,12 @@ export async function handleCreateSession(
   const body = await readBody(req);
   const sessionManager = SessionManager.getInstance();
 
-  const agentId: string = (body.agent_id as string) || (body.agentId as string) || defaultAgentId();
+  const agentSelection = selectRunnableAgent((body.agent_id as string) || (body.agentId as string) || '');
+  if (!agentSelection.ok || !agentSelection.agentId) {
+    sendJson(res, 409, { error: 'Agent Required', message: agentSelection.message || 'No runnable agent is configured' });
+    return;
+  }
+  const agentId = agentSelection.agentId;
   const title: string = (body.title as string) || (body.name as string) || 'API Session';
   const parentId: string | undefined = body.parentSessionId as string | undefined
     || body.parent_id as string | undefined
@@ -414,10 +426,7 @@ export async function handleClearAllSessions(
 
   const sessionManager = SessionManager.getInstance();
 
-  // Clear ALL sessions from memory first — frees file handles before disk delete
-  sessionManager.clearAll();
-
-  // Hard delete all session directories from disk
+  // Delete from disk first — if this fails, memory stays intact
   const store = SessionStore.getInstance();
   let count = 0;
   try {
@@ -425,6 +434,9 @@ export async function handleClearAllSessions(
   } catch (err) {
     LogManager.getInstance().logger('anochat.api').error('deleteAllSessions failed', { error: (err as Error).message });
   }
+
+  // Clear from memory after disk deletion succeeds
+  sessionManager.clearAll();
 
   sendJson(res, 200, {
     status: 'cleared',
@@ -520,8 +532,15 @@ export async function handleAutoTitle(
         if (event.type === 'text_delta' && event.content) generatedTitle += event.content;
         if (event.type === 'error') break;
       }
-    } catch {
-      // provider.chat handles AbortError internally
+    } catch (err) {
+      // provider.chat handles AbortError internally, but distinguish network errors
+      if (err instanceof Error) {
+        if (err.name === 'AbortError') {
+          // Expected — agent loop cancelled. Fall through to fallback.
+        } else {
+          LogManager.getInstance().logger('anochat.api').warn('Auto-title LLM error', { sid: sessionId, error: err.message });
+        }
+      }
     }
 
     if (!generatedTitle.trim()) {
@@ -602,9 +621,12 @@ export async function handleSendMessage(
   let session = sessionManager.session(sessionId);
   if (!session) {
     // Auto-create session if it doesn't exist (matching WS handler behavior)
-    const registry = AgentRegistry.getInstance();
-    const mainAgent = registry.mainAgent();
-    const agentId = mainAgent?.id || registry.allAgents()[0]?.id || DEFAULT_MAIN_AGENT_ID;
+    const agentSelection = selectRunnableAgent();
+    if (!agentSelection.ok || !agentSelection.agentId) {
+      sendJson(res, 409, { error: 'Agent Required', message: agentSelection.message || 'No runnable agent is configured' });
+      return;
+    }
+    const agentId = agentSelection.agentId;
     try {
       session = await sessionManager.createMainSession(agentId, content.slice(0, 30) || 'API Session');
     } catch (err) {
@@ -642,12 +664,6 @@ export async function handleSendMessage(
     agentId: session.agentId,
     message: 'Streaming via WebSocket',
   });
-}
-
-/** Get default agent ID */
-function defaultAgentId(): string {
-  const registry = AgentRegistry.getInstance();
-  return registry.mainAgent()?.id || registry.allAgents()[0]?.id || DEFAULT_MAIN_AGENT_ID;
 }
 
 /**
@@ -699,9 +715,11 @@ export async function handleSearchSessions(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   sendJson: SendJson,
+  host: string = 'localhost',
+  port: number = 3456,
 ): Promise<void> {
   try {
-    const url = new URL(req.url || '/', `http://localhost`);
+    const url = new URL(req.url || '/', `http://${host}:${port}`);
     const query = (url.searchParams.get('q') || '').trim();
     const limit = Math.min(parseInt(url.searchParams.get('limit') || '20', 10), 100);
     const scope = url.searchParams.get('scope') || 'all';

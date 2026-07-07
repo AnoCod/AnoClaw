@@ -19,7 +19,12 @@ export interface TaskNode {
 }
 
 export class TaskDAG {
-  tasks: Map<string, TaskNode> = new Map();
+  private _tasks: Map<string, TaskNode> = new Map();
+
+  /** Access the task map for inspection and status updates. */
+  get tasks(): Map<string, TaskNode> {
+    return this._tasks;
+  }
 
   /** Add a task node to the DAG. Rejects duplicate IDs silently (last wins).
    *  Throws if the new task would create a dependency cycle. */
@@ -33,7 +38,7 @@ export class TaskDAG {
         throw new Error(`Adding "${task.id}" would create a cycle via "${depId}"`);
       }
     }
-    this.tasks.set(task.id, { ...task });
+    this._tasks.set(task.id, { ...task });
   }
 
   /** BFS: return true if startId transitively depends on targetId. */
@@ -45,7 +50,7 @@ export class TaskDAG {
       if (current === targetId) return true;
       if (visited.has(current)) continue;
       visited.add(current);
-      const node = this.tasks.get(current);
+      const node = this._tasks.get(current);
       if (node) {
         for (const dep of node.dependsOn) {
           if (!visited.has(dep)) queue.push(dep);
@@ -58,15 +63,28 @@ export class TaskDAG {
   /**
    * Get tasks that are ready to run: all dependencies have status='completed',
    * and the task itself is still 'pending'.
+   *
+   * Tasks whose dependencies reference non-existent task IDs are marked as
+   * 'failed' (unsatisfiable) rather than silently remaining pending forever.
    */
   getReadyTasks(): TaskNode[] {
     const ready: TaskNode[] = [];
-    for (const task of this.tasks.values()) {
+    for (const task of this._tasks.values()) {
       if (task.status !== 'pending') continue;
+      let hasMissingDep = false;
       const depsReady = task.dependsOn.every(depId => {
-        const dep = this.tasks.get(depId);
-        return dep && dep.status === 'completed';
+        const dep = this._tasks.get(depId);
+        if (!dep) {
+          hasMissingDep = true;
+          return false;
+        }
+        return dep.status === 'completed';
       });
+      if (hasMissingDep) {
+        task.status = 'failed';
+        task.result = `Unsatisfiable: dependency "${task.dependsOn.find(d => !this._tasks.has(d))}" not found`;
+        continue;
+      }
       if (depsReady) ready.push(task);
     }
     return ready;
@@ -74,8 +92,8 @@ export class TaskDAG {
 
   /** Whether all tasks are in a terminal state (completed or failed). */
   isComplete(): boolean {
-    if (this.tasks.size === 0) return true;
-    for (const task of this.tasks.values()) {
+    if (this._tasks.size === 0) return true;
+    for (const task of this._tasks.values()) {
       if (task.status === 'pending' || task.status === 'running') return false;
     }
     return true;
@@ -84,7 +102,7 @@ export class TaskDAG {
   /** Simple completion summary: counts by status. */
   summary(): string {
     let pending = 0, running = 0, completed = 0, failed = 0;
-    for (const task of this.tasks.values()) {
+    for (const task of this._tasks.values()) {
       switch (task.status) {
         case 'pending': pending++; break;
         case 'running': running++; break;

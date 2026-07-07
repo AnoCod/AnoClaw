@@ -8,9 +8,12 @@ export interface RPCCallbacks {
   reject: (reason: Error) => void;
 }
 
+import * as crypto from 'crypto';
+import type { CapabilityDefinition } from '../../../shared/types/capability.js';
+
 /** Generate a short unique ID for RPC requests */
 export function generateRPCLabel(method: string, pluginName: string): string {
-  return `${pluginName}:${method}:${Math.random().toString(36).slice(2, 8)}`;
+  return `${pluginName}:${method}:${crypto.randomUUID().slice(0, 8)}`;
 }
 
 /** Plugin manifest schema */
@@ -24,6 +27,7 @@ export interface PluginManifest {
   activationEvents: string[];
   contributes?: {
     tools?: Array<{ name?: string }>;
+    capabilities?: CapabilityDefinition[];
     pages?: Array<{ id: string; title: string; icon?: string; order?: number; html?: string }>;
     skills?: string[];
     commands?: Array<{ id: string; label: string }>;
@@ -47,6 +51,17 @@ export interface PluginState {
   status: 'loaded' | 'activated' | 'error';
   errorMessage?: string;
   activatedAt?: string;
+}
+
+export interface PluginListItem {
+  name: string;
+  displayName: string;
+  version: string;
+  publisher?: string;
+  description?: string;
+  status: string;
+  errorMessage?: string;
+  contributes?: PluginManifest['contributes'];
 }
 
 // ── Extended Plugin API types ──

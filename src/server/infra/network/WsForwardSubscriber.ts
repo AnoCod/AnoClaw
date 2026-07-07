@@ -11,6 +11,7 @@
 import { TypedEventBus } from '../../core/events/TypedEventBus.js';
 import { WsServer } from './WsServer.js';
 import { SessionManager } from '../../core/session/SessionManager.js';
+import { WsMessageType } from '../../../shared/types/ws-protocol.js';
 
 function resolveRootSessionId(sessionId: string): string {
   try {
@@ -34,7 +35,7 @@ export function installWsForwarding(): void {
     const rootId = resolveRootSessionId(sid);
     if (ws.isConnected(rootId)) {
       ws.send(rootId, {
-        type: 'session_created',
+        type: WsMessageType.SessionCreated,
         sessionId: payload.sessionId,
         parentSessionId: payload.parentSessionId || null,
         agentId: payload.agentId,
@@ -46,7 +47,7 @@ export function installWsForwarding(): void {
     const rootId = resolveRootSessionId(payload.sessionId);
     if (ws.isConnected(rootId)) {
       ws.send(rootId, {
-        type: 'message_appended',
+        type: WsMessageType.MessageAppended,
         sessionId: payload.sessionId,
         messageId: payload.messageId,
         role: payload.role,
@@ -58,7 +59,7 @@ export function installWsForwarding(): void {
     const rootId = resolveRootSessionId(payload.sessionId);
     if (ws.isConnected(rootId)) {
       ws.send(rootId, {
-        type: 'workspace_changed',
+        type: WsMessageType.WorkspaceChanged,
         sessionId: payload.sessionId,
         workspace: payload.workspace,
       });
@@ -68,7 +69,24 @@ export function installWsForwarding(): void {
   // ── session:archived (triggers frontend tree refresh) ──
   TypedEventBus.on('session:archived', (payload) => {
     ws.broadcast({
-      type: 'session_created', // reuse existing type to trigger frontend reload
+      type: WsMessageType.SessionCreated, // reuse existing type to trigger frontend reload
+      sessionId: payload.sessionId,
+    });
+  });
+
+  // ── session:title_changed (triggers frontend session list update) ──
+  TypedEventBus.on('session:title_changed', (payload) => {
+    ws.broadcast({
+      type: WsMessageType.SessionTitleChanged,
+      sessionId: payload.sessionId,
+      title: payload.title,
+    });
+  });
+
+  // ── session:hard_deleted (triggers frontend session list removal) ──
+  TypedEventBus.on('session:hard_deleted', (payload) => {
+    ws.broadcast({
+      type: WsMessageType.SessionHardDeleted,
       sessionId: payload.sessionId,
     });
   });
@@ -78,7 +96,7 @@ export function installWsForwarding(): void {
     const rootId = resolveRootSessionId(payload.parentSessionId);
     if (ws.isConnected(rootId)) {
       ws.send(rootId, {
-        type: 'subsession_created',
+        type: WsMessageType.SubsessionCreated,
         sessionId: payload.sessionId,
         parentSessionId: payload.parentSessionId,
         agentId: payload.agentId,
@@ -92,8 +110,8 @@ export function installWsForwarding(): void {
   // ═══════════════════════════════════════════════════════════════
 
   TypedEventBus.on('agent:status_changed', (payload) => {
-    ws.send('*broadcast', {
-      type: 'agent_status',
+    ws.broadcast({
+      type: WsMessageType.AgentStatus,
       agentId: payload.agentId,
       oldStatus: payload.oldStatus,
       newStatus: payload.newStatus,
@@ -101,8 +119,8 @@ export function installWsForwarding(): void {
   });
 
   TypedEventBus.on('agent:registered', (payload) => {
-    ws.send('*broadcast', {
-      type: 'agent_registered',
+    ws.broadcast({
+      type: WsMessageType.AgentRegistered,
       agentId: payload.agentId,
       role: payload.role,
       name: payload.name,
@@ -111,18 +129,65 @@ export function installWsForwarding(): void {
 
   // ── agent:config_updated → forward to frontend ──
   TypedEventBus.on('agent:config_updated', (payload) => {
-    ws.send('*broadcast', {
-      type: 'agent_config_updated',
+    ws.broadcast({
+      type: WsMessageType.AgentConfigUpdated,
       agentId: payload.agentId,
       role: payload.role,
       name: payload.name,
     });
   });
 
+  // ── agent:unregistered → forward to frontend ──
+  TypedEventBus.on('agent:unregistered', (payload) => {
+    ws.broadcast({
+      type: WsMessageType.AgentUnregistered,
+      agentId: payload.agentId,
+      role: payload.role,
+      name: payload.name,
+    });
+  });
+
+  // ── agent:changed → forward to frontend ──
+  TypedEventBus.on('agent:changed', (payload) => {
+    ws.broadcast({
+      type: WsMessageType.AgentChanged,
+      action: payload.action,
+      agentId: payload.agentId,
+    });
+  });
+
+  // ── talent_pool:changed → forward to frontend ──
+  TypedEventBus.on('talent_pool:changed', (payload) => {
+    ws.broadcast({
+      type: WsMessageType.TalentPoolChanged,
+      action: payload.action,
+      entityId: payload.entityId,
+    });
+  });
+
+  // ── memory:changed → forward to frontend ──
+  TypedEventBus.on('memory:changed', (payload) => {
+    ws.broadcast({
+      type: WsMessageType.MemoryChanged,
+      action: payload.action,
+      name: payload.name,
+      scope: payload.scope,
+    });
+  });
+
+  // ── skill:changed → forward to frontend ──
+  TypedEventBus.on('skill:changed', (payload) => {
+    ws.broadcast({
+      type: WsMessageType.SkillChanged,
+      action: payload.action,
+      name: payload.name,
+    });
+  });
+
   // ── plugin:load_failed → forward to frontend for error display ──
   TypedEventBus.on('plugin:load_failed', (payload) => {
-    ws.send('*broadcast', {
-      type: 'plugin_load_failed',
+    ws.broadcast({
+      type: WsMessageType.PluginLoadFailed,
       pluginName: payload.pluginName,
       error: payload.error,
     });
@@ -136,7 +201,7 @@ export function installWsForwarding(): void {
     const rootId = resolveRootSessionId(payload.sessionId);
     if (ws.isConnected(rootId)) {
       ws.send(rootId, {
-        type: 'tool_execution_started',
+        type: WsMessageType.ToolExecutionStarted,
         sessionId: payload.sessionId,
         toolName: payload.toolName,
       });
@@ -147,7 +212,7 @@ export function installWsForwarding(): void {
     const rootId = resolveRootSessionId(payload.sessionId);
     if (ws.isConnected(rootId)) {
       ws.send(rootId, {
-        type: 'tool_execution_completed',
+        type: WsMessageType.ToolExecutionCompleted,
         sessionId: payload.sessionId,
         toolName: payload.toolName,
         success: payload.success,
@@ -164,7 +229,7 @@ export function installWsForwarding(): void {
     const rootId = resolveRootSessionId(payload.sessionId);
     if (ws.isConnected(rootId)) {
       ws.send(rootId, {
-        type: 'loop_completed',
+        type: WsMessageType.LoopCompleted,
         sessionId: payload.sessionId,
         agentId: payload.agentId,
         turnCount: payload.turnCount,
@@ -177,7 +242,7 @@ export function installWsForwarding(): void {
     const rootId = resolveRootSessionId(payload.sessionId);
     if (ws.isConnected(rootId)) {
       ws.send(rootId, {
-        type: 'compaction_triggered',
+        type: WsMessageType.CompactionTriggered,
         sessionId: payload.sessionId,
         beforeTokens: payload.beforeTokens,
         afterTokens: payload.afterTokens,
@@ -193,7 +258,7 @@ export function installWsForwarding(): void {
     const directParentId = payload.parentSessionId;
     if (ws.isConnected(directParentId)) {
       ws.send(directParentId, {
-        type: 'delegation_status',
+        type: WsMessageType.DelegationStatus,
         parentSessionId: payload.parentSessionId,
         subSessionId: payload.subSessionId,
         subAgentId: payload.subAgentId,
@@ -208,7 +273,7 @@ export function installWsForwarding(): void {
     const directParentId = payload.parentSessionId;
     if (ws.isConnected(directParentId)) {
       ws.send(directParentId, {
-        type: 'delegation_status',
+        type: WsMessageType.DelegationStatus,
         parentSessionId: payload.parentSessionId,
         subSessionId: payload.subSessionId,
         subAgentId: payload.subAgentId,
@@ -226,7 +291,7 @@ export function installWsForwarding(): void {
     const directParentId = payload.parentSessionId;
     if (ws.isConnected(directParentId)) {
       ws.send(directParentId, {
-        type: 'delegation_status',
+        type: WsMessageType.DelegationStatus,
         parentSessionId: payload.parentSessionId,
         subSessionId: payload.subSessionId,
         subAgentId: payload.subAgentId,
@@ -244,7 +309,7 @@ export function installWsForwarding(): void {
     const directParentId = payload.parentSessionId;
     if (ws.isConnected(directParentId)) {
       ws.send(directParentId, {
-        type: 'delegation_status',
+        type: WsMessageType.DelegationStatus,
         parentSessionId: payload.parentSessionId,
         subSessionId: payload.subSessionId,
         subAgentId: payload.subAgentId,
@@ -261,7 +326,7 @@ export function installWsForwarding(): void {
     const directParentId = payload.parentSessionId;
     if (ws.isConnected(directParentId)) {
       ws.send(directParentId, {
-        type: 'delegation_status',
+        type: WsMessageType.DelegationStatus,
         parentSessionId: payload.parentSessionId,
         subSessionId: payload.subSessionId,
         subAgentId: payload.subAgentId,
@@ -278,7 +343,7 @@ export function installWsForwarding(): void {
     const directParentId = payload.parentSessionId;
     if (ws.isConnected(directParentId)) {
       ws.send(directParentId, {
-        type: 'delegation_progress',
+        type: WsMessageType.DelegationProgress,
         subSessionId: payload.subSessionId,
         subAgentId: payload.subAgentId,
         originalType: payload.originalType,
@@ -299,7 +364,7 @@ export function installWsForwarding(): void {
     const directParentId = payload.parentSessionId;
     if (ws.isConnected(directParentId)) {
       ws.send(directParentId, {
-        type: 'task_notification',
+        type: WsMessageType.TaskNotification,
         parentSessionId: payload.parentSessionId,
         taskId: payload.taskId,
         parentAgentId: payload.parentAgentId,
@@ -316,7 +381,7 @@ export function installWsForwarding(): void {
     const directParentId = payload.parentSessionId;
     if (ws.isConnected(directParentId)) {
       ws.send(directParentId, {
-        type: 'task_notification',
+        type: WsMessageType.TaskNotification,
         parentSessionId: payload.parentSessionId,
         taskId: payload.taskId,
         parentAgentId: payload.parentAgentId,
@@ -337,7 +402,7 @@ export function installWsForwarding(): void {
     const rootId = resolveRootSessionId(task.parentSessionId);
     if (ws.isConnected(rootId)) {
       ws.send(rootId, {
-        type: 'task_list_update',
+        type: WsMessageType.TaskListUpdate,
         id: task.id,
         taskType: task.type,
         parentSessionId: task.parentSessionId,

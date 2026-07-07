@@ -1,5 +1,5 @@
-/**
- * AgentRuntime — singleton runtime manager.
+﻿/**
+ * AgentRuntime 鈥?singleton runtime manager.
  *
  * Extends EventEmitter. Entry point for processing messages, delegating tasks,
  * and spawning SubAgents. Coordinates WorkerPool, AgentLoop, and LLMProvider.
@@ -43,9 +43,15 @@ import {
   subAgentAllowedTools,
   type DelegationState,
 } from './AgentDelegation.js';
+import { resolveSessionEffort, resolveSessionPermissionMode } from './PermissionModePolicy.js';
+
+export interface ProcessMessageOptions {
+  permissionMode?: string;
+  effort?: string;
+}
 
 export class AgentRuntime extends EventEmitter {
-  // ── Singleton ──
+  // 鈹€鈹€ Singleton 鈹€鈹€
   private static _instance: AgentRuntime | null = null;
 
   static getInstance(): AgentRuntime {
@@ -57,14 +63,20 @@ export class AgentRuntime extends EventEmitter {
 
   /** Reset the singleton (primarily for testing). */
   static resetInstance(): void {
+    if (AgentRuntime._instance) {
+      AgentRuntime._instance._unsubTaskCompleted?.();
+      AgentRuntime._instance._unsubTaskFailed?.();
+    }
     AgentRuntime._instance = null;
   }
 
-  // ── Task notification wiring ──
+  // 鈹€鈹€ Task notification wiring 鈹€鈹€
   private _taskNotificationsWired = false;
+  private _unsubTaskCompleted: (() => void) | null = null;
+  private _unsubTaskFailed: (() => void) | null = null;
 
-  // ── Session tracking ──
-  /** Map of sessionId → active AgentLoop instance */
+  // 鈹€鈹€ Session tracking 鈹€鈹€
+  /** Map of sessionId 鈫?active AgentLoop instance */
   private _activeLoops: Map<string, AgentLoop> = new Map();
 
   private constructor() {
@@ -72,7 +84,7 @@ export class AgentRuntime extends EventEmitter {
     this._subscribeToTaskNotifications();
   }
 
-  // ── Core: process message ──
+  // 鈹€鈹€ Core: process message 鈹€鈹€
 
   /**
    * Main entry point for processing a user message through an AgentLoop.
@@ -89,6 +101,7 @@ export class AgentRuntime extends EventEmitter {
     agentId: string,
     message: Message,
     history: Message[] = [],
+    options: ProcessMessageOptions = {},
   ): AsyncGenerator<SSEEvent> {
     const registry = AgentRegistry.getInstance();
     const agent = registry.agent(agentId);
@@ -117,23 +130,23 @@ export class AgentRuntime extends EventEmitter {
     // Guard: prevent concurrent AgentLoop on the same session.
     // Instead of rejecting, queue the message as a pending interrupt.
     if (this.isSessionActive(sessionId)) {
-      logger.info('Session active — queuing as pending message (soft interrupt)', { sid: sessionId, aid: agentId });
+      logger.info('Session active 鈥?queuing as pending message (soft interrupt)', { sid: sessionId, aid: agentId });
       InterruptController.getInstance().setPendingUserMessage(sessionId, message.content as string);
       InterruptController.getInstance().requestInterrupt(sessionId, InterruptReason.UserSteer);
       yield {
         type: SSEEventType.StatusInfo,
-        content: '(Your message has been queued — the agent will respond shortly)',
+        content: '(Your message has been queued -- the agent will respond shortly)',
       };
       return;
     }
 
-    // Acquire lease — reject if too many concurrent sessions
+    // Acquire lease 鈥?reject if too many concurrent sessions
     const lease = SessionLeaseManager.getInstance().acquire(sessionId);
     if (!lease) {
-      logger.warn('Too many concurrent sessions — rejecting', { sid: sessionId });
+      logger.warn('Too many concurrent sessions 鈥?rejecting', { sid: sessionId });
       yield {
         type: SSEEventType.Error,
-        errorMessage: 'Server busy — too many concurrent sessions. Please wait and try again.',
+        errorMessage: 'Server busy -- too many concurrent sessions. Please wait and try again.',
         code: 'TOO_MANY_SESSIONS',
       };
       return;
@@ -160,59 +173,16 @@ export class AgentRuntime extends EventEmitter {
       maxTurns: agent.maxTurns,
       temperature: agent.temperature,
       contextWindow: agent.contextWindow,
+      permissionMode: options.permissionMode,
+      effort: options.effort,
     };
 
     const loop = new AgentLoop(loopConfig);
     this._activeLoops.set(sessionId, loop);
 
-    let supervisionCheckCounter = 0;
-
     try {
       // Run the AgentLoop
-      for await (const event of loop.run(message, history, signal)) {
-        supervisionCheckCounter++;
-
-        // Forward events from AgentRuntime
-        if (event.type === SSEEventType.ToolCall) {
-          this.emit(AgentRuntimeEvents.ToolCallStarted, {
-            sessionId,
-            agentId,
-            toolName: event.toolName,
-          });
-        } else if (event.type === SSEEventType.ToolResult) {
-          this.emit(AgentRuntimeEvents.ToolCallFinished, {
-            sessionId,
-            agentId,
-            toolName: event.toolName,
-          });
-        } else if (event.type === SSEEventType.Think || event.type === SSEEventType.Text) {
-          this.emit(AgentRuntimeEvents.StreamingToken, {
-            sessionId,
-            agentId,
-            type: event.type,
-            content: event.content,
-          });
-        }
-
-        yield event;
-
-        // Refresh heartbeat on every event — proves the agent is still alive
-        SupervisionManager.getInstance().heartbeat(sessionId);
-
-        // Periodically check if session has gone unresponsive (every 5 events)
-        if (supervisionCheckCounter % 5 === 0) {
-          if (SupervisionManager.getInstance().isUnresponsive(sessionId)) {
-            logger.warn('Session detected as unresponsive by SupervisionManager', {
-              sid: sessionId,
-              aid: agentId,
-            });
-            yield {
-              type: SSEEventType.StatusInfo,
-              content: '(Warning: session heartbeat overdue — agent may be unresponsive)',
-            };
-          }
-        }
-      }
+      yield* this._executeAndForwardLoop(loop, message, history, signal, sessionId, agentId, logger);
 
       // Loop completed successfully
       agent.setSessionStatus(sessionId, AgentStatus.Working); // back to "ready" (not actively in loop)
@@ -229,63 +199,12 @@ export class AgentRuntime extends EventEmitter {
       });
       logger.debug('Agent loop completed', { sid: sessionId, aid: agentId });
 
-      // ── Memory lifecycle: post-loop extraction, decay, consolidation ──
+      // 鈹€鈹€ Memory lifecycle: post-loop extraction, decay, consolidation 鈹€鈹€
       runMemoryLifecycle(agentId, sessionId).catch(() => {});
 
-      // ── Infinite mode: keep alive after completion ──
+      // Goal mode: keep advancing the active root-session goal after completion.
       const sessionManager = SessionManager.getInstance();
-      let processedCount = sessionManager.getMessageCount(sessionId);
-
-      while (sessionManager.getRunningMode(sessionId) === 'infinite') {
-        yield { type: SSEEventType.Sleep, content: '∞' };
-
-        // Sleep 3 seconds (30 × 100ms with interrupt check)
-        for (let i = 0; i < 30; i++) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-
-        // Check if mode changed during sleep
-        if (sessionManager.getRunningMode(sessionId) !== 'infinite') {
-          yield { type: SSEEventType.StatusInfo, content: '(Exiting ∞ mode — mode changed)' };
-          break;
-        }
-
-        // Check for new user messages
-        const currentCount = sessionManager.getMessageCount(sessionId);
-        if (currentCount > processedCount) {
-          processedCount = currentCount;
-          yield { type: SSEEventType.Wake, content: '(New task — resuming work in ∞ mode)' };
-
-          try {
-            const fullHistory = await sessionManager.getHistory(sessionId);
-            const recentHistory = fullHistory.slice(-200);
-
-            // Find the last user message that we haven't processed yet
-            const newUserMsg = recentHistory.filter(m => m.role === 'user').pop();
-            if (newUserMsg) {
-              const newLoop = new AgentLoop(loopConfig);
-              this._activeLoops.set(sessionId, newLoop);
-              try {
-                for await (const evt of newLoop.run(newUserMsg, recentHistory, signal)) {
-                  yield evt;
-                  SupervisionManager.getInstance().heartbeat(sessionId);
-                }
-              } finally {
-                this._activeLoops.delete(sessionId);
-              }
-
-              // Update processed count after sub-loop finishes
-              processedCount = sessionManager.getMessageCount(sessionId);
-            }
-          } catch (err) {
-            logger.warn('Infinite mode sub-loop error', { sid: sessionId, error: (err as Error).message });
-            yield { type: SSEEventType.Error, errorMessage: `Infinite mode error: ${(err as Error).message}`, code: 'INFINITE_LOOP_ERROR' };
-          }
-        }
-
-        // Refresh heartbeat during idle
-        SupervisionManager.getInstance().heartbeat(sessionId);
-      }
+      yield* this._runGoalMode(sessionId, sessionManager, loopConfig, signal);
 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -311,7 +230,208 @@ export class AgentRuntime extends EventEmitter {
     }
   }
 
-  // ── Delegate task ──
+  // 鈹€鈹€ Main loop execution 鈹€鈹€
+
+  /**
+   * Run the AgentLoop, emitting AgentRuntime events, heartbeating supervision,
+   * and forwarding SSE events to the caller.
+   */
+  private async *_executeAndForwardLoop(
+    loop: AgentLoop,
+    message: Message,
+    history: Message[],
+    signal: AbortSignal,
+    sessionId: string,
+    agentId: string,
+    logger: ReturnType<typeof createLogger>,
+  ): AsyncGenerator<SSEEvent> {
+    let supervisionCheckCounter = 0;
+
+    for await (const event of loop.run(message, history, signal)) {
+      supervisionCheckCounter++;
+
+      // Forward events from AgentRuntime
+      if (event.type === SSEEventType.ToolCall) {
+        this.emit(AgentRuntimeEvents.ToolCallStarted, {
+          sessionId,
+          agentId,
+          toolName: event.toolName,
+        });
+      } else if (event.type === SSEEventType.ToolResult) {
+        this.emit(AgentRuntimeEvents.ToolCallFinished, {
+          sessionId,
+          agentId,
+          toolName: event.toolName,
+        });
+      } else if (event.type === SSEEventType.Think || event.type === SSEEventType.Text) {
+        this.emit(AgentRuntimeEvents.StreamingToken, {
+          sessionId,
+          agentId,
+          type: event.type,
+          content: event.content,
+        });
+      }
+
+      yield event;
+
+      // Refresh heartbeat on every event -- proves the agent is still alive
+      SupervisionManager.getInstance().heartbeat(sessionId);
+
+      // Periodically check if session has gone unresponsive (every 5 events)
+      if (supervisionCheckCounter % 5 === 0) {
+        if (SupervisionManager.getInstance().isUnresponsive(sessionId)) {
+          logger.warn('Session detected as unresponsive by SupervisionManager', {
+            sid: sessionId,
+            aid: agentId,
+          });
+          yield {
+            type: SSEEventType.StatusInfo,
+            content: '(Warning: session heartbeat overdue -- agent may be unresponsive)',
+          };
+        }
+      }
+    }
+  }
+
+  // Goal mode loop
+
+  /**
+   * Keep the session alive after the main AgentLoop completes while a root
+   * session goal is active. Goal state lives in root-session metadata.
+   */
+  private async *_runGoalMode(
+    sessionId: string,
+    sessionManager: ReturnType<typeof SessionManager.getInstance>,
+    loopConfig: AgentLoopConfig,
+    signal: AbortSignal,
+  ): AsyncGenerator<SSEEvent> {
+    while (true) {
+      const goal = sessionManager.getGoal(sessionId);
+      if (!goal || goal.status !== 'active') break;
+
+      yield { type: SSEEventType.Sleep, content: '(Goal active -- waiting before next step)' };
+
+      await this._sleepUntilGoalWake(signal, 3000);
+      if (signal.aborted) {
+        const interruptController = InterruptController.getInstance();
+        const pending = interruptController.takePendingUserMessage(sessionId);
+        if (!pending) break;
+
+        yield { type: SSEEventType.StatusInfo, content: '(Processing your new message...)' };
+        signal = interruptController.createController(sessionId).signal;
+
+        const fullHistory = await sessionManager.getHistory(sessionId);
+        const pendingMessage = this._takeLatestPendingUserMessage(fullHistory, pending, sessionId);
+        const loopHistory = fullHistory
+          .filter((m) => m.id !== pendingMessage.id);
+        const freshLoopConfig: AgentLoopConfig = {
+          ...loopConfig,
+          permissionMode: resolveSessionPermissionMode(sessionManager, sessionId),
+          effort: resolveSessionEffort(sessionManager, sessionId),
+        };
+        const newLoop = new AgentLoop(freshLoopConfig);
+        this._activeLoops.set(sessionId, newLoop);
+        yield { type: SSEEventType.Wake, content: '(Goal wake -- processing user message)' };
+        try {
+          for await (const evt of newLoop.run(pendingMessage, loopHistory, signal)) {
+            yield evt;
+            SupervisionManager.getInstance().heartbeat(sessionId);
+          }
+        } finally {
+          this._activeLoops.delete(sessionId);
+        }
+        continue;
+      }
+
+      const currentGoal = sessionManager.getGoal(sessionId);
+      if (!currentGoal || currentGoal.status !== 'active') {
+        yield { type: SSEEventType.StatusInfo, content: '(Goal paused or deleted)' };
+        break;
+      }
+
+      try {
+        const content = [
+          'Continue working toward the active session goal.',
+          '',
+          `Goal: ${currentGoal.objective}`,
+          '',
+          'Advance the goal with the next useful step. If the goal is already complete, say so clearly and stop taking further action.',
+        ].join('\n');
+        const goalMessage: Message = {
+          id: `goal-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          sessionId,
+          role: MessageRole.User,
+          content,
+          tokenCount: 0,
+          compressed: false,
+          timestamp: new Date().toISOString(),
+        };
+        await sessionManager.appendMessage(sessionId, goalMessage, { notify: false });
+        await sessionManager.touchGoalRun(sessionId);
+
+        const fullHistory = await sessionManager.getHistory(sessionId);
+        const loopHistory = fullHistory.filter((m) => m.id !== goalMessage.id);
+        const freshLoopConfig: AgentLoopConfig = {
+          ...loopConfig,
+          permissionMode: resolveSessionPermissionMode(sessionManager, sessionId),
+          effort: resolveSessionEffort(sessionManager, sessionId),
+        };
+        const newLoop = new AgentLoop(freshLoopConfig);
+        this._activeLoops.set(sessionId, newLoop);
+        yield { type: SSEEventType.Wake, content: '(Goal wake -- continuing active goal)' };
+        try {
+          for await (const evt of newLoop.run(goalMessage, loopHistory, signal)) {
+            yield evt;
+            SupervisionManager.getInstance().heartbeat(sessionId);
+          }
+        } finally {
+          this._activeLoops.delete(sessionId);
+        }
+      } catch (err) {
+        createLogger('anochat.agent').warn('Goal mode sub-loop error', { sid: sessionId, error: (err as Error).message });
+        yield { type: SSEEventType.Error, errorMessage: `Goal mode error: ${(err as Error).message}`, code: 'GOAL_LOOP_ERROR' };
+      }
+
+      SupervisionManager.getInstance().heartbeat(sessionId);
+    }
+  }
+
+  private _sleepUntilGoalWake(signal: AbortSignal, ms: number): Promise<void> {
+    if (signal.aborted) return Promise.resolve();
+    return new Promise(resolve => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal.removeEventListener('abort', onAbort);
+        resolve();
+      };
+      const onAbort = () => done();
+      const timer = setTimeout(done, ms);
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  private _takeLatestPendingUserMessage(history: Message[], content: string, sessionId: string): Message {
+    for (let i = history.length - 1; i >= 0; i--) {
+      const msg = history[i];
+      if (msg.role === MessageRole.User && msg.content === content) {
+        return msg;
+      }
+    }
+    return {
+      id: `interrupt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      sessionId,
+      role: MessageRole.User,
+      content,
+      tokenCount: 0,
+      compressed: false,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  // 鈹€鈹€ Delegate task 鈹€鈹€
 
   /**
    * Delegate a task to a subordinate agent. Creates a sub-session
@@ -324,8 +444,9 @@ export class AgentRuntime extends EventEmitter {
     task: string,
     parentSessionId: string,
     parentAgentId: string,
+    priority: string = 'normal',
   ): Promise<ToolResult> {
-    // Role check — only CEO(0) and Manager(1) can delegate tasks
+    // Role check 鈥?only CEO(0) and Manager(1) can delegate tasks
     const delegator = AgentRegistry.getInstance().findAgent(parentAgentId);
     if (!delegator || !delegator.isManagerRole()) {
       return {
@@ -373,7 +494,7 @@ export class AgentRuntime extends EventEmitter {
       };
     }
 
-    // ── Validate org-tree relationship ──
+    // 鈹€鈹€ Validate org-tree relationship 鈹€鈹€
     // Tasks can ONLY be delegated to direct subordinates (immediate children).
     if (targetAgent.parentAgentId !== parentAgentId) {
       return {
@@ -397,10 +518,10 @@ export class AgentRuntime extends EventEmitter {
       const subSession = await sessionManager.createSubSession(parentSessionId, actualAgentId,
         `Task: ${task.slice(0, 40)}`);
       subSessionId = subSession.id;
-      // Link parent→child for interrupt propagation
+      // Link parent鈫抍hild for interrupt propagation
       InterruptController.getInstance().linkChild(parentSessionId, subSessionId);
       logger.info('Sub-session created for delegation', { parentSid: parentSessionId, subSid: subSessionId, targetAid: actualAgentId });
-      // Notify via TypedEventBus → WsForwardSubscriber so the frontend tree updates
+      // Notify via TypedEventBus 鈫?WsForwardSubscriber so the frontend tree updates
       TypedEventBus.emit('delegation:subsession_created', {
         sessionId: subSessionId,
         parentSessionId,
@@ -421,10 +542,10 @@ export class AgentRuntime extends EventEmitter {
       };
     }
 
-    // ── Inject parent context into delegation message ──
+    // 鈹€鈹€ Inject parent context into delegation message 鈹€鈹€
     // Append a structured summary of the parent conversation so the sub-agent
     // understands the broader goal (prevents "memory rupture").
-    let enrichedTask = task;
+    const taskParts: string[] = [task];
     try {
       const parentHistory = await sessionManager.getHistory(parentSessionId);
       if (parentHistory.length > 0) {
@@ -440,9 +561,9 @@ export class AgentRuntime extends EventEmitter {
         if (recent.length > 1) {
           contextParts.push(`**Recent Context:** ${recent.map((m: Message) => `[${m.role}] ${(m.content || '').slice(0, 80)}`).join(' | ')}`);
         }
-        enrichedTask = task + '\n\n---\n# Parent Session Context\n' + contextParts.join('\n');
+        taskParts.push('\n\n---\n# Parent Session Context\n' + contextParts.join('\n'));
       }
-    } catch { /* parent history unavailable — proceed with task only */ }
+    } catch { /* parent history unavailable 鈥?proceed with task only */ }
 
     // Store parent context in sub-session metadata for DelegationContextSection
     try {
@@ -457,33 +578,7 @@ export class AgentRuntime extends EventEmitter {
       }
     } catch { /* non-critical */ }
 
-    // Build delegation message
-    const parentAgent = AgentRegistry.getInstance().agent(parentAgentId);
-    const delegatorName = parentAgent?.name || parentAgentId;
-    const delegationMessage: Message = {
-      id: `delegate-msg-${Date.now()}`,
-      sessionId: subSessionId,
-      role: MessageRole.System,
-      content: `[Task delegated by ${delegatorName}]:\n\n${enrichedTask}`,
-      tokenCount: TokenCounter.estimate(`[Task delegated by ${delegatorName}]:\n\n${enrichedTask}`),
-      compressed: false,
-      timestamp: new Date().toISOString(),
-      agentId: parentAgentId,
-      agentName: delegatorName,
-    };
-
-    // Persist the delegation message
-    try {
-      await sessionManager.appendMessage(subSessionId, delegationMessage);
-    } catch { /* non-critical */ }
-
-    // ── Emit delegation_status: started ──
-    emitDelegationStatus(this,parentSessionId, subSessionId, targetAgentId, {
-      phase: 'started',
-      taskSummary: task.slice(0, 60),
-    });
-
-    // Populate SharedContextStore for bidirectional parent↔child context sharing
+    // Populate SharedContextStore for bidirectional parent鈫攃hild context sharing
     const teamScope = delegator?.teamName || parentSessionId;
     try {
       SharedContextStore.getInstance().set(teamScope, `task:${subSessionId}`, task, parentAgentId);
@@ -496,15 +591,32 @@ export class AgentRuntime extends EventEmitter {
       const contextEntries = SharedContextStore.getInstance().getAll(teamScope);
       if (contextEntries.length > 0) {
         const contextSummary = contextEntries
-          .map(e => `[${e.writtenBy}]: ${e.key}=${e.value.slice(0, 200)}`)
+          .map(e => `[${e.writtenBy}]: ${e.key}=${String(e.value).slice(0, 200)}`)
           .join('\n');
-        enrichedTask += '\n\n---\n# Shared Context (live updates from team)\n' + contextSummary;
+        taskParts.push('\n\n---\n# Shared Context (live updates from team)\n' + contextSummary);
       }
     } catch { /* non-critical */ }
 
+    const enrichedTask = taskParts.join('');
+
+    // Build delegation message
+    const parentAgent = AgentRegistry.getInstance().agent(parentAgentId);
+    const delegatorName = parentAgent?.name || parentAgentId;
+    const delegationMessage: Message = {
+      id: `delegate-msg-${Date.now()}`,
+      sessionId: subSessionId,
+      role: MessageRole.System,
+      content: `[Task delegated by ${delegatorName} (priority: ${priority})]:\n\n${enrichedTask}`,
+      tokenCount: TokenCounter.estimate(`[Task delegated by ${delegatorName} (priority: ${priority})]:\n\n${enrichedTask}`),
+      compressed: false,
+      timestamp: new Date().toISOString(),
+      agentId: parentAgentId,
+      agentName: delegatorName,
+    };
+
     const startedAt = Date.now();
 
-    // Shared mutable state — the heartbeat callback reads turnCount/currentTool live
+    // Shared mutable state 鈥?the heartbeat callback reads turnCount/currentTool live
     const state: DelegationState = {
       fullContent: '',
       thinking: '',
@@ -512,7 +624,7 @@ export class AgentRuntime extends EventEmitter {
       currentTool: undefined,
     };
 
-    // ── Re-delegation guard: if this session already has an active AgentLoop,
+    // 鈹€鈹€ Re-delegation guard: if this session already has an active AgentLoop,
     // inject the task as a soft interrupt instead of creating a new background task.
     // This keeps the "one agent = one session = one AgentLoop" contract intact.
     if (this.isSessionActive(subSessionId)) {
@@ -523,13 +635,13 @@ export class AgentRuntime extends EventEmitter {
         subSessionId,
         `[New task from ${delegatorName}]:\n\n${task}`,
       );
-      InterruptController.getInstance().requestSteerInterrupt(subSessionId);
+      InterruptController.getInstance().wakeOnly(subSessionId);
       logger.info('Task injected into active session', { subSid: subSessionId, targetAid: actualAgentId });
       return {
         toolCallId: `delegate-${actualAgentId}`,
         success: true,
         content: `Task injected into existing session for '${actualAgentId}' (${subSessionId}).\n` +
-          `The agent is currently working — your task will be picked up on its next turn.`,
+          `The agent is currently working -- your task will be picked up on its next turn.`,
         tokensUsed: 0,
         startedAt,
         finishedAt: Date.now(),
@@ -538,7 +650,7 @@ export class AgentRuntime extends EventEmitter {
       };
     }
 
-    // ── Register with BackgroundTaskManager ──
+    // 鈹€鈹€ Register with BackgroundTaskManager 鈹€鈹€
     const bgManager = BackgroundTaskManager.getInstance();
     const taskId = bgManager.register({
       type: 'subagent',
@@ -547,7 +659,7 @@ export class AgentRuntime extends EventEmitter {
       summary: task.slice(0, 60),
     });
 
-    // ── Subscribe parent agent to task completion/failure events ──
+    // 鈹€鈹€ Subscribe parent agent to task completion/failure events 鈹€鈹€
     // oneShot: true = auto-unsubscribe after first delivery, no manual cleanup needed
     const esm = EventSubscriptionManager.getInstance();
     esm.subscribe(parentSessionId, parentAgentId, `task:completed:${taskId}`, { oneShot: true });
@@ -558,53 +670,54 @@ export class AgentRuntime extends EventEmitter {
     const turnMsgId = `msg-sub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const initialPrevUuid = '00000000-0000-0000-0000-000000000000';
     const { StreamPersister } = await import('../../infra/StreamPersister.js');
-    const persister = new StreamPersister(store, subSessionId, turnMsgId, initialPrevUuid);
+    const persister = new StreamPersister(store, subSessionId, turnMsgId, initialPrevUuid, actualAgentId);
 
-    // ── Start sub-agent loop in background (non-blocking) ──
+    // 鈹€鈹€ Start sub-agent loop in background (non-blocking) 鈹€鈹€
     (async () => {
-      // Heartbeat timer — sends 'working' status every 5 seconds (WS-only, no message injection)
-      // Also detects unresponsive sub-agents and auto-kills them.
-      const heartbeatInterval = setInterval(() => {
-        const supMgr = SupervisionManager.getInstance();
-
-        // ── Unresponsive detection: kill sub-agent if heartbeat overdue ──
-        if (supMgr.isUnresponsive(subSessionId)) {
-          logger.warn('Sub-agent unresponsive, auto-killing', {
-            subSid: subSessionId,
-            targetAid: actualAgentId,
-            secondsSinceHeartbeat: supMgr.secondsSinceLastHeartbeat(subSessionId),
-          });
-          InterruptController.getInstance().requestInterrupt(subSessionId, InterruptReason.Timeout);
-          clearInterval(heartbeatInterval);
-          return;
-        }
-
-        supMgr.setCurrentTool(subSessionId, state.currentTool);
-        // Keep the SupervisionManager heartbeat alive — processMessage can't
-        // heartbeat when the AgentLoop is in its background-task wait loop.
-        supMgr.heartbeat(subSessionId);
-        emitDelegationStatus(this, parentSessionId, subSessionId, actualAgentId, {
-          phase: 'working',
-          taskSummary: task.slice(0, 60),
-          turnCount: state.turnCount,
-          currentTool: state.currentTool,
-          elapsedMs: Date.now() - startedAt,
-        });
-        // Update BackgroundTaskManager progress (rate-limited internally)
-        bgManager.updateProgress(taskId, { turnCount: state.turnCount, currentTool: state.currentTool });
-      }, 5000);
-
+      let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
       let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
       try {
-        // ── Timeout protection: terminate sub-agent loop after 10 minutes ──
+        // Heartbeat timer 鈥?sends 'working' status every 5 seconds (WS-only, no message injection)
+        // Also detects unresponsive sub-agents and auto-kills them.
+        heartbeatInterval = setInterval(() => {
+          const supMgr = SupervisionManager.getInstance();
+
+          // 鈹€鈹€ Unresponsive detection: kill sub-agent if heartbeat overdue 鈹€鈹€
+          if (supMgr.isUnresponsive(subSessionId)) {
+            logger.warn('Sub-agent unresponsive, auto-killing', {
+              subSid: subSessionId,
+              targetAid: actualAgentId,
+              secondsSinceHeartbeat: supMgr.secondsSinceLastHeartbeat(subSessionId),
+            });
+            InterruptController.getInstance().requestInterrupt(subSessionId, InterruptReason.Timeout);
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
+            return;
+          }
+
+          supMgr.setCurrentTool(subSessionId, state.currentTool);
+          // Keep the SupervisionManager heartbeat alive 鈥?processMessage can't
+          // heartbeat when the AgentLoop is in its background-task wait loop.
+          supMgr.heartbeat(subSessionId);
+          emitDelegationStatus(this, parentSessionId, subSessionId, actualAgentId, {
+            phase: 'working',
+            taskSummary: task.slice(0, 60),
+            turnCount: state.turnCount,
+            currentTool: state.currentTool,
+            elapsedMs: Date.now() - startedAt,
+          });
+          // Update BackgroundTaskManager progress (rate-limited internally)
+          bgManager.updateProgress(taskId, { turnCount: state.turnCount, currentTool: state.currentTool });
+        }, 5000);
+
+        // 鈹€鈹€ Timeout protection: terminate sub-agent loop after 10 minutes 鈹€鈹€
         const DELEGATION_TIMEOUT_MS = 600000;
         timeoutHandle = setTimeout(() => {
           logger.warn('Delegation timeout, aborting sub-session', { subSid: subSessionId, targetAid: actualAgentId });
           InterruptController.getInstance().requestInterrupt(subSessionId, InterruptReason.Timeout);
         }, DELEGATION_TIMEOUT_MS);
 
-        // Run the sub-agent's AgentLoop — per-event persistence + event bubbling
+        // Run the sub-agent's AgentLoop 鈥?per-event persistence + event bubbling
         await handleSubAgentOutput(
           this,
           this.processMessage(subSessionId, actualAgentId, delegationMessage),
@@ -617,18 +730,14 @@ export class AgentRuntime extends EventEmitter {
           state,
         );
 
-        clearTimeout(timeoutHandle);
-        clearInterval(heartbeatInterval);
-        InterruptController.getInstance().unlinkChild(subSessionId);
-
         const durationMs = Date.now() - startedAt;
 
-        // ── Detect silent failure: AgentLoop produced zero output ──
+        // 鈹€鈹€ Detect silent failure: AgentLoop produced zero output 鈹€鈹€
         if (state.turnCount === 0 && !state.fullContent.trim()) {
           const abortReason = state.fullContent.includes('[ERROR]')
             ? `Sub-agent process error: ${state.fullContent.replace('[ERROR] ', '')}`
             : 'Sub-agent exited immediately with no output. The agent may have failed to start (check model config, API key, or agent setup).';
-          logger.warn('Delegation aborted — sub-agent produced no output', { parentSid: parentSessionId, subSid: subSessionId, targetAid: actualAgentId, durationMs });
+          logger.warn('Delegation aborted 鈥?sub-agent produced no output', { parentSid: parentSessionId, subSid: subSessionId, targetAid: actualAgentId, durationMs });
 
           emitDelegationStatus(this, parentSessionId, subSessionId, actualAgentId, {
             phase: 'error',
@@ -638,7 +747,7 @@ export class AgentRuntime extends EventEmitter {
 
           await bgManager.fail(taskId, abortReason, durationMs);
         } else {
-          // ── Normal completion ──
+          // 鈹€鈹€ Normal completion 鈹€鈹€
           emitDelegationStatus(this, parentSessionId, subSessionId, actualAgentId, {
             phase: 'completed',
             taskSummary: task.slice(0, 60),
@@ -651,15 +760,12 @@ export class AgentRuntime extends EventEmitter {
 
         logger.info('Delegation completed (background)', { parentSid: parentSessionId, subSid: subSessionId, targetAid: actualAgentId, turnCount: state.turnCount, durationMs });
       } catch (err) {
-        if (timeoutHandle) clearTimeout(timeoutHandle);
-        clearInterval(heartbeatInterval);
-        InterruptController.getInstance().unlinkChild(subSessionId);
         const errorMessage = err instanceof Error ? err.message : String(err);
         const durationMs = Date.now() - startedAt;
 
         logger.error('Delegation failed (background)', { parentSid: parentSessionId, subSid: subSessionId, targetAid: actualAgentId, error: errorMessage.slice(0, 200) });
 
-        // ── Emit delegation_status: error ──
+        // 鈹€鈹€ Emit delegation_status: error 鈹€鈹€
         emitDelegationStatus(this, parentSessionId, subSessionId, actualAgentId, {
           phase: 'error',
           taskSummary: task.slice(0, 60),
@@ -668,10 +774,14 @@ export class AgentRuntime extends EventEmitter {
 
         // Fail in BackgroundTaskManager (injects error message into parent)
         await bgManager.fail(taskId, errorMessage, durationMs);
+      } finally {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        if (heartbeatInterval) clearInterval(heartbeatInterval);
+        InterruptController.getInstance().unlinkChild(subSessionId);
       }
     })();
 
-    // ── Return immediately — the CEO continues working ──
+    // 鈹€鈹€ Return immediately 鈥?the CEO continues working 鈹€鈹€
     return {
       toolCallId: `delegate-${actualAgentId}`,
       success: true,
@@ -687,7 +797,7 @@ export class AgentRuntime extends EventEmitter {
   }
 
 
-  // ── Spawn SubAgent ──
+  // 鈹€鈹€ Spawn SubAgent 鈹€鈹€
 
   /**
    * Create a temporary SubAgent and execute a task synchronously. The SubAgent
@@ -698,7 +808,7 @@ export class AgentRuntime extends EventEmitter {
     return spawnSubAgent(this, config, callerAgentId, parentSessionId);
   }
 
-  // ── Parallel task orchestration ──
+  // 鈹€鈹€ Parallel task orchestration 鈹€鈹€
 
   /**
    * Execute multiple delegated tasks in dependency-ordered parallel batches.
@@ -738,7 +848,7 @@ export class AgentRuntime extends EventEmitter {
     // Format summary
     let summary = `## Parallel Plan Results\n\n${dag.summary()}\n\n`;
     for (const task of dag.tasks.values()) {
-      const icon = task.status === 'completed' ? '✓' : '✗';
+      const icon = task.status === 'completed' ? '[done]' : '[pending]';
       summary += `- ${icon} **${task.agentId}**: ${task.description.slice(0, 60)}`;
       if (task.result) {
         summary += `\n  Result: ${task.result.slice(0, 200)}`;
@@ -749,7 +859,7 @@ export class AgentRuntime extends EventEmitter {
     return summary;
   }
 
-  // ── Session management ──
+  // 鈹€鈹€ Session management 鈹€鈹€
 
   /** Check if a session has an active AgentLoop running. */
   isSessionActive(sessionId: string): boolean {
@@ -800,7 +910,7 @@ export class AgentRuntime extends EventEmitter {
         if (this.isSessionActive(payload.parentSessionId)) {
           InterruptController.getInstance().requestSteerInterrupt(payload.parentSessionId);
         } else {
-          // Session is idle — start a background AgentLoop with StreamConsumer
+          // Session is idle 鈥?start a background AgentLoop with StreamConsumer
           // so the user sees the CEO's streaming response via WebSocket.
           (async () => {
             try {
@@ -820,7 +930,7 @@ export class AgentRuntime extends EventEmitter {
               const { StreamConsumer } = await import('../../infra/stream/StreamConsumer.js');
               const store = SessionStore.getInstance();
               const turnMsgId = `msg-wake-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-              const persister = new StreamPersister(store, payload.parentSessionId, turnMsgId, '00000000-0000-0000-0000-000000000000');
+              const persister = new StreamPersister(store, payload.parentSessionId, turnMsgId, '00000000-0000-0000-0000-000000000000', payload.parentAgentId);
               const consumer = new StreamConsumer(WsServer.getInstance(), payload.parentSessionId, persister);
 
               for await (const event of this.processMessage(payload.parentSessionId, payload.parentAgentId, wakeMessage, history)) {
@@ -859,6 +969,14 @@ export class AgentRuntime extends EventEmitter {
                     }
                     consumer.sendDirect(event as unknown as Record<string, unknown>);
                     break;
+                  case 'error':
+                    await consumer.beforeToolEvent();
+                    await persister.persistEvent('error', {
+                      error: (event.errorMessage || event.message || event.content || 'Unknown error') as string,
+                      source: 'task_notification',
+                    });
+                    consumer.sendDirect(event as unknown as Record<string, unknown>);
+                    break;
                   default:
                     consumer.sendDirect(event as unknown as Record<string, unknown>);
                 }
@@ -873,8 +991,8 @@ export class AgentRuntime extends EventEmitter {
         }
       };
 
-    TypedEventBus.on('task:completed', handler('task:completed'));
-    TypedEventBus.on('task:failed', handler('task:failed'));
+    this._unsubTaskCompleted = TypedEventBus.on('task:completed', handler('task:completed'));
+    this._unsubTaskFailed = TypedEventBus.on('task:failed', handler('task:failed'));
   }
 
   /** Get the number of currently active sessions. */
@@ -883,7 +1001,7 @@ export class AgentRuntime extends EventEmitter {
   }
 }
 
-// ── Memory lifecycle helper (lazy-import, fire-and-forget) ───
+// 鈹€鈹€ Memory lifecycle helper (lazy-import, fire-and-forget) 鈹€鈹€鈹€
 
 /** Run post-loop memory lifecycle: auto-extract facts, decay old memories, prune archives. Non-blocking. */
 async function runMemoryLifecycle(agentId: string, sessionId: string): Promise<void> {

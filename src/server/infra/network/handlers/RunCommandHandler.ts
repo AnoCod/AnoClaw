@@ -1,5 +1,9 @@
-// RunCommandHandler — handles 'run_command' WS messages for slash commands
-
+/**
+ * RunCommandHandler — handles 'run_command' WS messages for slash commands.
+ *
+ * Input:  `{ type: 'run_command', command: string, args?: Record<string,string>, sessionId }`
+ * Output: `{ type: WsMessageType.CommandResult, success, command, output, errorMessage?, code? }`
+ */
 import type { WsMessageHandler } from '../WsMessageRouter.js';
 import { SessionManager } from '../../../core/session/SessionManager.js';
 import { CommandRegistry } from '../../../core/commands/CommandRegistry.js';
@@ -16,6 +20,7 @@ export const runCommandHandler: WsMessageHandler = async (ctx) => {
       command: '',
       output: '',
       errorMessage: 'Missing command name',
+      code: 'MISSING_COMMAND',
     });
     return;
   }
@@ -28,6 +33,7 @@ export const runCommandHandler: WsMessageHandler = async (ctx) => {
       command: cmdName,
       output: '',
       errorMessage: 'No active session',
+      code: 'NO_SESSION',
     });
     return;
   }

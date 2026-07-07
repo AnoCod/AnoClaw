@@ -10,10 +10,11 @@ import { AgentRuntime } from '../../core/agent/AgentRuntime.js';
 import { AgentRegistry } from '../../core/agent/AgentRegistry.js';
 import { SessionManager } from '../../core/session/SessionManager.js';
 import { LogManager } from '../../infra/logging/LogManager.js';
+import type { SendJson, ReadBody } from '../RouteHelpers.js';
 
 export function handleHealth(
   res: http.ServerResponse,
-  sendJson: (res: http.ServerResponse, code: number, data: Record<string, unknown>) => void,
+  sendJson: SendJson,
 ): void {
   sendJson(res, 200, {
     status: 'ok',
@@ -90,6 +91,8 @@ export async function handleOpenFile(
 
     const command = platform === 'darwin'
       ? `open -R "${resolved}"`
+      // NOTE: xdg-open does not support -R (reveal in file manager). On Linux,
+      // directories open directly; for files we open the parent directory instead.
       : `xdg-open "${fs.statSync(resolved).isDirectory() ? resolved : path.dirname(resolved)}"`;
 
     exec(command, (error) => {

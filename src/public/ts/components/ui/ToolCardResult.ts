@@ -4,11 +4,8 @@
 import { ToolCard, type ToolCardState } from './ToolCard.js';
 
 export class ToolCardResult extends ToolCard {
-  private _items: string[];
-
   constructor(state: ToolCardState) {
     super(state);
-    this._items = this._extractItems(state.result || '');
   }
 
   private _extractItems(raw: string): string[] {
@@ -23,18 +20,19 @@ export class ToolCardResult extends ToolCard {
 
     wrapper.appendChild(this._buildIndicator(s));
 
-    if (this._items.length > 0) {
+    const items = this._extractItems(s.result || '');
+    if (items.length > 0) {
       const list = document.createElement('ul');
       list.className = 'ui-toolcard-result-list';
-      for (const item of this._items.slice(0, 15)) {
+      for (const item of items.slice(0, 15)) {
         const li = document.createElement('li');
         li.textContent = item;
         list.appendChild(li);
       }
-      if (this._items.length > 15) {
+      if (items.length > 15) {
         const more = document.createElement('li');
         more.className = 'ui-toolcard-result-more';
-        more.textContent = `+ ${this._items.length - 15} more results`;
+        more.textContent = `+ ${items.length - 15} more results`;
         list.appendChild(more);
       }
       wrapper.appendChild(list);

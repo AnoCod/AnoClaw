@@ -110,7 +110,7 @@ export function defaultConfig(overrides: Partial<AgentConfigWithKey> = {}): Agen
     apiKey: overrides.apiKey ?? '',
     model: overrides.model ?? '',
     contextWindow: overrides.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
-    maxTurns: overrides.maxTurns ?? 25,
+    maxTurns: overrides.maxTurns ?? 0,
     temperature: overrides.temperature ?? 0.7,
     agentPrompt: overrides.agentPrompt ?? '',
     preferredLanguage: overrides.preferredLanguage ?? 'en',

@@ -19,6 +19,39 @@ import { PluginBase } from './PluginBase.js';
 
 const ACTIVATE_TIMEOUT_MS = 15_000;
 
+/**
+ * Register kernel extension point overrides declared in plugin manifest.
+ * Shared by both class-based and function-based activation paths.
+ */
+async function _registerExtensionPointOverrides(
+  pluginPath: string,
+  overrides: Record<string, string | null>,
+  pluginName: string,
+  logError: (msg: string) => void,
+): Promise<Array<{ dispose(): void }>> {
+  const disposables: Array<{ dispose(): void }> = [];
+  if (!overrides || Object.keys(overrides).length === 0) return disposables;
+
+  const { extensionPoints } = await import('./ExtensionPoints.js');
+  for (const [pointName, handlerPath] of Object.entries(overrides)) {
+    if (!handlerPath) continue;
+    try {
+      const compiledOverride = await compilePlugin(pluginPath, handlerPath);
+      const overrideMod = await import(pathToFileURL(compiledOverride).href + '?t=' + Date.now());
+      const handler = overrideMod.default || overrideMod.handler || overrideMod.activate ||
+        (typeof overrideMod === 'function' ? overrideMod : null);
+      if (typeof handler !== 'function') {
+        throw new Error(`Override "${pointName}" must export a function`);
+      }
+      extensionPoints.register(pointName, pluginName, handler);
+      disposables.push({ dispose() { extensionPoints.unregisterAll(pluginName); } });
+    } catch (err) {
+      logError(`Failed to register override "${pointName}": ${(err as Error).message}`);
+    }
+  }
+  return disposables;
+}
+
 // ── RPC from main → worker ──
 // Single listener: PluginAPI handles RPC responses + events;
 // PluginHost handles RPC requests. Previously two separate
@@ -275,24 +308,13 @@ async function activateCurrentPlugin(): Promise<void> {
       _activeDisposables = Array.isArray(result) ? result : [];
 
       // Register kernel extension point overrides
-      const overrides = state.manifest.contributes?.overrides || {};
-      const { extensionPoints } = await import('./ExtensionPoints.js');
-      for (const [pointName, handlerPath] of Object.entries(overrides)) {
-        if (!handlerPath) continue;
-        try {
-          const compiledOverride = await compilePlugin(state.pluginPath, handlerPath);
-          const overrideMod = await import(pathToFileURL(compiledOverride).href + '?t=' + Date.now());
-          const handler = overrideMod.default || overrideMod.handler || overrideMod.activate ||
-            (typeof overrideMod === 'function' ? overrideMod : null);
-          if (typeof handler !== 'function') {
-            throw new Error(`Override "${pointName}" must export a function`);
-          }
-          extensionPoints.register(pointName, _pluginName, handler);
-          _activeDisposables.push({ dispose() { extensionPoints.unregisterAll(_pluginName); } });
-        } catch (err) {
-          api.log.error(`Failed to register override "${pointName}": ${(err as Error).message}`);
-        }
-      }
+      const extDisposables = await _registerExtensionPointOverrides(
+        state.pluginPath,
+        state.manifest.contributes?.overrides || {},
+        _pluginName,
+        (msg) => api.log.error(msg),
+      );
+      _activeDisposables.push(...extDisposables);
     } catch (err) {
       parentPort?.postMessage({
         id: 'auto-activate-error',
@@ -321,24 +343,13 @@ async function activateCurrentPlugin(): Promise<void> {
       _activeDisposables = Array.isArray(result) ? result : [];
 
       // Register kernel extension point overrides
-      const overrides = state.manifest.contributes?.overrides || {};
-      const { extensionPoints } = await import('./ExtensionPoints.js');
-      for (const [pointName, handlerPath] of Object.entries(overrides)) {
-        if (!handlerPath) continue;
-        try {
-          const compiledOverride = await compilePlugin(state.pluginPath, handlerPath);
-          const overrideMod = await import(pathToFileURL(compiledOverride).href + '?t=' + Date.now());
-          const handler = overrideMod.default || overrideMod.handler || overrideMod.activate ||
-            (typeof overrideMod === 'function' ? overrideMod : null);
-          if (typeof handler !== 'function') {
-            throw new Error(`Override "${pointName}" must export a function`);
-          }
-          extensionPoints.register(pointName, _pluginName, handler);
-          _activeDisposables.push({ dispose() { extensionPoints.unregisterAll(_pluginName); } });
-        } catch (err) {
-          api.log.error(`Failed to register override "${pointName}": ${(err as Error).message}`);
-        }
-      }
+      const extDisposables2 = await _registerExtensionPointOverrides(
+        state.pluginPath,
+        state.manifest.contributes?.overrides || {},
+        _pluginName,
+        (msg) => api.log.error(msg),
+      );
+      _activeDisposables.push(...extDisposables2);
     } catch (err) {
       parentPort?.postMessage({
         id: 'auto-activate-error',

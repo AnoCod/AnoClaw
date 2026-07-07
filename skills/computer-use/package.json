@@ -1,0 +1,32 @@
+{
+  "name": "computer-use",
+  "version": "1.0.0",
+  "description": "AI agent skill for computer control via mouse and keyboard simulation",
+  "main": "index.js",
+  "scripts": {
+    "test": "node examples/basic-test.js",
+    "demo": "node examples/demo.js"
+  },
+  "keywords": [
+    "computer-use",
+    "automation",
+    "mouse",
+    "keyboard",
+    "ai-agent",
+    "desktop-automation"
+  ],
+  "author": "Qoder",
+  "license": "MIT",
+  "dependencies": {
+    "@nut-tree/nut-js": "^4.0.0",
+    "nut-js": "^4.0.0",
+    "sharp": "^0.33.0",
+    "tesseract.js": "^5.0.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

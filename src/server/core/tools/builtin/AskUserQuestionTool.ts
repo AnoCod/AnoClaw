@@ -1,4 +1,4 @@
-// AskUserQuestionTool — asks the user one or more questions
+// AskUserQuestionTool - asks the user one or more questions
 // Used when the agent is blocked or needs clarification.
 // Questions support single-select (options) or free-text input.
 // shouldDefer: true (does not consume a model turn).
@@ -34,7 +34,7 @@ export class AskUserQuestionTool extends Tool {
       '**When to use:** Multiple valid approaches with different trade-offs. Missing critical requirement. User preference genuinely matters for the outcome.\n\n' +
       '**When NOT to use:** You can figure it out from context. It\'s a minor style choice. You\'re just being polite. There\'s only one reasonable approach.\n\n' +
       '**Limits:** Max 4 questions per call. Max 4 options per question. Each option needs a label and description. Use multiSelect for non-exclusive choices.\n\n' +
-      'Only ask questions that change what you do. Don\'t ask "should I proceed?" — just do it.';
+      'Only ask questions that change what you do. Don\'t ask "should I proceed?" - just do it.';
   }
 
   minRole(): string { return 'MainAgent'; }
@@ -87,7 +87,7 @@ export class AskUserQuestionTool extends Tool {
     return true; // Does not consume a model turn
   }
 
-  // No tool call card shown — results rendered as structured Q&A
+  // No tool call card shown - results rendered as structured Q&A
   userFacingName(_input?: Record<string, unknown>): string { return ''; }
 
   interruptBehavior(): InterruptBehavior {

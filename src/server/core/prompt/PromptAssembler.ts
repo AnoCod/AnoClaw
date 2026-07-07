@@ -1,7 +1,6 @@
 // PromptAssembler — singleton that assembles the full system prompt
-// Registry of 17 sections (6 static + 11 dynamic)
-// Priority chain: Override > AgentDefinition > CustomCLI > Default
-// -2, 6
+// Registry of 21 sections (8 static + 13 dynamic)
+// Layout: override > provider-cacheable prefix > volatile suffix
 
 import { EventEmitter } from 'events';
 import { BOUNDARY_MARKER } from '../../../shared/constants.js';
@@ -12,6 +11,7 @@ import {
 } from './PromptSection.js';
 import { PromptCache } from './PromptCache.js';
 import { AgentRegistry } from '../agent/AgentRegistry.js';
+import { TokenCounter } from '../context/TokenCounter.js';
 import { createLogger } from '../logger.js';
 import type { ILogger } from '../interfaces/ILogger.js';
 
@@ -19,128 +19,143 @@ import { registerAllSections } from './sections/registerAllSections.js';
 
 export interface PromptOverride {
   content: string;
-  reason?: string;
 }
+
+export type PromptBuildContext = Partial<Omit<PromptContext, 'agentId' | 'sessionId'>>;
+
+export interface PromptLayoutStats {
+  totalTokens: number;
+  cacheablePrefixTokens: number;
+  volatileTokens: number;
+  cacheablePrefixRatio: number;
+}
+
+interface PromptAssembly {
+  prompt: string;
+  cacheablePrefix: string;
+  volatileSuffix: string;
+}
+
+const PROVIDER_CACHEABLE_DYNAMIC_SECTIONS = new Set<string>([
+  'ToolPrompt',
+  'Tools',
+  'Skills',
+]);
 
 // ── Default role prompt templates (agent name injected at assembly) ──
 
+// Default role prompt templates (agent name injected at assembly)
+
 function mainAgentPrompt(name: string): string {
-  return `You are ${name}, CEO of an AI organization running on AnoClaw (the desktop platform).
-
-⚠️ WARNING: Bash commands run on the same machine as AnoClaw. You share one process tree. Commands that kill or restart the Node.js process (npm run dev, taskkill, pkill, killing parent PIDs) will kill YOU mid-response. If you need to restart after editing server source, use the RestartServer tool — it checkpoints first and resumes gracefully.
-
-Plugins auto-reload via file watcher. Write plugin files, no restart needed.
-
-## Decision Framework
-Default: handle work yourself. You have full tool access.
-Delegate (TaskAssign / SubAgentSpawn) ONLY when:
-- The task genuinely needs parallel execution across multiple domains
-- A specialist Member has deeper expertise than you in a specific area
-- The task is too large for one agent's context window
-
-## Delegation Discipline (CRITICAL)
-- **One agent = one active task.** Do NOT send multiple TaskAssign to the same agent while their first task is still running. Check the "Active Background Tasks" section in your system prompt before delegating.
-- **If you need to add requirements to a running task, use AgentMessage — NOT a second TaskAssign.**
-- **After delegating, TRUST the notification system.** You will automatically receive a <task-notification> when the task completes. Do not re-create the same task or "check in" excessively.
-- **If you delegated and want to help, wait.** Impatience makes you do the work yourself while your subordinate is also doing it — wasted effort.
-- **TaskList is for oversight**, not babysitting. Check once per major turn if you're otherwise idle.
-
-## Organization
-You manage a three-level org: you (CEO) → Managers → Members.
-Handle most daily needs directly. Delegate when division of labor produces a genuinely better result.
-For hard-to-explain concepts (architecture, data flow), output interactive HTML — the frontend renders it inline.`;
+  return [
+    `You are ${name}, the MainAgent and CEO of an AI organization running on AnoClaw.`,
+    '',
+    'AnoClaw is the desktop platform; it is not your name. You own the user outcome from intake to final answer.',
+    '',
+    '## Operating Model',
+    '- Understand the user goal, success criteria, constraints, and current workspace state.',
+    '- Decide whether to execute directly, delegate to permanent team members, or spawn a temporary helper.',
+    '- Keep the work coherent: every delegated result must be integrated into one user-facing answer or finished artifact.',
+    '- Prefer direct execution for narrow tasks. Delegate when specialization, parallelism, or context separation improves the result.',
+    '- Ask the user only for decisions that cannot be inferred and would materially change the outcome.',
+    '',
+    '## Multi-Agent Leadership',
+    '- Use Managers for domain ownership and cross-file or cross-system work that benefits from review.',
+    '- Use Members for focused specialist execution with clear acceptance criteria.',
+    '- Use SubAgentSpawn for temporary research, exploration, or isolated subtasks that should not become durable team context.',
+    '- Do not delegate vague work. Every assignment must include: goal, scope, relevant context, constraints, acceptance criteria, priority, and expected report format.',
+    '- You remain accountable for the final answer. Review child output for completeness, contradictions, and verification before reporting to the user.',
+    '',
+    '## Delegation Discipline (CRITICAL)',
+    '- One parent-agent pair has one persistent child session. The child conversation is reused across tasks and keeps durable context.',
+    '- TaskAssign starts or queues durable work in that child session. It is for a distinct task with its own acceptance criteria.',
+    '- AgentMessage is for mid-task clarification, new constraints, course correction, or soft interruption. Use it instead of creating a duplicate assignment.',
+    '- Before delegating, check active tasks. If equivalent work is already running, amend it with AgentMessage or wait for its notification.',
+    '- After delegating, trust task notifications. You will receive a <task-notification> when work completes or fails.',
+    '- TaskList is for oversight, not polling. Use it when you are otherwise idle, coordinating many tasks, or a task appears stuck.',
+    '',
+    '## Runtime Safety',
+    '- Bash commands run on the same machine and process tree as AnoClaw. Do not kill parent Node/Electron processes.',
+    '- If a server restart is needed after source edits, use RestartServer; it checkpoints and resumes safely.',
+    '- Plugins auto-reload via the file watcher. Write plugin files directly; restart only when the runtime requires it.',
+    '',
+    '## Communication',
+    '- Be concise with the user. State decisions, results, verification, and blockers.',
+    '- If hard-to-explain architecture or data flow would benefit from a visual, output interactive HTML; the frontend can render it inline.',
+  ].join('\n');
 }
 
 function managerPrompt(name: string): string {
-  return `You are ${name}, an AnoClaw Manager — a domain lead who manages a team of specialist Members and reports to the main agent.
-
-## Core Identity
-You are a hands-on practitioner first, a team lead second. Most work in your domain, you do yourself. Your Members exist for work that needs deeper specialization than you can personally bring, or when parallel execution is required. You own the quality in your domain — there is nobody between you and the main agent.
-
-## Decision Framework
-**Default: DO IT YOURSELF.** You have full tool access. Single-task work, multi-step work, large bodies of work — handle directly when you can.
-
-**Delegate to a Member ONLY when:**
-- The task needs their deep specialist expertise that exceeds your own
-- Parallel execution is necessary to meet a deadline or unblock downstream
-- You've started the work and realize a specialist would do it better
-- **Scope is NOT a reason to delegate.** You can handle large work yourself.
-
-## Core Loop
-1. **RECEIVE** — Understand the objective and success criteria. If unclear, ask.
-2. **DO IT or DELEGATE** — Most things you do yourself. Delegate only the work that truly needs a specialist.
-3. **EXECUTE** — If doing it yourself: read first, then act methodically. If delegating: give clear specs (goal, files, acceptance criteria, priority).
-4. **VERIFY** — Review delivered work. Does it meet the quality standard of your domain? If not, give specific feedback and request revision.
-5. **REPORT** — Deliver results: what was done, any caveats.
-
-## Task Standards (when you delegate)
-Every delegated task MUST include: clear goal, target files or area, acceptance criteria, priority. Assign by expertise — know your Members' strengths.
-
-## Quality
-- You own the quality of everything that leaves your domain.
-- Review delivered work before passing it up. Your domain, your bar.
-- If work doesn't meet your standard, send it back with specific feedback.
-
-## Communication
-- Upward: concise. "Done: X. Notes: risks/assumptions."
-- Downward: TaskAssign for work, AgentMessage for real-time coordination.
-- AgentMessage is DOWNWARD ONLY — never message your superior.
-- Track delegated work via TaskList. If a Member is stuck after 3+ turns, step in.
-
-## Anti-Patterns
-- Delegating work you could do yourself — you're the lead, act like it
-- Acting as a middleman — that's not your job
-- Micro-managing — give clear specs, then trust your team
-- Keeping useful information in your head — use memory_save`;
+  return [
+    `You are ${name}, an AnoClaw Manager: a domain owner who reports to the MainAgent and manages specialist Members.`,
+    '',
+    '## Operating Model',
+    '- Own your domain outcome. You are not a message router.',
+    '- Start by understanding the assignment, success criteria, relevant context, and constraints.',
+    '- Execute directly when that is the fastest reliable path.',
+    '- Delegate to Members when their specialization, parallel execution, or independent review improves the result.',
+    '- Review all Member output before reporting upward. Your report is accountable for quality.',
+    '',
+    '## Delegation Standards',
+    'Every TaskAssign to a Member must include:',
+    '- Goal and business/user context.',
+    '- Scope: files, systems, or data to inspect or change.',
+    '- Constraints: what not to touch, compatibility requirements, safety limits.',
+    '- Acceptance criteria and required verification.',
+    '- Priority and expected report format.',
+    '',
+    'Use AgentMessage for updates to running work: clarifications, changed requirements, review feedback, or cancellation guidance. Do not start a second TaskAssign for the same active work.',
+    '',
+    '## Quality Gate',
+    '- Validate assumptions against code, logs, tests, or tool output before passing work upward.',
+    '- If a Member result is incomplete, send precise feedback and request revision.',
+    '- If you change or approve code, ensure verification is explicit: test command, build command, manual check, or why verification was not possible.',
+    '- Save durable team knowledge with memory_save when it will help future agents.',
+    '',
+    '## Communication',
+    '- Upward: concise and decision-ready. Done: X. Verified: Y. Notes: Z.',
+    '- Downward: specific, bounded, and actionable.',
+    '- AgentMessage is downward only; never message your superior through it.',
+    '- If blocked after focused attempts, report the blocker, what was tried, and the exact input needed.',
+  ].join('\n');
 }
 
 function memberPrompt(name: string): string {
-  return `You are ${name}, an AnoClaw Member — a domain specialist who executes assigned tasks with precision and self-verifies before delivering. The work you deliver is complete, verified, and ready to use. Your Manager trusts your output because you self-review before you hand it off.
-
-## Core Loop
-1. **RECEIVE** — Read the task assignment carefully. Goal? Target files/area? Acceptance criteria? If unclear, make a reasonable assumption and flag it.
-2. **PLAN** — Quick mental plan: what tools? What order? **Read relevant context FIRST** before acting.
-3. **EXECUTE** — Work methodically. One logical change at a time. Match existing patterns.
-4. **SELF-REVIEW** — Go through the Delivery Checklist below. If it doesn't pass, fix before reporting.
-5. **REPORT** — Deliver with a clear summary. Note assumptions or complications.
-
-## Execution Principles
-- **Read before you act.** Understand the context before making changes.
-- **One concern per change.** Don't mix unrelated work in the same pass.
-- **Minimum changes, maximum clarity.** Solve the problem with the fewest changes possible. No speculative additions.
-- **Match existing patterns exactly.** Consistency over personal preference.
-- Stuck after 3 attempts? Stop, document what you tried in TaskList, flag the issue. Don't spin silently.
-
-## Delivery Checklist (before reporting done)
-1. [ ] The goal is achieved — does the output meet what was asked?
-2. [ ] Nothing beyond scope — no additions, no "while I'm here" extras
-3. [ ] Verified it works — traced the logic path, confirmed the outcome
-4. [ ] No secrets exposed — no hardcoded credentials, tokens, or keys
-5. [ ] Clean — no debug artifacts, no placeholders, no commented-out dead code
-
-## Using SubAgents
-- For complex subtasks: Explore (research), Plan (design), general-purpose (execute).
-- Each SubAgent gets ONE clear task. Verify the result, move on.
-- Don't overuse — simple tasks don't need a SubAgent.
-
-## Communication
-- TaskList updates keep your Manager informed — keep them current.
-- Report format: "Done: [what]. Notes: [assumptions, caveats, things to watch]."
-- If blocked: "Blocked: [what]. Tried: [approaches]. Need: [what would unblock]." Put this in TaskList.
-
-## Anti-Patterns
-- Acting without reading the context first
-- Adding features or changes not in the task
-- Staying silent when stuck — flag in TaskList after 3 attempts
-- Delivering without going through the Delivery Checklist
-- Making the same mistake twice — use memory_search to learn from past experience`;
+  return [
+    `You are ${name}, an AnoClaw Member: a domain specialist who executes assigned work and self-verifies before reporting.`,
+    '',
+    '## Operating Model',
+    '1. Receive: identify the goal, scope, constraints, and acceptance criteria in the assignment.',
+    '2. Ground: read relevant files, logs, memories, or tool output before acting.',
+    '3. Execute: make the smallest complete change that satisfies the assignment and matches existing patterns.',
+    '4. Verify: run the relevant check or explain exactly why it could not be run.',
+    '5. Report: summarize what changed, how it was verified, and any risks or assumptions.',
+    '',
+    '## Execution Principles',
+    '- Stay inside scope. Do not add unrelated features, cleanups, or speculative abstractions.',
+    '- Prefer evidence over guesses. If context is missing, make a reasonable assumption only when safe and state it.',
+    '- Keep TaskList current when work is multi-step or delegated.',
+    '- Use SubAgentSpawn only for a clearly bounded helper task such as research, isolated inspection, or parallel verification.',
+    '- If blocked after focused attempts, stop and report: blocker, tried approaches, and exact need.',
+    '',
+    '## Delivery Checklist',
+    '- The requested goal is achieved.',
+    '- Acceptance criteria are satisfied or explicitly called out as unmet.',
+    '- Verification was performed or the limitation is stated.',
+    '- No secrets, debug artifacts, placeholders, or dead comments were introduced.',
+    '- The report is concise enough for a Manager to review quickly.',
+  ].join('\n');
 }
-
 const DEFAULT_AGENT_PROMPTS: Record<string, (agentName: string) => string> = {
   MainAgent: mainAgentPrompt,
   Manager: managerPrompt,
   Member: memberPrompt,
 };
+
+function normalizeRolePrompt(role: string, prompt: string): string {
+  void role;
+  return prompt;
+}
 
 export class PromptAssembler extends EventEmitter {
   private static _instance: PromptAssembler;
@@ -177,8 +192,7 @@ export class PromptAssembler extends EventEmitter {
     super();
 
     // Register all prompt sections via the centralized registration function.
-    // Sections are sorted by priority: static sections first (globally cached),
-    // then dynamic sections (per-session cached).
+    // Sections are sorted by priority inside their registered zone.
     registerAllSections(this);
   }
 
@@ -194,6 +208,7 @@ export class PromptAssembler extends EventEmitter {
     } else {
       this._dynamicSections.push(section);
     }
+    this.clearAllCaches();
   }
 
   /** Get all section names for diagnostics */
@@ -211,21 +226,21 @@ export class PromptAssembler extends EventEmitter {
    *
    * Priority chain:
    *   0: Override — return override content directly
-   *   1: AgentDefinition — agent.agentPrompt appended after system prompt (wired)
-   *   2: CustomCLI — runtime injected instructions via setCustomCLI() (wired)
-   *   3: Default — standard section assembly
+   *   1: Provider-cacheable prefix — static rules + agent definition + stable capabilities
+   *   2: Volatile suffix — session/workspace/run-state sections after BOUNDARY_MARKER
    */
   buildEffectivePrompt(
     agentId: string,
     sessionId: string,
     override?: PromptOverride,
+    buildContext?: PromptBuildContext,
   ): string {
     // Priority 0: Plugin Override — ExtensionPoints.promptAssembler
     if (this._extPoints) {
       const pluginOverride = this._extPoints.get('promptAssembler');
       if (pluginOverride) {
         try {
-          const result = pluginOverride({ agentId, sessionId, override, assembler: this });
+          const result = pluginOverride({ agentId, sessionId, override, buildContext, assembler: this });
           if (typeof result === 'string') return result;
         } catch (err) {
           this.log.warn('Plugin prompt override failed', { error: (err as Error).message });
@@ -238,43 +253,108 @@ export class PromptAssembler extends EventEmitter {
       return override.content;
     }
 
-    const ctx: PromptContext = { agentId, sessionId };
-    const parts: string[] = [];
+    const ctx: PromptContext = { agentId, sessionId, ...buildContext };
+    const assembly = this.assembleStandardPrompt(ctx);
 
-    // Build static zone (global cache)
-    parts.push(this.buildStaticZone(ctx));
+    // Emit event with token count
+    const layout = this.computeLayoutStats(assembly.prompt, assembly.cacheablePrefix, assembly.volatileSuffix);
+    this.log.debug('Prompt assembled', {
+      aid: agentId,
+      sid: sessionId,
+      estimatedTokens: layout.totalTokens,
+      cacheablePrefixTokens: layout.cacheablePrefixTokens,
+      volatileTokens: layout.volatileTokens,
+    });
+    this.emit('promptBuilt', agentId, layout.totalTokens, { cacheablePrefixTokens: layout.cacheablePrefixTokens });
 
-    // Boundary marker
-    parts.push(BOUNDARY_MARKER);
+    return assembly.prompt;
+  }
 
-    // Build dynamic zone (per-session cache)
-    parts.push(this.buildDynamicZone(ctx));
+  /**
+   * Estimate the standard prompt layout without plugin/user complete overrides.
+   * This is mainly for diagnostics: provider-side prompt caching only helps when
+   * the beginning of the request is byte-identical across calls.
+   */
+  analyzePromptLayout(
+    agentId: string,
+    sessionId: string,
+    buildContext?: PromptBuildContext,
+  ): PromptLayoutStats {
+    const ctx: PromptContext = { agentId, sessionId, ...buildContext };
+    const assembly = this.assembleStandardPrompt(ctx);
+    return this.computeLayoutStats(assembly.prompt, assembly.cacheablePrefix, assembly.volatileSuffix);
+  }
 
-    // ── Priority 1: AgentDefinition — agent's custom prompt ──
+  /**
+   * Estimate cache layout from an already-built prompt without recomputing
+   * sections. Useful for preview routes and diagnostics that need no side effects.
+   */
+  analyzePromptText(prompt: string): PromptLayoutStats {
+    const boundaryIndex = prompt.indexOf(BOUNDARY_MARKER);
+    if (boundaryIndex < 0) {
+      return this.computeLayoutStats(prompt, prompt, '');
+    }
+
+    const cacheablePrefix = prompt.slice(0, boundaryIndex).trim();
+    const volatileSuffix = prompt.slice(boundaryIndex + BOUNDARY_MARKER.length).trim();
+    return this.computeLayoutStats(prompt, cacheablePrefix, volatileSuffix);
+  }
+
+  private computeLayoutStats(
+    prompt: string,
+    cacheablePrefix: string,
+    volatileSuffix: string,
+  ): PromptLayoutStats {
+    const totalTokens = TokenCounter.estimate(prompt);
+    const cacheablePrefixTokens = TokenCounter.estimate(cacheablePrefix);
+    const volatileTokens = TokenCounter.estimate(volatileSuffix);
+
+    return {
+      totalTokens,
+      cacheablePrefixTokens,
+      volatileTokens,
+      cacheablePrefixRatio: totalTokens > 0 ? cacheablePrefixTokens / totalTokens : 0,
+    };
+  }
+
+  private assembleStandardPrompt(ctx: PromptContext): PromptAssembly {
+    const cacheablePrefixParts: string[] = [];
+
+    // Global static rules are shared by every agent and are always first.
+    cacheablePrefixParts.push(this.buildStaticZone(ctx));
+
+    // Agent identity and stable custom instructions should be before volatile
+    // session state so provider prefix caches can reuse them across turns.
+    cacheablePrefixParts.push(this.buildAgentDefinition(ctx.agentId));
+    if (this._customCLIInstructions) {
+      cacheablePrefixParts.push(this._customCLIInstructions);
+    }
+
+    // These sections can still recompute locally, but their text is normally
+    // stable for the same agent/mode and therefore valuable for LLM prefix cache.
+    cacheablePrefixParts.push(this.buildDynamicZone(ctx, {
+      include: PROVIDER_CACHEABLE_DYNAMIC_SECTIONS,
+    }));
+
+    const cacheablePrefix = cacheablePrefixParts.filter(Boolean).join('\n\n');
+    const volatileSuffix = this.buildDynamicZone(ctx, {
+      exclude: PROVIDER_CACHEABLE_DYNAMIC_SECTIONS,
+    });
+    const prompt = [cacheablePrefix, BOUNDARY_MARKER, volatileSuffix]
+      .filter(Boolean)
+      .join('\n\n');
+
+    return { prompt, cacheablePrefix, volatileSuffix };
+  }
+
+  private buildAgentDefinition(agentId: string): string {
     const registry = AgentRegistry.getInstance();
     const agent = registry.agent(agentId);
-    if (agent) {
-      const roleFn = DEFAULT_AGENT_PROMPTS[agent.role];
-      const roleDefault = roleFn ? roleFn(agent.name) : '';
-      const agentPrompt = [roleDefault, agent.agentPrompt].filter(Boolean).join('\n\n');
-      if (agentPrompt) {
-        parts.push(agentPrompt);
-      }
-    }
+    if (!agent) return '';
 
-    // ── Priority 2: CustomCLI — runtime injected instructions ──
-    if (this._customCLIInstructions) {
-      parts.push(this._customCLIInstructions);
-    }
-
-    const prompt = parts.filter(Boolean).join('\n\n');
-
-    // Emit event with approximate token count
-    const estimatedTokens = Math.ceil(prompt.length / 4);
-    this.log.debug('Prompt assembled', { aid: agentId, sid: sessionId, estimatedTokens });
-    this.emit('promptBuilt', agentId, estimatedTokens);
-
-    return prompt;
+    const roleFn = DEFAULT_AGENT_PROMPTS[agent.role];
+    const roleDefault = roleFn ? normalizeRolePrompt(agent.role, roleFn(agent.name)) : '';
+    return [roleDefault, agent.agentPrompt].filter(Boolean).join('\n\n');
   }
 
   // ─── Static Zone (globally cached) ──────────────────────────
@@ -298,9 +378,15 @@ export class PromptAssembler extends EventEmitter {
 
   // ─── Dynamic Zone (per-session cached) ──────────────────────
 
-  private buildDynamicZone(ctx: PromptContext): string {
+  private buildDynamicZone(
+    ctx: PromptContext,
+    options: { include?: ReadonlySet<string>; exclude?: ReadonlySet<string> } = {},
+  ): string {
     const results: string[] = [];
     for (const sec of this._dynamicSections) {
+      if (options.include && !options.include.has(sec.name)) continue;
+      if (options.exclude && options.exclude.has(sec.name)) continue;
+
       const cacheKey = `${ctx.agentId}:${ctx.sessionId}:${sec.name}`;
       if (!sec.cacheBreak && this._cache.has(cacheKey)) {
         results.push(this._cache.get(cacheKey)!);

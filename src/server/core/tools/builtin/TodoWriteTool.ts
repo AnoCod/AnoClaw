@@ -1,4 +1,4 @@
-// TodoWriteTool — writes and manages a structured task list
+// TodoWriteTool - writes and manages a structured task list
 // The agent uses this to track progress on complex multi-step tasks.
 // All todos are merged/replaced on each call (not appended).
 // shouldDefer: true (does not consume a model turn).
@@ -8,6 +8,7 @@ import { Tool } from '../Tool.js';
 import type { ToolResult } from '../../../../shared/types/tool.js';
 import { RiskLevel, InterruptBehavior } from '../../../../shared/types/tool.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
+import { TypedEventBus } from '../../events/TypedEventBus.js';
 
 interface TodoItem {
   content: string;
@@ -17,30 +18,29 @@ interface TodoItem {
 
 export class TodoWriteTool extends Tool {
   static category = 'Planning & Communication';
-  static toolDescription = 'Creates and manages a structured task list for tracking progress.';
+  static toolDescription = 'Maintains a concise progress checklist for multi-step work.';
 
   name(): string {
     return 'TodoWrite';
   }
 
   description(): string {
-    return 'Create and manage a structured task list for multi-step work. Tracks progress with pending/in_progress/completed states.';
+    return 'Create or update a structured task list for multi-step work. Use pending, in_progress, and completed states.';
   }
 
   prompt(): string {
-    return '## TodoWrite Usage\n' +
-      '### When to Use\n' +
-      '- 3+ distinct steps required\n' +
-      '- Non-trivial multi-step task\n' +
-      '- User provides multiple tasks\n\n' +
-      '### When NOT to Use\n' +
-      '- Single trivial task — just do it directly\n' +
-      '- Informational questions (no coding work)\n' +
-      '- Tasks completable in <3 trivial steps\n\n' +
-      '### Rules\n' +
-      '- Exactly ONE task in_progress at a time\n' +
-      '- Mark complete IMMEDIATELY after finishing — do not batch\n' +
-      '- Remove tasks that are no longer relevant from the list';
+    return [
+      '## TodoWrite Usage',
+      'Use TodoWrite for visible progress on multi-step work, especially when coordinating implementation, verification, and delegation.',
+      '',
+      'Rules:',
+      '- Keep tasks concrete and outcome-oriented.',
+      '- Exactly one task may be in_progress at a time.',
+      '- Mark each task completed immediately after it is actually done.',
+      '- Remove or rewrite tasks that no longer match the plan.',
+      '',
+      'Do not use TodoWrite for a single trivial action or pure Q&A.',
+    ].join('\n');
   }
 
   parametersSchema(): Record<string, unknown> {
@@ -87,7 +87,7 @@ export class TodoWriteTool extends Tool {
     return true; // Does not consume a model turn
   }
 
-  // No UI display — todo list is rendered by TodoWriteDelegate via AppState
+  // No UI display - todo list is rendered by TodoWriteDelegate via AppState
   userFacingName(_input?: Record<string, unknown>): string { return ''; }
 
   interruptBehavior(): InterruptBehavior {
@@ -152,8 +152,13 @@ export class TodoWriteTool extends Tool {
       lines.push(`${icon} ${t.content}`);
     }
 
-    // TODO: persist to TodoWrite store / emit event for UI sync
-    // For now, return the formatted list
+    // Emit event for UI sync and downstream consumers (surrogate store, activity log, etc.)
+    TypedEventBus.emit('todo:updated', {
+      sessionId: ctx.sessionId,
+      agentId: ctx.agentId,
+      summary,
+      todos,
+    });
 
     return this.makeResult(lines.join('\n'), {
       structured: { summary, todos },

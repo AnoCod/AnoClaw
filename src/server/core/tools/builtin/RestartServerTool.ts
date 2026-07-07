@@ -1,4 +1,4 @@
-// RestartServerTool — graceful server restart with session checkpoint.
+// RestartServerTool - graceful server restart with session checkpoint.
 // Writes checkpoint to disk, then uses Electron's app.relaunch() + app.quit()
 // for reliable restart. The frontend sees the restart via WS close code 1012.
 
@@ -29,10 +29,10 @@ export class RestartServerTool extends Tool {
 
   prompt(): string {
     return '## RestartServer Usage\n' +
-      'Gracefully restart the application. A checkpoint is written to disk — your session resumes exactly where it left off after restart.\n\n' +
+      'Gracefully restart the application. A checkpoint is written to disk - your session resumes exactly where it left off after restart.\n\n' +
       '**When to use:** After modifying server source code (src/server/) that needs recompilation. After installing new npm packages.\n\n' +
       '**When NOT to use:** Plugin changes (auto-reload via file watcher). Frontend changes (just rebuild, no restart needed). Any change that doesn\'t touch server code.\n\n' +
-      'The `resumeMessage` parameter is shown to you after restart — include what you were working on and your next step.';
+      'The `resumeMessage` parameter is shown to you after restart - include what you were working on and your next step.';
   }
 
   parametersSchema(): Record<string, unknown> {
@@ -41,7 +41,7 @@ export class RestartServerTool extends Tool {
       properties: {
         resumeMessage: {
           type: 'string',
-          description: 'Message to yourself after restart — what you were doing and what to do next.',
+          description: 'Message to yourself after restart - what you were doing and what to do next.',
         },
       },
       required: ['resumeMessage'],
@@ -108,7 +108,7 @@ export class RestartServerTool extends Tool {
 
     // Schedule restart after the tool result has been flushed to the frontend.
     // setImmediate ensures we're past the current tool pipeline + WS send cycle.
-    // Electron's app.quit() is graceful — it fires before-quit → windows close → exit.
+    // Electron's app.quit() is graceful - it fires before-quit -> windows close -> exit.
     setImmediate(async () => {
       try {
         const electron = await import('electron');

@@ -1,4 +1,4 @@
-// MemoryDeleteTool — delete a memory entry
+// MemoryDeleteTool - delete a memory entry
 // Removes an entry using MemoryManager.
 
 import { Tool, RiskLevel } from '../Tool.js';
@@ -20,7 +20,7 @@ export class MemoryDeleteTool extends Tool {
   prompt(): string {
     return '## MemoryDelete Usage\n' +
       'Delete a memory entry by exact name match within a scope.\n\n' +
-      '**When to delete:** The information is outdated, wrong, or superseded by a newer entry. Use sparingly — memories are cheap, wrong memories are expensive.\n\n' +
+      '**When to delete:** The information is outdated, wrong, or superseded by a newer entry. Use sparingly - memories are cheap, wrong memories are expensive.\n\n' +
       'Prefer updating (MemorySave with same name+scope) over delete+recreate.';
   }
 

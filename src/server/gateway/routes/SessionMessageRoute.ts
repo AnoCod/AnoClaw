@@ -1,5 +1,5 @@
 // SessionMessageRoute — Inject a message into a session, optionally triggering the agent.
-// POST /api/v1/session/:id/messages
+// POST /api/v1/sessions/:id/messages
 // Body: { content, role?: 'user'|'system', triggerAgent?: boolean }
 //
 // When triggerAgent=true:
@@ -11,16 +11,17 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RouteMatch, RouteHandler } from '../RouteHandler.js';
 import type { ApiToken } from '../ApiAuth.js';
-import { sendJson, readBody } from '../RouteHelpers.js';
+import { sendJson, readBody, sendRedirect } from '../RouteHelpers.js';
 import { SessionManager } from '../../core/session/SessionManager.js';
 import { AgentRuntime } from '../../core/agent/AgentRuntime.js';
-import { AgentRegistry } from '../../core/agent/AgentRegistry.js';
+import { selectRunnableAgent } from '../../core/agent/AgentSelection.js';
 import type { Message } from '../../../shared/types/session.js';
 import { MessageRole } from '../../../shared/types/session.js';
 import { WsMessageType } from '../../../shared/types/events.js';
 import { WsServer } from '../../infra/network/WsServer.js';
 import { InterruptController, InterruptReason } from '../../core/agent/supervision/InterruptController.js';
 import { createLogger } from '../../core/logger.js';
+import { resolveSessionEffort, resolveSessionPermissionMode } from '../../core/agent/PermissionModePolicy.js';
 
 const log = createLogger('anochat.route.session-msg');
 
@@ -31,9 +32,10 @@ function resolveRootSessionId(sessionId: string): string {
 
 export class SessionMessageRoute implements RouteHandler {
   readonly method = 'POST';
-  readonly path = '/api/v1/session/:id/messages';
+  readonly path = '/api/v1/sessions/:id/messages';
   readonly description = 'Inject a message into a session. Set triggerAgent=true to have the agent process it.';
   readonly category = 'Session';
+  readonly permission = 'messages:send';
 
   async handle(
     match: RouteMatch,
@@ -42,6 +44,7 @@ export class SessionMessageRoute implements RouteHandler {
     _token: ApiToken | null,
   ): Promise<boolean> {
     try {
+      // 1. Parse request
       const sessionId = match.params.id;
       const body = await readBody(req);
       const content = body.content as string | undefined;
@@ -50,10 +53,12 @@ export class SessionMessageRoute implements RouteHandler {
       const role = (body.role as string) === 'system' ? MessageRole.System : MessageRole.User;
       const triggerAgent = body.triggerAgent === true;
 
+      // 2. Validate session exists
       const sm = SessionManager.getInstance();
       const session = sm.session(sessionId);
       if (!session) { sendJson(res, 404, { error: `Session "${sessionId}" not found` }); return true; }
 
+      // 3. Create and persist the injected message
       const msg: Message = {
         id: `inj-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
         sessionId,
@@ -65,23 +70,34 @@ export class SessionMessageRoute implements RouteHandler {
       };
       await sm.appendMessage(sessionId, msg);
 
-      // Notify frontend via WS
+      // 4. Notify frontend via WebSocket
       const ws = WsServer.getInstance();
       const rootId = resolveRootSessionId(sessionId);
       if (ws.isConnected(rootId)) {
         ws.send(rootId, { type: 'message_appended', sessionId, messageId: msg.id, role });
       }
 
+      // 5. If triggerAgent=false, just return the message ID
       if (!triggerAgent) {
         sendJson(res, 200, { messageId: msg.id, sessionId, triggered: false });
         return true;
       }
 
-      const agentId = session.agentId || AgentRegistry.getInstance().mainAgent()?.id || 'main-agent';
+      // 6. triggerAgent=true — determine how to run the agent
+      const agentSelection = selectRunnableAgent(session.agentId);
+      if (!agentSelection.ok || !agentSelection.agentId) {
+        sendJson(res, 409, {
+          error: 'Agent Required',
+          message: agentSelection.message || 'No runnable agent is configured',
+        });
+        return true;
+      }
+      const agentId = agentSelection.agentId;
       const runtime = AgentRuntime.getInstance();
 
       if (runtime.isSessionActive(sessionId)) {
-        // Active loop — queue via InterruptController
+        // 6a. Session has an active loop — queue message via InterruptController
+        //     The agent sees it mid-turn and responds without restart
         InterruptController.getInstance().setPendingUserMessage(sessionId, content);
         InterruptController.getInstance().requestInterrupt(sessionId, InterruptReason.UserSteer);
         if (ws.isConnected(rootId)) {
@@ -91,11 +107,16 @@ export class SessionMessageRoute implements RouteHandler {
         return true;
       }
 
-      // Idle session — spawn background agent loop, forward events to WS
+      // 6b. Idle session — spawn a background agent loop, forward streaming events to WS
+      //     Response is returned immediately (202), streaming happens over WS
       const history = await sm.getHistory(sessionId);
       (async () => {
         try {
-          for await (const event of runtime.processMessage(sessionId, agentId, msg, history)) {
+          const loopOptions = {
+            permissionMode: resolveSessionPermissionMode(sm, sessionId, body.mode),
+            effort: resolveSessionEffort(sm, sessionId, body.effort),
+          };
+          for await (const event of runtime.processMessage(sessionId, agentId, msg, history, loopOptions)) {
             if (ws.isConnected(rootId)) {
               ws.send(rootId, event as Record<string, unknown>);
             }
@@ -116,5 +137,16 @@ export class SessionMessageRoute implements RouteHandler {
       sendJson(res, 500, { error: 'Session message failed', message: msg });
       return true;
     }
+  }
+}
+
+/** Redirect old singular path to new plural path */
+export class SessionMessageRedirectRoute implements RouteHandler {
+  readonly method = 'POST';
+  readonly path = '/api/v1/session/:id/messages';
+
+  handle(match: RouteMatch, _req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): boolean {
+    sendRedirect(res, `/api/v1/sessions/${match.params.id}/messages`);
+    return true;
   }
 }

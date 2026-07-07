@@ -1,5 +1,5 @@
 // SkillExecuteRoute — Load and optionally execute a skill.
-// POST /api/v1/skill/execute
+// POST /api/v1/skills/execute
 // Body: { skillName, task?, agentId?, triggerAgent? }
 //
 // When triggerAgent=false (default): returns the skill body content.
@@ -8,19 +8,20 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RouteMatch, RouteHandler } from '../RouteHandler.js';
 import type { ApiToken } from '../ApiAuth.js';
-import { sendJson, readBody } from '../RouteHelpers.js';
+import { sendJson, readBody, sendRedirect } from '../RouteHelpers.js';
 import { SkillManager } from '../../core/skills/SkillManager.js';
 import { ApiServer } from '../ApiServer.js';
-import { DEFAULT_MAIN_AGENT_ID } from '../../../shared/constants.js';
+import { selectRunnableAgent } from '../../core/agent/AgentSelection.js';
 import { createLogger } from '../../core/logger.js';
 
 const log = createLogger('anochat.route.skill-exec');
 
 export class SkillExecuteRoute implements RouteHandler {
   readonly method = 'POST';
-  readonly path = '/api/v1/skill/execute';
+  readonly path = '/api/v1/skills/execute';
   readonly description = 'Load a skill by name and optionally execute it through an agent with a task.';
   readonly category = 'Skill';
+  readonly permission = 'messages:send';
 
   async handle(
     _match: RouteMatch,
@@ -45,14 +46,22 @@ export class SkillExecuteRoute implements RouteHandler {
         return true;
       }
 
-      // Run through agent via ApiServer internal routing
-      const agentId = (body.agentId as string) || DEFAULT_MAIN_AGENT_ID;
+      // Run through a real registered agent via ApiServer internal routing.
+      const agentSelection = selectRunnableAgent(body.agentId as string | undefined);
+      if (!agentSelection.ok || !agentSelection.agentId) {
+        sendJson(res, 409, {
+          error: 'Agent Required',
+          message: agentSelection.message || 'No runnable agent is configured',
+        });
+        return true;
+      }
+      const agentId = agentSelection.agentId;
       const fullPrompt = task
         ? `Execute skill "${skillName}":\n\n${skillBody}\n\n---\n\n${task}`
         : `Execute skill "${skillName}". Follow these instructions:\n\n${skillBody}`;
 
       const api = ApiServer.getInstance();
-      const result = await api.callInternal('POST', '/api/v1/agent/execute', {
+      const result = await api.callInternal('POST', '/api/v1/agents/execute', {
         agentId, task: fullPrompt,
       });
 
@@ -68,5 +77,16 @@ export class SkillExecuteRoute implements RouteHandler {
       sendJson(res, 500, { error: 'Skill execute failed', message: msg });
       return true;
     }
+  }
+}
+
+/** Redirect old singular path to new plural path */
+export class SkillExecuteRedirectRoute implements RouteHandler {
+  readonly method = 'POST';
+  readonly path = '/api/v1/skill/execute';
+
+  handle(_match: RouteMatch, _req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): boolean {
+    sendRedirect(res, '/api/v1/skills/execute');
+    return true;
   }
 }

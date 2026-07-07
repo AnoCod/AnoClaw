@@ -58,13 +58,14 @@ export interface OrgNode {
   orgRole: OrgRole;
   teamName: string;
   reportChain: string[];
+  children: OrgNode[];
 }
 
 export interface SubAgentConfig {
   description: string;
   prompt: string;
   subagent_type: 'Explore' | 'Plan' | 'general-purpose';
-  model?: 'haiku' | 'sonnet';
+  model?: string;
   run_in_background?: boolean;
   /** Keep the SubAgent alive for reuse (default: false). */
   persist?: boolean;

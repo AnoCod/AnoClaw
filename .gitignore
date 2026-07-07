@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+
+# TypeScript / frontend build output
+dist/
+src/public/js/
+src/public/monaco/vs/
+src/public/vendor/jszip.min.js
+src/public/d3-force.min.js
+src/public/css/bundle.css
+
+# Electron packaging output
+release*/
+out/
+
+# Runtime state and local user data
+/data/
+/memory/
+config/settings.yaml
+config/mcp_servers.yaml
+config/auth.json
+config/window-state.json
+config/.encryption-key
+/logs/
+/lancedb/
+/workspace/
+plugins/*/data/
+
+# Local agent/editor state
+.agents/
+.claude/
+.codex/
+
+# Local model/cache payloads
+tools/mcp-local-rag/models/
+
+# Backups and archives
+*.zip
+*.7z
+*.tar
+*.tar.gz
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*~

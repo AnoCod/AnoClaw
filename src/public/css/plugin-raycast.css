@@ -1,0 +1,580 @@
+/*
+ * AnoClaw plugin Raycast skin.
+ * Injected into every plugin iframe by PluginPageContainer.
+ */
+
+:root {
+  --rc-bg: #050608;
+  --rc-bg-2: #090b10;
+  --rc-panel: rgba(255,255,255,0.045);
+  --rc-panel-2: rgba(255,255,255,0.068);
+  --rc-panel-3: rgba(255,255,255,0.095);
+  --rc-line: rgba(255,255,255,0.075);
+  --rc-line-2: rgba(255,255,255,0.135);
+  --rc-text: #f4f4f6;
+  --rc-body: rgba(255,255,255,0.76);
+  --rc-muted: rgba(255,255,255,0.52);
+  --rc-faint: rgba(255,255,255,0.34);
+  --rc-red: #ff4058;
+  --rc-red-soft: rgba(255,64,88,0.17);
+  --rc-blue: #57c1ff;
+  --rc-blue-soft: rgba(87,193,255,0.16);
+  --rc-green: #59d499;
+  --rc-green-soft: rgba(89,212,153,0.16);
+  --rc-yellow: #ffc533;
+  --rc-yellow-soft: rgba(255,197,51,0.15);
+  --rc-radius: 8px;
+  --rc-radius-lg: 12px;
+  --rc-shadow: 0 22px 70px rgba(0,0,0,0.38);
+  --rc-font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --rc-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+
+  --bg: var(--rc-bg);
+  --surface: var(--rc-panel);
+  --surface-hover: var(--rc-panel-2);
+  --input-bg: rgba(10,12,17,0.76);
+  --border: var(--rc-line);
+  --text: var(--rc-text);
+  --text-dim: var(--rc-muted);
+  --accent: var(--rc-red);
+  --accent-hover: #ff6273;
+  --success: var(--rc-green);
+  --danger: var(--rc-red);
+  --warning: var(--rc-yellow);
+
+  --color-bg: var(--rc-bg);
+  --color-surface: rgba(6,7,10,0.74);
+  --color-surface-elevated: var(--rc-panel-2);
+  --color-surface-card: var(--rc-panel);
+  --color-hairline: var(--rc-line);
+  --color-hairline-strong: var(--rc-line-2);
+  --color-text: var(--rc-text);
+  --color-text-secondary: var(--rc-body);
+  --color-text-tertiary: var(--rc-muted);
+  --color-text-quaternary: var(--rc-faint);
+  --color-accent: var(--rc-red);
+}
+
+html[data-theme="light"] {
+  --rc-bg: #f7f7f5;
+  --rc-bg-2: #ececea;
+  --rc-panel: rgba(0,0,0,0.045);
+  --rc-panel-2: rgba(0,0,0,0.070);
+  --rc-panel-3: rgba(0,0,0,0.092);
+  --rc-line: rgba(0,0,0,0.075);
+  --rc-line-2: rgba(0,0,0,0.14);
+  --rc-text: rgba(0,0,0,0.88);
+  --rc-body: rgba(0,0,0,0.68);
+  --rc-muted: rgba(0,0,0,0.48);
+  --rc-faint: rgba(0,0,0,0.30);
+  --input-bg: rgba(255,255,255,0.74);
+  --color-surface: rgba(255,255,255,0.72);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+  background: var(--rc-bg);
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--rc-text);
+  font-family: var(--rc-font);
+  background: var(--rc-bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  pointer-events: none;
+}
+
+body::before {
+  z-index: -2;
+  inset: -24%;
+  background:
+    linear-gradient(127deg, transparent 0 22%, rgba(255,64,88,0.16) 31%, rgba(255,128,150,0.08) 41%, transparent 55%),
+    linear-gradient(127deg, transparent 36%, rgba(87,193,255,0.13) 50%, rgba(255,64,88,0.07) 63%, transparent 79%),
+    radial-gradient(circle at 79% 13%, rgba(87,193,255,0.18), transparent 23%),
+    radial-gradient(circle at 17% 76%, rgba(255,64,88,0.18), transparent 24%),
+    linear-gradient(180deg, #07101a 0%, #07080b 45%, #050608 100%);
+  opacity: .58;
+  transform: translate3d(-1%, -1%, 0) scale(1.04);
+  animation: rc-bg-drift 36s ease-in-out infinite alternate;
+}
+
+body::after {
+  z-index: -1;
+  inset: 0;
+  background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.010) 0 1px, transparent 1px 5px),
+    linear-gradient(180deg, rgba(0,0,0,0.04), rgba(0,0,0,0.58));
+  opacity: .55;
+  mix-blend-mode: overlay;
+}
+
+@keyframes rc-bg-drift {
+  to { transform: translate3d(2%, 1.5%, 0) scale(1.08); }
+}
+
+
+@media (prefers-reduced-motion: reduce) {
+  body::before { animation: none; }
+  *, *::before, *::after { scroll-behavior: auto !important; }
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.18);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.28);
+  background-clip: padding-box;
+}
+
+body > * {
+  position: relative;
+  z-index: 1;
+}
+
+.container,
+.app,
+.gw-inner,
+.meeting-app,
+.plugin-lab,
+[class$="-page"],
+[class*="-page "] {
+  color: var(--rc-text);
+}
+
+.container,
+.app,
+.plugin-lab {
+  padding: 14px;
+}
+
+h1, h2, h3, h4,
+.page-title,
+.gw-header-title,
+.workflow-toolbar-title,
+.meeting-title,
+.card-title,
+.section-title {
+  letter-spacing: 0;
+  color: var(--rc-text);
+}
+
+small,
+label,
+.muted,
+.hint,
+.subtitle,
+.metric-sub,
+.name-line span,
+.gw-platforms-label,
+.workflow-palette-group-title {
+  color: var(--rc-muted);
+}
+
+a {
+  color: var(--rc-blue);
+}
+
+button,
+.btn,
+.icon-btn,
+.theme-toggle,
+.tab-btn,
+.mode-tab,
+.preset-btn,
+.size-preset-btn,
+.style-opt-btn,
+.mcp-tab,
+.workflow-zoom-btn,
+.workflow-context-item,
+[role="button"] {
+  border-radius: var(--rc-radius);
+  font-family: inherit;
+  letter-spacing: 0;
+  transition: border-color .16s ease, background .16s ease, color .16s ease, transform .16s ease, opacity .16s ease;
+}
+
+button:not(.workflow-node-delete):not(.workflow-port),
+.btn,
+.icon-btn,
+.theme-toggle,
+.preset-btn,
+.size-preset-btn,
+.style-opt-btn {
+  border: 1px solid var(--rc-line);
+  background: rgba(255,255,255,0.045);
+  color: var(--rc-text);
+}
+
+button:not(:disabled):hover,
+.btn:not(:disabled):hover,
+.icon-btn:hover,
+.theme-toggle:hover,
+.preset-btn:hover,
+.size-preset-btn:hover,
+.style-opt-btn:hover,
+.mcp-card-hover:hover,
+.workflow-palette-item:hover,
+.workflow-context-item:hover {
+  border-color: var(--rc-line-2);
+  background: var(--rc-panel-2);
+}
+
+button:active,
+.btn:active,
+.icon-btn:active,
+.preset-btn:active {
+  transform: translateY(1px);
+}
+
+button:disabled,
+.btn:disabled {
+  color: var(--rc-faint);
+  border-color: rgba(255,255,255,0.035);
+  background: rgba(255,255,255,0.022);
+  cursor: default;
+  opacity: .62;
+}
+
+.active,
+.tab-btn.active,
+.mode-tab.active,
+.preset-btn.active,
+.size-preset-btn.active,
+.style-opt-btn.active,
+.mcp-tab-active,
+.workflow-zoom-btn.active {
+  color: var(--rc-text) !important;
+  border-color: rgba(255,64,88,0.26) !important;
+  background: linear-gradient(180deg, rgba(255,64,88,0.18), rgba(255,64,88,0.09)) !important;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+textarea,
+select,
+.search,
+.mcp-search-input,
+.workflow-node-input,
+.workflow-node-textarea,
+.workflow-node-select,
+.workflow-palette-search,
+.gw-compose-input {
+  border: 1px solid var(--rc-line);
+  border-radius: var(--rc-radius);
+  background: linear-gradient(rgba(10,12,17,0.82), rgba(10,12,17,0.82)) padding-box;
+  color: var(--rc-text);
+  outline: none;
+  font-family: inherit;
+}
+
+textarea,
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+select {
+  padding-left: max(12px, .85em);
+  padding-right: max(12px, .85em);
+}
+
+textarea::placeholder,
+input::placeholder {
+  color: var(--rc-faint);
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
+textarea:focus,
+select:focus,
+.search:focus,
+.mcp-search-input:focus,
+.workflow-node-input:focus,
+.workflow-node-textarea:focus,
+.workflow-node-select:focus,
+.workflow-palette-search:focus,
+.gw-compose-input:focus {
+  border-color: transparent !important;
+  background:
+    linear-gradient(rgba(10,12,17,0.90), rgba(10,12,17,0.90)) padding-box,
+    conic-gradient(from var(--rc-spin-angle, 0deg), var(--rc-blue), var(--rc-red), var(--rc-yellow), var(--rc-blue)) border-box !important;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.025), 0 0 18px rgba(255,64,88,0.12) !important;
+  animation: rc-border-spin 2.4s linear infinite;
+}
+
+@property --rc-spin-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes rc-border-spin {
+  to { --rc-spin-angle: 360deg; }
+}
+
+input[type="range"] {
+  accent-color: var(--rc-red);
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--rc-red);
+}
+
+.card,
+.detail-card,
+.kpi,
+.meeting-card,
+.template-preview,
+.template-option,
+.workflow-node,
+.workflow-context-menu,
+.workflow-minimap,
+.workflow-node-palette,
+.workflow-logs-panel,
+.workflow-search-panel,
+.mcp-tool-card,
+.mcp-card-hover,
+.gw-platform-card,
+.gw-connection-card,
+.gw-health-card,
+.gw-bubble,
+.gw-template-card,
+.gw-retry-card,
+.gw-wizard,
+.gw-add-form,
+.manager-row,
+.recent-item,
+.history-item,
+.output-card,
+.preview-card,
+.tab-panel,
+article {
+  border-color: var(--rc-line) !important;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.060), rgba(255,255,255,0.020)),
+    rgba(6,7,10,0.70) !important;
+  backdrop-filter: blur(24px) saturate(1.22);
+  -webkit-backdrop-filter: blur(24px) saturate(1.22);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.035);
+}
+
+.card:hover,
+.detail-card:hover,
+.meeting-card:hover,
+.mcp-tool-card:hover,
+.mcp-card-hover:hover,
+.gw-platform-card:hover,
+.gw-connection-card:hover,
+.recent-item:hover,
+.history-item:hover {
+  border-color: var(--rc-line-2) !important;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.080), rgba(255,255,255,0.028)),
+    rgba(8,9,13,0.76) !important;
+}
+
+.tabs,
+.detail-tabs,
+.mode-tabs,
+.workflow-toolbar,
+.gw-header,
+.meeting-header {
+  border-color: var(--rc-line) !important;
+}
+
+.tab-btn,
+.mode-tab,
+.mcp-tab {
+  border: 1px solid transparent;
+  border-bottom-color: transparent !important;
+}
+
+.tab-btn.active,
+.mode-tab.active {
+  border-bottom-color: rgba(255,64,88,0.46) !important;
+}
+
+.pill,
+.badge,
+.status-badge,
+.workflow-status-badge,
+.mcp-transport-badge,
+.validation-badge,
+.gw-msg-counter,
+.metric-badge {
+  border: 1px solid rgba(255,255,255,0.075);
+  background: rgba(255,255,255,0.055);
+  color: var(--rc-body);
+  border-radius: 999px;
+}
+
+.pill.good,
+.badge.good,
+.status-ok,
+.connected,
+.success {
+  color: var(--rc-green) !important;
+  background: var(--rc-green-soft) !important;
+  border-color: rgba(89,212,153,0.24) !important;
+}
+
+.pill.warn,
+.badge.warn,
+.warning {
+  color: var(--rc-yellow) !important;
+  background: var(--rc-yellow-soft) !important;
+  border-color: rgba(255,197,51,0.24) !important;
+}
+
+.pill.bad,
+.badge.bad,
+.danger,
+.error {
+  color: var(--rc-red) !important;
+  background: var(--rc-red-soft) !important;
+  border-color: rgba(255,64,88,0.26) !important;
+}
+
+.bar,
+.progress,
+.ecc-bar-bg {
+  background: rgba(255,255,255,0.055) !important;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.bar-fill,
+.progress-fill,
+.ecc-bar-fill {
+  background: linear-gradient(90deg, var(--rc-red), var(--rc-blue)) !important;
+}
+
+table,
+.table,
+.manager-list,
+.process-list,
+.history-list,
+.recent-list {
+  border-color: var(--rc-line) !important;
+}
+
+tr,
+.row,
+.manager-row,
+.process-row,
+.adapter-row,
+.disk-row,
+.history-item,
+.recent-item {
+  border-color: rgba(255,255,255,0.045) !important;
+}
+
+.process-row:hover,
+.manager-row:hover,
+.adapter-row:hover,
+.disk-row:hover,
+tr:hover {
+  background: rgba(255,255,255,0.045) !important;
+}
+
+.empty,
+.empty-state,
+.workflow-placeholder,
+.placeholder {
+  color: var(--rc-faint) !important;
+}
+
+.modal,
+.modal-card,
+.dialog,
+.overlay,
+.popover,
+.dropdown,
+.model-dropdown,
+.export-menu,
+.context-menu {
+  border-color: var(--rc-line-2) !important;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.080), rgba(255,255,255,0.030)),
+    rgba(5,6,9,0.88) !important;
+  backdrop-filter: blur(28px) saturate(1.3);
+  -webkit-backdrop-filter: blur(28px) saturate(1.3);
+  box-shadow: var(--rc-shadow);
+}
+
+.toast,
+#notify,
+.notification,
+.workflow-toast {
+  border: 1px solid var(--rc-line-2);
+  border-radius: var(--rc-radius-lg);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.080), rgba(255,255,255,0.030)),
+    rgba(5,6,9,0.88);
+  color: var(--rc-text);
+  box-shadow: var(--rc-shadow);
+  backdrop-filter: blur(24px) saturate(1.25);
+  -webkit-backdrop-filter: blur(24px) saturate(1.25);
+}
+
+pre,
+code,
+.log,
+.logs,
+.log-line,
+.workflow-log-line {
+  font-family: var(--rc-mono);
+}
+
+svg {
+  flex-shrink: 0;
+}
+
+.rc-kbd-hint {
+  position: fixed;
+  right: 14px;
+  bottom: 12px;
+  z-index: 999999;
+  padding: 4px 8px;
+  border: 1px solid var(--rc-line);
+  border-radius: 999px;
+  background: rgba(5,6,9,0.62);
+  color: var(--rc-faint);
+  font-size: 10px;
+  line-height: 1;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .16s ease, transform .16s ease;
+  backdrop-filter: blur(16px);
+}
+
+html.rc-plugin-ready .rc-kbd-hint {
+  opacity: .85;
+  transform: translateY(0);
+}

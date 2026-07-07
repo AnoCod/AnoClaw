@@ -138,12 +138,19 @@ function hasCJK(text: string): boolean {
   for (const ch of text) {
     const code = ch.codePointAt(0)!;
     if (
+      // CJK Unified Ideographs (U+4E00–U+9FFF) — common Chinese characters
       (code >= 0x4E00 && code <= 0x9FFF) ||
+      // CJK Unified Ideographs Extension A (U+3400–U+4DBF) — rare Chinese characters
       (code >= 0x3400 && code <= 0x4DBF) ||
+      // CJK Unified Ideographs Extension B (U+20000–U+2A6DF) — very rare Chinese characters
       (code >= 0x20000 && code <= 0x2A6DF) ||
+      // CJK Compatibility Ideographs (U+F900–U+FAFF) — duplicates for round-trip compatibility
       (code >= 0xF900 && code <= 0xFAFF) ||
+      // Hangul Syllables (U+AC00–U+D7AF) — Korean
       (code >= 0xAC00 && code <= 0xD7AF) ||
+      // Hiragana (U+3040–U+309F) — Japanese
       (code >= 0x3040 && code <= 0x309F) ||
+      // Katakana (U+30A0–U+30FF) — Japanese
       (code >= 0x30A0 && code <= 0x30FF)
     ) {
       return true;

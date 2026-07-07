@@ -1,20 +1,22 @@
-// AnoClaw Cinema — UserMessageDelegate: large editorial user message
-// 18px, -0.2px letter-spacing, markdown body, minimal label below.
+/**
+ * UserMessageDelegate — large editorial user message.
+ * 18px, -0.2px letter-spacing, markdown body, minimal label below.
+ */
 
-import type { Message } from '../types.js';
+import type { ConversationMessage } from '../types.js';
 import { renderMarkdown } from '../../../MarkdownRenderer.js';
 
 export class UserMessageDelegate {
   element: HTMLElement;
-  private _msg: Message;
+  private _msg: ConversationMessage;
 
-  constructor(msg: Message) {
+  constructor(msg: ConversationMessage) {
     this._msg = msg;
     this.element = this.render();
   }
 
   render(): HTMLElement {
-    const isSystem = (this._msg as any).agentName?.startsWith('System');
+    const isSystem = this._msg.role === 'system' || (this._msg as any).agentName?.startsWith('System');
 
     const block = document.createElement('div');
     block.className = isSystem ? 'cinema-system-block' : 'cinema-user-block';

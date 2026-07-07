@@ -1,4 +1,4 @@
-// WorkflowRendering.ts — SVG connection rendering, node DOM building, minimap, flow animation
+// WorkflowRendering.ts - SVG connection rendering, node DOM building, minimap, flow animation
 
 import { type WorkflowNode, type WorkflowConnection, NODE_DEFS, type NodeTypeDef } from './WorkflowNodeTypes.js';
 
@@ -205,7 +205,7 @@ export function renderConnections(svg: SVGSVGElement, connections: WorkflowConne
   }
 }
 
-/** Lightweight update of connection path geometry — only touches d attributes, no DOM rebuild */
+/** Lightweight update of connection path geometry - only touches d attributes, no DOM rebuild */
 export function updateConnectionPaths(svg: SVGSVGElement, connections: WorkflowConnection[], nodes: WorkflowNode[], nodesLayer?: HTMLElement, zoom?: number): void {
   const hitAreas = svg.querySelectorAll('.workflow-conn-hitarea');
   const paths = svg.querySelectorAll('.workflow-conn-path');

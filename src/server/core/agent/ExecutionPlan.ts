@@ -11,13 +11,14 @@ import type { AgentRegistry } from './AgentRegistry.js';
 import { AgentRuntime } from './AgentRuntime.js';
 import { TaskDAG, type TaskNode } from './TaskDAG.js';
 import { createLogger } from '../logger.js';
+import { TASK_TIMEOUT_SEC } from '../../../shared/constants.js';
 
 export class ExecutionPlan {
   private _dag: TaskDAG;
   private _registry: AgentRegistry;
 
-  /** Maximum total execution time for the plan (10 minutes). */
-  private static TIMEOUT_MS = 600000;
+  /** Maximum total execution time for the plan, from shared constants. */
+  private static TIMEOUT_MS = TASK_TIMEOUT_SEC * 1000;
 
   constructor(dag: TaskDAG, registry: AgentRegistry) {
     this._dag = dag;
@@ -114,7 +115,7 @@ export class ExecutionPlan {
         results.set(task.id, task.result || '');
       });
 
-      await Promise.all(batchPromises);
+      await Promise.allSettled(batchPromises);
     }
 
     const elapsed = Date.now() - startedAt;
@@ -131,6 +132,8 @@ export class ExecutionPlan {
   /**
    * Find tasks whose dependencies include at least one failed or missing task.
    * These tasks can never become ready and should be marked as failed.
+   *
+   * @returns Array of orphaned tasks that depend on failed or missing tasks.
    */
   private _findOrphanedTasks(): TaskNode[] {
     const orphaned: TaskNode[] = [];

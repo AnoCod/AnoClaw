@@ -1,4 +1,4 @@
-// GrepTool — regex pattern search in file contents
+// GrepTool - regex pattern search in file contents
 // Based on Claude Code's GrepTool pattern. Uses ripgrep (rg) if available,
 // falls back to recursive manual search with Node.js fs.
 // RiskLevel: Safe (read-only).
@@ -6,6 +6,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
+import micromatch from 'micromatch';
 import { Tool } from '../Tool.js';
 import type { ToolResult } from '../../../../shared/types/tool.js';
 import { RiskLevel, InterruptBehavior } from '../../../../shared/types/tool.js';
@@ -31,9 +32,9 @@ export class GrepTool extends Tool {
 
   prompt(): string {
     return '## Grep Usage\n' +
-      '- ALWAYS use Grep for content search — NEVER invoke grep or rg via Bash\n' +
+      '- ALWAYS use Grep for content search - NEVER invoke grep or rg via Bash\n' +
       '- For open-ended searches requiring multiple rounds, use the Agent tool instead\n' +
-      '- Pattern syntax uses ripgrep (not grep) — literal braces need escaping: use `interface\\{\\}` to find `interface{}` in Go code\n' +
+      '- Pattern syntax uses ripgrep (not grep) - literal braces need escaping: use `interface\\{\\}` to find `interface{}` in Go code\n' +
       '- Files with matches output mode is fastest for broad searches\n' +
       '- Output limit: 25,000 characters max. Use head_limit parameter for narrower results. Beyond the limit, output is head/tail truncated.';
   }
@@ -183,14 +184,10 @@ export class GrepTool extends Tool {
         });
       }
 
-      // Trim and limit output
+      // Trim and let pipeline normalize via outputLimit: 25000
       let trimmed = output.trim();
       if (!trimmed) trimmed = '(no matches)';
       const wasTruncated = trimmed.length > MAX_OUTPUT_CHARS;
-      if (wasTruncated) {
-        trimmed = trimmed.slice(0, MAX_OUTPUT_CHARS) +
-          `\n... [truncated, output limit reached]`;
-      }
 
       return this.makeResult(trimmed, { startedAt, wasTruncated });
     } catch (err: unknown) {
@@ -292,7 +289,14 @@ function tryRipgrep(
       cwd: searchPath,
     });
 
-    let output = (result.stdout || '') + (result.stderr || '');
+    let output = result.stdout || '';
+    // If ripgrep failed entirely (no stdout), surface the error
+    if (!output && result.error) return null;
+    // If ripgrep produced stderr but it's just informational (e.g. "permission denied" warnings),
+    // surface it separately rather than mixing into search results
+    if (result.stderr && result.stderr.trim()) {
+      output = output.trimEnd() + '\n[stderr]\n' + result.stderr.trim();
+    }
     if (result.error) return null;
 
     if (opts.headLimit > 0 && output) {
@@ -326,7 +330,7 @@ async function manualGrep(
 ): Promise<string> {
   let regex: RegExp;
   try {
-    regex = new RegExp(pattern, 'g' + (opts.caseInsensitive ? 'i' : ''));
+    regex = new RegExp(pattern, (opts.caseInsensitive ? 'i' : ''));
   } catch {
     return `Invalid regex pattern: ${pattern}`;
   }
@@ -355,7 +359,7 @@ async function manualGrep(
       if (entry.isDirectory()) {
         await walk(fullPath);
       } else if (entry.isFile()) {
-        if (opts.glob && !simpleGlobMatch(relative, opts.glob)) continue;
+        if (opts.glob && !micromatch.isMatch(relative, opts.glob)) continue;
 
         const ext = path.extname(entry.name).toLowerCase();
         const textExts = new Set([
@@ -442,16 +446,4 @@ async function manualGrep(
   }
 
   return results.join('\n');
-}
-
-function simpleGlobMatch(filePath: string, glob: string): boolean {
-  const regexStr = glob
-    .replace(/\./g, '\\.')
-    .replace(/\*/g, '.*')
-    .replace(/\?/g, '.');
-  try {
-    return new RegExp(regexStr).test(filePath);
-  } catch {
-    return false;
-  }
 }

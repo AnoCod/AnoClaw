@@ -5,8 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Meeting</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
 :root {
   --c-canvas: #07080a;
   --c-surface: #0d0d0d;
@@ -192,6 +190,13 @@ html, body { margin:0; padding:0; height:100%; background:var(--c-canvas); color
 
 /* ── Summary ── */
 .summary-text { font-size:12px; line-height:1.7; color:var(--c-text-secondary); white-space:pre-wrap; }
+.evidence-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px; margin-bottom:10px; }
+.evidence-stat { padding:8px 10px; border:1px solid var(--c-hairline); border-radius:var(--r-sm); background:var(--c-surface-elevated); }
+.evidence-stat strong { display:block; font-size:15px; color:var(--c-text-primary); margin-bottom:2px; }
+.evidence-stat span { font-size:8px; text-transform:uppercase; letter-spacing:1px; color:var(--c-text-quaternary); }
+.evidence-terms { display:flex; flex-wrap:wrap; gap:5px; }
+.evidence-term { font-size:9px; color:var(--c-blue); background:var(--c-blue-soft); border:1px solid rgba(87,193,255,0.2); border-radius:var(--r-full); padding:2px 7px; }
+.plan-text { font-size:12px; line-height:1.65; color:var(--c-text-secondary); white-space:pre-wrap; max-height:420px; overflow:auto; padding-right:6px; }
 
 /* ── Agent grid ── */
 .agent-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:6px; margin-top:6px; }
@@ -453,8 +458,8 @@ const MeetingTable = (() => {
         ie.style.cssText=`font-size:14px;font-weight:600;color:${col};pointer-events:none;`;
         ie.textContent=ini;
         se.appendChild(ie);
-        if(p.role==='moderator'){const ri=document.createElement('span');ri.style.cssText='position:absolute;top:-4px;right:-4px;font-size:12px;pointer-events:none;';ri.textContent='👑';se.appendChild(ri)}
-        else if(isObs){const ri=document.createElement('span');ri.style.cssText='position:absolute;top:-4px;right:-4px;font-size:10px;pointer-events:none;';ri.textContent='👁';se.appendChild(ri)}
+        if(p.role==='moderator'){const ri=document.createElement('span');ri.style.cssText='position:absolute;top:-4px;right:-4px;font-size:9px;pointer-events:none;background:var(--c-accent);color:#fff;border-radius:3px;padding:1px 3px;';ri.textContent='M';se.appendChild(ri)}
+        else if(isObs){const ri=document.createElement('span');ri.style.cssText='position:absolute;top:-4px;right:-4px;font-size:9px;pointer-events:none;background:var(--c-surface-elevated);color:var(--c-text-tertiary);border-radius:3px;padding:1px 3px;';ri.textContent='O';se.appendChild(ri)}
         if(isSpeak){const pr=document.createElement('div');pr.className='meeting-table-pulse-ring';pr.style.cssText='position:absolute;inset:-4px;border-radius:50%;border:2px solid rgba(89,212,153,0.4);animation:meetingTablePulse 2s ease-in-out infinite;pointer-events:none;';se.appendChild(pr)}
         if(spokeR&&!isSpeak){const tr=document.createElement('div');tr.style.cssText='position:absolute;inset:-3px;border-radius:50%;border:2px solid rgba(87,193,255,0.5);animation:meetingTableTurnPulse 3s ease-in-out infinite;pointer-events:none;';se.appendChild(tr)}
         // Tooltip
@@ -641,7 +646,7 @@ class MeetingApp {
 
   _bindEvents() {
     this._el.querySelectorAll('.meeting-card').forEach(el => { el.onclick = ()=>this._select(el.dataset.id); });
-    const actionMap = { start: '_start', stop: '_stop', delete: '_delete' };
+    const actionMap = { start: '_start', stop: '_stop', delete: '_delete', 'execute-plan': '_executePlan' };
     this._el.querySelectorAll('[data-act]').forEach(el => {
       const action = el.dataset.act;
       if (action && actionMap[action]) el.onclick = this[actionMap[action]].bind(this);
@@ -698,13 +703,14 @@ class MeetingApp {
     let acts = '';
     if (isIdle) acts += `<button class="btn btn-sm btn-success" data-act="start"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg> Start</button>`;
     if (isRunning) acts += `<button class="btn btn-sm btn-danger" data-act="stop"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Stop</button>`;
+    if (m.status === 'completed' || m.decisionPlan) acts += `<button class="btn btn-sm btn-primary" data-act="execute-plan">Execute Plan</button>`;
     // Export with format dropdown
     acts += `<div class="export-dropdown"><button class="btn btn-sm" data-act="export"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Export ▾</button>`;
     const expOpen = this._exportOpen ? 'block' : 'none';
     acts += `<div class="export-menu" id="exportMenu" style="display:${expOpen};">`;
-    acts += `<button class="export-menu-item" data-fmt="markdown">📄 Markdown (.md)</button>`;
+    acts += `<button class="export-menu-item" data-fmt="markdown">Markdown (.md)</button>`;
     acts += `<button class="export-menu-item" data-fmt="json">{ } JSON (.json)</button>`;
-    acts += `<button class="export-menu-item" data-fmt="text">📝 Plain Text (.txt)</button>`;
+    acts += `<button class="export-menu-item" data-fmt="text">Plain Text (.txt)</button>`;
     acts += `</div></div>`;
 
     acts += `<button class="btn btn-sm btn-danger" data-act="delete"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Delete</button>`;
@@ -741,6 +747,8 @@ class MeetingApp {
         <div class="detail-goal">${esc(m.goal)}</div>
         <div class="detail-meta">
           <span class="detail-meta-tag">${esc(m.speakerMode)}</span>
+          <span class="detail-meta-tag">${esc(m.meetingStyle || 'dialectic')}</span>
+          ${m.toolUseEnabled === false ? '<span class="detail-meta-tag">tools off</span>' : '<span class="detail-meta-tag">tool evidence</span>'}
           <span class="detail-meta-tag">${m.maxRounds||2} rounds</span>
           <span class="detail-meta-tag">${(m.participantIds||[]).length} participants</span>
           ${statusBadge}
@@ -748,6 +756,29 @@ class MeetingApp {
         <div class="participant-chips">${participants}</div>
       </div><div class="detail-actions">${acts}</div></div>
     </div>${runningBar}${durationHtml}${progressHtml}`;
+
+    const ctx = m.contextBundle;
+    if (ctx) {
+      const terms = (ctx.terms || []).map(t => `<span class="evidence-term">${esc(t)}</span>`).join('');
+      const warnings = (ctx.errors || []).length
+        ? `<div style="font-size:10px;color:var(--c-yellow);margin-top:8px;">${esc((ctx.errors || []).slice(0,3).join(' | '))}</div>`
+        : '';
+      html += `<div class="section">
+        <div class="section-legend">Project Evidence</div>
+        <div class="evidence-grid">
+          <div class="evidence-stat"><strong>${ctx.fileCount || 0}</strong><span>files read</span></div>
+          <div class="evidence-stat"><strong>${ctx.grepCount || 0}</strong><span>search groups</span></div>
+          <div class="evidence-stat"><strong>${ctx.memoryCount || 0}</strong><span>memories</span></div>
+        </div>
+        ${terms ? `<div class="evidence-terms">${terms}</div>` : '<div style="font-size:10px;color:var(--c-text-quaternary);">No context terms extracted yet</div>'}
+        ${warnings}
+      </div>`;
+    } else if (m.contextEnabled !== false) {
+      html += `<div class="section">
+        <div class="section-legend">Project Evidence</div>
+        <div style="font-size:11px;color:var(--c-text-quaternary);">Read-only project context will be collected when the meeting starts.</div>
+      </div>`;
+    }
 
     // Meeting Table (collapsible)
     const tableVisible = this._showTable;
@@ -811,6 +842,35 @@ class MeetingApp {
     // Summary
     if (m.summary) {
       html += `<div class="section"><div class="section-legend">Summary</div><div class="summary-text">${esc(m.summary)}</div></div>`;
+    }
+
+    if (m.decisionPlan) {
+      const planPath = m.planFile?.path || `data/meetings/plans/${esc(m.id)}/plan.md`;
+      html += `<div class="section"><div class="section-legend">Indexed Plan</div><div style="font-size:10px;color:var(--c-text-tertiary);margin-bottom:8px;">${esc(planPath)}</div><div class="plan-text">${esc(m.decisionPlan)}</div></div>`;
+    }
+
+    if (m.debateLedger && m.debateLedger.length > 0) {
+      html += '<div class="section"><div class="section-legend">Debate Ledger</div>';
+      for (const d of m.debateLedger.slice(-8)) {
+        html += `<div style="padding:8px 0;border-bottom:1px solid var(--c-hairline);">
+          <div style="font-size:10px;color:var(--c-text-primary);margin-bottom:4px;">R${d.round} ${esc(d.phase||'')} · ${esc(d.speakerName||d.speakerId||'')}</div>
+          ${d.position ? `<div style="font-size:11px;color:var(--c-text-secondary);"><strong>Position:</strong> ${esc(d.position)}</div>` : ''}
+          ${d.challenge ? `<div style="font-size:11px;color:var(--c-yellow);"><strong>Challenge:</strong> ${esc(d.challenge)}</div>` : ''}
+          ${d.decisionImpact ? `<div style="font-size:11px;color:var(--c-green);"><strong>Impact:</strong> ${esc(d.decisionImpact)}</div>` : ''}
+        </div>`;
+      }
+      html += '</div>';
+    }
+
+    if (m.toolLedger && m.toolLedger.length > 0) {
+      html += '<div class="section"><div class="section-legend">Tool Ledger</div>';
+      for (const turn of m.toolLedger.slice(-6)) {
+        html += `<div style="font-size:10px;color:var(--c-text-tertiary);margin:6px 0 4px;">R${turn.round} ${esc(turn.phase||'')} · ${esc(turn.speakerName||turn.speakerId||'')}</div>`;
+        for (const entry of (turn.entries||[]).slice(0,3)) {
+          html += `<div style="font-size:11px;color:var(--c-text-secondary);padding:4px 0;">${esc(entry.toolName)} · ${esc(entry.query||'')}<div style="font-size:10px;color:var(--c-text-quaternary);">${esc(entry.summary||'').slice(0,220)}</div></div>`;
+        }
+      }
+      html += '</div>';
     }
 
     // Speaker analytics
@@ -917,6 +977,85 @@ class MeetingApp {
   async _start() { if (!this._selectedId) return; try { const r = await fetch(`/api/v1/meetings/${this._selectedId}/start`,{method:'POST'}); if (!r.ok) { notify('Failed'); return; } notify('Started'); this._load(); } catch { notify('Error'); } }
   async _stop() { if (!this._selectedId) return; try { await fetch(`/api/v1/meetings/${this._selectedId}/stop`,{method:'POST'}); notify('Stopped'); this._load(); } catch { notify('Error'); } }
   async _delete() { if (!this._selectedId) return; const dlg = window.anoclaw?.dialog?.confirm; if (!(dlg ? await dlg('Delete this meeting?') : confirm('Delete?'))) return; try { await fetch(`/api/v1/meetings/${this._selectedId}`,{method:'DELETE'}); this._selectedId = null; notify('Deleted'); this._load(); } catch { notify('Error'); } }
+  async _executePlan() {
+    if (!this._selectedId) return;
+    notify('Creating execution session...');
+    try {
+      const r = await fetch(`/api/v1/meetings/${this._selectedId}/plan/session`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({}),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        notify(d.error || 'Execution session failed');
+        if (d.executionPrompt) this._showExecutionPrompt(d);
+        return;
+      }
+      const handedOff = await this._handoffExecutionPrompt(d);
+      notify(handedOff ? 'Execution session ready' : 'Execution session created');
+      this._showExecutionPrompt(d, handedOff);
+      this._load();
+    } catch (err) {
+      notify('Execution setup error: ' + err.message);
+    }
+  }
+
+  _handoffExecutionPrompt(data) {
+    const sessionId = data.session?.id;
+    const prompt = data.executionPrompt || '';
+    if (!sessionId || !prompt || !window.parent || window.parent === window) return Promise.resolve(false);
+    const id = 'handoff-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    return new Promise(resolve => {
+      const timer = setTimeout(() => {
+        window.removeEventListener('message', onMessage);
+        resolve(false);
+      }, 2500);
+      const onMessage = (e) => {
+        const msg = e.data || {};
+        if (msg.type !== 'anoclaw:session:handoff-result' || msg.id !== id) return;
+        clearTimeout(timer);
+        window.removeEventListener('message', onMessage);
+        resolve(!!msg.ok);
+      };
+      window.addEventListener('message', onMessage);
+      window.parent.postMessage({
+        type: 'anoclaw:session:handoff',
+        id,
+        sessionId,
+        prompt,
+      }, '*');
+    });
+  }
+
+  _showExecutionPrompt(data, handedOff = false) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const sessionId = data.session?.id || '';
+    const planPath = data.planFile?.path || '';
+    overlay.innerHTML = `<div class="modal-card">
+      <button class="modal-close" id="planPromptClose">x</button>
+      <div class="section-legend" style="margin-bottom:14px;">Plan Execution</div>
+      <div style="font-size:11px;color:${handedOff?'var(--c-green)':'var(--c-yellow)'};margin-bottom:8px;">${handedOff?'Prompt injected into the execution session.':'Prompt created. Copy it into the execution session if automatic handoff did not occur.'}</div>
+      ${sessionId ? `<div style="font-size:11px;color:var(--c-text-secondary);margin-bottom:8px;">Session: <code>${esc(sessionId)}</code></div>` : ''}
+      ${planPath ? `<div style="font-size:11px;color:var(--c-text-secondary);margin-bottom:8px;">Plan: <code>${esc(planPath)}</code></div>` : ''}
+      <textarea class="textarea" rows="12" readonly id="planExecutionPrompt">${esc(data.executionPrompt || '')}</textarea>
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <button class="btn btn-primary" id="copyPlanPrompt">Copy Prompt</button>
+        <button class="btn" id="closePlanPrompt">Close</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    overlay.querySelector('#planPromptClose')?.addEventListener('click', close);
+    overlay.querySelector('#closePlanPrompt')?.addEventListener('click', close);
+    overlay.querySelector('#copyPlanPrompt')?.addEventListener('click', async () => {
+      const text = overlay.querySelector('#planExecutionPrompt')?.value || '';
+      try { await navigator.clipboard.writeText(text); notify('Prompt copied'); }
+      catch { notify('Copy failed'); }
+    });
+  }
   _toggleExportMenu() {
     this._exportOpen = !this._exportOpen;
     const menu = document.getElementById('exportMenu');
@@ -947,13 +1086,13 @@ class MeetingApp {
       const d = await r.json();
       if (format === 'json') {
         const blob = new Blob([JSON.stringify(d.meeting, null, 2)], {type:'application/json'});
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = d.filename || `meeting-${this._selectedId}.json`; a.click();
+        const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = d.filename || `meeting-${this._selectedId}.json`; a.click(); URL.revokeObjectURL(url);
       } else {
         const ct = format === 'text' ? 'text/plain' : 'text/markdown';
         const blob = new Blob([d.text], {type:ct});
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = d.filename || 'meeting-export.md'; a.click();
+        const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = d.filename || 'meeting-export.md'; a.click(); URL.revokeObjectURL(url);
       }
-      URL.revokeObjectURL(document.querySelector('#exportMenu')?.closest('a')?.href || ''); notify('Exported as ' + format);
+      notify('Exported as ' + format);
     } catch { notify('Export error'); }
   }
 
@@ -1072,6 +1211,16 @@ class MeetingApp {
     } }
     html += '</div></div>';
     html += '<div class="form-row-double"><div><label class="label">Mode</label><select class="select" id="fMode"><option value="round-robin">Round Robin</option><option value="moderator">Moderator</option><option value="auto">Auto</option></select></div><div><label class="label">Rounds</label><input class="input" id="fRounds" type="number" value="2" min="1" max="10"></div></div>';
+    html += '<div class="form-row-double"><div><label class="label">Meeting Style</label><select class="select" id="fMeetingStyle"><option value="dialectic">Dialectic debate</option><option value="workshop">Production workshop</option></select></div><div><label class="label">Tool Evidence</label><div class="recurring-toggle" style="height:32px;align-items:center;"><input type="checkbox" id="fToolUseEnabled" checked><label for="fToolUseEnabled" style="font-size:10px;color:var(--c-text-tertiary);">Read-only probes per turn</label></div></div></div>';
+    html += '<div class="form-row-double"><div><label class="label">Allowed Tools</label><input class="input" id="fAllowedTools" value="memory.search,Grep" placeholder="memory.search,Grep,MeetingWebSearch"></div><div><label class="label">Probe Budget</label><input class="input" id="fToolProbeBudget" type="number" value="2" min="0" max="6"></div></div>';
+    html += '<div class="form-row-double"><div><label class="label">Quality Threshold</label><input class="input" id="fMinimumQualityScore" type="number" value="70" min="0" max="100"></div><div><label class="label">Quality Gate</label><div class="recurring-toggle" style="height:32px;align-items:center;"><input type="checkbox" id="fEnforceQualityGate" checked><label for="fEnforceQualityGate" style="font-size:10px;color:var(--c-text-tertiary);">Append remediation if weak</label></div></div></div>';
+    html += '<div class="form-row"><label class="label">Probe Templates JSON</label><textarea class="textarea" id="fToolProbeTemplates" rows="2" placeholder=\'[{"toolName":"MeetingWebSearch","purpose":"Fresh market signal","params":{"query":"{{topic}} {{term}}"}}]\'></textarea></div>';
+
+    html += '<div class="form-row"><label class="label">Project Evidence</label>';
+    html += '<div class="recurring-toggle"><input type="checkbox" id="fContextEnabled" checked><label for="fContextEnabled" style="font-size:10px;color:var(--c-text-tertiary);">Collect read-only project context before discussion</label></div>';
+    html += '<input class="input" id="fContextQuery" style="margin-top:6px;" placeholder="Optional context query, defaults to topic + goal">';
+    html += '<textarea class="textarea" id="fContextFiles" rows="2" style="margin-top:6px;" placeholder="Optional extra files, one per line"></textarea>';
+    html += '</div>';
 
     // Recurring meeting toggle
     html += '<div class="form-row"><label class="label">Recurring</label>';
@@ -1158,7 +1307,31 @@ class MeetingApp {
       if (!goal) { notify('Goal required'); return; }
       if (selectedAgents.size < 2) { notify('Select 2+ participants'); return; }
       try {
-        const body = { topic, goal, participantIds: Array.from(selectedAgents), speakerMode: overlay.querySelector('#fMode')?.value||'round-robin', maxRounds: parseInt(overlay.querySelector('#fRounds')?.value||'2') };
+        const contextFiles = (overlay.querySelector('#fContextFiles')?.value||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+        const allowedToolNames = (overlay.querySelector('#fAllowedTools')?.value||'').split(',').map(s=>s.trim()).filter(Boolean);
+        let toolProbeTemplates = [];
+        const templateRaw = (overlay.querySelector('#fToolProbeTemplates')?.value||'').trim();
+        if (templateRaw) {
+          try { toolProbeTemplates = JSON.parse(templateRaw); }
+          catch { notify('Probe Templates must be valid JSON'); return; }
+          if (!Array.isArray(toolProbeTemplates)) { notify('Probe Templates JSON must be an array'); return; }
+        }
+        const body = {
+          topic, goal,
+          participantIds: Array.from(selectedAgents),
+          speakerMode: overlay.querySelector('#fMode')?.value||'round-robin',
+          maxRounds: parseInt(overlay.querySelector('#fRounds')?.value||'2'),
+          meetingStyle: overlay.querySelector('#fMeetingStyle')?.value||'dialectic',
+          toolUseEnabled: overlay.querySelector('#fToolUseEnabled')?.checked !== false,
+          allowedToolNames,
+          toolProbeBudget: parseInt(overlay.querySelector('#fToolProbeBudget')?.value||'2'),
+          toolProbeTemplates,
+          minimumQualityScore: parseInt(overlay.querySelector('#fMinimumQualityScore')?.value||'70'),
+          enforceQualityGate: overlay.querySelector('#fEnforceQualityGate')?.checked !== false,
+          contextEnabled: overlay.querySelector('#fContextEnabled')?.checked !== false,
+          contextQuery: (overlay.querySelector('#fContextQuery')?.value||'').trim(),
+          contextFiles,
+        };
         if (selectedTemplate.current) body.template = selectedTemplate.current;
         const r = await fetch('/api/v1/meetings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
         if (!r.ok) { notify('Failed'); return; }

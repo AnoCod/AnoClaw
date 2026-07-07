@@ -1,4 +1,4 @@
-// MemorySaveTool — save a memory entry
+// MemorySaveTool - save a memory entry
 // Writes to the appropriate MEMORY.md file using MemoryManager.
 
 import { Tool, RiskLevel } from '../Tool.js';
@@ -15,25 +15,23 @@ function scopeParam(s: string, sessionId?: string): string {
 export class MemorySaveTool extends Tool {
 
   static category = 'Memory & Skills';
-  static toolDescription = 'Saves information to the persistent memory system.';
+  static toolDescription = 'Saves durable facts, preferences, decisions, or lessons to memory.';
   name(): string { return 'memory_save'; }
 
   description(): string {
-    return 'Save a memory entry. If an entry with the same name and scope already exists, it will be overwritten (update). Memories persist across sessions.';
+    return 'Save a durable memory entry. Use selectively for information future agents or sessions should reuse.';
   }
 
   prompt(): string {
-    return '## MemorySave Usage\n' +
-      'Save important information the team will need later. Be selective — don\'t save trivia.\n\n' +
-      '**Scopes:**\n' +
-      '- `personal`: Information only you need (preferences, personal notes). Stored in memory/agents/<your-id>/\n' +
-      '- `team`: Information your whole team needs (architecture decisions, conventions, bug patterns). Stored in memory/team/\n' +
-      '- `project`: Cross-team project-level knowledge.\n' +
-      '- `session_personal` / `session_team`: Ephemeral — scoped to the current session only.\n\n' +
-      '**Types:** `user` (about the user), `feedback` (lessons from mistakes), `project` (work context), `reference` (pointers to external resources).\n\n' +
-      '**Naming:** Use descriptive kebab-case names. Prefer domain prefixes for team memories: `frontend-patterns`, `backend-auth-flow`, `tools-read-best-practices`.\n\n' +
-      '**When to save:** A pattern you\'ll need again. A decision others should know. A bug that cost significant time. User preference they won\'t want to repeat.\n\n' +
-      '**When NOT to save:** Single-use file paths. Temporary state. Conversation details that will be in session history.';
+    return [
+      '## memory_save Usage',
+      'Save only information with future value: user preferences, project conventions, architecture decisions, recurring bug patterns, or lessons from feedback.',
+      '',
+      'Do not save temporary task state, obvious facts already in code, single-use paths, or full conversation transcripts.',
+      '',
+      'Use team scope for shared project knowledge, personal scope for agent-specific lessons, and session scopes for temporary collaboration state.',
+      'Use descriptive kebab-case names and concise content with enough context to be useful later.',
+    ].join('\n');
   }
 
   parametersSchema(): Record<string, unknown> {

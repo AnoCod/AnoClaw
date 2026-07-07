@@ -1,4 +1,4 @@
-// WorkflowPersistence.ts — localStorage persistence + API fetch for workflow data + execution logs
+// WorkflowPersistence.ts - localStorage persistence + API fetch for workflow data + execution logs
 
 import { type WorkflowMeta, type WorkflowCanvasData, STORAGE_KEY } from './WorkflowNodeTypes.js';
 

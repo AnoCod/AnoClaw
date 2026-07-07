@@ -18,7 +18,6 @@ interface RightBarCallbacks {
 export class RightEdgeBar {
   readonly element: HTMLElement;
   private _callbacks: RightBarCallbacks;
-  private _filesBadge: HTMLElement | null = null;
   private _contextText: HTMLElement | null = null;
   private _tooltip: HTMLElement | null = null;
   private _hideTimer: ReturnType<typeof setTimeout> | null = null;
@@ -33,11 +32,7 @@ export class RightEdgeBar {
     el.className = 'cinema-edge-right';
 
     // Files icon with badge — navigates to Workspace page
-    const filesBtn = this._makeIcon(SVG_FILES, 'Files', 'files');
-    this._filesBadge = document.createElement('span');
-    this._filesBadge.className = 'cinema-edge-badge';
-    this._filesBadge.style.display = 'none';
-    filesBtn.appendChild(this._filesBadge);
+    const filesBtn = this._makeIcon(SVG_FILES, 'Files', 'files', false);
     filesBtn.addEventListener('click', (e) => { e.stopPropagation(); pageRegistry.navigateTo('workspace'); });
     el.appendChild(filesBtn);
 
@@ -51,7 +46,7 @@ export class RightEdgeBar {
     el.appendChild(this._makeIcon(SVG_TASKS, 'Tasks', 'tasks'));
 
     // Context ring icon
-    const ctxBtn = this._makeIcon('', 'Context', 'context');
+    const ctxBtn = this._makeIcon('', 'Context', 'context', false);
     this._contextText = document.createElement('span');
     this._contextText.className = 'cinema-edge-ctx-text';
     this._contextText.style.cssText = `
@@ -82,29 +77,28 @@ export class RightEdgeBar {
     return el;
   }
 
-  private _makeIcon(svg: string, title: string, name: string): HTMLElement {
+  private _makeIcon(svg: string, title: string, name: string, dispatchPanel = true): HTMLElement {
     const btn = document.createElement('button');
     btn.className = 'cinema-edge-icon';
     btn.title = title;
     btn.setAttribute('data-panel', name);
     btn.innerHTML = svg;
-    btn.addEventListener('click', () => {
-      window.dispatchEvent(new CustomEvent('right-bar-click', { detail: { panel: name } }));
-    });
+    if (dispatchPanel) {
+      btn.addEventListener('click', () => {
+        window.dispatchEvent(new CustomEvent('right-bar-click', { detail: { panel: name } }));
+      });
+    }
     return btn;
   }
 
   setFileCount(n: number): void {
-    if (this._filesBadge) {
-      this._filesBadge.textContent = String(n);
-      this._filesBadge.style.display = n > 0 ? '' : 'none';
-    }
+    void n;
   }
 
   setContextPct(pct: number): void {
     if (this._contextText) {
       this._contextText.textContent = String(Math.round(pct));
-      if (pct < 20) {
+      if (pct > 80) {
         this._contextText.style.borderColor = 'var(--color-accent-cinema)';
         this._contextText.style.color = 'var(--color-accent-cinema)';
       } else {

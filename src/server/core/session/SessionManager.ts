@@ -17,8 +17,12 @@ import type {
   Message,
   TokenBreakdown,
   JsonlEvent,
+  SessionGoal,
 } from '../../../shared/types/session.js';
-import { messageToJsonlEvents, jsonlEventsToMessages, MessageRole } from '../../../shared/types/session.js';
+import { MessageRole } from '../../../shared/types/session.js';
+import type { PermissionMode } from '../agent/PermissionModePolicy.js';
+import { normalizePermissionMode } from '../agent/PermissionModePolicy.js';
+import { messageToJsonlEvents, jsonlEventsToMessages } from '../../../shared/serialization/jsonl-converters.js';
 import { createLogger } from '../logger.js';
 import { TypedEventBus } from '../events/TypedEventBus.js';
 import type { ILogger } from '../interfaces/ILogger.js';
@@ -55,8 +59,6 @@ export class SessionManager extends EventEmitter {
   private _locks: Map<string, Promise<void>> = new Map();
   /** Per-session external message counter — incremented on appendMessage, read by AgentLoop for inter-turn injection */
   private _messageCounts: Map<string, number> = new Map();
-  /** Per-session running mode (normal/infinite) — controls whether agent stays alive after response */
-  private _runningModes: Map<string, string> = new Map();
 
   private constructor() {
     super();
@@ -68,12 +70,17 @@ export class SessionManager extends EventEmitter {
     const prev = this._locks.get(sessionId) || Promise.resolve();
     let release: () => void = () => {};
     const next = new Promise<void>((resolve) => { release = resolve; });
-    this._locks.set(sessionId, prev.then(() => next));
+    const chainTail = prev.then(() => next);
+    this._locks.set(sessionId, chainTail);
     await prev;
     try {
       return await fn();
     } finally {
       release();
+      // Clean up completed chain entry if no new callers are waiting
+      if (this._locks.get(sessionId) === chainTail) {
+        this._locks.delete(sessionId);
+      }
     }
   }
 
@@ -110,9 +117,14 @@ export class SessionManager extends EventEmitter {
     const store = SessionStore.getInstance();
     await store.initialize(sessionsDir);
 
-    const recovered = await store.recoverSessions(sessionsDir);
+    const recovered = await store.recoverSessions();
     for (const session of recovered) {
       this.sessions.set(session.id, session);
+      // Populate message count from persisted meta for inter-turn detection
+      const mc = await store.loadMessageCount(session.id);
+      if (mc > 0) {
+        this._messageCounts.set(session.id, mc);
+      }
     }
 
     // Set the first non-archived main session as active
@@ -209,7 +221,7 @@ export class SessionManager extends EventEmitter {
     if (existing && !existing.isArchived()) {
       // Sync workspace in case parent was rebound after sub-session creation
       if (existing.workspace !== parent.workspace) {
-        existing.setWorkspace(parent.workspace);
+        await this.setWorkspace(sessionId, parent.workspace);
         this.log.debug('Sub-session workspace synced from parent', { sid: sessionId, workspace: parent.workspace });
       }
       return existing;
@@ -302,6 +314,42 @@ export class SessionManager extends EventEmitter {
     if (s) s.setMetadata(key, value);
   }
 
+  /** Set a metadata key and persist meta.json. */
+  async setMetadataPersisted(sessionId: string, key: string, value: unknown): Promise<void> {
+    const s = this.sessions.get(sessionId);
+    if (!s) throw new Error(`Session '${sessionId}' not found`);
+    s.setMetadata(key, value);
+    await this._syncMeta(sessionId);
+  }
+
+  /** Store permission mode only on root sessions. Sub-sessions always resolve to Auto. */
+  async setSessionPermissionMode(sessionId: string, mode: PermissionMode): Promise<PermissionMode> {
+    const root = this.getRootSession(sessionId);
+    const effectiveMode = root.id === sessionId ? normalizePermissionMode(mode) : 'Auto';
+    if (root.id === sessionId) {
+      root.setMetadata('permissionMode', effectiveMode);
+      await this._syncMeta(root.id);
+    }
+    return effectiveMode;
+  }
+
+  getSessionPermissionMode(sessionId: string): PermissionMode {
+    const session = this.sessions.get(sessionId);
+    if (!session) return 'Auto';
+    if (!session.isRoot()) return 'AutoEdit';
+    return normalizePermissionMode(session.metadata.permissionMode);
+  }
+
+  async setSessionEffortMode(sessionId: string, enabled: boolean): Promise<boolean> {
+    const root = this.getRootSession(sessionId);
+    const effective = root.id === sessionId ? enabled : true;
+    if (root.id === sessionId) {
+      root.setMetadata('effortMode', effective);
+      await this._syncMeta(root.id);
+    }
+    return effective;
+  }
+
   /**
    * List all Sessions, optionally filtered by status.
    *
@@ -342,6 +390,19 @@ export class SessionManager extends EventEmitter {
     return parent.subSessionIds
       .map((id) => this.sessions.get(id))
       .filter((s): s is Session => s !== undefined);
+  }
+
+  /** Get all descendant sessions below a parent, depth-first. */
+  descendantSessionsOf(parentSessionId: string): Session[] {
+    const result: Session[] = [];
+    const visit = (sessionId: string): void => {
+      for (const child of this.subsessionsOf(sessionId)) {
+        result.push(child);
+        visit(child.id);
+      }
+    };
+    visit(parentSessionId);
+    return result;
   }
 
   // -----------------------------------------------------------------------
@@ -483,7 +544,7 @@ export class SessionManager extends EventEmitter {
    * @param message   — message to append
    * @throws Error if the session does not exist
    */
-  async appendMessage(sessionId: string, message: Message): Promise<void> {
+  async appendMessage(sessionId: string, message: Message, options?: { notify?: boolean }): Promise<void> {
     return this._withLock(sessionId, async () => {
     const session = this.sessions.get(sessionId);
     if (!session) {
@@ -518,11 +579,13 @@ export class SessionManager extends EventEmitter {
       session.cachedMessages.push(message);
     }
     this.emit('messageAppended', sessionId, message);
-    TypedEventBus.emit('session:message_appended', {
-      sessionId,
-      messageId: message.id,
-      role: message.role,
-    });
+    if (options?.notify !== false) {
+      TypedEventBus.emit('session:message_appended', {
+        sessionId,
+        messageId: message.id,
+        role: message.role,
+      });
+    }
     });
   }
 
@@ -537,14 +600,51 @@ export class SessionManager extends EventEmitter {
     return this._messageCounts.get(sessionId) || 0;
   }
 
-  /** Store the running mode for a session */
-  setRunningMode(sessionId: string, mode: string): void {
-    this._runningModes.set(sessionId, mode);
+  async setGoal(sessionId: string, objective: string): Promise<SessionGoal> {
+    const root = this.getRootSession(sessionId);
+    const now = new Date().toISOString();
+    const previous = root.metadata.goal as Partial<SessionGoal> | undefined;
+    const goal: SessionGoal = {
+      objective,
+      status: 'active',
+      createdAt: typeof previous?.createdAt === 'string' ? previous.createdAt : now,
+      updatedAt: now,
+      lastRunAt: typeof previous?.lastRunAt === 'string' ? previous.lastRunAt : undefined,
+    };
+    root.setMetadata('goal', goal);
+    await this._syncMeta(root.id);
+    return goal;
   }
 
-  /** Read the running mode for a session (defaults to 'normal') */
-  getRunningMode(sessionId: string): string {
-    return this._runningModes.get(sessionId) || 'normal';
+  async updateGoalStatus(sessionId: string, status: 'active' | 'paused' | 'deleted'): Promise<SessionGoal | null> {
+    const root = this.getRootSession(sessionId);
+    const existing = root.metadata.goal as SessionGoal | undefined;
+    if (!existing || !existing.objective) return null;
+    const now = new Date().toISOString();
+    const goal: SessionGoal = {
+      ...existing,
+      status,
+      updatedAt: now,
+      ...(status === 'deleted' ? { deletedAt: now } : {}),
+    };
+    root.setMetadata('goal', goal);
+    await this._syncMeta(root.id);
+    return goal;
+  }
+
+  async touchGoalRun(sessionId: string): Promise<void> {
+    const root = this.getRootSession(sessionId);
+    const existing = root.metadata.goal as SessionGoal | undefined;
+    if (!existing || existing.status !== 'active') return;
+    root.setMetadata('goal', { ...existing, lastRunAt: new Date().toISOString() });
+    await this._syncMeta(root.id);
+  }
+
+  getGoal(sessionId: string): SessionGoal | null {
+    const root = this.getRootSession(sessionId);
+    const goal = root.metadata.goal as SessionGoal | undefined;
+    if (!goal || !goal.objective || goal.status === 'deleted') return null;
+    return goal;
   }
 
   /**
@@ -739,6 +839,7 @@ export class SessionManager extends EventEmitter {
     await this._syncMeta(sessionId);
 
     this.emit('titleChanged', sessionId, title);
+    TypedEventBus.emit('session:title_changed', { sessionId, title });
     });
   }
 
@@ -750,7 +851,11 @@ export class SessionManager extends EventEmitter {
    * @param workspace — new absolute workspace path
    * @throws Error if the session does not exist
    */
-  async setWorkspace(sessionId: string, workspace: string): Promise<void> {
+  async setWorkspace(
+    sessionId: string,
+    workspace: string,
+    options: { cascade?: boolean } = {},
+  ): Promise<void> {
     return this._withLock(sessionId, async () => {
     const session = this.sessions.get(sessionId);
     if (!session) {
@@ -773,6 +878,26 @@ export class SessionManager extends EventEmitter {
 
     this.emit('workspaceChanged', sessionId, workspace);
     TypedEventBus.emit('session:workspace_changed', { sessionId, workspace });
+
+    if (options.cascade !== false) {
+      for (const child of this.descendantSessionsOf(sessionId)) {
+        if (child.workspace === workspace) continue;
+
+        child.setWorkspace(workspace);
+        await store.persistEvent(child.id, {
+          type: 'workspace_change',
+          uuid: `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+          parentUuid: child.lastEventUuid,
+          sessionId: child.id,
+          path: workspace,
+          timestamp: new Date().toISOString(),
+        });
+        await this._syncMeta(child.id);
+
+        this.emit('workspaceChanged', child.id, workspace);
+        TypedEventBus.emit('session:workspace_changed', { sessionId: child.id, workspace });
+      }
+    }
     });
   }
 

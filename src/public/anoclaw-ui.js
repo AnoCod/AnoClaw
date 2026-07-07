@@ -560,13 +560,15 @@
   if (window.parent !== window && window.parent.anoclaw && window.parent.anoclaw.ui) {
     var parentUi = window.parent.anoclaw.ui;
     window.anoclaw.ui.mount = function(slot, el, position, replace) {
-      return parentUi.mount(slot, el, position, replace);
+      var opts = (position && typeof position === 'object') ? position : { position: position, replace: replace };
+      opts.pluginName = opts.pluginName || window.__ANOCLAW_PLUGIN_NAME__ || el.dataset.pluginName;
+      return parentUi.mount(slot, el, opts, opts.replace);
     };
     window.anoclaw.ui.unmount = function(slot, el) {
       return parentUi.unmount(slot, el);
     };
     window.anoclaw.ui.unmountAll = function(slot) {
-      return parentUi.unmountAll(slot);
+      return parentUi.unmountAll(slot, window.__ANOCLAW_PLUGIN_NAME__);
     };
     window.anoclaw.ui.registerToolCard = function(name, comp) {
       return parentUi.registerToolCard(name, comp);

@@ -29,6 +29,4 @@ export class WSMessageRouter {
       handler({ type, data, sessionId });
     }
   }
-
-  clear(): void { this._handlers.clear(); }
 }

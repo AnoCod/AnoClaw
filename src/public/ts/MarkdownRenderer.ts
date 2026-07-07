@@ -17,6 +17,7 @@
  */
 
 import { highlightCode } from './components/tabs/FilePreview.js';
+import { linkifyFilePathsInHtml, markdownLinkHtml } from './utils/PathReferences.js';
 
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -41,6 +42,11 @@ const BLOCK_TAGS = new Set([
   'div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li',
   'pre', 'blockquote', 'table', 'details', 'section', 'header', 'footer', 'hr', 'br',
 ]);
+
+/** Regex matching any SAFE_TAG name, used to protect sanitized tags from the esc() pass. */
+const SAFE_TAG_RE = new RegExp(
+  `^</?(${[...SAFE_TAGS].join('|')})\\b`, 'i'
+);
 
 /** Strip dangerous attributes (on* handlers, javascript: URLs). */
 function safeAttr(name: string, value: string): string {
@@ -159,16 +165,7 @@ function renderTable(lines: string[], startIdx: number): { html: string; endIdx:
 
 /** Convert recognizable file paths in HTML text to clickable spans. */
 function linkifyPaths(html: string): string {
-  const EXTS = 'ts|tsx|js|jsx|mjs|cjs|json|yaml|yml|py|rs|go|java|c|cpp|h|hpp|cs|rb|php|swift|kt|scala|sh|bash|sql|html|css|scss|less|xml|toml|ini|cfg|conf|md|mdx|txt|log|env|svg|png|jpg|jpeg|gif|ico|vue|svelte|dart|ex|exs|proto|prisma|tf|nix|cmake|gradle|properties|lock|gitignore|dockerfile|makefile';
-  const pat =
-    `(?<![>'"])` +
-    `((?:[a-zA-Z]:[\\\\/]|~\\/|\\/[\\w\\-.]+[\\\\/])[^\\s<>"{}|^\`\\[\\]()]+\\.(?:${EXTS})` +
-    `|` +
-    `\\b[\\w\\-.]+[\\\\/][^\\s<>"{}|^\`\\[\\]()]+\\.(?:${EXTS}))` +
-    `(?::\\d+(?:-\\d+)?)?\\b`;
-  return html.replace(new RegExp(pat, 'gi'), (match) =>
-    `<span class="clickable-path" data-file-path="${esc(match)}">${match}</span>`
-  );
+  return linkifyFilePathsInHtml(html);
 }
 
 // ── Main pipeline ──
@@ -187,10 +184,8 @@ function processText(text: string): string {
   // Strategy: mark safe tags with placeholders, escape everything else, restore
   const safeTagPlaceholders: string[] = [];
   html = html.replace(/<\/?[a-zA-Z][a-zA-Z0-9]*(?:\s(?:[a-zA-Z][a-zA-Z0-9-]*(?:=(?:"[^"]*"|'[^']*'|[^\s>]+))?\s*)*)?\s*\/?>/g, (tag) => {
-    // Only protect tags that passed sanitization (they were rebuilt without dangerous bits)
-    // Tags that didn't match a SAFE_TAG in sanitizeHtml would have been escaped already.
-    // But we also need to protect the sanitized tags from esc().
-    if (/^<\/?(div|span|p|h[1-6]|ul|ol|li|code|pre|strong|em|del|b|i|u|s|br|hr|img|a|blockquote|table|thead|tbody|tr|th|td|caption|details|summary|section|header|footer|nav|main|dl|dt|dd|figure|figcaption|mark|small|sub|sup|abbr|time|kbd|var|samp)\b/i.test(tag)) {
+    // Only protect tags that passed sanitization — derive from SAFE_TAGS set
+    if (SAFE_TAG_RE.test(tag)) {
       const idx = safeTagPlaceholders.length;
       safeTagPlaceholders.push(tag);
       return `\x01${idx}\x01`;
@@ -210,20 +205,20 @@ function processText(text: string): string {
     '<span class="md-image-wrapper"><img src="$2" alt="$1" class="md-inline-image" loading="lazy" onerror="this.style.display=\'none\'"></span>');
   // Links — only where NOT inside <a> tags
   html = html.replace(/(?<!href=")(?<!>)(?<!")(?<!')\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" data-external-url="true" rel="noopener noreferrer" class="md-link">$1</a>');
+    (_match, label, target) => markdownLinkHtml(label, target));
   // Auto-link bare URLs (not already inside href or an <a> tag)
   html = html.replace(/(?<!["'=><])(https?:\/\/[^\s<>"{}|\\^`\[\]]+)(?!<\/a>)/g,
     '<a href="$1" data-external-url="true" rel="noopener noreferrer" class="md-link">$1</a>');
   // Bold+Italic first (longest match)
-  html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/\*\*\*(.+?)\*\*\*/gs, '<strong><em>$1</em></strong>');
   // Bold
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*\*(.+?)\*\*/gs, '<strong>$1</strong>');
   // Italic — after ** and *** are consumed, remaining single * pairs
-  html = html.replace(/\*([^*\n]+?)\*/g, '<em>$1</em>');
+  html = html.replace(/\*([^*]+?)\*/gs, '<em>$1</em>');
   // Strikethrough
-  html = html.replace(/~~(.+?)~~/g, '<del>$1</del>');
+  html = html.replace(/~~(.+?)~~/gs, '<del>$1</del>');
   // Inline code (don't match inside <code> tags)
-  html = html.replace(/(?<!<code[^>]*>)`([^`]+)`(?!<\/code>)/g, '<code class="md-inline-code">$1</code>');
+  html = html.replace(/(?<!<code[^>]*>)`([^`]+)`(?!<\/code>)/gs, '<code class="md-inline-code">$1</code>');
 
   // File path → clickable span (after inline code, before block processing)
   html = linkifyPaths(html);

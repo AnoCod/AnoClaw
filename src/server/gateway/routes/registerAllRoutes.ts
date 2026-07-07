@@ -3,9 +3,10 @@
 import type { ApiServer } from '../ApiServer.js';
 import { HealthRoute } from './HealthRoute.js';
 import { ToolsListRoute, CommandsListRoute, ToolsStatsRoute } from './ToolsRoute.js';
+import { ListCapabilitiesRoute, ResolveTaskRoute } from './CapabilityRoutes.js';
 import { ToolsGroupRoute } from './ToolsGroupRoute.js';
 import { GetToolDetailRoute, ToolsForAgentRoute } from './ToolsDetailRoute.js';
-import { OpenFileRoute } from './SystemRoutes.js';
+import { OpenFileRoute, StatsRoute, GetLogEntriesRoute } from './SystemRoutes.js';
 import { SystemInfoRoute } from './SystemInfoRoute.js';
 import { GetSettingsRoute, PutSettingsRoute } from './SettingsRoutes.js';
 import { GetSettingsRoute as GetFullSettingsRoute, PutSettingRoute } from './SettingsFullRoute.js';
@@ -16,6 +17,7 @@ import { InterruptSessionRoute, InterruptStatusRoute, SessionMetadataRoute, Sess
 import { BackgroundTasksRoute } from './BackgroundTaskRoute.js';
 import { MemorySearchRoute } from './MemorySearchRoute.js';
 import { MemoryExtractRoute } from './MemoryExtractRoute.js';
+import { ListMemoryRoute, CreateMemoryRoute, UpdateMemoryRoute, DeleteMemoryRoute } from './MemoryCrudRoutes.js';
 import { PluginDetailRoute } from './PluginDetailRoute.js';
 import { ListPluginStorageRoute, GetPluginStorageRoute, PutPluginStorageRoute } from './PluginStorageRoutes.js';
 import { GetPluginConfigRoute, PutPluginConfigRoute } from './PluginConfigRoutes.js';
@@ -32,19 +34,31 @@ import {
   ConvertOfficeRoute,
 } from './WorkspaceRoutes.js';
 import { EvolutionAnalyzeRoute, EvolutionApplyRoute, EvolutionStatsRoute } from './EvolutionRoute.js';
-import { AgentExecuteRoute } from './AgentExecuteRoute.js';
-import { SessionMessageRoute } from './SessionMessageRoute.js';
-import { ToolExecuteRoute } from './ToolExecuteRoute.js';
-import { SkillExecuteRoute } from './SkillExecuteRoute.js';
+import { AgentExecuteRoute, AgentExecuteRedirectRoute } from './AgentExecuteRoute.js';
+import { SessionMessageRoute, SessionMessageRedirectRoute } from './SessionMessageRoute.js';
+import { ToolExecuteRoute, ToolExecuteRedirectRoute } from './ToolExecuteRoute.js';
+import { SkillExecuteRoute, SkillExecuteRedirectRoute } from './SkillExecuteRoute.js';
 import {
   ListGroupsRoute, CreateGroupRoute, UpdateGroupRoute, DeleteGroupRoute,
   ListTemplatesRoute, GetTemplateRoute, CreateTemplateRoute, DeleteTemplateRoute, HireTemplateRoute,
 } from './TalentPoolRoutes.js';
+import { InlineSuggestRoute } from './InlineSuggestRoute.js';
+import {
+  ListSessionsRoute, CreateSessionRoute, SearchSessionsRoute,
+  GetSessionRoute, PatchSessionRoute, DeleteSessionRoute, ClearSessionsRoute,
+  SessionOverviewRoute, SessionToolStatsRoute, SessionAutoTitleRoute,
+} from './SessionRoutes.js';
+import {
+  ListAgentsRoute, GetAgentRoute, CreateAgentRoute,
+  UpdateAgentRoute, DeleteAgentRoute, AgentStatusRoute, TestAgentConnectionRoute,
+} from './AgentRoutes.js';
 
 export function registerAllRoutes(api: ApiServer): void {
   // System
   api.registerRoute(new HealthRoute());
   api.registerRoute(new SystemInfoRoute());
+  api.registerRoute(new StatsRoute());
+  api.registerRoute(new GetLogEntriesRoute());
   api.registerRoute(new OpenFileRoute());
 
   // Settings
@@ -56,12 +70,23 @@ export function registerAllRoutes(api: ApiServer): void {
   // Tools & Commands — specific paths BEFORE parameterized /tools/:name
   api.registerRoute(new ToolsListRoute());
   api.registerRoute(new CommandsListRoute());
+  api.registerRoute(new ListCapabilitiesRoute());
+  api.registerRoute(new ResolveTaskRoute());
   api.registerRoute(new ToolsGroupRoute());
   api.registerRoute(new ToolsStatsRoute());
   api.registerRoute(new GetToolDetailRoute());
   api.registerRoute(new ToolsForAgentRoute());
 
-  // Agents
+  // Agents — legacy CRUD
+  api.registerRoute(new ListAgentsRoute());
+  api.registerRoute(new CreateAgentRoute());
+  api.registerRoute(new TestAgentConnectionRoute());
+  api.registerRoute(new GetAgentRoute());
+  api.registerRoute(new UpdateAgentRoute());
+  api.registerRoute(new DeleteAgentRoute());
+  api.registerRoute(new AgentStatusRoute());
+
+  // Agents — control
   api.registerRoute(new AgentOrgTreeRoute());
   api.registerRoute(new SetAgentStateRoute());
   api.registerRoute(new ReassignAgentParentRoute());
@@ -71,7 +96,18 @@ export function registerAllRoutes(api: ApiServer): void {
   api.registerRoute(new ListAgentsFilteredRoute());
   api.registerRoute(new PreviewAgentPromptRoute());
 
-  // Sessions
+  // Sessions — legacy CRUD
+  api.registerRoute(new ListSessionsRoute());
+  api.registerRoute(new CreateSessionRoute());
+  api.registerRoute(new GetSessionRoute());
+  api.registerRoute(new PatchSessionRoute());
+  api.registerRoute(new DeleteSessionRoute());
+  api.registerRoute(new ClearSessionsRoute());
+  api.registerRoute(new SessionOverviewRoute());
+  api.registerRoute(new SessionToolStatsRoute());
+  api.registerRoute(new SessionAutoTitleRoute());
+
+  // Sessions — control
   api.registerRoute(new GetSessionTreeRoute());
   api.registerRoute(new GetSessionSubtreeRoute());
   api.registerRoute(new InterruptSessionRoute());
@@ -89,6 +125,13 @@ export function registerAllRoutes(api: ApiServer): void {
   // Memory
   api.registerRoute(new MemorySearchRoute());
   api.registerRoute(new MemoryExtractRoute());
+  api.registerRoute(new ListMemoryRoute());
+  api.registerRoute(new CreateMemoryRoute());
+  api.registerRoute(new UpdateMemoryRoute());
+  api.registerRoute(new DeleteMemoryRoute());
+
+  // Search
+  api.registerRoute(new SearchSessionsRoute());
 
   // Plugins — register specific paths BEFORE parameterized ones
   api.registerRoute(new PluginExtensionsRoute());
@@ -146,15 +189,19 @@ export function registerAllRoutes(api: ApiServer): void {
 
   // Agent — general-purpose agent execution for plugins
   api.registerRoute(new AgentExecuteRoute());
+  api.registerRoute(new AgentExecuteRedirectRoute());
 
   // Session — message injection
   api.registerRoute(new SessionMessageRoute());
+  api.registerRoute(new SessionMessageRedirectRoute());
 
   // Tool — generic tool execution
   api.registerRoute(new ToolExecuteRoute());
+  api.registerRoute(new ToolExecuteRedirectRoute());
 
   // Skill — load and execute skills
   api.registerRoute(new SkillExecuteRoute());
+  api.registerRoute(new SkillExecuteRedirectRoute());
 
   // Talent Pool
   api.registerRoute(new ListGroupsRoute());
@@ -166,4 +213,22 @@ export function registerAllRoutes(api: ApiServer): void {
   api.registerRoute(new CreateTemplateRoute());
   api.registerRoute(new DeleteTemplateRoute());
   api.registerRoute(new HireTemplateRoute());
+
+  // Inline code completion
+  api.registerRoute(new InlineSuggestRoute());
+
+  // Non-declarative endpoints (not backed by RouteHandler — for discovery only)
+  const R = (m: string, p: string, d: string, c?: string) => api.registerNonDeclarativeEndpoint(m, p, d, c);
+  R('GET', '/api/v1/endpoints', 'Discover all API endpoints (this list)', 'System');
+  R('GET', '/api/v1/sessions/:id/messages', 'Read session message history', 'Sessions');
+  R('POST', '/api/v1/sessions/:id/messages', 'Send message (triggers Agent execution)', 'Sessions');
+  // Memory routes (legacy MemoryRoutes class)
+  R('GET', '/api/v1/memory', 'List all memory entries', 'Memory');
+  R('POST', '/api/v1/memory', 'Create a new memory entry', 'Memory');
+  R('PATCH', '/api/v1/memory/:id', 'Update a memory entry', 'Memory');
+  R('DELETE', '/api/v1/memory/:id', 'Delete a memory entry', 'Memory');
+  // Plugin management (dispatched via _dispatchPluginRoute)
+  R('GET', '/api/v1/plugins', 'List all plugins', 'Plugins');
+  R('POST', '/api/v1/plugins/reload', 'Reload a plugin', 'Plugins');
+  R('DELETE', '/api/v1/plugins/:name', 'Uninstall plugin', 'Plugins');
 }

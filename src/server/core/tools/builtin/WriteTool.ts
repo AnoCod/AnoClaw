@@ -1,4 +1,4 @@
-// WriteTool — writes content to a file on the local filesystem
+// WriteTool - writes content to a file on the local filesystem
 // Creates parent directories automatically if they don't exist.
 // RiskLevel: Medium (destructive, but reversible via git).
 
@@ -8,6 +8,7 @@ import { Tool } from '../Tool.js';
 import type { ToolResult } from '../../../../shared/types/tool.js';
 import { RiskLevel, InterruptBehavior } from '../../../../shared/types/tool.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
+import { atomicWriteFile, resolvePath } from './FileUtils.js';
 
 export class WriteTool extends Tool {
 
@@ -25,7 +26,7 @@ export class WriteTool extends Tool {
 
   prompt(): string {
     return '## Write Usage\n' +
-      '- Prefer Edit for modifying existing files — it only sends the diff\n' +
+      '- Prefer Edit for modifying existing files - it only sends the diff\n' +
       '- Only use Write for new files or complete rewrites\n' +
       '- NEVER create documentation files (*.md) or README files unless explicitly requested by the user\n' +
       '- Do not create planning, decision, or analysis documents unless asked';
@@ -82,21 +83,22 @@ export class WriteTool extends Tool {
     const startedAt = Date.now();
 
     try {
-      const resolved = path.isAbsolute(filePath)
-        ? filePath
-        : path.resolve(ctx.workspace, filePath);
+      const resolved = resolvePath(filePath, ctx.workspace);
 
-      // Create parent directories
-      const dir = path.dirname(resolved);
-      await fs.mkdir(dir, { recursive: true });
+      // Check if file exists already - warn about overwriting with empty content
+      let existed = false;
+      try {
+        await fs.stat(resolved);
+        existed = true;
+      } catch { /* file doesn't exist yet */ }
 
-      // Write file
-      await fs.writeFile(resolved, content, 'utf-8');
+      await atomicWriteFile(resolved, content, 'utf-8');
 
-      return this.makeResult(
-        `Successfully wrote ${content.length} chars to ${resolved}`,
-        { startedAt },
-      );
+      let msg = `Successfully wrote ${content.length} chars to ${resolved}`;
+      if (existed && content.length === 0) {
+        msg += '\n[Warning: file was overwritten with empty content]';
+      }
+      return this.makeResult(msg, { startedAt });
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       return this.makeError(`Write failed: ${errMsg}`);

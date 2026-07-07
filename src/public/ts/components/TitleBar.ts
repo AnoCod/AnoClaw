@@ -3,6 +3,7 @@
 // Replaces old titlebar + NavigationDock combination.
 
 import { WSConnectionState } from '../viewmodel/WSClient.js';
+import { slotRegistry } from '../SlotRegistry.js';
 
 interface PageEntry {
   page: string;
@@ -16,6 +17,11 @@ const KERNEL_PAGES: PageEntry[] = [
   { page: 'memory', label: 'Memory' },
   { page: 'settings', label: 'Settings' },
 ];
+
+const SVG_WIN_MINIMIZE = `<svg width="10" height="10" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>`;
+const SVG_WIN_MAXIMIZE = `<svg width="10" height="10" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>`;
+const SVG_WIN_RESTORE = `<svg width="10" height="10" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8V5h11v11h-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><rect x="5" y="8" width="11" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>`;
+const SVG_WIN_CLOSE = `<svg width="10" height="10" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>`;
 
 /**
  * Cinema topbar: page name label (left), [titlebar-left slot], status dot + PAGES dropdown (right),
@@ -105,6 +111,7 @@ export class TitleBar {
     leftSlot.setAttribute('data-slot', 'titlebar-left');
     leftSlot.style.cssText = 'display:flex;align-items:center;gap:8px;margin-left:12px;-webkit-app-region:no-drag;';
     el.appendChild(leftSlot);
+    slotRegistry._onSlotReady('titlebar-left');
 
     const statusGroup = document.createElement('div');
     statusGroup.className = 'topbar-status';
@@ -129,33 +136,34 @@ export class TitleBar {
     rightSlot.setAttribute('data-slot', 'titlebar-right');
     rightSlot.style.cssText = 'display:flex;align-items:center;gap:6px;margin-right:8px;-webkit-app-region:no-drag;';
     el.appendChild(rightSlot);
+    slotRegistry._onSlotReady('titlebar-right');
 
     // Window controls (Electron frameless)
     const winControls = document.createElement('div');
     winControls.className = 'win-controls';
 
-    const makeBtn = (cls: string, label: string, title: string, handler: () => void): HTMLButtonElement => {
+    const makeBtn = (cls: string, icon: string, title: string, handler: () => void): HTMLButtonElement => {
       const btn = document.createElement('button');
       btn.className = `win-btn ${cls}`;
-      btn.textContent = label;
+      btn.innerHTML = icon;
       btn.title = title;
       btn.addEventListener('click', handler);
       winControls.appendChild(btn);
       return btn;
     };
 
-    makeBtn('win-minimize', '─', '最小化', () => {
+    makeBtn('win-minimize', SVG_WIN_MINIMIZE, 'Minimize', () => {
       (window as any).electronAPI?.windowMinimizeAnimate();
     });
-    const maxBtn = makeBtn('win-maximize', '□', '最大化', () => (window as any).electronAPI?.windowMaximize());
-    makeBtn('win-close', '×', '关闭', () => (window as any).electronAPI?.windowClose());
+    const maxBtn = makeBtn('win-maximize', SVG_WIN_MAXIMIZE, 'Maximize', () => (window as any).electronAPI?.windowMaximize());
+    makeBtn('win-close', SVG_WIN_CLOSE, 'Close', () => (window as any).electronAPI?.windowClose());
 
     // Listen for maximize/unmaximize from Electron main process to toggle button icon
     const api = (window as any).electronAPI;
     if (api?.onMaximizeChange) {
       api.onMaximizeChange((maximized: boolean) => {
-        maxBtn.textContent = maximized ? '⊗' : '□';
-        maxBtn.title = maximized ? '还原' : '最大化';
+        maxBtn.innerHTML = maximized ? SVG_WIN_RESTORE : SVG_WIN_MAXIMIZE;
+        maxBtn.title = maximized ? 'Restore' : 'Maximize';
       });
     }
 

@@ -14,9 +14,9 @@
 /** Entry in the shared context store — written by one agent, read by others. */
 export interface ContextEntry {
   key: string;
-  value: string;
+  value: unknown;
   writtenBy: string; // agentId
-  timestamp: string;
+  timestamp: number; // Date.now() for TTL eviction
 }
 
 /**
@@ -29,6 +29,8 @@ export class SharedContextStore {
   private _stores = new Map<string, Map<string, ContextEntry>>();
   /** Max entries per team before oldest are evicted */
   private static MAX_ENTRIES = 500;
+  /** Default TTL in milliseconds (5 minutes). Entries older than this are evicted on read. */
+  private static DEFAULT_TTL_MS = 5 * 60 * 1000;
 
   static getInstance(): SharedContextStore {
     if (!this._instance) this._instance = new SharedContextStore();
@@ -36,7 +38,7 @@ export class SharedContextStore {
   }
 
   /** Write a value to the shared context. */
-  set(scope: string, key: string, value: string, agentId: string): void {
+  set(scope: string, key: string, value: unknown, agentId: string): void {
     if (!this._stores.has(scope)) {
       this._stores.set(scope, new Map());
     }
@@ -46,7 +48,7 @@ export class SharedContextStore {
       key,
       value,
       writtenBy: agentId,
-      timestamp: new Date().toISOString(),
+      timestamp: Date.now(),
     });
 
     // Evict oldest entries while over limit
@@ -56,22 +58,26 @@ export class SharedContextStore {
     }
   }
 
-  /** Read a value. Returns null if not found. */
+  /** Read a value. Returns null if not found or expired. */
   get(scope: string, key: string): ContextEntry | null {
-    return this._stores.get(scope)?.get(key) ?? null;
+    const entry = this._stores.get(scope)?.get(key) ?? null;
+    if (entry && this._isExpired(entry)) {
+      this._stores.get(scope)?.delete(key);
+      return null;
+    }
+    return entry;
   }
 
-  /** Get all entries in a scope, ordered by timestamp (oldest first). */
+  /** Get all entries in a scope, ordered by timestamp (oldest first). Expired entries are evicted. */
   getAll(scope: string): ContextEntry[] {
     const store = this._stores.get(scope);
     if (!store) return [];
-    return [...store.values()].sort(
-      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-    );
+    this._evictExpired(store);
+    return [...store.values()].sort((a, b) => a.timestamp - b.timestamp);
   }
 
-  /** Get entries written after a specific timestamp. */
-  getSince(scope: string, since: string): ContextEntry[] {
+  /** Get entries written after a specific timestamp. Expired entries are evicted. */
+  getSince(scope: string, since: number): ContextEntry[] {
     return this.getAll(scope).filter(e => e.timestamp > since);
   }
 
@@ -80,8 +86,25 @@ export class SharedContextStore {
     this._stores.delete(scope);
   }
 
-  /** Number of entries in a scope. */
+  /** Number of entries in a scope (after TTL eviction). */
   size(scope: string): number {
-    return this._stores.get(scope)?.size ?? 0;
+    const store = this._stores.get(scope);
+    if (!store) return 0;
+    this._evictExpired(store);
+    return store.size;
+  }
+
+  /** Check if an entry has exceeded its TTL. */
+  private _isExpired(entry: ContextEntry): boolean {
+    return Date.now() - entry.timestamp > SharedContextStore.DEFAULT_TTL_MS;
+  }
+
+  /** Remove all expired entries from a store. */
+  private _evictExpired(store: Map<string, ContextEntry>): void {
+    for (const [key, entry] of store) {
+      if (this._isExpired(entry)) {
+        store.delete(key);
+      }
+    }
   }
 }

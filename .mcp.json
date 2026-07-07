@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "browser-use": {
+      "command": "npx",
+      "args": ["-y", "@anthropic/browser-use-mcp"],
+      "env": {
+        "BROWSER_USE_HEADLESS": "false"
+      }
+    },
+    "obsidian": {
+      "type": "http",
+      "url": "http://127.0.0.1:27123/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${env:OBSIDIAN_MCP_TOKEN}"
+      }
+    }
+  }
+}

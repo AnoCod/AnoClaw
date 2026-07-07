@@ -1,4 +1,4 @@
-// ReadTool — reads a file from the local filesystem
+// ReadTool - reads a file from the local filesystem
 // Supports offset/limit for partial reads, images, PDFs, and Jupyter notebooks.
 // Based on Claude Code's FileReadTool pattern.
 
@@ -18,20 +18,22 @@ const MAX_OUTPUT_CHARS = 80000;
 export class ReadTool extends Tool {
 
   static category = 'File & Code';
-  static toolDescription = 'Reads a file from the local filesystem.';
+  static toolDescription = 'Reads local files or directory listings for grounded context.';
   name(): string {
     return 'Read';
   }
 
   description(): string {
-    return 'Reads a file from the local filesystem. Max file size: 256 KB. Max output: 80,000 characters (head/tail truncated if exceeded — use offset/limit for large files). Supports reading specific line ranges.';
+    return 'Read a local file or list a directory. Use offset and limit for large files. Prefer this over shell commands for file inspection.';
   }
 
   prompt(): string {
-    return '## Read Usage\n' +
-      'Your primary tool for examining text and code files. Reads file contents as text.\n\n' +
-      '**Large files:** Use `offset` and `limit` parameters to read in chunks. Max 80,000 chars per read — if a file exceeds this, the result is head+tail truncated. For files you suspect are large, read with offset=0, limit=100 first to gauge size.\n\n' +
-      'Only read files relevant to your current task. Don\'t read files you\'ve already read in this turn unless they changed.';
+    return [
+      '## Read Usage',
+      'Use Read to inspect files before proposing or making changes.',
+      'Read only relevant files and avoid rereading unchanged content in the same turn.',
+      'For large files, use offset and limit to inspect the relevant region.',
+    ].join('\n');
   }
 
   parametersSchema(): Record<string, unknown> {
@@ -56,7 +58,7 @@ export class ReadTool extends Tool {
         pages: {
           type: 'string',
           description:
-            'Page range for PDF files (e.g., "1-5", "3", "10-20"). Only applicable to PDF files. Maximum 20 pages per request.',
+            'NOT YET IMPLEMENTED. Page range for PDF files (e.g., "1-5", "3", "10-20"). This parameter is accepted but has no effect - PDF parsing is not currently supported.',
         },
       },
       required: ['file_path'],
@@ -115,7 +117,7 @@ export class ReadTool extends Tool {
       } catch (err: unknown) {
         const errMsg = (err as NodeJS.ErrnoException)?.code === 'ENOENT'
           ? `File not found: ${filePath}`
-          : `Cannot access file: ${filePath} — ${(err as Error).message}`;
+          : `Cannot access file: ${filePath} - ${(err as Error).message}`;
         return this.makeError(errMsg);
       }
 
@@ -140,7 +142,7 @@ export class ReadTool extends Tool {
       // Handle different file types
       const ext = path.extname(resolved).toLowerCase();
 
-      // Image files — note that we've read them but can't render inline here
+      // Image files - note that we've read them but can't render inline here
       if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'].includes(ext)) {
         return this.makeResult(
           `[Image file: ${path.basename(resolved)}]\nSize: ${formatBytes(stat.size)}\nPath: ${resolved}`,
@@ -170,13 +172,8 @@ export class ReadTool extends Tool {
         content = lines.slice(start, end).join('\n');
       }
 
-      // Apply character limit
+      // Apply character limit - pipeline normalizes via outputLimit: 80000
       const wasTruncated = content.length > MAX_OUTPUT_CHARS;
-      if (wasTruncated) {
-        const totalLen = content.length;
-        content = content.slice(0, MAX_OUTPUT_CHARS) +
-          `\n... [truncated, ${totalLen} chars total. Use offset/limit to read more]`;
-      }
 
       return this.makeResult(content, { startedAt, wasTruncated });
     } catch (err: unknown) {

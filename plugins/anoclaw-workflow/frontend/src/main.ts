@@ -1,4 +1,4 @@
-// main.ts — Workflow plugin v3.0 entry point
+// main.ts - Workflow plugin v3.0 entry point
 // Full visual workflow editor: canvas with drag/pan/zoom, 14 node types, connections, palette, list,
 // undo/redo, execution logs viewer, keyboard shortcuts, node grouping, import/export, search, snap-to-grid
 
@@ -101,84 +101,84 @@ class WorkflowPage {
 
       const ctrl = e.ctrlKey || e.metaKey;
 
-      // Ctrl+Z — Undo
+      // Ctrl+Z - Undo
       if (ctrl && e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
         this._undo();
         return;
       }
 
-      // Ctrl+Shift+Z or Ctrl+Y — Redo
+      // Ctrl+Shift+Z or Ctrl+Y - Redo
       if ((ctrl && e.key === 'z' && e.shiftKey) || (ctrl && e.key === 'y')) {
         e.preventDefault();
         this._redo();
         return;
       }
 
-      // Ctrl+C — Copy selected nodes
+      // Ctrl+C - Copy selected nodes
       if (ctrl && e.key === 'c' && (this._selectedNodeId || this._selectedNodeIds.size > 0)) {
         e.preventDefault();
         this._copySelectedNodes();
         return;
       }
 
-      // Ctrl+V — Paste
+      // Ctrl+V - Paste
       if (ctrl && e.key === 'v' && this._clipboard) {
         e.preventDefault();
         this._pasteNodes();
         return;
       }
 
-      // Ctrl+D — Duplicate
+      // Ctrl+D - Duplicate
       if (ctrl && e.key === 'd' && (this._selectedNodeId || this._selectedNodeIds.size > 0)) {
         e.preventDefault();
         this._duplicateSelectedNode();
         return;
       }
 
-      // Delete/Backspace — Delete selected node or connection
+      // Delete/Backspace - Delete selected node or connection
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
         this._deleteSelected();
         return;
       }
 
-      // Ctrl+S — Save (prevent default)
+      // Ctrl+S - Save (prevent default)
       if (ctrl && e.key === 's') {
         e.preventDefault();
         this._showToast('Auto-saved');
         return;
       }
 
-      // Ctrl+F — Search nodes
+      // Ctrl+F - Search nodes
       if (ctrl && e.key === 'f') {
         e.preventDefault();
         this._toggleSearchOverlay();
         return;
       }
 
-      // Ctrl+G — Group selected nodes
+      // Ctrl+G - Group selected nodes
       if (ctrl && e.key === 'g') {
         e.preventDefault();
         this._groupSelectedNodes();
         return;
       }
 
-      // Ctrl+E — Export workflow
+      // Ctrl+E - Export workflow
       if (ctrl && e.key === 'e') {
         e.preventDefault();
         this._exportWorkflow();
         return;
       }
 
-      // L — Toggle logs panel
+      // L - Toggle logs panel
       if (e.key === 'l' && !ctrl) {
         e.preventDefault();
         this._toggleLogsPanel();
         return;
       }
 
-      // Escape — Deselect all / close overlays
+      // Escape - Deselect all / close overlays
       if (e.key === 'Escape') {
         this._selectedNodeId = null;
         this._selectedConnId = null;
@@ -189,7 +189,7 @@ class WorkflowPage {
         return;
       }
 
-      // Ctrl+A — Select all
+      // Ctrl+A - Select all
       if (ctrl && e.key === 'a') {
         e.preventDefault();
         this._selectAllNodes();
@@ -764,7 +764,7 @@ class WorkflowPage {
         return;
       }
 
-      // Check for delete button or textarea — allow default behavior
+      // Check for delete button or textarea - allow default behavior
       if ((e.target as HTMLElement).closest('.workflow-node-delete') ||
           (e.target as HTMLElement).closest('textarea') ||
           (e.target as HTMLElement).closest('select') ||
@@ -783,7 +783,7 @@ class WorkflowPage {
         return;
       }
 
-      // Select then start drag — push state for undo on drag end
+      // Select then start drag - push state for undo on drag end
       this._selectedNodeId = nodeId;
       this._selectedConnId = null;
       this._selectedNodeIds.clear();
@@ -1029,7 +1029,7 @@ class WorkflowPage {
     }
   }
 
-  /** Lightweight selection update — toggle class without full DOM rebuild */
+  /** Lightweight selection update - toggle class without full DOM rebuild */
   private _updateNodeSelection(): void {
     this._nodesLayer.querySelectorAll('.workflow-node').forEach(el => {
       const id = el.getAttribute('data-node-id');

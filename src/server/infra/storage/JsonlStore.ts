@@ -102,6 +102,7 @@ export class JsonlStore extends EventEmitter {
     event: JsonlEvent,
     opts?: { skipMetaUpdate?: boolean },
   ): Promise<void> {
+    await this._withMetaLock(sessionId, async () => {
     const dir = sessionDir(sessionId);
     await fsp.mkdir(dir, { recursive: true });
 
@@ -160,10 +161,11 @@ export class JsonlStore extends EventEmitter {
 
     // Update meta (increment message count) — skip for high-frequency stream events
     if (!opts?.skipMetaUpdate) {
-      await this.incrementMetaMessageCount(sessionId);
+      await this._doIncrementMetaMessageCount(sessionId);
     }
 
     this.emit('eventAppended', sessionId, event);
+    });
   }
 
   // -----------------------------------------------------------------------
@@ -244,7 +246,37 @@ export class JsonlStore extends EventEmitter {
 
   async updateMeta(sessionId: string, updates: Partial<SessionMeta>): Promise<void> {
     await this._withMetaLock(sessionId, async () => {
-    // Read raw file to preserve all fields (SessionNode + SessionMeta coexist in meta.json)
+      await this._atomicUpdateMeta(sessionId, (current) => ({ ...current, ...updates }));
+    });
+  }
+
+  /** Public: increment message count with its own lock (for callers outside appendEvent). */
+  async incrementMetaMessageCount(sessionId: string): Promise<void> {
+    await this._withMetaLock(sessionId, async () => {
+      await this._doIncrementMetaMessageCount(sessionId);
+    });
+  }
+
+  /** Internal: increment message count. Caller must hold _withMetaLock. */
+  private async _doIncrementMetaMessageCount(sessionId: string): Promise<void> {
+    try {
+      await this._atomicUpdateMeta(sessionId, (current) => {
+        current.messageCount = ((current.messageCount as number) || 0) + 1;
+        current.lastActiveAt = new Date().toISOString();
+        if (!current.sessionId) current.sessionId = sessionId;
+        if (!current.createdAt) current.createdAt = new Date().toISOString();
+        return current;
+      });
+    } catch {
+      // Non-critical — allow append to succeed even if meta update fails
+    }
+  }
+
+  /** Read-modify-write meta.json with a transform function. Caller must hold _withMetaLock. */
+  private async _atomicUpdateMeta(
+    sessionId: string,
+    transform: (current: Record<string, unknown>) => Record<string, unknown>,
+  ): Promise<void> {
     const metaPath = path.join(sessionDir(sessionId), META_FILE);
     let current: Record<string, unknown>;
     try {
@@ -253,38 +285,10 @@ export class JsonlStore extends EventEmitter {
     } catch {
       current = {};
     }
-    const merged = { ...current, ...updates, sessionId: current.sessionId || sessionId };
-    this.metaCache.set(sessionId, merged as unknown as SessionMeta);
-
+    const updated = transform(current);
+    this.metaCache.set(sessionId, updated as unknown as SessionMeta);
     await fsp.mkdir(sessionDir(sessionId), { recursive: true });
-    await fsp.writeFile(metaPath, JSON.stringify(merged, null, 2), 'utf-8');
-    });
-  }
-
-  /** Internal: increment message count and touch lastActiveAt */
-  private async incrementMetaMessageCount(sessionId: string): Promise<void> {
-    await this._withMetaLock(sessionId, async () => {
-    try {
-      const metaPath = path.join(sessionDir(sessionId), META_FILE);
-      let current: Record<string, unknown>;
-      try {
-        const raw = await fsp.readFile(metaPath, 'utf-8');
-        current = JSON.parse(raw) as Record<string, unknown>;
-      } catch {
-        current = {};
-      }
-      current.messageCount = ((current.messageCount as number) || 0) + 1;
-      current.lastActiveAt = new Date().toISOString();
-      if (!current.sessionId) current.sessionId = sessionId;
-      if (!current.createdAt) current.createdAt = new Date().toISOString();
-
-      // Update cache with whatever we have
-      this.metaCache.set(sessionId, current as unknown as SessionMeta);
-      await fsp.writeFile(metaPath, JSON.stringify(current, null, 2), 'utf-8');
-    } catch {
-      // Non-critical — allow append to succeed even if meta update fails
-    }
-    });
+    await fsp.writeFile(metaPath, JSON.stringify(updated, null, 2), 'utf-8');
   }
 
   /** Invalidate the meta cache for a session (called after writeSessionMeta) */
@@ -345,12 +349,13 @@ export class JsonlStore extends EventEmitter {
       await fsp.unlink(filePath);
     }
 
+    // Read meta before clearing caches
+    const meta = await this.getMeta(sessionId);
+
     // Clear caches for this session
     this.dropSession(sessionId);
 
     // Update meta status to archived
-    const meta = await this.getMeta(sessionId);
-    // TODO: we might want a dedicated SessionStatus field on meta; for now we just touch lastActiveAt
     meta.lastActiveAt = new Date().toISOString();
     await this.updateMeta(sessionId, meta);
 
@@ -415,16 +420,32 @@ export class JsonlStore extends EventEmitter {
     const filePath = shardPath(sessionId, shardIdx);
     try {
       const stat = await fsp.stat(filePath);
-      let lineCount = 0;
-
-      const stream = fs.createReadStream(filePath, 'utf-8');
-      const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-
-      // Count lines without storing all data
-      for await (const _line of rl) {
-        lineCount++;
+      // Fast path: small files — read buffer and count \n bytes
+      if (stat.size <= 16 * 1024 * 1024) {
+        const buf = await fsp.readFile(filePath);
+        let lineCount = 0;
+        for (let i = 0; i < buf.length; i++) {
+          if (buf[i] === 10) lineCount++; // '\n' === 10
+        }
+        return { lineCount, byteSize: stat.size };
       }
-
+      // Fallback for very large files: streaming read with buffer counting
+      let lineCount = 0;
+      const fd = await fsp.open(filePath, 'r');
+      try {
+        const chunkSize = 64 * 1024;
+        const buf = Buffer.alloc(chunkSize);
+        let bytesRead: number;
+        do {
+          const result = await fd.read(buf, 0, chunkSize, null);
+          bytesRead = result.bytesRead;
+          for (let i = 0; i < bytesRead; i++) {
+            if (buf[i] === 10) lineCount++;
+          }
+        } while (bytesRead > 0);
+      } finally {
+        await fd.close();
+      }
       return { lineCount, byteSize: stat.size };
     } catch {
       return { lineCount: 0, byteSize: 0 };

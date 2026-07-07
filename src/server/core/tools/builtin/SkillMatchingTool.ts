@@ -1,4 +1,4 @@
-// SkillMatchingTool.ts — find skills matching a task description using semantic similarity
+// SkillMatchingTool.ts - find skills matching a task description using semantic similarity
 // Calls SkillManager.matchingSkills() which uses hybrid embedding+keyword scoring.
 
 import { Tool, RiskLevel } from '../Tool.js';
@@ -9,27 +9,28 @@ import { SkillManager } from '../../skills/SkillManager.js';
 export class SkillMatchingTool extends Tool {
 
   static category = 'Memory & Skills';
-  static toolDescription = 'Find skills relevant to a task using semantic matching.';
+  static toolDescription = 'Finds loaded skills relevant to the current task.';
 
   name(): string { return 'skill_matching'; }
 
   description(): string {
-    return 'Find skills that match a description of your current task. Uses semantic similarity (embedding) when available, falling back to keyword matching. Returns ranked results with scores.';
+    return 'Find skills matching a short task description. Use before complex or unfamiliar work to discover specialized workflows.';
   }
 
   prompt(): string {
-    return '## Skill Matching\n'
-      + 'Call this with a **short description of your current task** to find relevant skills. '
-      + 'Describe what you are about to do — e.g. "debug a WebSocket connection issue" or "add a new REST API endpoint". '
-      + 'The system returns ranked skill names with match scores. High scores (>0.5) indicate strong relevance.\n\n'
-      + '**Tool name:** skill_matching\n';
+    return [
+      '## skill_matching Usage',
+      'Call with a short description of the task you are about to perform.',
+      'Use the ranked results to decide whether to inspect and invoke a skill.',
+      'Do not invoke low-relevance skills just because they exist.',
+    ].join('\n');
   }
 
   parametersSchema(): Record<string, unknown> {
     return {
       type: 'object',
       properties: {
-        task: { type: 'string', description: 'Short description of your current task — what you need to do.' },
+        task: { type: 'string', description: 'Short description of your current task - what you need to do.' },
       },
       required: ['task'],
     };
@@ -37,13 +38,15 @@ export class SkillMatchingTool extends Tool {
 
   riskLevel(): RiskLevel { return RiskLevel.Safe; }
 
+  isReadOnly(): boolean { return true; }
+
   async execute(params: Record<string, unknown>, ctx: ExecutionContext): Promise<ToolResult> {
     const task = String(params.task || '').trim();
     if (!task) return this.makeError('Missing "task" parameter. Describe what you need to do.');
 
     try {
       const sm = SkillManager.getInstance();
-      const skills = await sm.matchingSkills(task);
+      const skills = await sm.matchAndTrack(task);
 
       if (skills.length === 0) {
         return this.makeResult(`No matching skills found for: "${task}"`);

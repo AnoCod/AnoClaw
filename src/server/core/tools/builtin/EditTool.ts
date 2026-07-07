@@ -1,4 +1,4 @@
-// EditTool — performs exact string replacements in files
+// EditTool - performs exact string replacements in files
 // Based on Claude Code's FileEditTool pattern.
 // RiskLevel: Low (reversible via git, single-string replacement).
 
@@ -8,6 +8,7 @@ import { Tool } from '../Tool.js';
 import type { ToolResult } from '../../../../shared/types/tool.js';
 import { RiskLevel, InterruptBehavior } from '../../../../shared/types/tool.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
+import { atomicWriteFile, resolvePath } from './FileUtils.js';
 
 export class EditTool extends Tool {
 
@@ -27,11 +28,11 @@ export class EditTool extends Tool {
 
   prompt(): string {
     return '## Edit Usage\n' +
-      '- ALWAYS prefer Edit over Write for modifying existing files — Edit only sends the diff\n' +
+      '- ALWAYS prefer Edit over Write for modifying existing files - Edit only sends the diff\n' +
       '- Only use Write to create new files or for complete rewrites\n' +
       '- You must Read the file before editing\n' +
-      '- Match existing code style exactly — consistency over your preference\n' +
-      '- Touch ONLY lines relevant to the change — do not fix adjacent formatting';
+      '- Match existing code style exactly - consistency over your preference\n' +
+      '- Touch ONLY lines relevant to the change - do not fix adjacent formatting';
   }
 
   parametersSchema(): Record<string, unknown> {
@@ -95,9 +96,7 @@ export class EditTool extends Tool {
     const startedAt = Date.now();
 
     try {
-      const resolved = path.isAbsolute(filePath)
-        ? filePath
-        : path.resolve(ctx.workspace, filePath);
+      const resolved = resolvePath(filePath, ctx.workspace);
 
       // Read existing content
       let original: string;
@@ -139,8 +138,8 @@ export class EditTool extends Tool {
         result = original.slice(0, idx) + newString + original.slice(idx + oldString.length);
       }
 
-      // Write back
-      await fs.writeFile(resolved, result, 'utf-8');
+      // Write back atomically
+      await atomicWriteFile(resolved, result, 'utf-8');
 
       const changedChars = Math.abs(result.length - original.length);
       return this.makeResult(

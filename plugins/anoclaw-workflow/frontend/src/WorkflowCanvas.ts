@@ -1,4 +1,4 @@
-// WorkflowCanvas.ts — Pan/zoom, node drag, port connection controller, undo/redo, snap-to-grid
+// WorkflowCanvas.ts - Pan/zoom, node drag, port connection controller, undo/redo, snap-to-grid
 
 import { type WorkflowNode, type WorkflowConnection, MIN_ZOOM, MAX_ZOOM, GRID_SIZE, nextConnId } from './WorkflowNodeTypes.js';
 import { getPortPosition, renderConnections, updateConnectionPaths } from './WorkflowRendering.js';
@@ -108,7 +108,7 @@ export class WorkflowCanvasController {
           const newY = parseInt(el.style.top) || 0;
           this._cb.onNodeMoved(_nd2.nodeId, newX, newY);
         } else {
-          // Element was removed during drag — persist model position if available
+          // Element was removed during drag - persist model position if available
           const node = this._cb.getNodes().find(n => n.id === _nd2.nodeId);
           if (node) this._cb.onNodeMoved(node.id, node.x, node.y);
         }
@@ -318,7 +318,7 @@ export class WorkflowCanvasController {
           }
         }
       } else {
-        // Dropped on empty canvas — disconnect existing connection on this port
+        // Dropped on empty canvas - disconnect existing connection on this port
         this._cb.onConnectionDisconnect(
           this._connectDragging.sourceNodeId,
           this._connectDragging.sourcePortIndex,

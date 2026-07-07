@@ -8,7 +8,7 @@ import * as path from 'path';
 import { Dirent } from 'fs';
 import { Session } from './Session.js';
 import { JsonlStore } from '../../infra/storage/JsonlStore.js';
-import { DEFAULT_MAIN_AGENT_ID } from '../../../shared/constants.js';
+import { selectRunnableAgent } from '../agent/AgentSelection.js';
 import { createLogger } from '../logger.js';
 import type {
   SessionNode,
@@ -32,6 +32,10 @@ const META_FILE = 'meta.json';
 /** Prevent path traversal in session IDs */
 function sanitise(id: string): string {
   return id.replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+}
+
+function fallbackAgentId(): string {
+  return selectRunnableAgent().agentId || '';
 }
 
 // ---------------------------------------------------------------------------
@@ -91,7 +95,7 @@ export class SessionStore extends EventEmitter {
    *
    * Repairs partially-written sessions (missing meta.json, empty dirs).
    */
-  async recoverSessions(_sessionsDir: string): Promise<Session[]> {
+  async recoverSessions(): Promise<Session[]> {
     const sessions: Session[] = [];
     const dir = this.sessionsDir;
 
@@ -189,7 +193,7 @@ export class SessionStore extends EventEmitter {
         sessionId,
         parentSessionId: first.parentSessionId,
         level: first.parentSessionId ? 1 : 0,
-        agentId: first.agentId,
+        agentId: first.agentId || fallbackAgentId(),
         type: (first.parentSessionId ? 'Sub' : 'Main') as SessionType,
         status: 'Idle' as SessionStatus, // Conservative — assume idle
         title: `Recovered session ${sessionId}`,
@@ -228,7 +232,7 @@ export class SessionStore extends EventEmitter {
         sessionId: parsed.sessionId || sessionId,
         parentSessionId: parsed.parentSessionId || null,
         level: parsed.level ?? 0,
-        agentId: parsed.agentId || DEFAULT_MAIN_AGENT_ID,
+        agentId: parsed.agentId || fallbackAgentId(),
         type: parsed.type || 'Main',
         status: parsed.status || 'Active',
         title: parsed.title || 'Untitled',
@@ -241,7 +245,6 @@ export class SessionStore extends EventEmitter {
     } catch {
       return null;
     }
-    createLogger('anochat.system').debug('Session meta read', { sid: sessionId });
   }
 
   /** Write session metadata to meta.json */
@@ -265,6 +268,12 @@ export class SessionStore extends EventEmitter {
   ): Promise<void> {
     await this.jsonlStore.updateMeta(sessionId, updates);
     createLogger('anochat.system').debug('Session meta updated', { sid: sessionId, fields: Object.keys(updates) });
+  }
+
+  /** Read messageCount from persisted meta (fast — no full history load). */
+  async loadMessageCount(sessionId: string): Promise<number> {
+    const meta = await this.jsonlStore.getMeta(sessionId);
+    return meta.messageCount ?? 0;
   }
 
   // -----------------------------------------------------------------------
@@ -345,9 +354,8 @@ export class SessionStore extends EventEmitter {
     }
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      // Also clear _file-history and other leading-underscore dirs
       await fsp.rm(path.join(dir, entry.name), { recursive: true, force: true });
-      if (!entry.name.startsWith('_')) count++;
+      count++;
     }
     createLogger('anochat.system').info('All sessions deleted', { count });
     return count;

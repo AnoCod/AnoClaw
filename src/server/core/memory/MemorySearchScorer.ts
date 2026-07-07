@@ -120,7 +120,7 @@ async function hybridScore(
   const bm25Scores = computeBM25Scores(entries, queryTerms);
 
   // 3. Vector scoring (gracefully unavailable)
-  const vectorScores = tryVectorScores(entries, query);
+  const vectorScores = await tryVectorScoresAsync(entries, query);
 
   // If BM25 finds no term matches AND no vector layer, fall back to n-gram fuzzy
   // (handles typos like "configuraton" for "configuration")
@@ -145,7 +145,7 @@ async function hybridScore(
   const decays = computeRecencyDecay(entries);
 
   // 7. Frequency boost
-  const freqBoosts = tryFrequencyBoost(entries);
+  const freqBoosts = await tryFrequencyBoostAsync(entries);
 
   // 8. Composite score: relevance * 0.7 + recency * 0.2 + frequency * 0.1
   const results: ScoredEntry[] = entries.map((entry, i) => {
@@ -239,27 +239,37 @@ function tryVectorScores(
 ): number[] | null {
   try {
     // Lazy import — EmbeddingService may not exist yet
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const esModule = require('../../infra/embedding/EmbeddingService.js');
-    const EmbeddingService = esModule.EmbeddingService;
-    if (!EmbeddingService) return null;
+    // Note: EmbeddingService path is relative to infra/ — we import dynamically
+    return null; // Graceful: vector scoring requires async service init; skip for now
+  } catch {
+    return null;
+  }
+}
 
-    const service = EmbeddingService.getInstance?.() || EmbeddingService.instance;
-    if (!service) return null;
-    if (typeof service.isReady === 'function' && !service.isReady()) return null;
+async function tryVectorScoresAsync(
+  entries: MemoryEntry[],
+  query: string,
+): Promise<number[] | null> {
+  try {
+    const esModule = await import('./embedding/EmbeddingService.js');
+    const service = esModule.EmbeddingService.getInstance();
+    if (!service || !service.isReady()) return null;
 
     // Generate query embedding
-    const queryEmbedding = service.embedSync?.(query);
-    if (!queryEmbedding || !Array.isArray(queryEmbedding)) return null;
+    const queryEmbedding = await service.embed(query);
+    if (!queryEmbedding || queryEmbedding.length === 0) return null;
+
+    // Check if any entry has a pre-computed embedding
+    const anyEmbedding = entries.some(e => (e as any).embedding);
+    if (!anyEmbedding) return null; // No embeddings available for entries
 
     // Compute cosine similarity against each entry
     return entries.map(entry => {
-      // Prefer direct embedding field on entry (e.g. from MemoryDatabase),
-      // fall back to service lookup by entry name
-      const emb =
-        (entry as any).embedding || service.getDocEmbedding?.(entry.name);
-      if (!emb || !Array.isArray(emb)) return 0;
-      return cosineSimilarity(queryEmbedding, emb);
+      const emb = (entry as any).embedding;
+      if (!emb || !Array.isArray(emb) && !(emb instanceof Float32Array)) return 0;
+      const arrA = Array.from(queryEmbedding) as number[];
+      const arrB = Array.from(emb) as number[];
+      return cosineSimilarity(arrA, arrB);
     });
   } catch {
     return null;
@@ -326,17 +336,24 @@ function tryFrequencyBoost(entries: MemoryEntry[]): number[] {
     return counts.map(c => ((c ?? 0) / maxCount) * FREQ_BOOST_MAX);
   }
 
-  // Layer 2: Try MemoryDatabase for access counts
+  // Layer 2: Try MemoryDatabase for access counts — use dynamic import
+  return entries.map(() => 0); // Graceful: sync path returns 0, async path in caller
+}
+
+async function tryFrequencyBoostAsync(entries: MemoryEntry[]): Promise<number[]> {
+  const syncResult = tryFrequencyBoost(entries);
+  // If sync path found actual counts (not all zeros), return them
+  if (syncResult.some(c => c > 0)) return syncResult;
+
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const dbModule = require('./MemoryDatabase.js');
+    const dbModule = await import('./storage/MemoryDatabase.js');
     const MemoryDatabase = dbModule.MemoryDatabase;
     if (!MemoryDatabase) return entries.map(() => 0);
 
-    const db = MemoryDatabase.getInstance?.() || MemoryDatabase.instance;
-    if (!db || typeof db.getAccessCount !== 'function') return entries.map(() => 0);
+    const db = MemoryDatabase.getInstance?.();
+    if (!db || typeof (db as any).getAccessCount !== 'function') return entries.map(() => 0);
 
-    const dbCounts = entries.map(e => db.getAccessCount(e.name) || 0);
+    const dbCounts = entries.map(e => (db as any).getAccessCount(e.name) || 0);
     const maxCount = Math.max(...dbCounts, 1);
     return dbCounts.map(c => (c / maxCount) * FREQ_BOOST_MAX);
   } catch {

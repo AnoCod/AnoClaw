@@ -28,6 +28,14 @@ const GHOST_R = 8;
 
 interface SimNode { id: string; x: number; y: number; r: number; agent?: AgentConfig; isGhost?: boolean; parentId?: string; addRole?: string; }
 interface SimLink { source: string | SimNode; target: string | SimNode; cls?: string; }
+interface AgentToolMeta {
+  name: string;
+  group: string;
+  displayName: string;
+  description: string;
+  source?: 'builtin' | 'plugin' | 'external';
+  pluginName?: string;
+}
 
 export class AgentsPage implements Page {
   name = 'agents';
@@ -74,9 +82,13 @@ export class AgentsPage implements Page {
   constructor() {
     this.container = document.createElement('div');
     this.container.className = 'ag-page';
-    this.container.style.cssText = 'position:relative;flex:1;overflow:hidden;background:#0d0d11;';
+    this.container.style.cssText = 'position:relative;flex:1;overflow:hidden;';
     this.container.setAttribute('data-page', 'agents');
     this._initTalentPool();
+
+    // Auto-refresh talent pool on external changes
+    const sse = App.getInstance().sseClient;
+    sse.on('talent_pool_changed', () => this._talentPool?.reload());
   }
 
   private _initTalentPool(): void {
@@ -155,8 +167,14 @@ export class AgentsPage implements Page {
 
     const agents = App.getInstance().agentVM.agents;
     if (!agents || agents.length === 0) {
-      this.container.innerHTML = `<div class="ag-empty"><span>No agents configured</span><button class="ag-empty-btn" id="ag-create-first">Create Agent</button></div>`;
-      this.container.querySelector('#ag-create-first')!.addEventListener('click', () => this._openEditPanel(null));
+      this.container.innerHTML = `
+        <div class="ag-empty">
+          <span class="ag-empty-title">No CEO configured</span>
+          <span class="ag-empty-desc">Create a CEO/MainAgent first, then add managers and members under it.</span>
+          <button class="ag-empty-btn" id="ag-create-first">Create CEO</button>
+        </div>
+      `;
+      this.container.querySelector('#ag-create-first')!.addEventListener('click', () => this._openEditPanel(this._firstAgentDraft()));
       return;
     }
 
@@ -448,27 +466,51 @@ export class AgentsPage implements Page {
           e.stopPropagation();
           const parent = App.getInstance().agentVM.agents.find(a => a.id === n.parentId);
           if (parent) {
-            // Build a partial agent config with role and parent pre-set
-            const partial: any = {
-              role: n.addRole || 'Member',
-              parentAgentId: n.parentId,
-              name: `New ${n.addRole || 'Member'}`,
-              model: parent.model || '',
-            };
+            const partial = this._childDraft(parent, n.addRole || 'Member');
             this._createDefaults = { parentAgentId: n.parentId!, role: n.addRole || 'Member' };
             this._openEditPanel(partial);
           }
         });
       } else {
         const style = n.agent ? (ROLE_STYLES[n.agent.role] || DEFAULT_STYLE) : DEFAULT_STYLE;
+        const issue = n.agent ? App.getInstance().agentVM.agentRunnableProblem(n.agent) : null;
+        if (issue) {
+          g.classList.add('ag-node-g--issue');
+          const titleEl = document.createElementNS(svgNS, 'title');
+          titleEl.textContent = issue;
+          g.appendChild(titleEl);
+        }
+        const ring = document.createElementNS(svgNS, 'circle');
+        ring.setAttribute('r', String(style.r + 7));
+        ring.setAttribute('class', 'ag-node-focus-ring');
+        ring.setAttribute('stroke', style.stroke);
+        g.appendChild(ring);
+
         const circle = document.createElementNS(svgNS, 'circle');
         circle.setAttribute('r', String(style.r));
         circle.setAttribute('class', `ag-node ag-node-${n.agent?.role || 'Member'}`);
         circle.setAttribute('fill', style.fill);
         circle.setAttribute('stroke', style.stroke);
         circle.setAttribute('filter', `url(#glow-${n.agent?.role || 'Member'})`);
-        if (n.id === this._selectedId) circle.classList.add('selected');
+        if (n.id === this._selectedId) {
+          circle.classList.add('selected');
+          g.classList.add('ag-node-g--selected');
+        }
         g.appendChild(circle);
+        if (issue) {
+          const badge = document.createElementNS(svgNS, 'circle');
+          badge.setAttribute('class', 'ag-node-issue-badge');
+          badge.setAttribute('cx', String(style.r - 2));
+          badge.setAttribute('cy', String(-style.r + 2));
+          badge.setAttribute('r', '6');
+          g.appendChild(badge);
+          const marker = document.createElementNS(svgNS, 'text');
+          marker.setAttribute('class', 'ag-node-issue-mark');
+          marker.setAttribute('x', String(style.r - 2));
+          marker.setAttribute('y', String(-style.r + 5));
+          marker.textContent = '!';
+          g.appendChild(marker);
+        }
         const lbl = document.createElementNS(svgNS, 'text');
         lbl.setAttribute('class', 'ag-node-label'); lbl.setAttribute('text-anchor', 'middle');
         lbl.setAttribute('dy', String(style.r + 15));
@@ -479,7 +521,12 @@ export class AgentsPage implements Page {
 
         // Click → open edit panel
         g.style.cursor = 'pointer';
-        g.addEventListener('click', (e) => { e.stopPropagation(); this._selectNode(n.id); if (n.agent) this._openEditPanel(n.agent); });
+        g.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this._selectNode(n.id);
+          this._pulseNode(n.id);
+          if (n.agent) this._openEditPanel(n.agent);
+        });
         // Right-click → context menu
         g.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); this._selectNode(n.id); this._showContextMenu(e.clientX, e.clientY, n.agent || null); });
       }
@@ -520,7 +567,8 @@ export class AgentsPage implements Page {
       g.setAttribute('transform', `translate(${n.x},${n.y})`);
       // Update selection state
       if (!n.isGhost) {
-        const circle = g.querySelector('circle');
+        g.classList.toggle('ag-node-g--selected', n.id === this._selectedId);
+        const circle = g.querySelector('.ag-node');
         if (circle) circle.classList.toggle('selected', n.id === this._selectedId);
       }
     }
@@ -594,6 +642,8 @@ export class AgentsPage implements Page {
   // ═══ Zoom / Pan ══════════════════════════════════════════
 
   private _onWheel = (e: WheelEvent): void => {
+    // Don't zoom if scrolling inside the edit panel
+    if ((e.target as HTMLElement).closest('.ag-edit-panel')) return;
     e.preventDefault();
     // Zoom toward cursor position
     const rect = this.container.getBoundingClientRect();
@@ -628,17 +678,38 @@ export class AgentsPage implements Page {
     this._updatePositions();
   }
 
+  private _pulseNode(id: string): void {
+    if (!this._nodeGroup) return;
+    const group = this._nodeGroup.querySelector<SVGGElement>(`.ag-node-g[data-node-id="${CSS.escape(id)}"]`);
+    if (!group) return;
+    group.classList.remove('ag-node-g--pulsing');
+    void group.getBoundingClientRect();
+    group.classList.add('ag-node-g--pulsing');
+    window.setTimeout(() => group.classList.remove('ag-node-g--pulsing'), 520);
+  }
+
   // ═══ Edit panel ══════════════════════════════════════════
 
-  private _toolMetaCache: Promise<{ tools: Array<{ name: string; group: string; displayName: string; description: string }>; groups: string[] }> | null = null;
+  private _toolMetaCache: Promise<{ tools: AgentToolMeta[]; groups: string[] }> | null = null;
 
-  private _fetchToolMeta(): Promise<{ tools: Array<{ name: string; group: string; displayName: string; description: string }>; groups: string[] }> {
+  private _fetchToolMeta(): Promise<{ tools: AgentToolMeta[]; groups: string[] }> {
     if (this._toolMetaCache) return this._toolMetaCache;
     this._toolMetaCache = fetch('/api/v1/tools').then(r => r.json()).then(d => ({
       tools: d.tools || [],
       groups: d.groups || [],
     })).catch(() => { this._toolMetaCache = null; return { tools: [], groups: [] }; });
     return this._toolMetaCache;
+  }
+
+  private _toolSource(tool: AgentToolMeta): 'builtin' | 'plugin' | 'external' {
+    return tool.source || 'builtin';
+  }
+
+  private _toolSourceRank(tool: AgentToolMeta): number {
+    const source = this._toolSource(tool);
+    if (source === 'builtin') return 0;
+    if (source === 'plugin') return 1;
+    return 2;
   }
 
   private async _openEditPanel(agent: AgentConfig | null): Promise<void> {
@@ -649,7 +720,6 @@ export class AgentsPage implements Page {
 
     const panel = document.createElement('div');
     panel.className = 'ag-edit-panel';
-    panel.style.top = '60px'; panel.style.right = '20px';
     panel.innerHTML = '<div class="ag-edit-body" style="text-align:center;padding:40px;">Loading tools...</div>';
     this.container.appendChild(panel);
     this._editPanel = panel;
@@ -663,55 +733,147 @@ export class AgentsPage implements Page {
     const title = isNew ? 'Create Agent' : `Edit: ${agent!.name}`;
     const nameVal = agent?.name || '';
     const roleVal = agent?.role || 'Member';
+    const providerVal = agent?.provider || 'openai-compatible';
+    const apiUrlVal = agent?.apiUrl || (providerVal === 'ollama' ? 'http://localhost:11434' : 'https://api.openai.com');
     const modelVal = agent?.model || '';
+    const contextWindowVal = agent?.contextWindow || 128000;
+    const maxTurnsVal = agent?.maxTurns ?? 0;
+    const temperatureVal = agent?.temperature ?? 0.7;
     const promptVal = agent?.agentPrompt || '';
     const allowedSet = new Set(agent?.allowedTools || []);
 
-    // Group tools
-    const byGroup = new Map<string, typeof meta.tools>();
-    for (const t of meta.tools) {
-      const g = t.group || 'Other';
-      if (!byGroup.has(g)) byGroup.set(g, []);
-      byGroup.get(g)!.push(t);
-    }
-    const groupOrder = meta.groups.length > 0 ? meta.groups : [...byGroup.keys()];
+    // Build checkboxes HTML — grid layout, full descriptions
+    const selectedToolCount = meta.tools.filter(t => allowedSet.has(t.name)).length;
+    const sortedTools = [...meta.tools].sort((a, b) => {
+      const sourceDiff = this._toolSourceRank(a) - this._toolSourceRank(b);
+      if (sourceDiff !== 0) return sourceDiff;
+      const pluginDiff = (a.pluginName || '').localeCompare(b.pluginName || '');
+      if (pluginDiff !== 0) return pluginDiff;
+      const groupDiff = (a.group || 'Other').localeCompare(b.group || 'Other');
+      if (groupDiff !== 0) return groupDiff;
+      return (a.displayName || a.name).localeCompare(b.displayName || b.name);
+    });
 
-    // Build checkboxes HTML
-    let toolsHtml = '';
-    for (const g of groupOrder) {
-      const items = byGroup.get(g);
-      if (!items || items.length === 0) continue;
-      toolsHtml += `<fieldset class="ag-tool-group"><legend>${this._esc(g)}</legend>`;
-      for (const t of items) {
-        const checked = allowedSet.has(t.name) ? ' checked' : '';
-        toolsHtml += `<label class="ag-tool-item"><input type="checkbox" value="${this._esc(t.name)}"${checked}> <span class="ag-tool-name">${this._esc(t.displayName || t.name)}</span><span class="ag-tool-desc">${this._esc(t.description).slice(0, 60)}</span></label>`;
-      }
-      toolsHtml += '</fieldset>';
+    const nativeTools = sortedTools.filter(t => this._toolSource(t) !== 'plugin');
+    const pluginGroups = new Map<string, AgentToolMeta[]>();
+    for (const tool of sortedTools) {
+      if (this._toolSource(tool) !== 'plugin') continue;
+      const pluginName = tool.pluginName || 'Unknown Plugin';
+      if (!pluginGroups.has(pluginName)) pluginGroups.set(pluginName, []);
+      pluginGroups.get(pluginName)!.push(tool);
+    }
+
+    const renderTool = (t: AgentToolMeta): string => {
+      const checked = allowedSet.has(t.name) ? ' checked' : '';
+      const displayName = t.displayName || t.name;
+      const group = t.group || 'Other';
+      const description = t.description || '';
+      const sourceLabel = this._toolSource(t) === 'plugin' ? (t.pluginName || 'Plugin') : 'Native';
+      const searchText = `${displayName} ${t.name} ${group} ${description} ${sourceLabel}`.toLowerCase();
+      return `<label class="ag-tool-card ag-tool-row${checked ? ' ag-tool-card--on' : ''}" data-search="${this._esc(searchText)}">
+        <input type="checkbox" value="${this._esc(t.name)}"${checked}>
+        <span class="ag-tool-check" aria-hidden="true"></span>
+        <span class="ag-tool-card-main">
+          <span class="ag-tool-card-name">${this._esc(displayName)}</span>
+          <span class="ag-tool-card-desc">${this._esc(description)}</span>
+        </span>
+        <span class="ag-tool-card-group">${this._esc(group)}</span>
+      </label>`;
+    };
+
+    const renderSection = (title: string, tools: AgentToolMeta[], kind: string): string => {
+      if (tools.length === 0) return '';
+      return `<section class="ag-tool-section" data-kind="${this._esc(kind)}">
+        <div class="ag-tool-section-head">
+          <span class="ag-tool-section-title">${this._esc(title)}</span>
+          <span class="ag-tool-section-count">${tools.length} tools</span>
+        </div>
+        <div class="ag-tool-section-items">${tools.map(renderTool).join('')}</div>
+      </section>`;
+    };
+
+    let toolsHtml = renderSection('Native Tools', nativeTools, 'builtin');
+    for (const [pluginName, tools] of pluginGroups) {
+      toolsHtml += renderSection(`Plugin: ${pluginName}`, tools, 'plugin');
     }
 
     panel.innerHTML = `
       <div class="ag-edit-header">
-        <h3>${title}</h3>
+        <h3>${this._esc(title)}</h3>
         <button class="ag-edit-close">&times;</button>
       </div>
       <div class="ag-edit-body">
-        <label>Name</label>
-        <input type="text" id="ag-edit-name" value="${this._esc(nameVal)}" placeholder="Agent name">
-        <label>Role</label>
-        <select id="ag-edit-role">
-          <option value="MainAgent" ${roleVal === 'MainAgent' ? 'selected' : ''}>CEO</option>
-          <option value="Manager" ${roleVal === 'Manager' ? 'selected' : ''}>Manager</option>
-          <option value="Member" ${roleVal === 'Member' ? 'selected' : ''}>Member</option>
-        </select>
-        <label>Model</label>
-        <input type="text" id="ag-edit-model" value="${this._esc(modelVal)}" placeholder="e.g. claude-sonnet-4-6">
-        <label>System Prompt</label>
-        <textarea id="ag-edit-prompt" rows="4" placeholder="Agent system prompt">${this._esc(promptVal)}</textarea>
-        <label>Allowed Tools</label>
-        <div class="ag-tool-groups">${toolsHtml}</div>
+        <div class="ag-edit-form">
+          <div class="ag-field">
+            <label for="ag-edit-name">Name</label>
+            <input type="text" id="ag-edit-name" value="${this._esc(nameVal)}" placeholder="Agent name">
+          </div>
+          <div class="ag-field">
+            <label for="ag-edit-role">Role</label>
+            <select id="ag-edit-role">
+              <option value="MainAgent" ${roleVal === 'MainAgent' ? 'selected' : ''}>CEO</option>
+              <option value="Manager" ${roleVal === 'Manager' ? 'selected' : ''}>Manager</option>
+              <option value="Member" ${roleVal === 'Member' ? 'selected' : ''}>Member</option>
+            </select>
+          </div>
+          <div class="ag-field">
+            <label for="ag-edit-provider">Provider</label>
+            <select id="ag-edit-provider">
+              <option value="openai-compatible" ${providerVal !== 'ollama' ? 'selected' : ''}>OpenAI-compatible</option>
+              <option value="ollama" ${providerVal === 'ollama' ? 'selected' : ''}>Ollama</option>
+            </select>
+          </div>
+          <div class="ag-field">
+            <label for="ag-edit-api-url">API URL</label>
+            <input type="text" id="ag-edit-api-url" value="${this._esc(apiUrlVal)}" placeholder="https://api.openai.com">
+          </div>
+          <div class="ag-field">
+            <label for="ag-edit-api-key">API Key</label>
+            <input type="password" id="ag-edit-api-key" value="" placeholder="${isNew ? 'Required for cloud providers' : 'Leave blank to keep existing key'}" autocomplete="off">
+            ${!isNew && agent?.apiKey ? '<div class="ag-secret-note">A saved key exists. Enter a new key only when rotating it.</div>' : ''}
+          </div>
+          <div class="ag-field">
+            <label for="ag-edit-model">Model</label>
+            <input type="text" id="ag-edit-model" value="${this._esc(modelVal)}" placeholder="e.g. claude-sonnet-4-6">
+          </div>
+          <div class="ag-field ag-field-grid">
+            <span>
+              <label for="ag-edit-context">Context</label>
+              <input type="number" id="ag-edit-context" value="${contextWindowVal}" min="1000" step="1000">
+            </span>
+            <span>
+              <label for="ag-edit-max-turns">Max turns</label>
+              <input type="number" id="ag-edit-max-turns" value="${maxTurnsVal}" min="0" step="1">
+            </span>
+            <span>
+              <label for="ag-edit-temperature">Temp</label>
+              <input type="number" id="ag-edit-temperature" value="${temperatureVal}" min="0" max="2" step="0.1">
+            </span>
+          </div>
+          <div class="ag-field ag-field-prompt">
+            <label for="ag-edit-prompt">System Prompt</label>
+            <textarea id="ag-edit-prompt" rows="10" placeholder="Agent system prompt">${this._esc(promptVal)}</textarea>
+          </div>
+        </div>
+        <section class="ag-tools-panel" aria-label="Allowed Tools">
+          <div class="ag-tools-head">
+            <div>
+              <label for="ag-tool-search">Allowed Tools</label>
+              <span class="ag-tools-count"><span id="ag-tool-count">${selectedToolCount}</span> / ${meta.tools.length} selected</span>
+            </div>
+            <div class="ag-tools-actions">
+              <button type="button" class="ag-tools-select-visible">Select visible</button>
+              <button type="button" class="ag-tools-clear">Clear</button>
+            </div>
+          </div>
+          <input type="search" id="ag-tool-search" class="ag-tool-search" placeholder="Search tools by name, group, or description">
+          <div class="ag-tool-list">${toolsHtml}</div>
+          <div class="ag-tool-empty" hidden>No tools match this search.</div>
+        </section>
       </div>
       <div class="ag-edit-footer">
         ${!isNew ? '<button class="ag-edit-btn-delete">Delete</button>' : ''}
+        <button class="ag-edit-btn-test" type="button">Test</button>
         <button class="ag-edit-btn-cancel">Cancel</button>
         <button class="ag-edit-btn-save">Save</button>
       </div>
@@ -719,12 +881,133 @@ export class AgentsPage implements Page {
 
     panel.querySelector('.ag-edit-close')!.addEventListener('click', () => this._closeEditPanel());
     panel.querySelector('.ag-edit-btn-cancel')!.addEventListener('click', () => this._closeEditPanel());
+    panel.querySelector('.ag-edit-btn-test')!.addEventListener('click', () => this._testConnection());
     panel.querySelector('.ag-edit-btn-save')!.addEventListener('click', () => this._saveEdit());
+    this._wireProviderDefaults(panel, isNew);
     if (!isNew) {
       panel.querySelector('.ag-edit-btn-delete')!.addEventListener('click', () => this._deleteEdit());
     }
+    this._wireToolPicker(panel);
     const onEsc = (ev: KeyboardEvent) => { if (ev.key === 'Escape') { this._closeEditPanel(); document.removeEventListener('keydown', onEsc); } };
     document.addEventListener('keydown', onEsc);
+  }
+
+  private _wireProviderDefaults(panel: HTMLElement, isNew: boolean): void {
+    const providerEl = panel.querySelector<HTMLSelectElement>('#ag-edit-provider');
+    const apiUrlEl = panel.querySelector<HTMLInputElement>('#ag-edit-api-url');
+    const modelEl = panel.querySelector<HTMLInputElement>('#ag-edit-model');
+    if (!providerEl || !apiUrlEl || !modelEl) return;
+
+    providerEl.addEventListener('change', () => {
+      if (providerEl.value === 'ollama') {
+        if (!apiUrlEl.value || apiUrlEl.value === 'https://api.openai.com') apiUrlEl.value = 'http://localhost:11434';
+        if (isNew && !modelEl.value) modelEl.value = 'llama3.1';
+      } else if (!apiUrlEl.value || apiUrlEl.value === 'http://localhost:11434') {
+        apiUrlEl.value = 'https://api.openai.com';
+      }
+    });
+  }
+
+  private _childDraft(parent: AgentConfig, role: string): any {
+    return {
+      role,
+      parentAgentId: parent.id,
+      name: `New ${role}`,
+      provider: parent.provider || 'openai-compatible',
+      apiUrl: parent.apiUrl || '',
+      model: parent.model || '',
+      contextWindow: parent.contextWindow || 128000,
+      maxTurns: parent.maxTurns ?? 0,
+      temperature: parent.temperature ?? 0.7,
+    };
+  }
+
+  private _firstAgentDraft(): any {
+    return {
+      name: 'CEO',
+      role: 'MainAgent',
+      provider: 'openai-compatible',
+      apiUrl: 'https://api.openai.com',
+      model: '',
+      contextWindow: 128000,
+      maxTurns: 0,
+      temperature: 0.7,
+      agentPrompt: 'You are the CEO of this AnoClaw workspace. Understand the user goal, coordinate specialist agents when useful, and keep the work moving with clear, verified outcomes.',
+    };
+  }
+
+  private _rootAgentDraft(): any {
+    const mainAgent = App.getInstance().agentVM.agents.find(a => a.role === 'MainAgent');
+    return mainAgent ? this._childDraft(mainAgent, 'Manager') : this._firstAgentDraft();
+  }
+
+  private _hierarchyError(role: string, parentAgentId: string | null): string | null {
+    const agents = App.getInstance().agentVM.agents;
+    if (role === 'MainAgent') return parentAgentId ? 'CEO/MainAgent cannot have a parent' : null;
+    if (!parentAgentId) return `${role} requires a parent agent`;
+    const parent = agents.find(a => a.id === parentAgentId);
+    if (!parent) return 'Parent agent is not configured';
+    if (role === 'Manager' && parent.role !== 'MainAgent') return 'Managers must report directly to the CEO';
+    if (role === 'Member' && parent.role !== 'Manager') return 'Members must report to a Manager';
+    return null;
+  }
+
+  private _wireToolPicker(panel: HTMLElement): void {
+    const cards = Array.from(panel.querySelectorAll<HTMLLabelElement>('.ag-tool-card'));
+    const sections = Array.from(panel.querySelectorAll<HTMLElement>('.ag-tool-section'));
+    const checks = Array.from(panel.querySelectorAll<HTMLInputElement>('.ag-tool-card input[type="checkbox"]'));
+    const countEl = panel.querySelector<HTMLElement>('#ag-tool-count');
+    const searchInput = panel.querySelector<HTMLInputElement>('#ag-tool-search');
+    const emptyEl = panel.querySelector<HTMLElement>('.ag-tool-empty');
+
+    const updateCount = () => {
+      const selected = checks.filter(cb => cb.checked).length;
+      if (countEl) countEl.textContent = String(selected);
+      for (const card of cards) {
+        const cb = card.querySelector<HTMLInputElement>('input[type="checkbox"]');
+        card.classList.toggle('ag-tool-card--on', !!cb?.checked);
+      }
+    };
+
+    const applyFilter = () => {
+      const query = (searchInput?.value || '').trim().toLowerCase();
+      let visible = 0;
+      for (const section of sections) {
+        let sectionVisible = 0;
+        const sectionCards = Array.from(section.querySelectorAll<HTMLLabelElement>('.ag-tool-card'));
+        for (const card of sectionCards) {
+          const haystack = card.dataset.search || '';
+          const matches = !query || haystack.includes(query);
+          card.hidden = !matches;
+          if (matches) {
+            sectionVisible++;
+            visible++;
+          }
+        }
+        section.hidden = sectionVisible === 0;
+      }
+      if (emptyEl) emptyEl.hidden = visible > 0;
+    };
+
+    for (const cb of checks) {
+      cb.addEventListener('change', updateCount);
+    }
+    searchInput?.addEventListener('input', applyFilter);
+    panel.querySelector('.ag-tools-select-visible')?.addEventListener('click', () => {
+      for (const card of cards) {
+        if (card.hidden) continue;
+        const cb = card.querySelector<HTMLInputElement>('input[type="checkbox"]');
+        if (cb) cb.checked = true;
+      }
+      updateCount();
+    });
+    panel.querySelector('.ag-tools-clear')?.addEventListener('click', () => {
+      for (const cb of checks) cb.checked = false;
+      updateCount();
+    });
+
+    updateCount();
+    applyFilter();
   }
 
   private _closeEditPanel(): void {
@@ -733,32 +1016,79 @@ export class AgentsPage implements Page {
     this._createDefaults = null;
   }
 
+  private _descendantCount(agentId: string): number {
+    const agents = App.getInstance().agentVM.agents;
+    const seen = new Set<string>();
+    const queue = [agentId];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      for (const agent of agents) {
+        if (agent.parentAgentId !== current || seen.has(agent.id)) continue;
+        seen.add(agent.id);
+        queue.push(agent.id);
+      }
+    }
+    return seen.size;
+  }
+
   private async _saveEdit(): Promise<void> {
     const panel = this._editPanel!;
     const name = (panel.querySelector('#ag-edit-name') as HTMLInputElement).value.trim();
     const role = (panel.querySelector('#ag-edit-role') as HTMLSelectElement).value;
+    const provider = (panel.querySelector('#ag-edit-provider') as HTMLSelectElement).value;
+    const apiUrl = (panel.querySelector('#ag-edit-api-url') as HTMLInputElement).value.trim();
+    const apiKey = (panel.querySelector('#ag-edit-api-key') as HTMLInputElement).value.trim();
     const model = (panel.querySelector('#ag-edit-model') as HTMLInputElement).value.trim();
+    const contextWindow = Number((panel.querySelector('#ag-edit-context') as HTMLInputElement).value);
+    const maxTurns = Number((panel.querySelector('#ag-edit-max-turns') as HTMLInputElement).value);
+    const temperature = Number((panel.querySelector('#ag-edit-temperature') as HTMLInputElement).value);
     const agentPrompt = (panel.querySelector('#ag-edit-prompt') as HTMLTextAreaElement).value.trim();
-    const checks = panel.querySelectorAll<HTMLInputElement>('.ag-tool-item input[type="checkbox"]:checked');
+    const checks = panel.querySelectorAll<HTMLInputElement>('.ag-tool-card input[type="checkbox"]:checked');
     const allowedTools = Array.from(checks).map(cb => cb.value);
 
     if (!name) { ToastManager.getInstance().error('Name is required'); return; }
+    if (!model) { ToastManager.getInstance().error('Model is required'); return; }
+    if (!apiUrl) { ToastManager.getInstance().error('API URL is required'); return; }
+    const duplicateMainAgent = role === 'MainAgent'
+      && App.getInstance().agentVM.agents.some(a => a.role === 'MainAgent' && a.id !== this._editingAgent?.id);
+    if (duplicateMainAgent) { ToastManager.getInstance().error('Only one CEO/MainAgent is allowed'); return; }
+    const parentAgentId = this._editingAgent?.parentAgentId || this._createDefaults?.parentAgentId || null;
+    const hierarchyError = this._hierarchyError(role, parentAgentId);
+    if (hierarchyError) { ToastManager.getInstance().error(hierarchyError); return; }
+    if (!Number.isFinite(contextWindow) || contextWindow < 1000) { ToastManager.getInstance().error('Context must be at least 1000'); return; }
+    if (!Number.isFinite(maxTurns) || maxTurns < 0 || !Number.isInteger(maxTurns)) { ToastManager.getInstance().error('Max turns must be a non-negative integer'); return; }
+    if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) { ToastManager.getInstance().error('Temperature must be between 0 and 2'); return; }
 
     try {
       const vm = App.getInstance().agentVM;
+      const payload: any = {
+        name,
+        role,
+        provider,
+        apiUrl,
+        model,
+        contextWindow,
+        maxTurns,
+        temperature,
+        allowedTools,
+        agentPrompt,
+      };
+      if (apiKey) payload.apiKey = apiKey;
+
       this._reloading = true;
       if (this._editingAgent && this._editingAgent.id) {
         // Editing existing agent
-        await vm.updateAgent(this._editingAgent.id, { name, role, model, allowedTools, agentPrompt } as any);
+        const ok = await vm.updateAgent(this._editingAgent.id, payload);
+        if (!ok) { this._reloading = false; ToastManager.getInstance().error(vm.lastError || 'Update failed'); return; }
         ToastManager.getInstance().success(`Updated ${name}`);
       } else {
         // Creating new agent — include parentAgentId if set via ghost
-        const createPayload: any = { name, role, model, allowedTools, agentPrompt };
+        const createPayload: any = { ...payload };
         if (this._createDefaults) {
           createPayload.parentAgentId = this._createDefaults.parentAgentId;
         }
         const result = await vm.createAgent(createPayload);
-        if (!result) { this._reloading = false; ToastManager.getInstance().error('Create failed'); return; }
+        if (!result) { this._reloading = false; ToastManager.getInstance().error(vm.lastError || 'Create failed'); return; }
         ToastManager.getInstance().success(`Created ${name}`);
       }
       this._closeEditPanel();
@@ -770,14 +1100,63 @@ export class AgentsPage implements Page {
     } catch (err) { this._reloading = false; ToastManager.getInstance().error('Save failed'); ClientLogger.ui.error('AgentsPage saveEdit', { error: String(err) }); }
   }
 
+  private async _testConnection(): Promise<void> {
+    const panel = this._editPanel;
+    if (!panel) return;
+
+    const provider = (panel.querySelector('#ag-edit-provider') as HTMLSelectElement).value;
+    const apiUrl = (panel.querySelector('#ag-edit-api-url') as HTMLInputElement).value.trim();
+    const apiKey = (panel.querySelector('#ag-edit-api-key') as HTMLInputElement).value.trim();
+    const model = (panel.querySelector('#ag-edit-model') as HTMLInputElement).value.trim();
+    const btn = panel.querySelector<HTMLButtonElement>('.ag-edit-btn-test');
+
+    if (!model) { ToastManager.getInstance().error('Model is required'); return; }
+    if (!apiUrl) { ToastManager.getInstance().error('API URL is required'); return; }
+    if (provider !== 'ollama' && !apiKey && !this._editingAgent?.id) {
+      ToastManager.getInstance().error('API key is required for new cloud agents');
+      return;
+    }
+
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Testing';
+    }
+
+    try {
+      const result = await App.getInstance().agentVM.testConnection({
+        agentId: this._editingAgent?.id,
+        provider,
+        apiUrl,
+        apiKey,
+        model,
+      });
+      if (result.ok) {
+        const suffix = typeof result.durationMs === 'number' ? ` (${Math.max(1, Math.round(result.durationMs / 1000))}s)` : '';
+        ToastManager.getInstance().success(`${result.message}${suffix}`);
+      } else {
+        ToastManager.getInstance().error(result.message);
+      }
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Test';
+      }
+    }
+  }
+
   private async _deleteEdit(): Promise<void> {
     if (!this._editingAgent) return;
     const agent = this._editingAgent;
-    const ok = await ConfirmDialog.show(`Delete ${agent.name}? Child agents will be reassigned to root.`);
+    const descendantCount = this._descendantCount(agent.id);
+    const suffix = descendantCount > 0
+      ? ` This will also delete ${descendantCount} child agent${descendantCount === 1 ? '' : 's'}.`
+      : '';
+    const ok = await ConfirmDialog.show(`Delete ${agent.name}?${suffix}`);
     if (!ok) return;
     try {
-      const resp = await fetch(`/api/v1/agents/${agent.id}`, { method: 'DELETE' });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const vm = App.getInstance().agentVM;
+      const deleted = await vm.deleteAgent(agent.id, descendantCount > 0);
+      if (!deleted) throw new Error(vm.lastError || 'Delete failed');
       ToastManager.getInstance().success(`Deleted ${agent.name}`);
       this._closeEditPanel();
       App.getInstance().agentVM.loadAgents().then(() => this._load());
@@ -792,14 +1171,21 @@ export class AgentsPage implements Page {
     const items: Array<{ label: string; action: () => void; sep?: boolean }> = [];
     if (agent) {
       items.push({ label: 'Edit', action: () => { this._createDefaults = null; this._openEditPanel(agent); } });
-      items.push({ label: 'Add Manager', action: () => { this._createDefaults = { parentAgentId: agent.id, role: 'Manager' }; this._openEditPanel({ name: 'New Manager', role: 'Manager', parentAgentId: agent.id, model: agent.model } as any); } });
-      items.push({ label: 'Add Member', action: () => { this._createDefaults = { parentAgentId: agent.id, role: 'Member' }; this._openEditPanel({ name: 'New Member', role: 'Member', parentAgentId: agent.id, model: agent.model } as any); } });
+      if (agent.role === 'MainAgent') {
+        items.push({ label: 'Add Manager', action: () => { this._createDefaults = { parentAgentId: agent.id, role: 'Manager' }; this._openEditPanel(this._childDraft(agent, 'Manager')); } });
+      } else if (agent.role === 'Manager') {
+        items.push({ label: 'Add Member', action: () => { this._createDefaults = { parentAgentId: agent.id, role: 'Member' }; this._openEditPanel(this._childDraft(agent, 'Member')); } });
+      }
       items.push({ label: '', action: () => {}, sep: true });
       items.push({ label: 'Save to Talent Pool', action: () => this._saveAgentToPool(agent) });
       items.push({ label: '', action: () => {}, sep: true });
       items.push({ label: 'Delete', action: () => this._confirmDelete(agent) });
     } else {
-      items.push({ label: 'Create Agent', action: () => this._openEditPanel(null) });
+      items.push({ label: 'Create Agent', action: () => {
+        const draft = this._rootAgentDraft();
+        this._createDefaults = draft?.parentAgentId ? { parentAgentId: draft.parentAgentId, role: draft.role || 'Manager' } : null;
+        this._openEditPanel(draft);
+      } });
     }
     for (const it of items) {
       if (it.sep) { const s = document.createElement('div'); s.className = 'ag-ctx-sep'; menu.appendChild(s); continue; }
@@ -824,7 +1210,7 @@ export class AgentsPage implements Page {
       const resp = await fetch('/api/v1/agents', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: `New ${role}`, role, parentAgentId: parent.id, model: parent.model || '', allowedTools: [] }),
+        body: JSON.stringify({ ...this._childDraft(parent, role), allowedTools: [] }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       ToastManager.getInstance().success(`Created ${role}`);
@@ -833,11 +1219,16 @@ export class AgentsPage implements Page {
   }
 
   private async _confirmDelete(agent: AgentConfig): Promise<void> {
-    const ok = await ConfirmDialog.show(`Delete ${agent.name}? Child agents will be reassigned to root.`);
+    const descendantCount = this._descendantCount(agent.id);
+    const suffix = descendantCount > 0
+      ? ` This will also delete ${descendantCount} child agent${descendantCount === 1 ? '' : 's'}.`
+      : '';
+    const ok = await ConfirmDialog.show(`Delete ${agent.name}?${suffix}`);
     if (!ok) return;
     try {
-      const resp = await fetch(`/api/v1/agents/${agent.id}`, { method: 'DELETE' });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const vm = App.getInstance().agentVM;
+      const deleted = await vm.deleteAgent(agent.id, descendantCount > 0);
+      if (!deleted) throw new Error(vm.lastError || 'Delete failed');
       ToastManager.getInstance().success(`Deleted ${agent.name}`);
       App.getInstance().agentVM.loadAgents().then(() => this._load());
     } catch (err) { ToastManager.getInstance().error('Delete failed'); ClientLogger.ui.error('AgentsPage delete', { error: String(err) }); }
@@ -899,6 +1290,11 @@ export class AgentsPage implements Page {
   }
 
   private _esc(s: string): string {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 }

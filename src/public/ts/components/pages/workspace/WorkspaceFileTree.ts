@@ -1,6 +1,9 @@
 // WorkspaceFileTree.ts — Recursive file tree component for Workspace page.
 
-interface FileNode { name:string; path:string; isDirectory:boolean; children?:FileNode[]; size?:number; modifiedAt?:string; }
+import type { FileEntry } from '../../../types.js';
+
+/** Local alias using isDirectory for convenience; maps from FileEntry type field. */
+type FileNode = FileEntry & { isDirectory?: boolean; modifiedAt?: string };
 
 export class WorkspaceFileTree {
   readonly element: HTMLElement;
@@ -49,9 +52,9 @@ export class WorkspaceFileTree {
 
     this._refreshBtn = document.createElement('button');
     this._refreshBtn.className = 'ws-tree-refresh-btn';
-    this._refreshBtn.innerHTML = '↻';
+    this._refreshBtn.innerHTML = _SVG_REFRESH;
     this._refreshBtn.title = 'Refresh file tree';
-    this._refreshBtn.style.cssText = 'border:none;background:transparent;color:var(--color-text-tertiary,#6a6b6c);cursor:pointer;font-size:14px;padding:2px 4px;border-radius:4px;display:flex;align-items:center;';
+    this._refreshBtn.style.cssText = 'border:none;background:transparent;color:var(--color-text-tertiary,#6a6b6c);cursor:pointer;padding:2px 4px;border-radius:4px;display:flex;align-items:center;';
     this._refreshBtn.addEventListener('click', () => { this.refreshAll(); });
     header.appendChild(this._refreshBtn);
     this.element.appendChild(header);
@@ -100,7 +103,7 @@ export class WorkspaceFileTree {
       }
       this._renderNodes(nodes, this._treeBody, 0);
       await this._restoreExpandedState();
-    } catch {}
+    } catch { console.debug('WorkspaceFileTree: loadRoot failed'); }
   }
 
   private _startPolling(): void {
@@ -127,7 +130,7 @@ export class WorkspaceFileTree {
         }
         this._renderNodes(nodes, this._treeBody, 0);
         await this._restoreExpandedState();
-      } catch {}
+      } catch { console.debug('WorkspaceFileTree: poll refresh failed'); }
     }, 5000);
   }
 
@@ -147,7 +150,7 @@ export class WorkspaceFileTree {
       if (!resp.ok) return;
       childContainer.innerHTML = '';
       this._renderNodes((await resp.json()).nodes||[], childContainer, 0);
-    } catch {}
+    } catch { console.debug('WorkspaceFileTree: refreshDirectory failed for', dirPath); }
   }
 
   // Restore expanded state after a full tree rebuild (polling / refreshAll).
@@ -192,7 +195,7 @@ export class WorkspaceFileTree {
     row.style.paddingLeft = (8 + depth*16) + 'px'; row.title = node.path;
 
     const arrow = document.createElement('span'); arrow.className = 'ws-tree-arrow';
-    if (node.isDirectory) arrow.textContent = '▶';
+    if (node.isDirectory) arrow.innerHTML = _SVG_CHEVRON_RIGHT;
     row.appendChild(arrow);
 
     const icon = document.createElement('span'); icon.className = 'ws-tree-icon';
@@ -247,13 +250,13 @@ export class WorkspaceFileTree {
         void this._moveFile(srcPath, node.path);
       });
     }
-    this._nodeMap.set(node.path, row);
 
     if (childContainer) {
       const wrapper = document.createElement('div'); wrapper.appendChild(row); wrapper.appendChild(childContainer);
       this._nodeMap.set(node.path, wrapper);
       return wrapper;
     }
+    this._nodeMap.set(node.path, row);
     return row;
   }
 
@@ -263,7 +266,7 @@ export class WorkspaceFileTree {
       if (!resp.ok) return;
       container.innerHTML = '';
       this._renderNodes((await resp.json()).nodes||[], container, depth);
-    } catch {}
+    } catch { console.debug('WorkspaceFileTree: _loadDirChildren failed for', dirPath); }
   }
 
   private _showContextMenu(x:number, y:number, node:FileNode): void {
@@ -300,15 +303,15 @@ export class WorkspaceFileTree {
 
   private async _createFile(parentPath:string): Promise<void> {
     const name = await this._prompt('File name:', 'new-file.txt'); if (!name) return;
-    await fetch('/api/v1/workspace/create-file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:parentPath,name})}); this.refreshDirectory(parentPath);
+    await fetch('/api/v1/workspace/create-file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,path:parentPath,name})}); this.refreshDirectory(parentPath);
   }
   private async _createFolder(parentPath:string): Promise<void> {
     const name = await this._prompt('Folder name:', 'new-folder'); if (!name) return;
-    await fetch('/api/v1/workspace/create-dir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:parentPath,name})}); this.refreshDirectory(parentPath);
+    await fetch('/api/v1/workspace/create-dir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,path:parentPath,name})}); this.refreshDirectory(parentPath);
   }
   private async _rename(node:FileNode): Promise<void> {
     const newName = await this._prompt('New name:', node.name); if (!newName||newName===node.name) return;
-    await fetch('/api/v1/workspace/rename',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:node.path,newName})});
+    await fetch('/api/v1/workspace/rename',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,path:node.path,newName})});
     const parentPath = node.path.substring(0,node.path.lastIndexOf('/'))||'/'; this.refreshDirectory(parentPath);
   }
   private async _delete(node:FileNode): Promise<void> {
@@ -325,14 +328,14 @@ export class WorkspaceFileTree {
   private async _renameByPath(filePath: string): Promise<void> {
     const name = filePath.split('/').pop() || '';
     const newName = await this._prompt('New name:', name); if (!newName||newName===name) return;
-    await fetch('/api/v1/workspace/rename',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:filePath,newName})});
+    await fetch('/api/v1/workspace/rename',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,path:filePath,newName})});
     const parentPath = filePath.substring(0,filePath.lastIndexOf('/'))||'/';
     if (this._selectedPath === filePath) this._selectedPath = parentPath + '/' + newName;
     this.refreshDirectory(parentPath);
   }
 
   private async _moveFile(srcPath: string, destDir: string): Promise<void> {
-    await fetch('/api/v1/workspace/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:srcPath,destDir})});
+    await fetch('/api/v1/workspace/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,source:srcPath,destDir})});
     this.refreshAll();
   }
 
@@ -390,3 +393,5 @@ const _SVG_HTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" s
 const _SVG_MD = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#59d499" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
 const _SVG_PY = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ffd43b" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
 const _SVG_IMAGE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`;
+const _SVG_REFRESH = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 16v5h5"/><path d="M3 12A9 9 0 0 1 18.5 5.7L21 8"/><path d="M21 8V3h-5"/></svg>`;
+const _SVG_CHEVRON_RIGHT = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>`;

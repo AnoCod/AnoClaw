@@ -1,4 +1,4 @@
-// SessionAgent — per-session independent processing pipeline.
+﻿// SessionAgent 鈥?per-session independent processing pipeline.
 // Each session has its own SessionAgent with its own EventEmitter, SessionState,
 // and WS event handlers. No global pointer swap, no silent emit, no shared state.
 //
@@ -41,7 +41,9 @@ export function finalizeTextSegment(agent: SessionAgent): void {
   const s = agent.state;
   if (s.streamMsgId) {
     const msg = findMessageById(agent, s.streamMsgId);
-    if (msg) agent.emit('textSegmentFinalized', msg);
+    if (msg) {
+      agent.emit('textSegmentFinalized', msg);
+    }
   }
 }
 
@@ -56,12 +58,10 @@ export function removeStatusCard(agent: SessionAgent): void {
   if (idx !== -1) agent.state.messages.removeMessage(idx);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// WS event handlers — operate on agent.state, emit on agent
+// 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?// WS event handlers 鈥?operate on agent.state, emit on agent
 // Each handler is a pure function: takes an agent, mutates its state,
 // and fires events on its emitter so the UI (SessionsPage) can react.
-// ═══════════════════════════════════════════════════════════════════════════
-
+// 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
 /** Handle a 'think' event: create or accumulate a thinking block message. */
 export function onThink(agent: SessionAgent, content: string, durationMs?: number): void {
   const s = agent.state;
@@ -69,7 +69,8 @@ export function onThink(agent: SessionAgent, content: string, durationMs?: numbe
     // Start a new think block
     s.thinkStartTime = Date.now();
     const msg: Message = {
-      id: generateId(), type: 'think', content, timestamp: Date.now(), durationMs,
+      id: generateId(), sessionId: agent.sessionId, type: 'think', content, timestamp: Date.now(), durationMs,
+      agentId: agent.agentId,
       status: 'pending',
     };
     s.currentThinkMsg = msg;
@@ -91,13 +92,16 @@ export function onText(agent: SessionAgent, content: string): void {
   if (!s.isStreaming) {
     s.isStreaming = true;
     s.generationSeq++;
+    s.streamMsgId = null;
+    s.currentStreamMessage = '';
     agent.emit('streamingStarted');
   }
   if (!s.streamMsgId) {
-    // First text token for this turn — create the message
+    // First text token for this turn 鈥?create the message
     s.streamMsgId = generateId();
     const msg: Message = {
-      id: s.streamMsgId, type: 'message', role: 'assistant', content, timestamp: Date.now(),
+      id: s.streamMsgId, sessionId: agent.sessionId, type: 'message', role: 'assistant', content, timestamp: Date.now(),
+      agentId: agent.agentId,
     };
     s.currentStreamMessage = content;
     s.messages.appendMessage(msg);
@@ -114,7 +118,7 @@ export function onText(agent: SessionAgent, content: string): void {
 }
 
 /** Handle a 'tool_call' event: finalize think/text, create a pending tool_call card.
- *  TodoWrite is special-cased — it updates the todo list inline instead. */
+ *  TodoWrite is special-cased 鈥?it updates the todo list inline instead. */
 export function onToolCall(agent: SessionAgent, id: string, name: string, input: Record<string, unknown>): void {
   finalizeThink(agent);
   finalizeTextSegment(agent);
@@ -124,8 +128,9 @@ export function onToolCall(agent: SessionAgent, id: string, name: string, input:
   if (name === 'TodoWrite' && input.todos) { onTodoWrite(agent, input.todos as TodoItem[]); return; }
 
   const msg: Message = {
-    id: generateId(), type: 'tool_call', toolName: name, toolId: id,
+    id: generateId(), sessionId: agent.sessionId, type: 'tool_call', toolName: name, toolId: id,
     toolInput: input, content: '', status: 'pending', timestamp: Date.now(),
+    agentId: agent.agentId,
   };
   agent.state.messages.appendMessage(msg);
   agent.emit('messageAdded', msg);
@@ -154,7 +159,7 @@ export function onToolResult(agent: SessionAgent, id: string, name: string, cont
 }
 
 /** Handle a 'done' event: stop streaming, finalize think/text, update token breakdown. */
-export function onDone(agent: SessionAgent, tokenUsage?: Record<string, unknown>): void {
+export function onDone(agent: SessionAgent, tokenUsage?: TokenBreakdown): void {
   const s = agent.state;
   if (!s.isStreaming) return;
   s.isStreaming = false;
@@ -162,17 +167,9 @@ export function onDone(agent: SessionAgent, tokenUsage?: Record<string, unknown>
   finalizeTextSegment(agent);
   s.streamMsgId = null;
 
-  // Parse token breakdown — shows context window usage
+  // Parse token breakdown 鈥?shows context window usage
   if (tokenUsage) {
-    const total = (tokenUsage.total as number) || 0;
-    const freeSpace = (tokenUsage.freeSpace as number) || 0;
-    s.tokenBreakdown = {
-      systemPrompt: (tokenUsage.systemPrompt as number) || 0,
-      systemTools: (tokenUsage.systemTools as number) || 0,
-      skills: (tokenUsage.skills as number) || 0,
-      messages: (tokenUsage.messages as number) || 0,
-      total, contextWindow: total + freeSpace, freeSpace,
-    };
+    s.tokenBreakdown = { ...tokenUsage };
     agent.emit('tokensUpdated', s.tokenBreakdown);
   }
   removeStatusCard(agent);
@@ -188,15 +185,27 @@ export function onError(agent: SessionAgent, data: { message?: string; code?: st
     ClientLogger.vm.debug('Ignoring non-fatal error', { code: data.code, message: message.slice(0, 80) });
     return;
   }
-  if (!agent.state.isStreaming) return;
+  if (!agent.state.isStreaming) {
+    // Fatal errors outside streaming should still be shown 鈥?e.g. API key errors
+    const fatalMsg: Message = {
+      id: generateId(), sessionId: agent.sessionId, type: 'error',
+      content: message || 'API request failed -- check your API key and URL in Agents settings.',
+      timestamp: Date.now(),
+      agentId: agent.agentId,
+    };
+    agent.state.messages.appendMessage(fatalMsg);
+    agent.emit('messageAdded', fatalMsg);
+    return;
+  }
   agent.state.isStreaming = false;
   agent.state.streamMsgId = null;
   finalizeThink(agent);
 
   const msg: Message = {
-    id: generateId(), type: 'error',
-    content: message || 'API request failed — check your API key and URL in Agents settings.',
+    id: generateId(), sessionId: agent.sessionId, type: 'error',
+    content: message || 'API request failed -- check your API key and URL in Agents settings.',
     timestamp: Date.now(),
+    agentId: agent.agentId,
   };
   agent.state.messages.appendMessage(msg);
   agent.emit('messageAdded', msg);
@@ -207,8 +216,9 @@ export function onError(agent: SessionAgent, data: { message?: string; code?: st
 /** Handle a 'plan_enter' event: show a plan mode boundary card. */
 export function onPlanEnter(agent: SessionAgent, title: string): void {
   const msg: Message = {
-    id: generateId(), type: 'plan_enter', planTitle: title,
+    id: generateId(), sessionId: agent.sessionId, type: 'plan_enter', planTitle: title,
     content: `Plan mode: ${title}`, timestamp: Date.now(),
+    agentId: agent.agentId,
   };
   agent.state.messages.appendMessage(msg);
   agent.emit('messageAdded', msg);
@@ -217,7 +227,8 @@ export function onPlanEnter(agent: SessionAgent, title: string): void {
 /** Handle a 'plan_exit' event: show a plan mode exit card. */
 export function onPlanExit(agent: SessionAgent): void {
   const msg: Message = {
-    id: generateId(), type: 'plan_exit', content: 'Plan mode exited', timestamp: Date.now(),
+    id: generateId(), sessionId: agent.sessionId, type: 'plan_exit', content: 'Plan mode exited', timestamp: Date.now(),
+    agentId: agent.agentId,
   };
   agent.state.messages.appendMessage(msg);
   agent.emit('messageAdded', msg);
@@ -231,7 +242,8 @@ export function onTodoWrite(agent: SessionAgent, todos: TodoItem[]): void {
     if (msgs[i].type === 'todo_write') agent.state.messages.removeMessage(i);
   }
   const msg: Message = {
-    id: generateId(), type: 'todo_write', content: '', todos, timestamp: Date.now(),
+    id: generateId(), sessionId: agent.sessionId, type: 'todo_write', content: '', todos, timestamp: Date.now(),
+    agentId: agent.agentId,
   };
   agent.state.messages.appendMessage(msg);
   agent.emit('messageAdded', msg);
@@ -250,10 +262,11 @@ export function onDelegationProgress(agent: SessionAgent, data: Record<string, u
   const displayContent = formatDelegationContent(subAgentId, originalType, content, toolName);
 
   if (existing === -1) {
-    // New delegation — create the activity card
+    // New delegation 鈥?create the activity card
     const dMsg: Message = {
-      id: delegationMsgId, type: 'delegation_activity', content: displayContent,
+      id: delegationMsgId, sessionId: agent.sessionId, type: 'delegation_activity', content: displayContent,
       subAgentId, subSessionId, timestamp: Date.now(),
+      agentId: agent.agentId,
     } as Message;
     agent.state.messages.appendMessage(dMsg);
     agent.emit('messageAdded', dMsg);
@@ -271,9 +284,6 @@ export function onDelegationProgress(agent: SessionAgent, data: Record<string, u
 export function onDelegationStatus(agent: SessionAgent, data: Record<string, unknown>): void {
   const subSessionId = data.subSessionId as string;
   const phase = data.phase as string;
-  const taskSummary = (data.taskSummary as string) || '';
-  const subAgentId = (data.subAgentId as string) || '';
-  const elapsedMs = data.elapsedMs as number | undefined;
 
   agent.emit('delegationStatusUpdate', { subSessionId, phase });
 
@@ -299,14 +309,22 @@ export function onTaskNotification(agent: SessionAgent, data: Record<string, unk
 
   const msg: Message = {
     id: msgId,
+    sessionId: agent.sessionId,
     type: 'task_notification',
     content: JSON.stringify({ taskId, parentSessionId, parentAgentId, status, summary, result }),
+    taskId,
+    parentSessionId,
+    parentAgentId,
+    taskStatus: status,
+    taskSummary: summary,
+    taskResult: result,
+    agentId: parentAgentId || agent.agentId,
     timestamp: Date.now(),
   };
 
   const existingIdx = agent.state.messages.indexOf(msgId);
   if (existingIdx >= 0) {
-    // Update in place — avoids DOM rebuild
+    // Update in place 鈥?avoids DOM rebuild
     agent.state.messages.updateMessage(existingIdx, msg);
     agent.emit('messageUpdated', msg);
   } else {
@@ -324,39 +342,39 @@ export function onStatus(agent: SessionAgent, content?: string): void {
     const msg = agent.state.messages.messages[existingIdx];
     if (msg) { msg.content = content; agent.state.messages.updateMessage(existingIdx, msg); agent.emit('messageUpdated', msg); }
   } else {
-    const statusMsg: Message = { id: statusId, type: 'status', content, timestamp: Date.now() };
+    const statusMsg: Message = { id: statusId, sessionId: agent.sessionId, type: 'status', content, timestamp: Date.now(), agentId: agent.agentId };
     agent.state.messages.appendMessage(statusMsg);
     agent.emit('messageAdded', statusMsg);
   }
 }
 
-/** Handle a 'sleep' event: show the infinite-mode idle card. */
+/** Handle a 'sleep' event: show the goal-mode idle card. */
 export function onSleep(agent: SessionAgent, content?: string): void {
-  const msg = content || '∞ mode active — waiting for new tasks';
-  const statusId = 'infinite-status';
+  const msg = content || 'Goal active -- waiting before next step';
+  const statusId = 'goal-status';
   const existingIdx = agent.state.messages.indexOf(statusId);
   if (existingIdx !== -1) {
     const m = agent.state.messages.messages[existingIdx];
     if (m) { m.content = msg; agent.state.messages.updateMessage(existingIdx, m); agent.emit('messageUpdated', m); }
   } else {
-    const statusMsg: Message = { id: statusId, type: 'status', content: msg, timestamp: Date.now() };
+    const statusMsg: Message = { id: statusId, sessionId: agent.sessionId, type: 'status', content: msg, timestamp: Date.now(), agentId: agent.agentId };
     agent.state.messages.appendMessage(statusMsg);
     agent.emit('messageAdded', statusMsg);
   }
 }
 
-/** Handle a 'wake' event: resume streaming + update the infinite-mode card to show activity. */
+/** Handle a 'wake' event: resume streaming + update the goal-mode card to show activity. */
 export function onWake(agent: SessionAgent, content?: string): void {
   agent.state.isStreaming = true;
   finalizeThink(agent);
-  const msg = content || '∞ mode — new task detected, resuming...';
-  const statusId = 'infinite-status';
+  const msg = content || 'Goal wake -- continuing active goal';
+  const statusId = 'goal-status';
   const existingIdx = agent.state.messages.indexOf(statusId);
   if (existingIdx !== -1) {
     const m = agent.state.messages.messages[existingIdx];
     if (m) { m.content = msg; agent.state.messages.updateMessage(existingIdx, m); agent.emit('messageUpdated', m); }
   } else {
-    const statusMsg: Message = { id: statusId, type: 'status', content: msg, timestamp: Date.now() };
+    const statusMsg: Message = { id: statusId, sessionId: agent.sessionId, type: 'status', content: msg, timestamp: Date.now(), agentId: agent.agentId };
     agent.state.messages.appendMessage(statusMsg);
     agent.emit('messageAdded', statusMsg);
   }
@@ -371,19 +389,17 @@ function formatDelegationContent(
 ): string {
   const agentLabel = subAgentId.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   switch (originalType) {
-    case 'think': return `🧠 ${agentLabel} is thinking...`;
-    case 'text': return `💬 ${agentLabel}: ${content.slice(0, 200)}${content.length > 200 ? '...' : ''}`;
-    case 'tool_call': return `🔧 ${agentLabel} → ${toolName || 'tool'}()`;
-    case 'tool_result': return `✅ ${agentLabel} ← ${toolName || 'tool'} completed`;
-    case 'error': return `❌ ${agentLabel}: ${content.slice(0, 100)}`;
-    default: return `⏳ ${agentLabel} working...`;
+    case 'think': return `[think] ${agentLabel} is thinking...`;
+    case 'text': return `[text] ${agentLabel}: ${content.slice(0, 200)}${content.length > 200 ? '...' : ''}`;
+    case 'tool_call': return `[tool] ${agentLabel} -> ${toolName || 'tool'}()`;
+    case 'tool_result': return `[done] ${agentLabel} <- ${toolName || 'tool'} completed`;
+    case 'error': return `[error] ${agentLabel}: ${content.slice(0, 100)}`;
+    default: return `[busy] ${agentLabel} working...`;
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// SessionAgent — per-session object with its own emitter, state, and pipeline
-// ═══════════════════════════════════════════════════════════════════════════
-
+// 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?// SessionAgent 鈥?per-session object with its own emitter, state, and pipeline
+// 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
 export class SessionAgent extends EventEmitter {
   readonly sessionId: string;
   /** Per-session mutable state: messages, streaming flags, token breakdown, etc. */
@@ -392,6 +408,10 @@ export class SessionAgent extends EventEmitter {
   private _sessionVM: SessionViewModel | null = null;
   /** Prevent concurrent sendMessage calls for the same session. */
   private _sendingLock = false;
+
+  get agentId(): string | undefined {
+    return this._sessionVM?.sessions.getById(this.sessionId)?.agentId;
+  }
 
   constructor(sessionId: string, sessionVM: SessionViewModel) {
     super();
@@ -405,7 +425,7 @@ export class SessionAgent extends EventEmitter {
     });
   }
 
-  // ── WS event entry point ──
+  // 鈹€鈹€ WS event entry point 鈹€鈹€
 
   /** Handle a WS event for THIS session. No global swap, no silent mode.
    *  Dispatches to the matching handler function, which mutates this.state
@@ -417,9 +437,14 @@ export class SessionAgent extends EventEmitter {
       switch (eventType) {
         case 'think': onThink(this, data.content as string, data.durationMs as number | undefined); break;
         case 'text': onText(this, data.content as string); break;
-        case 'tool_call': onToolCall(this, data.id as string, data.name as string, data.input as Record<string, unknown>); break;
+        case 'tool_call': onToolCall(
+          this,
+          (data.id || data.toolCallId || data.toolId || '') as string,
+          (data.name || data.toolName || '') as string,
+          (data.input || data.params || data.args || data.toolInput || {}) as Record<string, unknown>,
+        ); break;
         case 'tool_result': onToolResult(this, (data.toolCallId || data.id || '') as string, (data.toolName || data.name || '') as string, (data.result || data.content || '') as string, (data.success !== false ? 'success' : 'error')); break;
-        case 'done': onDone(this, data.tokenUsage as Record<string, unknown> | undefined); break;
+        case 'done': onDone(this, data.tokenUsage as TokenBreakdown | undefined); break;
         case 'error': onError(this, data as { message?: string; code?: string; errorMessage?: string }); break;
         case 'plan_enter': onPlanEnter(this, data.title as string); break;
         case 'plan_exit': onPlanExit(this); break;
@@ -438,7 +463,7 @@ export class SessionAgent extends EventEmitter {
     }
   }
 
-  // ── Send message ──
+  // 鈹€鈹€ Send message 鈹€鈹€
 
   /** Build the user message, wire attachments, send via WS, start streaming.
    *  Auto-generates a session title for unnamed sessions. Guarded by _sendingLock. */
@@ -464,17 +489,20 @@ export class SessionAgent extends EventEmitter {
       }
     }
     const userMsg: Message = {
-      id: generateId(), type: 'message', role: 'user', content: displayContent, timestamp: Date.now(),
+      id: generateId(), sessionId: this.sessionId, type: 'message', role: 'user', content: displayContent, timestamp: Date.now(),
+      agentId: this.agentId,
     };
 
     this._sendingLock = true;
 
     try {
-      const vm = this._sessionVM!;
+      const vm = this._sessionVM;
+      if (!vm) throw new Error('SessionAgent._sessionVM is null -- agent not properly initialized');
       const targetSessionId = this.sessionId;
       const node = vm.sessions.getById(targetSessionId);
+      await vm.ensureRunnableAgentForSession(targetSessionId);
 
-      // Auto-title for new sessions — fire-and-forget, don't block the message
+      // Auto-title for new sessions 鈥?fire-and-forget, don't block the message
       if (node && (node.title === 'New Session' || !node.title || node.title === content.slice(0, 30))) {
         this._generateSessionTitle(targetSessionId, content).then(title => {
           if (title) vm.renameSession(targetSessionId, title).catch(() => {});
@@ -490,7 +518,7 @@ export class SessionAgent extends EventEmitter {
 
       this.state.messages.appendMessage(userMsg);
 
-      // Reset streaming state for the new turn — prevents appending to stale messages
+      // Reset streaming state for the new turn 鈥?prevents appending to stale messages
       finalizeThink(this);
       this.state.streamMsgId = null;
       this.state.currentStreamMessage = '';
@@ -506,9 +534,11 @@ export class SessionAgent extends EventEmitter {
       console.error('[SessionAgent] sendMessage failed', { sessionId: this.sessionId, error: (err as Error).message });
       ClientLogger.vm.error('Send failed', { error: (err as Error).message });
       this.state.messages.appendMessage({
-        id: generateId(), type: 'error',
+        id: generateId(), sessionId: this.sessionId, type: 'error',
         content: `Failed to send message: ${err instanceof Error ? err.message : String(err)}`, timestamp: Date.now(),
+        agentId: this.agentId,
       });
+      ToastManager.getInstance().error(err instanceof Error ? err.message : String(err));
     } finally {
       this._sendingLock = false;
     }
@@ -527,13 +557,14 @@ export class SessionAgent extends EventEmitter {
     }
   }
 
-  // ── Stop generation ──
+  // 鈹€鈹€ Stop generation 鈹€鈹€
 
   /** Stop the current generation: send stop to backend, finalize state, emit streamingStopped. */
   async stopGeneration(): Promise<void> {
     console.log('[SessionAgent] stopGeneration', { sessionId: this.sessionId });
     ClientLogger.vm.debug('Stopping generation', { sid: this.sessionId });
-    this._sessionVM!.getWSClient().stopGeneration(this.sessionId);
+    if (!this._sessionVM) return;
+    this._sessionVM.getWSClient().stopGeneration(this.sessionId);
     this.state.isStreaming = false;
     this.state.streamMsgId = null;
     finalizeThink(this);
@@ -542,7 +573,7 @@ export class SessionAgent extends EventEmitter {
     this.emit('streamingStopped');
   }
 
-  // ── Load history ──
+  // 鈹€鈹€ Load history 鈹€鈹€
 
   /** Fetch stored messages for this session from the backend. Aborts any in-flight load.
    *  Reconstructs the message list, streaming state, and token breakdown. */
@@ -581,21 +612,12 @@ export class SessionAgent extends EventEmitter {
           skills: (data.tokenBreakdown.skills as number) || 0,
           messages: (data.tokenBreakdown.messages as number) || 0,
           total: (data.tokenBreakdown.total as number) || 0,
-          contextWindow: ((data.tokenBreakdown.total as number) || 0) + ((data.tokenBreakdown.freeSpace as number) || 0),
+          contextWindow: (data.tokenBreakdown.contextWindow as number)
+            || (((data.tokenBreakdown.total as number) || 0) + ((data.tokenBreakdown.freeSpace as number) || 0)),
           freeSpace: (data.tokenBreakdown.freeSpace as number) || 0,
         };
       }
       ClientLogger.vm.debug('Conversation history loaded', { sid: this.sessionId, messageCount: (data.messages || []).length });
-      // Restore streaming pointer: last assistant message becomes the stream target
-      const histMsgs = s.messages.messages;
-      for (let i = histMsgs.length - 1; i >= 0; i--) {
-        const m = histMsgs[i];
-        if (m.type === 'message' && m.role === 'assistant') {
-          s.streamMsgId = m.id;
-          s.currentStreamMessage = m.content || '';
-          break;
-        }
-      }
       this.emit('historyLoaded', { sessionId: this.sessionId });
       if (s.tokenBreakdown) this.emit('tokensUpdated', s.tokenBreakdown);
     } catch (e) {
@@ -611,6 +633,9 @@ export class SessionAgent extends EventEmitter {
   private _ingestStoredMessage(m: any): void {
     const s = this.state;
     const ts = typeof m.timestamp === 'string' ? new Date(m.timestamp).getTime() : Date.now();
+    const sessionId = String(m.sessionId || this.sessionId);
+    const agentId = (m.agentId as string | undefined) || this.agentId;
+    const agentName = m.agentName as string | undefined;
     // Todo-write: replace all existing todos with the stored set
     if (m.type === 'todo_write') {
       if (Array.isArray(m.todos)) {
@@ -618,23 +643,63 @@ export class SessionAgent extends EventEmitter {
         for (let i = msgs.length - 1; i >= 0; i--) {
           if (msgs[i].type === 'todo_write') s.messages.removeMessage(i);
         }
-        s.messages.appendMessage({ id: m.id || generateId(), type: 'todo_write', content: '', todos: m.todos as TodoItem[], timestamp: ts });
+        s.messages.appendMessage({ id: m.id || generateId(), sessionId, type: 'todo_write', content: '', todos: m.todos as TodoItem[], timestamp: ts, agentId, agentName });
       }
       return;
     }
-    // User messages pass through directly
+    if (m.type === 'error') {
+      s.messages.appendMessage({ id: m.id || generateId(), sessionId, type: 'error', content: String(m.content || m.error || 'Unknown error'), timestamp: ts, agentId, agentName });
+      return;
+    }
+    if (m.type === 'plan_enter') {
+      s.messages.appendMessage({ id: m.id || generateId(), sessionId, type: 'plan_enter', content: String(m.content || ''), planTitle: String(m.planTitle || m.title || 'Plan Mode'), timestamp: ts, agentId, agentName });
+      return;
+    }
+    if (m.type === 'plan_exit') {
+      s.messages.appendMessage({ id: m.id || generateId(), sessionId, type: 'plan_exit', content: String(m.content || 'Plan mode exited'), timestamp: ts, agentId, agentName });
+      return;
+    }
+    if (m.type === 'status') {
+      s.messages.appendMessage({ id: m.id || generateId(), sessionId, type: 'status', content: String(m.content || ''), timestamp: ts, agentId, agentName });
+      return;
+    }
+    // User messages pass through directly 鈥?unless they're task notifications persisted as raw XML
     if (m.role === 'user') {
-      s.messages.appendMessage({ id: m.id || generateId(), type: 'message', role: 'user', content: String(m.content || ''), timestamp: ts, agentId: m.agentId, agentName: m.agentName });
+      const rawContent = String(m.content || '');
+      if (rawContent.startsWith('<task-notification>')) {
+        const parsed = parseTaskNotificationXML(rawContent);
+        if (parsed) {
+          s.messages.appendMessage({
+            id: m.id || generateId(),
+            sessionId,
+            type: 'task_notification',
+            content: JSON.stringify(parsed),
+            taskId: parsed.taskId || '',
+            parentSessionId: m.sessionId || '',
+            parentAgentId: m.agentId || '',
+            taskStatus: parsed.status,
+            taskSummary: parsed.summary,
+            taskResult: parsed.result,
+            timestamp: ts,
+          });
+          return;
+        }
+      }
+      s.messages.appendMessage({ id: m.id || generateId(), sessionId, type: 'message', role: 'user', content: rawContent, timestamp: ts, agentId, agentName });
+      return;
+    }
+    if (m.role === 'system') {
+      s.messages.appendMessage({ id: m.id || generateId(), sessionId, type: 'message', role: 'system', content: String(m.content || ''), timestamp: ts, agentId, agentName });
       return;
     }
     if (m.role !== 'assistant') return;
     const tcs: any[] = Array.isArray(m.toolCalls) ? m.toolCalls : [];
-    // Detect flat (legacy) formats — single-content-type messages
+    // Detect flat (legacy) formats 鈥?single-content-type messages
     const isFlatThink = !tcs.length && !m.content && m.thinking;
     const isFlatToolCall = tcs.length > 0 && !m.content && !m.thinking;
     const isFlatText = !tcs.length && m.content && !m.thinking;
     if (isFlatThink) {
-      s.messages.appendMessage({ id: m.id || generateId(), type: 'think', content: String(m.thinking), timestamp: ts, durationMs: 0 });
+      s.messages.appendMessage({ id: m.id || generateId(), sessionId, type: 'think', content: String(m.thinking), timestamp: ts, durationMs: 0, agentId, agentName });
       return;
     }
     if (isFlatToolCall) {
@@ -644,22 +709,23 @@ export class SessionAgent extends EventEmitter {
         const input = tc.params || tc.input || {};
         const result = tc.result;
         if (name === 'TodoWrite' && input.todos) {
-          s.messages.appendMessage({ id: generateId(), type: 'todo_write', content: '', todos: input.todos as TodoItem[], timestamp: ts });
+          s.messages.appendMessage({ id: generateId(), sessionId, type: 'todo_write', content: '', todos: input.todos as TodoItem[], timestamp: ts, agentId, agentName });
           continue;
         }
         if (name === 'AskUserQuestion') continue;
         s.messages.appendMessage({
-          id: tc.id || generateId(), type: 'tool_call', toolName: name, toolId: tc.id || '',
+          id: tc.id || generateId(), sessionId, type: 'tool_call', toolName: name, toolId: tc.id || '',
           toolInput: input, content: result && typeof result.content === 'string' ? result.content : '',
           status: result ? (result.success ? 'success' : 'error') : 'success', timestamp: ts,
+          agentId, agentName,
         });
       }
       return;
     }
     // Structured format: thinking block, then text, then tool calls + results interleaved
-    if (m.thinking) s.messages.appendMessage({ id: generateId(), type: 'think', content: String(m.thinking), timestamp: ts, durationMs: 0 });
+    if (m.thinking) s.messages.appendMessage({ id: generateId(), sessionId, type: 'think', content: String(m.thinking), timestamp: ts, durationMs: 0, agentId, agentName });
     if (m.content && m.content !== '(tool calls)' && m.content !== '(reasoning only)') {
-      s.messages.appendMessage({ id: m.id || generateId(), type: 'message', role: 'assistant', content: String(m.content), timestamp: ts, agentId: m.agentId, agentName: m.agentName });
+      s.messages.appendMessage({ id: m.id || generateId(), sessionId, type: 'message', role: 'assistant', content: String(m.content), timestamp: ts, agentId, agentName });
     }
     // Match tool results to their calls by id
     const trs: any[] = Array.isArray(m.toolResults) ? m.toolResults : [];
@@ -670,17 +736,18 @@ export class SessionAgent extends EventEmitter {
       const tr = rm.get(String(tc.id || ''));
       const name = tc.toolName || tc.name || '';
       const input = tc.params || tc.input || {};
-      if (name === 'TodoWrite' && input.todos) { s.messages.appendMessage({ id: generateId(), type: 'todo_write', content: '', todos: input.todos as TodoItem[], timestamp: ts }); continue; }
+      if (name === 'TodoWrite' && input.todos) { s.messages.appendMessage({ id: generateId(), sessionId, type: 'todo_write', content: '', todos: input.todos as TodoItem[], timestamp: ts, agentId, agentName }); continue; }
       if (name === 'AskUserQuestion') continue;
       s.messages.appendMessage({
-        id: tc.id || generateId(), type: 'tool_call', toolName: name, toolId: tc.id || '',
+        id: tc.id || generateId(), sessionId, type: 'tool_call', toolName: name, toolId: tc.id || '',
         toolInput: input, content: tr && typeof tr.content === 'string' ? tr.content : '',
         status: tr ? (tr.success ? 'success' : 'error') : 'pending', timestamp: ts,
+        agentId, agentName,
       });
     }
   }
 
-  // ── Other ──
+  // 鈹€鈹€ Other 鈹€鈹€
 
   /** Handle WS disconnection mid-stream: stop streaming, show error card. */
   onConnectionLost(): void {
@@ -692,8 +759,9 @@ export class SessionAgent extends EventEmitter {
     this.state.generationSeq++;
     removeStatusCard(this);
     const msg: Message = {
-      id: generateId(), type: 'error',
+      id: generateId(), sessionId: this.sessionId, type: 'error',
       content: 'WebSocket connection lost. Please check your network and try again.', timestamp: Date.now(),
+      agentId: this.agentId,
     };
     this.state.messages.appendMessage(msg);
     this.emit('messageAdded', msg);
@@ -720,5 +788,25 @@ export class SessionAgent extends EventEmitter {
       this.state.loadAbortController.abort();
     }
     this.removeAllListeners();
+  }
+}
+
+/** Extract fields from a <task-notification> XML string. Returns null if not parseable. */
+function parseTaskNotificationXML(xml: string): { taskId: string; status: string; summary: string; result: string } | null {
+  try {
+    const tag = (name: string): string => {
+      const m = xml.match(new RegExp(`<${name}>(.*?)</${name}>`, 's'));
+      return (m?.[1] || '').trim();
+    };
+    const taskId = tag('task-id');
+    if (!taskId) return null;
+    return {
+      taskId,
+      status: tag('status') || 'unknown',
+      summary: tag('summary') || '',
+      result: tag('result') || '',
+    };
+  } catch {
+    return null;
   }
 }

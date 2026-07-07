@@ -4,6 +4,7 @@
  */
 
 import type { Page, SkillEntry } from '../../types.js';
+import { App } from '../../app.js';
 import { ClientLogger } from '../../ClientLogger.js';
 import { Button } from '../ui/Button.js';
 import { Dialog } from '../ui/Dialog.js';
@@ -43,6 +44,10 @@ export class SkillsPage implements Page {
     this._gridEl = document.createElement('div');
     this._gridEl.className = 'cinema-card-grid';
     inner.appendChild(this._gridEl);
+
+    // Auto-refresh on external skill changes (CEO creates/deletes via tool)
+    const sse = App.getInstance().sseClient;
+    sse.on('skill_changed', () => this._loadSkills());
   }
 
   onEnter(): void { this._loadSkills(); }

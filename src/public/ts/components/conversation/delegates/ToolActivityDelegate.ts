@@ -1,57 +1,19 @@
 /**
- * ToolActivityDelegate — compact tool card matching ThinkDelegate visual style.
- * Layout: pulse-dot · TOOLNAME · ran <subject> · X.Xs
+ * ToolActivityDelegate 鈥?compact tool card matching ThinkDelegate visual style.
+ * Layout: pulse-dot - TOOLNAME - ran <subject> - X.Xs
  * Click to expand result body (always present when result is non-empty).
  *
  * States:
- *   running — animated pulse dot (ta-pulse keyframes), body auto-expanded
- *   success — static muted dot, body collapsed by default
- *   error   — dim-red dot, body collapsed by default
+ *   running 鈥?animated pulse dot (ta-pulse keyframes), body auto-expanded
+ *   success 鈥?static muted dot, body collapsed by default
+ *   error   鈥?dim-red dot, body collapsed by default
  *
  * Long results (>200 chars or >5 lines) show a truncated preview with a
  * "Show more" / "Show less" button below the collapsible body.
  */
 import type { ToolCall } from '../types.js';
-
-// Tool metadata registry: verb phrase + result-summary extractor for every known tool.
-// Unknown tools get a generated verb from their camelCase name.
-const TOOL: Record<string, { verb: string; result: (t: ToolActivityState) => string | null }> = {
-  // ── File tools ──
-  Read:   { verb: 'read',   result: t => { const c = t.result || ''; if (c.startsWith('[Image')) return 'Image file'; return `${c.split('\n').length} lines`; } },
-  Write:  { verb: 'wrote',  result: t => { const c = t.result || ''; const m = c.match(/Successfully wrote (\d+) chars to (.+)/); const path = m?.[2]?.replace(/\\/g, '/').split('/').pop(); return `Wrote ${m?.[1] || '?'} chars` + (path ? ` → ${path}` : ''); } },
-  Edit:   { verb: 'edited', result: () => null },
-  Grep:   { verb: 'searched', result: t => { const c = t.result || ''; if (!c || c === '(no matches)') return 'No matches'; return `${c.split('\n').filter(Boolean).length} matches`; } },
-  Glob:   { verb: 'found',  result: t => { const c = t.result || ''; if (!c || c === '(no matches)') return 'Nothing found'; return `${c.split('\n').filter(Boolean).length} files`; } },
-  Bash:   { verb: 'ran',    result: t => { const c = (t.result || '').trim(); if (!c) return 'Done'; return c.length > 80 ? `${c.split('\n').length} lines output` : c; } },
-  // ── Web tools ──
-  WebSearch: { verb: 'searched', result: t => { const n = ((t.result || '').match(/\[.+\]\(https?:\/\//g) || []).length; return n ? `${n} results` : 'Done'; } },
-  WebFetch:  { verb: 'fetched',  result: t => `Read ${(t.result || '').length} chars` },
-  ApiCall:   { verb: 'called',   result: t => { const c = (t.result || '').trim(); return c ? `${c.length} chars response` : 'Done'; } },
-  // ── Task/Agent tools ──
-  Skill:         { verb: 'used',      result: t => { const c = (t.result || '').trim(); return c ? c.slice(0, 120) : 'Done'; } },
-  SkillList:     { verb: 'listed',    result: t => { const n = (t.result || '').split('\n').filter(Boolean).length; return n ? `${n} skills` : 'Done'; } },
-  SkillInspect:  { verb: 'inspected', result: t => { const c = (t.result || '').trim(); return c ? `${c.split('\n').length} lines` : 'Done'; } },
-  TaskAssign:    { verb: 'assigned',  result: () => 'Task dispatched' },
-  TaskList:      { verb: 'listed',    result: () => 'Tasks listed' },
-  TaskStop:      { verb: 'stopped',   result: () => 'Task stopped' },
-  TaskOutput:    { verb: 'read',      result: t => { const c = (t.result || '').trim(); return c ? `${c.split('\n').length} lines` : 'Done'; } },
-  SubAgentSpawn: { verb: 'delegated', result: () => 'Sub-agent running' },
-  SubAgentDelete:{ verb: 'removed',   result: () => 'Agent removed' },
-  AgentMessage:  { verb: 'messaged',  result: t => { const c = (t.result || '').trim(); return c ? c.slice(0, 80) : 'Sent'; } },
-  HireEmployee:  { verb: 'hired',     result: () => 'Employee created' },
-  ListEmployees: { verb: 'listed',    result: () => 'Employees listed' },
-  UpdateOrg:     { verb: 'updated',   result: () => 'Org chart updated' },
-  // ── Memory tools ──
-  memory_save:   { verb: 'saved',    result: () => 'Memory saved' },
-  memory_search: { verb: 'searched', result: t => { const n = (t.result || '').split('\n').filter(Boolean).length; return n ? `${n} entries` : 'None found'; } },
-  memory_delete: { verb: 'deleted',  result: () => 'Memory deleted' },
-  // ── Misc tools ──
-  NotebookEdit:  { verb: 'edited',   result: () => 'Cell edited' },
-  RestartServer: { verb: 'restarted',result: () => 'Server restarted' },
-  Sleep:         { verb: 'waited',   result: t => { const d = t.toolInput?.seconds || t.toolInput?.duration; return d ? `${d}s` : 'Done'; } },
-  TodoWrite:     { verb: 'updated',  result: () => 'Todo updated' },
-};
-
+import { injectStyle } from '../../../utils/domUtils.js';
+import { TOOL_REGISTRY as TOOL } from './ToolRegistry.js';
 export interface ToolActivityState {
   toolName: string;
   toolInput: Record<string, unknown>;
@@ -75,13 +37,43 @@ export class ToolActivityDelegate {
     this._injectStyles();   // one-time keyframe injection
   }
 
-  /* ── main render ── */
+  /** Update in-place: refresh dot animation, duration, result body, and expand/collapse. */
+  update(state: ToolActivityState): void {
+    this._fullResult = state.result || '';
+    this.element.classList.toggle('tool-activity-inline--running', state.status === 'running');
+    this.element.classList.toggle('tool-activity-inline--success', state.status === 'success');
+    this.element.classList.toggle('tool-activity-inline--error', state.status === 'error');
+    if (state.status !== 'running') this._expanded = false;
+    // Update dot animation
+    const dot = this.element.querySelector('span') as HTMLElement | null;
+    if (dot) {
+      dot.style.background = state.status === 'running'
+        ? 'var(--cinema-text-welcome)'
+        : state.status === 'error'
+          ? 'rgba(255,130,130,0.4)'
+          : 'var(--cinema-text-muted)';
+      dot.style.animation = state.status === 'running'
+        ? 'ta-pulse 2s ease-in-out infinite'
+        : 'none';
+    }
+    // Update body content
+    if (this._bodyEl && state.result) {
+      const isLong = state.result.length > 200 || state.result.split('\n').length > 5;
+      this._bodyEl.textContent = this._expanded ? state.result : (isLong ? state.result.slice(0, 400) : state.result);
+      this._bodyEl.hidden = !this._expanded;
+      if (this._showMoreBtn) this._showMoreBtn.style.display = this._expanded ? 'block' : 'none';
+    }
+  }
+
+  /* 鈹€鈹€ main render 鈹€鈹€ */
 
   /** Build the card: dot indicator line + collapsible result body. */
   private render(s: ToolActivityState): HTMLElement {
     const wrapper = document.createElement('div');
+    wrapper.className = 'tool-activity-inline tool-activity-inline--' + s.status;
+    wrapper.dataset.toolName = s.toolName;
 
-    // ── Indicator line: dot · TOOLNAME · verb subject · duration ──
+    // 鈹€鈹€ Indicator line: dot - TOOLNAME - verb subject - duration 鈹€鈹€
     const indicator = document.createElement('div');
     indicator.style.cssText = `
       font-size: 9px; color: var(--cinema-text-muted); letter-spacing: 1px;
@@ -106,7 +98,7 @@ export class ToolActivityDelegate {
 
     // Separator
     const sep = document.createElement('span');
-    sep.textContent = '·';
+    sep.textContent = '-';
     sep.style.cssText = `opacity: 0.3;`;
     indicator.appendChild(sep);
 
@@ -116,10 +108,10 @@ export class ToolActivityDelegate {
     action.style.cssText = `letter-spacing: 0;`;
     indicator.appendChild(action);
 
-    // Duration — only shown once the tool has completed
+    // Duration 鈥?only shown once the tool has completed
     if (typeof s.durationMs === 'number' && s.durationMs > 0) {
       const dur = document.createElement('span');
-      dur.textContent = `· ${s.durationMs >= 1000 ? `${(s.durationMs / 1000).toFixed(1)}s` : `${s.durationMs}ms`}`;
+      dur.textContent = `- ${s.durationMs >= 1000 ? `${(s.durationMs / 1000).toFixed(1)}s` : `${s.durationMs}ms`}`;
       dur.style.cssText = `opacity: 0.5;`;
       indicator.appendChild(dur);
     }
@@ -135,31 +127,35 @@ export class ToolActivityDelegate {
 
     wrapper.appendChild(indicator);
 
-    // ── Collapsible result body ──
+    // 鈹€鈹€ Collapsible result body 鈹€鈹€
     if (hasBody) {
       const isLong = this._fullResult.length > 200 || this._fullResult.split('\n').length > 5;
 
       // Truncate to 400 chars in collapsed state; full text when expanded
       const body = document.createElement('pre');
+      body.className = 'tool-activity-output';
       body.textContent = isLong ? this._fullResult.slice(0, 400) : this._fullResult;
       body.style.cssText = `
         font-size: 12px; color: var(--cinema-text-tertiary);
-        line-height: 1.6; padding: 8px 0; margin-bottom: 12px;
+        line-height: 1.6; padding: 10px 12px; margin: 6px 0 12px;
         white-space: pre-wrap; word-break: break-all;
         font-family: var(--font-mono, monospace);
-        border-bottom: 1px solid var(--hairline-cinema, var(--cinema-bg-edge-icon));
-        ${isLong && !this._expanded ? 'max-height: 60px; overflow: hidden;' : ''}
+        background: var(--raycast-card-fill, rgba(255,255,255,0.034));
+        border: 1px solid rgba(255,255,255,0.055);
+        border-radius: var(--raycast-radius-control, 8px);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.025);
+        ${isLong && !this._expanded ? 'max-height: 72px; overflow: hidden;' : ''}
       `;
       body.hidden = !this._expanded;
       this._bodyEl = body;
       wrapper.appendChild(body);
 
-      // Show more / less toggle button — only for long results
+      // Show more / less toggle button 鈥?only for long results
       if (isLong) {
         const btn = document.createElement('button');
         btn.textContent = this._expanded ? 'Show less' : 'Show more';
         btn.style.cssText = `
-          display: block; width: 100%; padding: 2px 0 0; margin: 0;
+          display: ${this._expanded ? 'block' : 'none'}; width: 100%; padding: 2px 0 0; margin: 0;
           background: none; border: none; color: var(--cinema-text-muted);
           cursor: pointer; font-size: 9px; font-family: var(--font-sans);
           letter-spacing: 1px; text-align: center;
@@ -201,12 +197,35 @@ export class ToolActivityDelegate {
     }
     if (this._showMoreBtn) {
       this._showMoreBtn.textContent = this._expanded ? 'Show less' : 'Show more';
+      this._showMoreBtn.style.display = this._expanded ? 'block' : 'none';
     }
   }
 
-  /* ── helpers ── */
+  collapse(): void {
+    this._expanded = false;
+    if (this._bodyEl) this._bodyEl.hidden = true;
+    if (this._showMoreBtn) {
+      this._showMoreBtn.textContent = 'Show more';
+      this._showMoreBtn.style.display = 'none';
+    }
+  }
 
-  /** Look up tool metadata; unknown tools get a camelCase → space-separated verb. */
+  expand(): void {
+    this._expanded = true;
+    if (this._bodyEl) {
+      this._bodyEl.textContent = this._fullResult;
+      this._bodyEl.style.maxHeight = 'none';
+      this._bodyEl.style.overflow = 'visible';
+      this._bodyEl.hidden = false;
+    }
+    if (this._showMoreBtn) {
+      this._showMoreBtn.textContent = 'Show less';
+      this._showMoreBtn.style.display = 'block';
+    }
+  }
+  /* 鈹€鈹€ helpers 鈹€鈹€ */
+
+  /** Look up tool metadata; unknown tools get a camelCase 鈫?space-separated verb. */
   private _meta(name: string) {
     return TOOL[name] || { verb: name.toLowerCase().replace(/([A-Z])/g, ' $1').trim(), result: () => null as string | null };
   }
@@ -259,16 +278,12 @@ export class ToolActivityDelegate {
 
   /** Inject ta-pulse keyframes once into document head. */
   private _injectStyles(): void {
-    const id = 'ta-styles';
-    if (document.getElementById(id)) return;
-    const s = document.createElement('style');
-    s.id = id;
-    s.textContent = `
+    injectStyle('ta-styles', `
       @keyframes ta-pulse {
         0%, 100% { opacity: 0.3; }
         50% { opacity: 1; }
       }
-    `;
-    document.head.appendChild(s);
+    `);
   }
 }
+

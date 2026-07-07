@@ -1,4 +1,4 @@
-// EnterPlanModeTool — signals the agent to enter plan mode
+// EnterPlanModeTool - signals the agent to enter plan mode
 // Plan mode pauses implementation and focuses on exploration/design.
 // shouldDefer: true (does not consume a model turn).
 // RiskLevel: Safe.
@@ -57,7 +57,7 @@ export class EnterPlanModeTool extends Tool {
     params: Record<string, unknown>,
     ctx: ExecutionContext,
   ): Promise<ToolResult> {
-    ToolPipeline.enterPlanMode();
+    ToolPipeline.enterPlanMode(ctx.sessionId);
     return this.makeResult(
       'Entering plan mode. The agent will now explore and design before implementing.' +
       ' Destructive tools are restricted until ExitPlanMode is called.' +

@@ -35,6 +35,7 @@ export type MessageStatus = 'pending' | 'success' | 'error';
  */
 export interface Message {
   id: string;
+  sessionId?: string;
   type: MessageType;
   role?: MessageRole;
   content: string;
@@ -55,6 +56,13 @@ export interface Message {
   // Delegation activity specific
   subAgentId?: string;
   subSessionId?: string;
+  // Task notification specific
+  taskId?: string;
+  parentSessionId?: string;
+  parentAgentId?: string;
+  taskStatus?: string;
+  taskSummary?: string;
+  taskResult?: string;
 }
 
 /** Alias for clarity — the frontend display message type. */
@@ -66,7 +74,10 @@ export interface TodoItem {
   activeForm?: string;
 }
 
-export type SessionStatus = 'idle' | 'working' | 'paused' | 'error' | 'Active' | 'started' | 'tool_executing';
+/** Frontend session status — UI states derived from shared SessionStatus enum + runtime states.
+ *  'Active', 'Idle', 'Archived' match the shared SessionStatus enum (PascalCase).
+ *  'working', 'paused', etc. are runtime-only UI states local to the frontend. */
+export type SessionStatus = 'Active' | 'Idle' | 'Archived' | 'working' | 'paused' | 'error' | 'started' | 'tool_executing';
 
 /**
  * Frontend session tree node.

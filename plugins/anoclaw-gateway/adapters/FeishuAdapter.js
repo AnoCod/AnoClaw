@@ -1,7 +1,7 @@
-// FeishuAdapter — connects to Feishu/Lark via official REST API.
+// FeishuAdapter - connects to Feishu/Lark via official REST API.
 // Outbound: HTTPS POST /open-apis/im/v1/messages (text, rich_text, interactive cards)
 // Inbound: WebSocket wss://open.feishu.cn/ws/v1/events (ws package optional)
-// Auth: appId + appSecret → tenant_access_token (2h expiry, auto-refresh)
+// Auth: appId + appSecret -> tenant_access_token (2h expiry, auto-refresh)
 // Rich messages: text, rich_text, interactive (card), post (rich post), image, file
 // Features: health monitoring, card templates, message actions
 
@@ -191,7 +191,7 @@ export class FeishuAdapter {
       this._ws = ws;
 
       ws.on('open', () => {
-        // Connected — events will start flowing
+        // Connected - events will start flowing
       });
 
       ws.on('message', data => {
@@ -218,7 +218,7 @@ export class FeishuAdapter {
               ...richInfo,
             });
           }
-        } catch { /* malformed frame — skip */ }
+        } catch { /* malformed frame - skip */ }
       });
 
       ws.on('close', () => {
@@ -233,7 +233,7 @@ export class FeishuAdapter {
         ws.close();
       });
     } catch (err) {
-      // ws package not available in plugin context — fall back to send-only
+      // ws package not available in plugin context - fall back to send-only
       this._ws = null;
     }
   }

@@ -4,6 +4,7 @@
  */
 
 import type { Page, MemoryEntry } from '../../types.js';
+import { App } from '../../app.js';
 import { ConfirmDialog } from '../ConfirmDialog.js';
 import { ClientLogger } from '../../ClientLogger.js';
 import { Button } from '../ui/Button.js';
@@ -73,6 +74,10 @@ export class MemoryPage implements Page {
     this._gridEl = document.createElement('div');
     this._gridEl.className = 'cinema-card-grid';
     inner.appendChild(this._gridEl);
+
+    // Auto-refresh on external memory changes (CEO deletes/creates via tool)
+    const sse = App.getInstance().sseClient;
+    sse.on('memory_changed', () => this._load());
   }
 
   onEnter(): void { this._load(); }

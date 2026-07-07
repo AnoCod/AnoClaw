@@ -48,7 +48,7 @@ export function hasPermission(
   token: ApiToken,
   permission: ApiPermission,
 ): boolean {
-  return token.permissions.includes(permission);
+  return token.permissions.includes('admin' as ApiPermission) || token.permissions.includes(permission);
 }
 
 /**
@@ -131,6 +131,7 @@ export async function initAuthStore(configDir?: string): Promise<void> {
     'agents:read' as ApiPermission,
     'agents:write' as ApiPermission,
     'workspace:read' as ApiPermission,
+    'workspace:write' as ApiPermission,
     'memory:read' as ApiPermission,
     'memory:write' as ApiPermission,
     'admin' as ApiPermission,

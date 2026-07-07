@@ -1,4 +1,4 @@
-// TaskAssignTool — delegate a task to a subordinate agent
+// TaskAssignTool - delegate a task to a subordinate agent
 // Creates a sub-session for the subordinate and runs their AgentLoop
 // with the task as a user message. Returns the sub-session ID.
 
@@ -12,30 +12,31 @@ import { createLogger } from '../../logger.js';
 export class TaskAssignTool extends Tool {
 
   static category = 'Task Delegation';
-  static toolDescription = 'Dispatches a task to a subordinate agent (non-blocking — returns immediately).';
+  static toolDescription = 'Delegates a distinct tracked task to a subordinate agent and returns immediately.';
   name(): string {
     return 'TaskAssign';
   }
 
   description(): string {
-    return 'Dispatch a task to a subordinate agent. Returns immediately — the subordinate works independently in background. The system delivers a <task-notification> when the task finishes. Use TaskList to check progress, TaskOutput to retrieve results.';
+    return 'Assign a distinct tracked task to a subordinate agent. The child works in its persistent session and the system sends a task notification on completion or failure.';
   }
 
   prompt(): string {
-    return '## TaskAssign Usage\n' +
-      'Delegate work to a direct subordinate. The task runs in background.\n\n' +
-      '**CRITICAL — Before delegating:**\n' +
-      '1. Check your Active Background Tasks list in the system prompt — is this agent already busy?\n' +
-      '2. If yes, use AgentMessage to add requirements, NOT a second TaskAssign\n' +
-      '3. One agent = one active task. Duplicate assignments create chaos.\n\n' +
-      '**Workflow:**\n' +
-      '1. TaskAssign → delegate the task with clear specs, then move on\n' +
-      '2. TaskList → check progress (sparingly — once per major turn if idle)\n' +
-      '3. TaskOutput → retrieve results when done\n' +
-      '4. TaskStop → cancel if needed\n\n' +
-      '**Task description must include:** clear goal, target files/area, acceptance criteria, priority.\n' +
-      '**Match by expertise** — assign frontend work to frontend specialists, backend to backend.\n' +
-      '**After delegating**, continue your own work or wait. You WILL be notified when it completes. Do NOT re-delegate the same work — the notification will arrive automatically.';
+    return [
+      '## TaskAssign Usage',
+      'Use TaskAssign for a separate unit of durable work that needs ownership, tracking, and a completion notification.',
+      '',
+      'TaskAssign is not a chat message. It creates or queues formal work in the subordinate persistent session.',
+      '',
+      'Every task must include:',
+      '- Goal and reason the work matters.',
+      '- Scope: files, systems, data, or constraints to inspect or change.',
+      '- Acceptance criteria and required verification.',
+      '- Priority and expected report format.',
+      '',
+      'Use AgentMessage instead when you need to clarify, amend, interrupt, or review a task that is already running.',
+      'After assigning, do not duplicate the same work yourself unless the task fails or the user changes direction.',
+    ].join('\n');
   }
 
   minRole(): string { return 'Manager'; }
@@ -67,7 +68,7 @@ export class TaskAssignTool extends Tool {
   }
 
   isAsync(): boolean {
-    return true; // Non-blocking — delegateTask now returns immediately
+    return true; // Non-blocking - delegateTask now returns immediately
   }
 
   defaultTimeoutMs(): number {
@@ -92,10 +93,10 @@ export class TaskAssignTool extends Tool {
     if (!target) {
       return this.makeError(`Target agent '${targetAgentId}' not found in registry`);
     }
-    // Check the target's report chain includes the caller — means caller is an ancestor
+    // Check the target's report chain includes the caller - means caller is an ancestor
     const chain = registry.reportChain(target.id);
     if (!chain.includes(ctx.agentId) && target.parentAgentId !== ctx.agentId) {
-      logger.warn('TaskAssign validation failed — not a subordinate', { targetAgentId, callerAid: ctx.agentId });
+      logger.warn('TaskAssign validation failed - not a subordinate', { targetAgentId, callerAid: ctx.agentId });
       return this.makeError(
         `Cannot assign task to '${targetAgentId}': ` +
         'tasks can only be delegated to subordinates (down the org tree).',
@@ -104,8 +105,8 @@ export class TaskAssignTool extends Tool {
 
     const runtime = AgentRuntime.getInstance();
 
-    // Delegate task (non-blocking — returns immediately after dispatching)
-    const result = await runtime.delegateTask(targetAgentId, task, ctx.sessionId, ctx.agentId);
+    // Delegate task (non-blocking - returns immediately after dispatching)
+    const result = await runtime.delegateTask(targetAgentId, task, ctx.sessionId, ctx.agentId, priority);
 
     if (!result.success) {
       return result;

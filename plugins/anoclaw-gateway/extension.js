@@ -1,4 +1,4 @@
-// extension.js — Gateway plugin (v2.1.0).
+// extension.js - Gateway plugin (v2.1.0).
 // Full multi-platform gateway: Telegram, WeChat (iLink Bot API, long-poll),
 // Feishu (REST + WebSocket).
 // Connection config stored in data/gateway_connections.json.
@@ -41,7 +41,7 @@ function saveConfig(config) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Inbox — persisted to JSON file, in-memory mirror for speed
+// Inbox - persisted to JSON file, in-memory mirror for speed
 // ═══════════════════════════════════════════════════════════════
 
 const _inbox = [];
@@ -88,7 +88,7 @@ function addInboxMessage(platform, chatId, senderId, text, connectionId, extra) 
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Message Templates — reusable message formats
+// Message Templates - reusable message formats
 // ═══════════════════════════════════════════════════════════════
 
 const _templates = [];
@@ -147,7 +147,7 @@ function applyTemplate(templateId, variables) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Outbound Retry Queue — exponential backoff
+// Outbound Retry Queue - exponential backoff
 // ═══════════════════════════════════════════════════════════════
 
 const _retryQueue = [];
@@ -257,7 +257,7 @@ function searchMessages({ query, platform, startDate, endDate, mediaType, limit 
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Platform adapter factory — single source of truth (DRY fix)
+// Platform adapter factory - single source of truth (DRY fix)
 // ═══════════════════════════════════════════════════════════════
 
 function createAdapter(platform, config) {
@@ -479,21 +479,26 @@ export async function activate(anoclaw) {
   // Inject prompt section for agent awareness
   await anoclaw.prompt.inject('gateway-rules',
     '## Gateway Rules\n' +
-    '- Use GatewaySend to reply to messages from Telegram/WeChat/Feishu.\n' +
-    '- Use GatewayReadInbox to check for new inbound messages.\n' +
-    '- Use GatewayStatus to check adapter health.\n' +
-    '- Use GatewaySearchMessages to search/filter inbox by platform, date, or content.\n' +
-    '- Use GatewayTemplates to manage reusable message formats with {{variable}} substitution.\n' +
-    '- For images, set mediaType to "photo"/"image" and provide a URL.\n' +
-    '- For documents/files, set mediaType to "document"/"file" and provide a URL.\n' +
-    '- For link cards (WeChat), set mediaType to "link_card" and provide title, description, URL.\n' +
-    '- For interactive cards (Feishu), set mediaType to "card" and provide card JSON.\n' +
-    '- For inline keyboards (Telegram), provide buttons array in the request.\n' +
-    '- Set retry: true for messages that should retry on failure.\n',
+    '- Gateway tools can send or read external messages. Treat outbound messages as user-visible external side effects.\n' +
+    '- Use GatewayReadInbox for pending inbound messages and GatewaySearchMessages for filtered history.\n' +
+    '- Use GatewayStatus before troubleshooting delivery or adapter behavior.\n' +
+    '- Use GatewayTemplates for reusable message formats with {{variable}} substitution.\n' +
+    '- For images, documents, files, link cards, or cards, set mediaType and provide the required URL/title/card fields.\n' +
+    '- Set retry: true only when duplicate delivery is acceptable.\n' +
+    '- Confirm ambiguous or high-impact outbound messages before sending unless the user has already authorized the exact content and recipient.\n',
     40
   );
 
-  anoclaw.log.info('Gateway plugin activated — all adapters initialized');
+  anoclaw.log.info('Gateway plugin activated - all adapters initialized');
+
+  await mountSlotBadge(
+    anoclaw,
+    'Gateway',
+    `${loadConfig().length} conn / ${_inbox.length} inbox`,
+    _inbox.length > 0 ? 'info' : 'ok',
+    'gateway-status',
+    60,
+  );
 
   return [{ dispose() {
     for (const adapter of Object.values(_adapters)) {
@@ -503,8 +508,22 @@ export async function activate(anoclaw) {
     persistInbox();
     persistTemplates();
     persistRetryQueue();
+    anoclaw.ui?.unmountAll('titlebar-right').catch(() => {});
     anoclaw.log.info('Gateway plugin deactivated');
   } }];
+}
+
+async function mountSlotBadge(anoclaw, label, value, tone, id, priority = 50) {
+  const html = `<span class="anoclaw-slot-pill" data-tone="${tone}"><span class="slot-dot"></span><strong>${escapeSlot(label)}</strong><span>${escapeSlot(value)}</span></span>`;
+  await anoclaw.ui?.mount('titlebar-right', html, { id, priority, position: 'append', replace: true });
+}
+
+function escapeSlot(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -750,7 +769,7 @@ export const handleTelegramWebhookSetup = authMiddleware(async (req) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// Tool execution — called by the agent
+// Tool execution - called by the agent
 // ═══════════════════════════════════════════════════════════════
 
 export async function executeTool(toolName, params) {
@@ -836,7 +855,7 @@ export async function executeTool(toolName, params) {
         }
         case 'create': {
           const t = addTemplate(params);
-          return `Template created: ${t.id} — ${t.name}`;
+          return `Template created: ${t.id} - ${t.name}`;
         }
         case 'delete': {
           if (deleteTemplate(params.templateId)) return `Template ${params.templateId} deleted.`;
@@ -862,7 +881,7 @@ export async function executeTool(toolName, params) {
         if (health.totalErrors) extras.push(`${health.totalErrors} errors`);
         if (health.uptime) extras.push(`up ${health.uptime}s`);
         const suffix = extras.length ? ` (${extras.join(', ')})` : '';
-        return `${c.name || c.id}: ${c.platform} — ${status}${suffix}`;
+        return `${c.name || c.id}: ${c.platform} - ${status}${suffix}`;
       });
       return statuses.length > 0 ? statuses.join('\n') : 'No gateway connections configured.';
     }

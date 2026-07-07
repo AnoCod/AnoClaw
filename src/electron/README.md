@@ -10,7 +10,7 @@ Windows desktop shell: single-instance lock, frameless main window, system tray,
 
 The true Electron entry point (`"main"` in `package.json`).
 
-- Sets GPU flags: `disable-gpu-vsync`, `enable-gpu-rasterization`, `use-angle=direct-composition`
+- Sets rendering flags in auto mode: `enable-gpu-rasterization`, `enable-zero-copy`, `use-angle=d3d11` on Windows; software fallback remains enabled. Use `ANOCLAW_GPU_MODE=cpu` to force CPU/software rendering or `ANOCLAW_GPU_MODE=force` to ignore Chromium GPU blocklist.
 - Enables remote debugging: `--remote-debugging-port=9222`
 - **Single-instance lock:** `app.requestSingleInstanceLock()`; second instance focuses existing window
 - Dynamically imports `main.js` → `createApp(electron)`
@@ -65,7 +65,7 @@ class WindowManager {
 }
 ```
 
-**Window config:** `titleBarStyle: 'hidden'`, `icon: build/icon.ico`, `backgroundColor: '#0a0a0a'`, `enableLargerThanScreen: true`, `backgroundThrottling: false`, min 800×600.
+**Window config:** `titleBarStyle: 'hidden'`, `icon: build/icon.ico`, `backgroundColor: '#0a0a0a'`, `enableLargerThanScreen: true`, `backgroundThrottling: true`, min 800×600.
 
 **State persistence:** saves position/size/maximized to `userData/window-state.json`, restores on next launch. Debounced at 500ms.
 

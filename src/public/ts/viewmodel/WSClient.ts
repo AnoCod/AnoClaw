@@ -110,11 +110,6 @@ export class WSClient {
     return this._connectionState;
   }
 
-  /** Always null — this is a global connection, not per-session. */
-  get sessionId(): string | null {
-    return null; // Global connection, not per-session
-  }
-
   /** Send a chat message for a given session. Includes permission mode, effort, and attachments. */
   sendMessage(sessionId: string, content: string, mode?: string, effortMode?: boolean, attachments?: Array<Record<string, unknown>>): void {
     console.log('[WS] sendMessage — sessionId:', sessionId);

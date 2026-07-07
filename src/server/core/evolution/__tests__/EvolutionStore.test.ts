@@ -76,7 +76,7 @@ describe('EvolutionStore', () => {
       version: 1,
       updatedAt: new Date().toISOString(),
       tools: {
-        Read: { callCount: 10, successCount: 9, totalTokens: 5000, totalDurationMs: 1000, avgTokens: 500, p50Tokens: 400, p95Tokens: 800, lastUsedAt: new Date().toISOString() },
+        Read: { callCount: 10, successCount: 9, totalTokens: 5000, totalDurationMs: 1000, avgTokens: 500, p50Tokens: 400, p95Tokens: 800, avgDurationMs: 100, lastUsedAt: new Date().toISOString() },
       },
     };
     await store.writeStats('tool-stats.json', data);

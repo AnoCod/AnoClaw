@@ -1,4 +1,4 @@
-// GlobTool — filename pattern matching using glob patterns
+// GlobTool - filename pattern matching using glob patterns
 // Based on Claude Code's GlobTool pattern. Uses micromatch for standard glob semantics.
 // RiskLevel: Safe (read-only).
 
@@ -45,7 +45,7 @@ export class GlobTool extends Tool {
     return '## Glob Usage\n' +
       '- Use this tool to find files by name pattern\n' +
       '- When doing open-ended searches requiring multiple rounds, use the Agent tool instead\n' +
-      '- Do NOT use Bash `find` or `ls` for file search — use Glob\n' +
+      '- Do NOT use Bash `find` or `ls` for file search - use Glob\n' +
       '- On Windows, use forward slashes: D:/foo/bar, or omit path to use the workspace root\n' +
       '- If you need to list ALL files in a directory, use pattern "**/*"\n' +
       '- Result limit: 200 files max. Output beyond 10,000 chars is auto-truncated. Refine your pattern if needed.';
@@ -65,7 +65,7 @@ export class GlobTool extends Tool {
             'The directory to search in. Defaults to the current working directory (workspace root).' +
             ' Use forward slashes on all platforms (e.g. D:/projects/src, /home/user/code).' +
             ' IMPORTANT: Omit this field to use the default directory.' +
-            ' DO NOT enter "undefined" or "null" — simply omit it for the default behavior.',
+            ' DO NOT enter "undefined" or "null" - simply omit it for the default behavior.',
         },
       },
       required: ['pattern'],
@@ -157,7 +157,7 @@ export class GlobTool extends Tool {
         return this.makeResult('(no matches)', { startedAt });
       }
 
-      // Sort by modification time (newest first) — batch stat
+      // Sort by modification time (newest first) - batch stat
       const withMtime: Array<{ filePath: string; mtimeMs: number }> = [];
       for (const rel of matched.slice(0, MAX_RESULTS)) {
         try {

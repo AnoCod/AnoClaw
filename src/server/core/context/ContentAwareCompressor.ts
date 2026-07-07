@@ -424,6 +424,22 @@ function compressJsonArray(arr: unknown[]): string {
   return JSON.stringify([...arr.slice(0, 5), `... ${arr.length - 10} items`, ...arr.slice(-5)]);
 }
 
+/**
+ * Check if a value is a compression sentinel (placeholder inserted during
+ * array/object compression to indicate omitted rows/items).
+ * Sentinel objects have a `_rows_omitted` key; sentinel strings match the
+ * "... N items omitted" pattern.
+ */
+export function isCompressionSentinel(value: unknown): boolean {
+  if (typeof value === 'object' && value !== null) {
+    return '_rows_omitted' in (value as Record<string, unknown>);
+  }
+  if (typeof value === 'string') {
+    return /\d+ items? omitted/.test(value);
+  }
+  return false;
+}
+
 // ══════════════════════════════════════════════════════════════
 // Public API
 // ══════════════════════════════════════════════════════════════

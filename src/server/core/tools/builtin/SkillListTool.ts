@@ -1,4 +1,4 @@
-// SkillListTool — list all available skills for the current agent
+// SkillListTool - list all available skills for the current agent
 // Queries SkillManager for skills available to the agent.
 
 import { Tool, RiskLevel } from '../Tool.js';
@@ -19,10 +19,10 @@ export class SkillListTool extends Tool {
   prompt(): string {
     return '## Skill Discovery Pipeline\n' +
       'Skills extend your capabilities with specialized workflows and domain knowledge. The discovery pipeline is:\n\n' +
-      '1. **SkillList** (this tool) — See what skills are available with their descriptions and triggers.\n' +
-      '2. **SkillInspect** — Read a skill\'s full body and metadata before deciding to invoke it.\n' +
-      '3. **Skill** — Invoke the skill to load its instructions into your context.\n\n' +
-      'Always SkillList first. Never invoke a skill blindly — SkillInspect it first to understand what it does and whether it fits your task.\n\n' +
+      '1. **SkillList** (this tool) - See what skills are available with their descriptions and triggers.\n' +
+      '2. **SkillInspect** - Read a skill\'s full body and metadata before deciding to invoke it.\n' +
+      '3. **Skill** - Invoke the skill to load its instructions into your context.\n\n' +
+      'Always SkillList first. Never invoke a skill blindly - SkillInspect it first to understand what it does and whether it fits your task.\n\n' +
       'Skills can also auto-trigger based on keywords in user messages. When a skill triggers, you\'ll see `<command-name>` in the conversation.';
   }
 
@@ -31,6 +31,8 @@ export class SkillListTool extends Tool {
   }
 
   riskLevel(): RiskLevel { return RiskLevel.Safe; }
+
+  isReadOnly(): boolean { return true; }
 
   async execute(_params: Record<string, unknown>, ctx: ExecutionContext): Promise<ToolResult> {
     try {

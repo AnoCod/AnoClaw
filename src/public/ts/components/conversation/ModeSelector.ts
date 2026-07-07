@@ -1,10 +1,10 @@
-/**
- * ModeSelector — Mode selection button + dropdown menu component
+﻿/**
+ * ModeSelector 鈥?Mode selection button + dropdown menu component
  * Extracted from InputPanel, independently manages input mode (Ask / Auto-Edit / Plan / Auto) and Effort toggle.
  * Dropdown menu renders on body and auto-closes on outside click.
  */
 
-import type { InputMode, RunningMode } from './types.js';
+import type { GoalState, InputMode } from './types.js';
 import { ClientLogger } from '../../ClientLogger.js';
 import { Toggle } from '../ui/Toggle.js';
 
@@ -13,48 +13,48 @@ export class ModeSelector {
 
   /** Fires when mode changes (including external setMode calls and user menu clicks) */
   onModeChange: ((mode: InputMode) => void) | null = null;
-  /** Fires when running mode (normal/infinite) changes */
-  onRunningModeChange: ((mode: RunningMode) => void) | null = null;
+  /** Fires when effort toggle changes */
+  onEffortChange: ((enabled: boolean) => void) | null = null;
+  onGoalAction: ((action: 'start' | 'pause' | 'resume' | 'edit' | 'delete', objective?: string) => void) | null = null;
 
   private mode: InputMode;
-  private runningMode: RunningMode;
   private effortEnabled: boolean;
+  private goal: GoalState | null = null;
   private dropdown: HTMLElement | null = null;
 
-  constructor(initialMode: InputMode = 'auto', initialRunningMode: RunningMode = 'normal', effortEnabled: boolean = true) {
+  constructor(initialMode: InputMode = 'auto', effortEnabled: boolean = true) {
     this.mode = initialMode;
-    this.runningMode = initialRunningMode;
     this.effortEnabled = effortEnabled;
     this.element = this._buildButton();
   }
 
-  // ── Public API ──────────────────────────────────────────────────
+  // 鈹€鈹€ Public API 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
   getMode(): InputMode {
     return this.mode;
-  }
-
-  getRunningMode(): RunningMode {
-    return this.runningMode;
   }
 
   isEffortEnabled(): boolean {
     return this.effortEnabled;
   }
 
-  setMode(mode: InputMode): void {
+  setMode(mode: InputMode, emit: boolean = true): void {
     this.mode = mode;
     this._updateLabel();
-    if (this.onModeChange) this.onModeChange(this.mode);
+    if (emit && this.onModeChange) this.onModeChange(this.mode);
   }
 
-  setRunningMode(mode: RunningMode): void {
-    this.runningMode = mode;
+  setGoal(goal: GoalState | null): void {
+    this.goal = goal && goal.status !== 'deleted' ? goal : null;
     this._updateLabel();
-    if (this.onRunningModeChange) this.onRunningModeChange(this.runningMode);
   }
 
-  // ── Button build ──────────────────────────────────────────────────
+  setEffort(enabled: boolean, emit: boolean = true): void {
+    this.effortEnabled = enabled;
+    if (emit && this.onEffortChange) this.onEffortChange(enabled);
+  }
+
+  // 鈹€鈹€ Button build 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
   private _buildButton(): HTMLButtonElement {
     const btn = document.createElement('button');
@@ -70,25 +70,25 @@ export class ModeSelector {
   private _updateLabel(btn?: HTMLButtonElement): void {
     const b = btn || this.element;
     const modeLabels: Record<InputMode, string> = {
+      'auto-edit': 'Auto Edit',
+      'auto': 'Safe Auto',
       'ask': 'Ask',
-      'auto-edit': 'Auto-Edit',
       'plan': 'Plan',
-      'auto': 'Auto',
     };
     b.innerHTML = '';
 
-    const prefix = this.runningMode === 'infinite' ? '∞ ' : '';
+    const prefix = this.goal?.status === 'active' ? 'Goal ' : '';
     const label = document.createElement('span');
     label.textContent = prefix + modeLabels[this.mode];
     b.appendChild(label);
 
     const arrow = document.createElement('span');
-    arrow.textContent = '▾';
+    arrow.textContent = '^';
     arrow.style.cssText = 'font-size: 8px; opacity: 0.5; margin-left: 2px;';
     b.appendChild(arrow);
   }
 
-  // ── Dropdown menu ──────────────────────────────────────────────────
+  // 鈹€鈹€ Dropdown menu 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
   private _toggleDropdown(): void {
     if (this.dropdown) {
@@ -97,6 +97,7 @@ export class ModeSelector {
     }
     this.dropdown = this._buildDropdown();
     document.body.appendChild(this.dropdown);
+    this._positionDropdown();
 
     // Close on outside click (use capture to beat stopped propagation).
     // setTimeout avoids the click that opened the dropdown from closing it.
@@ -134,10 +135,10 @@ export class ModeSelector {
     dd.className = 'mode-dropdown';
 
     const modes: { mode: InputMode; label: string; desc: string }[] = [
-      { mode: 'ask', label: 'Ask before edits', desc: 'Ask for confirmation before each edit' },
-      { mode: 'auto-edit', label: 'Edit automatically', desc: 'Edit files directly without asking' },
-      { mode: 'plan', label: 'Plan mode', desc: 'Explore code and present a plan first' },
-      { mode: 'auto', label: 'Auto mode', desc: 'Auto-select best permission mode (default)' },
+      { mode: 'auto-edit', label: 'Auto Edit', desc: 'All tools run freely. No confirmation pop-ups.' },
+      { mode: 'auto', label: 'Safe Auto', desc: 'Auto-approve edits and writes. Pop up only for risky commands.' },
+      { mode: 'ask', label: 'Ask', desc: 'Pop up confirmation for every file change and command.' },
+      { mode: 'plan', label: 'Plan', desc: 'Read and explore only. No changes allowed.' },
     ];
 
     for (const m of modes) {
@@ -174,25 +175,12 @@ export class ModeSelector {
       dd.appendChild(item);
     }
 
-    // Separator before running mode
+    // Separator before goal controls
     const divider1 = document.createElement('div');
     divider1.className = 'mode-dropdown-divider';
     dd.appendChild(divider1);
 
-    // Infinite toggle row
-    const infiniteRow = document.createElement('div');
-    infiniteRow.className = 'mode-infinite-row';
-    const infiniteLabel = document.createElement('span');
-    infiniteLabel.className = 'mode-infinite-label';
-    infiniteLabel.textContent = '∞ Infinite';
-
-    const infiniteToggle = new Toggle({ checked: this.runningMode === 'infinite', onChange: (v) => {
-      this.setRunningMode(v ? 'infinite' : 'normal');
-    }});
-
-    infiniteRow.appendChild(infiniteLabel);
-    infiniteRow.appendChild(infiniteToggle.element);
-    dd.appendChild(infiniteRow);
+    dd.appendChild(this._buildGoalRow());
 
     // Separator before effort
     const divider2 = document.createElement('div');
@@ -209,17 +197,80 @@ export class ModeSelector {
     const effortToggle = new Toggle({ checked: this.effortEnabled, onChange: (v) => {
       this.effortEnabled = v;
       ClientLogger.ui.debug('Effort toggled', { enabled: v });
+      if (this.onEffortChange) this.onEffortChange(v);
     }});
 
     effortRow.appendChild(effortLabel);
     effortRow.appendChild(effortToggle.element);
     dd.appendChild(effortRow);
 
-    // Position above the button (dropdown opens upward)
-    const anchorRect = this.element.getBoundingClientRect();
-    dd.style.bottom = `${window.innerHeight - anchorRect.top + 4}px`;
-    dd.style.left = `${anchorRect.left}px`;
-
     return dd;
   }
+
+  private _positionDropdown(): void {
+    if (!this.dropdown) return;
+    const anchorRect = this.element.getBoundingClientRect();
+    const dropdownRect = this.dropdown.getBoundingClientRect();
+    const gap = 6;
+    const margin = 8;
+    const left = Math.min(
+      Math.max(anchorRect.left, margin),
+      Math.max(margin, window.innerWidth - dropdownRect.width - margin),
+    );
+    const top = Math.max(margin, anchorRect.top - dropdownRect.height - gap);
+
+    this.dropdown.style.left = `${left}px`;
+    this.dropdown.style.top = `${top}px`;
+    this.dropdown.style.bottom = 'auto';
+  }
+
+  private _buildGoalRow(): HTMLElement {
+    const row = document.createElement('div');
+    row.className = 'mode-goal-row';
+    row.style.gap = '8px';
+
+    const label = document.createElement('span');
+    label.className = 'mode-goal-label';
+    label.textContent = this.goal ? `Goal: ${this.goal.status}` : 'Goal';
+    label.title = this.goal?.objective || 'No active goal';
+    row.appendChild(label);
+
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:4px;align-items:center;';
+
+    const makeBtn = (text: string, action: 'start' | 'pause' | 'resume' | 'edit' | 'delete') => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = text;
+      btn.className = 'cinema-tool-btn';
+      btn.style.cssText = 'height:22px;padding:0 7px;font-size:10px;';
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.onGoalAction?.(action);
+        this._closeDropdown();
+      });
+      return btn;
+    };
+
+    if (!this.goal) {
+      actions.style.width = '100%';
+      const startBtn = makeBtn('Start Goal', 'start');
+      startBtn.classList.add('mode-goal-start-btn');
+      startBtn.style.width = '100%';
+      actions.appendChild(startBtn);
+    } else if (this.goal.status === 'active') {
+      actions.appendChild(makeBtn('Pause', 'pause'));
+      actions.appendChild(makeBtn('Edit', 'edit'));
+      actions.appendChild(makeBtn('Delete', 'delete'));
+    } else {
+      actions.appendChild(makeBtn('Resume', 'resume'));
+      actions.appendChild(makeBtn('Edit', 'edit'));
+      actions.appendChild(makeBtn('Delete', 'delete'));
+    }
+
+    row.appendChild(actions);
+    return row;
+  }
 }
+
+

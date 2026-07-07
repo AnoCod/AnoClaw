@@ -2,7 +2,7 @@
   "name": "anoclaw-mcp",
   "displayName": "MCP",
   "version": "2.1.0",
-  "description": "Model Context Protocol — connect external tools, resources, and prompts from MCP servers. Full spec support with auto-reconnect, health monitoring, and dynamic tool proxy.",
+  "description": "Model Context Protocol - connect external tools, resources, and prompts from MCP servers. Full spec support with auto-reconnect, health monitoring, and dynamic tool proxy.",
   "publisher": "anoclaw",
   "main": "extension.js",
   "activationEvents": ["onStartup"],

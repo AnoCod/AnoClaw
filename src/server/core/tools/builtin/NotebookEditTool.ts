@@ -1,4 +1,4 @@
-// NotebookEditTool — edits Jupyter notebook (.ipynb) cells
+// NotebookEditTool - edits Jupyter notebook (.ipynb) cells
 // Supports replacing, inserting, and deleting cells by ID or index.
 // RiskLevel: Safe (file edit, but limited to notebook cells).
 
@@ -8,6 +8,7 @@ import { Tool } from '../Tool.js';
 import type { ToolResult } from '../../../../shared/types/tool.js';
 import { RiskLevel } from '../../../../shared/types/tool.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
+import { atomicWriteFile, resolvePath } from './FileUtils.js';
 
 interface NotebookCell {
   cell_type: 'code' | 'markdown';
@@ -31,14 +32,14 @@ export class NotebookEditTool extends Tool {
   }
 
   description(): string {
-    return 'Replace, insert, or delete a single cell in a Jupyter notebook (.ipynb file). Use this instead of Write for notebook edits — Write would overwrite the entire file.';
+    return 'Replace, insert, or delete a single cell in a Jupyter notebook (.ipynb file). Use this instead of Write for notebook edits - Write would overwrite the entire file.';
   }
 
   prompt(): string {
     return '## NotebookEdit Usage\n' +
-      'Edit cells in .ipynb Jupyter notebooks. Use this instead of Write or Edit for notebook files — those tools work on raw JSON, this works on the cell structure.\n\n' +
-      '**Operations:** `replace` (default) — changes a cell\'s source. `insert` — adds a new cell after the given cell_id. `delete` — removes a cell.\n\n' +
-      'You must Read the notebook first to see cell IDs. Only edit notebook files — for regular .ts/.js/.py files, use Edit.';
+      'Edit cells in .ipynb Jupyter notebooks. Use this instead of Write or Edit for notebook files - those tools work on raw JSON, this works on the cell structure.\n\n' +
+      '**Operations:** `replace` (default) - changes a cell\'s source. `insert` - adds a new cell after the given cell_id. `delete` - removes a cell.\n\n' +
+      'You must Read the notebook first to see cell IDs. Only edit notebook files - for regular .ts/.js/.py files, use Edit.';
   }
 
   parametersSchema(): Record<string, unknown> {
@@ -74,7 +75,7 @@ export class NotebookEditTool extends Tool {
           description: 'The type of edit to make (replace, insert, delete). Defaults to replace.',
         },
       },
-      required: ['notebook_path', 'new_source'],
+      required: ['notebook_path'],
     };
   }
 
@@ -104,13 +105,14 @@ export class NotebookEditTool extends Tool {
     if (!notebookPath || typeof notebookPath !== 'string') {
       return this.makeError('notebook_path is required');
     }
+    if (editMode !== 'delete' && (newSource === undefined || newSource === null)) {
+      return this.makeError('new_source is required for replace and insert modes');
+    }
 
     const startedAt = Date.now();
 
     try {
-      const resolved = path.isAbsolute(notebookPath)
-        ? notebookPath
-        : path.resolve(ctx.workspace, notebookPath);
+      const resolved = resolvePath(notebookPath, ctx.workspace);
 
       let raw: string;
       try {
@@ -163,9 +165,8 @@ export class NotebookEditTool extends Tool {
         case 'insert': {
           const newCell: NotebookCell = {
             cell_type: cellType ?? 'code',
-            source: newSource,
+            source: newSource ?? '',
           };
-          if (cellId) newCell.id = cellId;
           if (targetIdx >= 0 && targetIdx < nb.cells.length) {
             nb.cells.splice(targetIdx + 1, 0, newCell);
             message = `Inserted ${cellType} cell after index ${targetIdx} in ${path.basename(resolved)}`;
@@ -189,7 +190,7 @@ export class NotebookEditTool extends Tool {
         }
       }
 
-      await fs.writeFile(resolved, JSON.stringify(nb, null, 1) + '\n', 'utf-8');
+      await atomicWriteFile(resolved, JSON.stringify(nb, null, 1) + '\n', 'utf-8');
 
       return this.makeResult(message, { startedAt });
     } catch (err: unknown) {

@@ -71,7 +71,7 @@ export class Agent extends EventEmitter {
     this._apiKey = config.apiKey;
     this._model = config.model;
     this._contextWindow = config.contextWindow;
-    this._maxTurns = config.maxTurns ?? 25;
+    this._maxTurns = config.maxTurns ?? 0;
     this._temperature = config.temperature ?? 0.7;
 
     // Capabilities
@@ -256,24 +256,7 @@ export class Agent extends EventEmitter {
       this.emit(AgentEvents.ActiveStateChanged, config.state, old);
     }
 
-    // Model
-    this._provider = config.provider;
-    this._apiUrl = config.apiUrl;
-    this._apiKey = config.apiKey;
-    this._model = config.model;
-    this._contextWindow = config.contextWindow;
-    this._maxTurns = config.maxTurns ?? 25;
-    this._temperature = config.temperature ?? 0.7;
-
-    // Capabilities
-    this._allowedTools = [...config.allowedTools];
-    this._enabledSkills = [...config.enabledSkills];
-    this._mcpServers = [...config.mcpServers];
-
-    // Prompt
-    this._agentPrompt = config.agentPrompt;
-    this._preferredLanguage = config.preferredLanguage;
-    this._conversationLanguage = config.conversationLanguage;
+    this._applySharedConfig(config);
 
     this.emit(AgentEvents.ConfigUpdated, config);
     createLogger('anochat.agent').debug('Agent config updated', { aid: this.id });
@@ -285,11 +268,42 @@ export class Agent extends EventEmitter {
   toConfig(): AgentConfigWithKey {
     return {
       id: this.id,
-      name: this._name,
-      role: this._role,
       parentAgentId: this._parentAgentId,
       level: this._level,
       teamName: this.teamName,
+      createdAt: this.createdAt,
+      ...this._collectSharedConfig(),
+    };
+  }
+
+  /** Apply the shared mutable config fields from a config object to this agent. */
+  private _applySharedConfig(config: AgentConfigWithKey): void {
+    this._provider = config.provider;
+    this._apiUrl = config.apiUrl;
+    this._apiKey = config.apiKey;
+    this._model = config.model;
+    this._contextWindow = config.contextWindow;
+    this._maxTurns = config.maxTurns ?? 0;
+    this._temperature = config.temperature ?? 0.7;
+    this._allowedTools = [...config.allowedTools];
+    this._enabledSkills = [...config.enabledSkills];
+    this._mcpServers = [...config.mcpServers];
+    this._agentPrompt = config.agentPrompt;
+    this._preferredLanguage = config.preferredLanguage;
+    this._conversationLanguage = config.conversationLanguage;
+  }
+
+  /** Collect the shared mutable config fields from this agent. */
+  private _collectSharedConfig(): Pick<AgentConfigWithKey,
+    'name' | 'role' | 'state' |
+    'provider' | 'apiUrl' | 'apiKey' | 'model' | 'contextWindow' | 'maxTurns' | 'temperature' |
+    'allowedTools' | 'enabledSkills' | 'mcpServers' |
+    'agentPrompt' | 'preferredLanguage' | 'conversationLanguage'
+  > {
+    return {
+      name: this._name,
+      role: this._role,
+      state: this._state,
       provider: this._provider,
       apiUrl: this._apiUrl,
       apiKey: this._apiKey,
@@ -297,14 +311,12 @@ export class Agent extends EventEmitter {
       contextWindow: this._contextWindow,
       maxTurns: this._maxTurns,
       temperature: this._temperature,
-      agentPrompt: this._agentPrompt,
-      preferredLanguage: this._preferredLanguage,
-      conversationLanguage: this._conversationLanguage,
       allowedTools: [...this._allowedTools],
       enabledSkills: [...this._enabledSkills],
       mcpServers: [...this._mcpServers],
-      state: this._state,
-      createdAt: this.createdAt,
+      agentPrompt: this._agentPrompt,
+      preferredLanguage: this._preferredLanguage,
+      conversationLanguage: this._conversationLanguage,
     };
   }
 }

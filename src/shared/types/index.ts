@@ -10,3 +10,5 @@ export * from './evolution.js';
 export * from './stream-events.js';
 export * from './memory.js';
 export * from './talent-pool.js';
+export * from './ws-protocol.js';
+export * from './capability.js';

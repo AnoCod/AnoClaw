@@ -18,6 +18,7 @@ import { WorkspacePage } from './components/pages/workspace/WorkspacePage.js';
 import { PluginsPage } from './components/pages/PluginsPage.js';
 import { PluginPageContainer } from './components/pages/PluginPageContainer.js';
 import { PluginViewModel } from './viewmodel/PluginViewModel.js';
+import { ToolConfirmationQueue } from './viewmodel/ToolConfirmationQueue.js';
 import type { AppSettings, PluginPageContribution } from './types.js';
 import { ClientLogger } from './ClientLogger.js';
 import { initAnoClawAPI } from './anoclaw-api.js';
@@ -71,6 +72,7 @@ class App {
     // Wire WSClient events to ConversationViewModel
     this._conversationVM.setSessionVM(this._sessionVM);
     this._agentVM = new AgentViewModel();
+    this._sessionVM.setAgentVM(this._agentVM);
     this._titleBar = new TitleBar();
     this._pluginVM = new PluginViewModel();
 
@@ -137,6 +139,7 @@ class App {
     const ws = this._sessionVM.getWSClient();
     ws.on('serverRestarted', () => {
       ClientLogger.app.info('Server epoch changed — reloading all state');
+      this._syncSettingsFromServer();
       this._sessionVM.loadSessions().then(() => {
         this._sessionVM.restoreActiveSession();
       }).catch(() => {});
@@ -147,6 +150,7 @@ class App {
     // WS reconnected after disconnect → auto-recover stale state
     ws.on('reconnected', () => {
       ClientLogger.app.info('WS reconnected — refreshing state');
+      this._syncSettingsFromServer();
       this._sessionVM.loadSessions().then(() => {
         this._sessionVM.restoreActiveSession();
       }).catch(() => {});
@@ -175,7 +179,7 @@ class App {
     (window as any).__anoclawApp = this;
 
     // Resize: flag <html> with .is-resizing for CSS GPU compositing optimizations
-    let rt: any = null;
+    let rt: ReturnType<typeof setTimeout> | null = null;
     window.addEventListener('resize', () => {
       document.documentElement.classList.add('is-resizing');
       if (rt) clearTimeout(rt);
@@ -263,11 +267,9 @@ class App {
     this._saveSettings();
     this._applyTheme();
 
-    if (patch.showThinkCards !== undefined || patch.showToolCards !== undefined) {
-      window.dispatchEvent(new CustomEvent('settings-changed', {
-        detail: { showThinkCards: this._settings.showThinkCards, showToolCards: this._settings.showToolCards },
-      }));
-    }
+    window.dispatchEvent(new CustomEvent('settings-changed', {
+      detail: { ...this._settings },
+    }));
   }
 
   // -- Private --
@@ -299,7 +301,7 @@ class App {
         Object.assign(this._settings, server);
         this._applyTheme();
         window.dispatchEvent(new CustomEvent('settings-changed', {
-          detail: { showThinkCards: this._settings.showThinkCards, showToolCards: this._settings.showToolCards },
+          detail: { ...this._settings },
         }));
       }
     } catch {
@@ -327,18 +329,26 @@ class App {
     const root = document.documentElement;
     root.setAttribute('data-theme', this._settings.theme);
     // Accent color attribute and variable override
-    root.setAttribute('data-accent', this._getAccentName(this._settings.accentColor));
+    const accentName = this._getAccentName(this._settings.accentColor);
+    root.setAttribute('data-accent', accentName);
+    root.style.setProperty('--color-accent', this._settings.accentColor);
+    root.style.setProperty('--color-icon-active', this._settings.accentColor);
+    root.style.setProperty('--color-accent-cinema', this._settings.accentColor);
+    root.style.setProperty('--color-accent-cinema-subtle', `${this._settings.accentColor}1A`);
+    root.style.setProperty('--color-accent-cinema-glow', `${this._settings.accentColor}26`);
     window.dispatchEvent(new CustomEvent('theme-changed', {
-      detail: { theme: this._settings.theme, accent: this._getAccentName(this._settings.accentColor) },
+      detail: { theme: this._settings.theme, accent: accentName },
     }));
   }
 
   private _getAccentName(hex: string): string {
     const map: Record<string, string> = {
       '#ffffff': 'white',
+      '#da291c': 'red',
       '#7c3aed': 'purple',
       '#0984E3': 'blue',
       '#00B894': 'green',
+      '#E17055': 'orange',
     };
     return map[hex] || 'white';
   }
@@ -510,6 +520,9 @@ class App {
     // Pluggable message router: WSClient 'event' → WSMessageRouter.dispatch → ChatHandlers
     const router = new WSMessageRouter();
     registerChatHandlers(router, this._conversationVM, this._sessionVM);
+
+    // Wire ToolConfirmationQueue to WS client
+    ToolConfirmationQueue.getInstance().setSender((data) => this._sseClient.send(data));
 
     // Every received WS message → dispatch by type. session-less events pass empty sessionId.
     this._sseClient.on('event', (data: unknown) => {

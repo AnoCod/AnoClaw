@@ -135,10 +135,13 @@ export class SupervisionManager extends EventEmitter {
     for (const [sessionId, hb] of this._heartbeats.entries()) {
       const elapsed = now - hb.getTime();
       if (elapsed > this._config.heartbeatIntervalSec * 1000 * 1.5) {
+        this.emit('heartbeatMissed', sessionId);
       }
       if (elapsed > unresponsiveThresholdMs) {
+        this.emit('sessionUnresponsive', sessionId);
       }
       if (this.isTimedOut(sessionId)) {
+        this.emit('sessionTimedOut', sessionId);
       }
     }
   }

@@ -13,7 +13,7 @@
 
 import type { Tool } from './Tool.js';
 import type { ToolResult } from '../../../shared/types/tool.js';
-import { RiskLevel } from '../../../shared/types/tool.js';
+import { InterruptBehavior, RiskLevel } from '../../../shared/types/tool.js';
 import type { ExecutionContext } from '../../../shared/types/session.js';
 import { createLogger } from '../logger.js';
 import { makeError } from './ToolResult.js';
@@ -70,11 +70,15 @@ export interface PipelineStages {
  */
 export class ToolPipeline {
   /** Plan mode state — when active, only read-only tools are allowed. */
-  private static _planMode = false;
+  private static _planModeSessions: Set<string> = new Set();
+  /** Allowed prompts per session (set by ExitPlanMode, cleared by EnterPlanMode). */
+  private static _allowedPrompts: Map<string, Array<{ tool: string; prompt: string }>> = new Map();
 
-  static enterPlanMode(): void { ToolPipeline._planMode = true; }
-  static exitPlanMode(): void { ToolPipeline._planMode = false; }
-  static isPlanMode(): boolean { return ToolPipeline._planMode; }
+  static enterPlanMode(sessionId: string = '__global__'): void { ToolPipeline._planModeSessions.add(sessionId); ToolPipeline._allowedPrompts.delete(sessionId); }
+  static exitPlanMode(sessionId: string = '__global__'): void { ToolPipeline._planModeSessions.delete(sessionId); }
+  static isPlanMode(sessionId: string = '__global__'): boolean { return ToolPipeline._planModeSessions.has(sessionId); }
+  static setAllowedPrompts(sessionId: string, prompts: Array<{ tool: string; prompt: string }>): void { ToolPipeline._allowedPrompts.set(sessionId, prompts); }
+  static getAllowedPrompts(sessionId: string): Array<{ tool: string; prompt: string }> { return ToolPipeline._allowedPrompts.get(sessionId) || []; }
 
   /** Run the complete pipeline and return the final ToolResult. */
   static async run(
@@ -162,17 +166,25 @@ export class ToolPipeline {
     params: Record<string, unknown>,
     ctx: ExecutionContext,
   ): ToolResult | null {
-    // Second line of defense: block Critical tools without user confirmation
-    if (tool.riskLevel() === RiskLevel.Critical && !ctx.userConfirmed) {
+    // Allowed prompts (from ExitPlanMode) bypass all security checks —
+    // the user explicitly approved these tool actions during plan review.
+    const allowed = ToolPipeline._allowedPrompts.get(ctx.sessionId);
+    if (allowed && allowed.some(e => e.tool === tool.name())) {
+      return null;
+    }
+
+    // Delegate to the tool's own requiresConfirmation() — single source of truth
+    if (tool.requiresConfirmation(ctx)) {
       return makeError(
         `Tool "${tool.name()}" requires user confirmation (risk: ${tool.riskLevel()}).`,
         { toolCallId: '' },
       );
     }
 
+    const mode = ctx.mode;
+
     // Block non-read-only tools in read-only mode
     if (!tool.isReadOnly()) {
-      const mode = (ctx as unknown as Record<string, unknown>).mode as string | undefined;
       if (mode === 'read_only' || mode === 'readOnly') {
         return makeError(
           `Tool "${tool.name()}" is not read-only; blocked in ${mode} mode.`,
@@ -182,7 +194,7 @@ export class ToolPipeline {
     }
 
     // Block non-read-only tools in plan mode (except EnterPlanMode/ExitPlanMode gatekeepers)
-    if (ToolPipeline._planMode && !tool.isReadOnly()) {
+    if ((ToolPipeline.isPlanMode(ctx.sessionId) || ToolPipeline.isPlanMode()) && !tool.isReadOnly()) {
       const name = tool.name();
       if (name !== 'EnterPlanMode' && name !== 'ExitPlanMode') {
         return makeError(
@@ -253,6 +265,9 @@ export class ToolPipeline {
   ): Promise<ToolResult> {
     const errorMsg = originalResult.errorMessage || '';
     if (!errorMsg) return originalResult;
+
+    // Never retry Block-interrupt tools — repeated execution may compound destructive side-effects
+    if (tool.interruptBehavior() === InterruptBehavior.Block) return originalResult;
 
     // Classify error
     const isRetryable = RETRYABLE_PATTERNS.some(r => r.test(errorMsg));

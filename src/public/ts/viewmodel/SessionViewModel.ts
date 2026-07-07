@@ -7,6 +7,8 @@ import { SessionListModel } from './SessionListModel.js';
 import type { WSClient } from './WSClient.js';
 import { ClientLogger } from '../ClientLogger.js';
 import type { SessionNode } from '../types.js';
+import { ToastManager } from '../ToastManager.js';
+import type { AgentViewModel } from './AgentViewModel.js';
 
 /** localStorage key for persisting the active session across page refreshes. */
 const ACTIVE_SESSION_KEY = 'anoclaw-active-session';
@@ -16,6 +18,7 @@ export class SessionViewModel extends EventEmitter {
   sessions: SessionListModel = new SessionListModel();
   activeSessionId: string | null = null;
   private _sseClient: WSClient;
+  private _agentVM: AgentViewModel | null = null;
 
   constructor(sseClient: WSClient) {
     super();
@@ -26,9 +29,39 @@ export class SessionViewModel extends EventEmitter {
     this.sessions.on('sessionAdded', (node: unknown) => { this.emit('sessionAdded', node); });
     this.sessions.on('sessionUpdated', (node: unknown) => { this.emit('sessionUpdated', node); });
     this.sessions.on('sessionRemoved', (node: unknown) => { this.emit('sessionRemoved', node); });
+
+    // Listen for session title changes via WebSocket (e.g. CEO renames a session)
+    this._sseClient.on('session_title_changed', (data: unknown) => {
+      const d = data as { sessionId: string; title: string };
+      if (d.sessionId && d.title) {
+        this.sessions.updateSession({ id: d.sessionId, title: d.title });
+      }
+    });
+
+    // Listen for session hard deletes via WebSocket (e.g. CEO permanently deletes)
+    this._sseClient.on('session_hard_deleted', (data: unknown) => {
+      const d = data as { sessionId: string };
+      if (d.sessionId) {
+        this.sessions.removeSession(d.sessionId);
+      }
+    });
   }
 
   getWSClient(): WSClient { return this._sseClient; }
+
+  setAgentVM(agentVM: AgentViewModel): void {
+    this._agentVM = agentVM;
+  }
+
+  async ensureRunnableAgentForSession(sessionId: string): Promise<void> {
+    if (!this._agentVM) return;
+    await this._agentVM.ensureLoaded();
+    const session = this.sessions.getById(sessionId);
+    const result = this._agentVM.selectRunnableAgent(session?.agentId);
+    if (!result.ok) {
+      throw new Error(result.message || 'No runnable agent is configured. Open Agents and configure a model connection before sending a message.');
+    }
+  }
 
   /** Fetch the full session list from the backend and rebuild the tree. */
   async loadSessions(): Promise<void> {
@@ -74,7 +107,14 @@ export class SessionViewModel extends EventEmitter {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name || 'New Session', parentId: parentId || null }),
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) {
+        let message = `HTTP ${resp.status}`;
+        try {
+          const body = await resp.json() as { message?: string; error?: string };
+          message = body.message || body.error || message;
+        } catch { /* keep status fallback */ }
+        throw new Error(message);
+      }
       const node: SessionNode = await resp.json();
       this.sessions.addSession(node);
       this.selectSession(node.id);
@@ -82,6 +122,7 @@ export class SessionViewModel extends EventEmitter {
       return node;
     } catch (e) {
       ClientLogger.vm.error('Failed to create session', { error: (e as Error).message });
+      ToastManager.getInstance().error((e as Error).message || 'Failed to create session');
       return null;
     }
   }

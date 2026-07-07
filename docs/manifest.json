@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "updated": "2026-07-07",
+  "purpose": "AnoClaw agent-readable knowledge base. Supplements skills and memory with durable product, plugin, API, architecture, design, and troubleshooting references.",
+  "entries": [
+    {
+      "path": "docs/README.md",
+      "title": "AnoClaw 知识库索引",
+      "audience": ["all", "agent"],
+      "tags": ["index", "routing", "knowledge-base"],
+      "summary": "Start here to choose the right document and understand docs vs skills vs memory."
+    },
+    {
+      "path": "docs/user-guide.md",
+      "title": "AnoClaw 用户指南",
+      "audience": ["user", "agent"],
+      "tags": ["user", "workflow", "sessions", "agents"],
+      "summary": "Explains what AnoClaw can do and how users should work with agents."
+    },
+    {
+      "path": "docs/agent-collaboration.md",
+      "title": "多 Agent 协作模型",
+      "audience": ["user", "agent", "developer"],
+      "tags": ["agent", "delegation", "organization", "sessions"],
+      "summary": "Explains MainAgent, Managers, Members, SubAgents, task assignment, and reporting."
+    },
+    {
+      "path": "docs/architecture-overview.md",
+      "title": "AnoClaw 架构总览",
+      "audience": ["developer", "agent"],
+      "tags": ["architecture", "electron", "websocket", "jsonl", "plugin-host"],
+      "summary": "High-level runtime architecture and data flow for code and debugging tasks."
+    },
+    {
+      "path": "docs/plugin-dev.md",
+      "title": "插件开发指南",
+      "audience": ["developer", "agent"],
+      "tags": ["plugin", "development", "tool", "route", "page"],
+      "summary": "Practical guide for creating and debugging plugins."
+    },
+    {
+      "path": "docs/plugin-api.md",
+      "title": "插件 API 参考",
+      "audience": ["developer", "agent"],
+      "tags": ["plugin", "api", "PluginBase", "events", "ui", "llm", "memory"],
+      "summary": "Source-aligned reference for AnoClaw plugin APIs."
+    },
+    {
+      "path": "docs/plugin-ui-guide.md",
+      "title": "插件 UI 与品牌设计指南",
+      "audience": ["designer", "developer", "agent"],
+      "tags": ["ui", "design", "tokens", "iframe", "brand"],
+      "summary": "How to build plugin frontends with tokens, shared UI, and design presets."
+    },
+    {
+      "path": "docs/troubleshooting.md",
+      "title": "故障排查手册",
+      "audience": ["user", "developer", "agent"],
+      "tags": ["troubleshooting", "startup", "plugin", "build", "logs"],
+      "summary": "Common symptoms, checks, and safe recovery steps."
+    },
+    {
+      "path": "docs/agent-docs.md",
+      "title": "Agent Docs 调度与维护规则",
+      "audience": ["agent", "developer"],
+      "tags": ["agent", "docs", "maintenance", "routing"],
+      "summary": "Rules for reading, dispatching, and maintaining the docs knowledge base."
+    },
+    {
+      "path": "docs/design-md/",
+      "title": "品牌设计预设",
+      "audience": ["designer", "developer", "agent"],
+      "tags": ["design", "brand", "tokens"],
+      "summary": "Brand-specific DESIGN.md token references for UI work."
+    }
+  ]
+}

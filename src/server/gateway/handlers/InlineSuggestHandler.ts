@@ -5,16 +5,17 @@ import * as http from 'http';
 import { createLLMProvider } from '../../infra/llm/provider-factory.js';
 import { AgentRegistry } from '../../core/agent/AgentRegistry.js';
 import { SessionManager } from '../../core/session/SessionManager.js';
-
-type Sender = (res: http.ServerResponse, code: number, data: Record<string, unknown>) => void;
-type Reader = (req: http.IncomingMessage) => Promise<Record<string, unknown>>;
+import type { SendJson, ReadBody } from '../RouteHelpers.js';
 
 export async function handleInlineSuggest(
   req: http.IncomingMessage,
   res: http.ServerResponse,
-  sendJson: Sender,
-  readBody: Reader,
+  sendJson: SendJson,
+  readBody: ReadBody,
 ): Promise<void> {
+  const PREFIX_MAX_LINES = 15;  // Max lines of code before cursor to send as context
+  const SUFFIX_MAX_LINES = 3;   // Max lines of code after cursor to send as context
+
   try {
     const body = await readBody(req);
     const { prefix, suffix, language, sessionId } = body as Record<string, string>;
@@ -37,19 +38,21 @@ export async function handleInlineSuggest(
           provider = agent.provider || provider;
           model = agent.modelName || model;
           apiUrl = agent.apiUrl || '';
+          apiKey = agent.apiKey;
         }
       }
     }
 
-    const maxPrefix = (prefix || '').split('\n').slice(-15).join('\n');
-    const maxSuffix = (suffix || '').split('\n').slice(0, 3).join('\n');
+    const maxPrefix = (prefix || '').split('\n').slice(-PREFIX_MAX_LINES).join('\n');
+    const maxSuffix = (suffix || '').split('\n').slice(0, SUFFIX_MAX_LINES).join('\n');
     const lang = language || 'plaintext';
 
     const systemPrompt = 'You are a code completion engine. Return ONLY the code to insert at cursor — no explanation, no markdown fences. Keep it short (1-5 lines). Match the surrounding indentation and style. Return empty if nothing meaningful to add.';
 
     const userPrompt = `Language: ${lang}\n\n=== Before cursor ===\n${maxPrefix}\n=== After cursor ===\n${maxSuffix}\n=== End ===\n\nInsert at cursor:`;
 
-    const llmProvider = createLLMProvider(provider, null as any);
+    const emptyExtensionPoints = {} as any;
+    const llmProvider = createLLMProvider(provider, emptyExtensionPoints);
     const stream = llmProvider.chat(
       [
         { role: 'user', content: userPrompt },

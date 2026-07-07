@@ -1,0 +1,40 @@
+{
+  "_comment": "AnoClaw ComfyUI video smoke workflow. It turns one input image into a short MP4 through core ImageBatch -> CreateVideo -> SaveVideo nodes. This validates video job submission/output handling without requiring a large video generation model.",
+  "1": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "Frame 1" },
+    "inputs": { "image": "REPLACE_WITH_UPLOADED_FILENAME.png" }
+  },
+  "2": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "Frame 2" },
+    "inputs": { "image": "REPLACE_WITH_UPLOADED_FILENAME.png" }
+  },
+  "3": {
+    "class_type": "ImageBatch",
+    "_meta": { "title": "Two frame batch" },
+    "inputs": {
+      "image1": ["1", 0],
+      "image2": ["2", 0]
+    }
+  },
+  "4": {
+    "class_type": "CreateVideo",
+    "_meta": { "title": "Create MP4 video object" },
+    "inputs": {
+      "images": ["3", 0],
+      "fps": 2,
+      "bit_depth": 8
+    }
+  },
+  "5": {
+    "class_type": "SaveVideo",
+    "_meta": { "title": "Save MP4" },
+    "inputs": {
+      "video": ["4", 0],
+      "filename_prefix": "anoclaw_video_smoke",
+      "format": "mp4",
+      "codec": "h264"
+    }
+  }
+}

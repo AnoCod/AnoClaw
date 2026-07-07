@@ -14,7 +14,13 @@ export type AgentStatus = 'working' | 'idle' | 'paused' | 'error' | 'Active' | '
 export type InputMode = 'ask' | 'auto-edit' | 'plan' | 'auto';
 
 /** Running mode — how long the agent stays alive */
-export type RunningMode = 'normal' | 'infinite';
+export interface GoalState {
+  objective: string;
+  status: 'active' | 'paused' | 'deleted';
+  createdAt?: string;
+  updatedAt?: string;
+  lastRunAt?: string;
+}
 
 /** Todo status */
 export type TodoStatus = 'pending' | 'in_progress' | 'completed';
@@ -31,14 +37,16 @@ export interface Attachment {
   content?: string;
 }
 
-/** A single message event in the transcript */
-export interface Message {
+/** A single user/assistant text message event in the transcript.
+ *  Named ConversationMessage to avoid shadowing the canonical Message from ../../types.ts. */
+export interface ConversationMessage {
   type: 'message';
   role: MessageRole;
   content: string;
   timestamp?: string;
   attachments?: Attachment[];
   id?: string;
+  sessionId?: string;
   agentId?: string;
   agentName?: string;
 }
@@ -81,6 +89,8 @@ export interface ToolResultData {
   summary?: string;
   /** Execution duration in milliseconds */
   durationMs?: number;
+  /** Original tool input, used by rich tool cards when available. */
+  toolInput?: Record<string, unknown>;
   id?: string;
   timestamp?: string;
 }
@@ -110,16 +120,6 @@ export interface SystemMessageEvent {
   timestamp?: string;
   id?: string;
 }
-
-/** Union of all possible message/event types */
-export type ConversationEvent =
-  | Message
-  | ThinkEvent
-  | ToolCall
-  | ToolResultData
-  | TodoWriteEvent
-  | PlanEvent
-  | SystemMessageEvent;
 
 /** Plan step */
 export interface PlanStep {

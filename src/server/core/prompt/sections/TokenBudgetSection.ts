@@ -3,6 +3,7 @@
 import { SystemPromptSection, PromptContext } from '../PromptSection.js';
 import { TokenCounter } from '../../context/TokenCounter.js';
 import { SessionManager } from '../../session/index.js';
+import { AgentRegistry } from '../../agent/AgentRegistry.js';
 import {
   DEFAULT_CONTEXT_WINDOW,
   COMPRESSION_TRIGGER_RATIO,
@@ -20,7 +21,8 @@ export function createTokenBudgetSection(): SystemPromptSection {
     cacheBreak: true,
     compute: (ctx: PromptContext) => {
       const session = SessionManager.getInstance().session(ctx.sessionId);
-      const contextWindow = DEFAULT_CONTEXT_WINDOW;
+      const agent = AgentRegistry.getInstance().agent(ctx.agentId);
+      const contextWindow = agent?.contextWindow || DEFAULT_CONTEXT_WINDOW;
       const currentTokens = session?.metadata?.tokenCount
         ? (session.metadata.tokenCount as number)
         : 0;

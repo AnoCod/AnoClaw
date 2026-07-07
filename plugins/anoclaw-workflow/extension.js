@@ -1,4 +1,4 @@
-// extension.js — Workflow plugin v3.0
+// extension.js - Workflow plugin v3.0
 // Full CRUD + execution engine for 14 node types with variable system and execution logs.
 // Stores workflows as JSON files in data/workflows/.
 // New: database_query, file_read, sub_workflow, approval nodes
@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url);
 const path = require('path');
 
 // ═══════════════════════════════════════════════════════════════
-// WorkflowStore — JSON file persistence
+// WorkflowStore - JSON file persistence
 // ═══════════════════════════════════════════════════════════════
 
 const WORKFLOWS_DIR = path.resolve(process.cwd(), 'data', 'workflows');
@@ -80,10 +80,10 @@ function resolveVariables(str, variables) {
 // Execution Engine
 // ═══════════════════════════════════════════════════════════════
 
-const _runningWorkflows = new Map(); // workflowId → AbortController
+const _runningWorkflows = new Map(); // workflowId -> AbortController
 let _anoclaw = null;
 
-/** Normalize connection keys: accept both fromNodeId→toNodeId (frontend) and source→target (backend) */
+/** Normalize connection keys: accept both fromNodeId->toNodeId (frontend) and source->target (backend) */
 function normalizeConns(connections) {
   return (connections || []).map(c => ({
     ...c,
@@ -423,7 +423,7 @@ async function executeByType(wf, node, ac) {
       appendLog(wf, { level: 'info', message: `Database query (${connection}): ${query.substring(0, 100)}`, nodeId: node.id });
 
       try {
-        // Simulated database execution — in production this would connect to the actual DB
+        // Simulated database execution - in production this would connect to the actual DB
         // For safety, we return a structured result indicating the query was queued
         appendLog(wf, { level: 'info', message: `Database query queued on ${connection}`, nodeId: node.id });
         return {
@@ -540,7 +540,7 @@ async function executeByType(wf, node, ac) {
       // Wait for approval with timeout
       return new Promise((resolve) => {
         const timeoutId = setTimeout(() => {
-          appendLog(wf, { level: 'warn', message: 'Approval timed out — auto-rejected', nodeId: node.id });
+          appendLog(wf, { level: 'warn', message: 'Approval timed out - auto-rejected', nodeId: node.id });
           resolve({ approved: false, reason: 'timeout' });
         }, timeout);
 

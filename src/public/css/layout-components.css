@@ -606,3 +606,12 @@
   font-family: var(--font-mono); white-space: pre-wrap;
   margin-bottom: 12px;
 }
+
+
+.ui-toolcard.is-collapsed > :not(.ui-toolcard-indicator) {
+  display: none !important;
+}
+
+.edit-result-card.is-collapsed > :not(:first-child) {
+  display: none !important;
+}

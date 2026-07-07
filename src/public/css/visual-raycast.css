@@ -1,0 +1,652 @@
+/* Raycast-inspired glass skin.
+   Loaded after tokens.css so these visual overrides win the cascade. */
+
+:root {
+  --raycast-red: #ff4058;
+  --raycast-red-deep: #b41628;
+  --raycast-blue-deep: #061827;
+  --raycast-ink: #040507;
+  --raycast-glass-bg: rgba(5, 6, 9, 0.84);
+  --raycast-glass-bg-strong: rgba(5, 6, 9, 0.91);
+  --raycast-glass-bg-soft: rgba(255, 255, 255, 0.036);
+  --raycast-glass-border: rgba(255, 255, 255, 0.12);
+  --raycast-glass-border-strong: rgba(255, 255, 255, 0.18);
+  --raycast-hairline-faint: rgba(255, 255, 255, 0.045);
+  --raycast-hairline-soft: rgba(255, 255, 255, 0.072);
+  --raycast-panel-fill: rgba(5, 6, 9, 0.66);
+  --raycast-card-fill: rgba(255, 255, 255, 0.034);
+  --raycast-card-fill-hover: rgba(255, 255, 255, 0.066);
+  --raycast-selected-fill: linear-gradient(90deg, rgba(255, 64, 88, 0.20), rgba(255, 255, 255, 0.065));
+  --raycast-glass-shadow: 0 18px 56px rgba(0, 0, 0, 0.48);
+  --raycast-radius-window: 12px;
+  --raycast-radius-control: 8px;
+  --raycast-field-bg: rgba(16, 17, 22, 0.88);
+  --raycast-field-bg-focus: rgba(20, 20, 26, 0.94);
+  --raycast-border-angle: 0deg;
+}
+
+@property --raycast-border-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+html[data-theme="dark"],
+html[data-theme="dark"] body {
+  background: var(--raycast-ink);
+}
+
+html[data-theme="dark"] body::before,
+html[data-theme="dark"] body::after {
+  content: "";
+  position: fixed;
+  pointer-events: none;
+}
+
+html[data-theme="dark"] body::before {
+  inset: -24%;
+  z-index: 0;
+  background:
+    radial-gradient(circle at 22% 26%, rgba(255, 64, 88, 0.26), transparent 18%),
+    radial-gradient(circle at 76% 28%, rgba(21, 72, 112, 0.34), transparent 21%),
+    linear-gradient(124deg, transparent 0 20%, rgba(255, 64, 88, 0.22) 27%, rgba(255, 130, 154, 0.14) 34%, transparent 45%),
+    linear-gradient(124deg, transparent 35%, rgba(126, 25, 47, 0.22) 43%, rgba(255, 64, 88, 0.16) 51%, transparent 64%),
+    linear-gradient(124deg, transparent 58%, rgba(10, 39, 63, 0.28) 68%, rgba(255, 87, 118, 0.10) 76%, transparent 88%),
+    linear-gradient(180deg, #061827 0%, #070b12 42%, #040507 100%);
+  background-size: 120% 120%, 115% 115%, 150% 150%, 145% 145%, 150% 150%, 100% 100%;
+  background-position: 0% 12%, 100% 0%, 0% 0%, 52% 24%, 100% 100%, 0 0;
+  filter: saturate(1.08) contrast(1.02);
+  opacity: 0.72;
+  transform: translate3d(-1.2%, -0.8%, 0) scale(1.03);
+  will-change: transform;
+  animation: raycast-drift 28s ease-in-out infinite alternate;
+}
+
+html[data-theme="dark"] body::after {
+  inset: 0;
+  z-index: 0;
+  background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.014) 0 1px, transparent 1px 5px),
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.010) 0 1px, transparent 1px 6px),
+    radial-gradient(circle at 50% 0%, rgba(255,255,255,0.05), transparent 40%),
+    linear-gradient(180deg, rgba(0,0,0,0.10), rgba(0,0,0,0.70));
+  opacity: 0.38;
+  mix-blend-mode: overlay;
+  transform: translate3d(0, 0, 0);
+  animation: none;
+}
+
+@keyframes raycast-drift {
+  0% {
+    transform: translate3d(-1.2%, -0.8%, 0) scale(1.02);
+  }
+  100% {
+    transform: translate3d(2.8%, 1.8%, 0) scale(1.075);
+  }
+}
+
+html[data-theme="dark"] {
+  --color-hairline: var(--raycast-hairline-faint);
+  --color-hairline-strong: var(--raycast-hairline-soft);
+  --color-border-layout: var(--raycast-hairline-faint);
+  --color-border-panel: var(--raycast-hairline-faint);
+  --color-border-input: var(--raycast-hairline-soft);
+  --hairline-cinema: var(--raycast-hairline-faint);
+  --hairline-cinema-bar: rgba(255, 255, 255, 0.034);
+  --cinema-bg-search: rgba(255, 255, 255, 0.038);
+  --cinema-btn-border: rgba(255, 255, 255, 0.07);
+  --cinema-btn-hover-border: rgba(255, 255, 255, 0.12);
+}
+
+
+@keyframes raycast-border-spin {
+  to { --raycast-border-angle: 360deg; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="dark"] body::before {
+    animation-duration: 32s, 42s;
+  }
+  html[data-theme="dark"] body::after {
+    animation-duration: 18s;
+  }
+}
+
+html[data-theme="dark"] #app-root {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  gap: 0;
+  padding: 0;
+  background: transparent;
+}
+
+html[data-theme="dark"] #titlebar {
+  flex-shrink: 0;
+}
+
+html[data-theme="dark"] .topbar-cinema {
+  height: 34px;
+  box-sizing: border-box;
+  border: 0 !important;
+  border-radius: 0;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.048), rgba(255,255,255,0.010)),
+    rgba(5, 7, 11, 0.72);
+  backdrop-filter: blur(22px) saturate(1.24);
+  -webkit-backdrop-filter: blur(22px) saturate(1.24);
+  box-shadow: inset 0 -1px 0 var(--raycast-hairline-faint);
+}
+
+html[data-theme="dark"] .topbar-cinema .topbar-page-switcher {
+  border: 1px solid rgba(255,255,255,0.055);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.032);
+}
+
+html[data-theme="dark"] .topbar-cinema .topbar-page-switcher:hover {
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.16);
+}
+
+html[data-theme="dark"] .page-container {
+  min-height: 0;
+  border: 0 !important;
+  border-radius: 0;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.030), rgba(255,255,255,0.006)),
+    rgba(4, 5, 8, 0.74);
+  backdrop-filter: blur(22px) saturate(1.18);
+  -webkit-backdrop-filter: blur(22px) saturate(1.18);
+  box-shadow: none;
+}
+
+html[data-theme="dark"] #page-area,
+html[data-theme="dark"] #sessions-panel,
+html[data-theme="dark"] .cinema-page,
+html[data-theme="dark"] .conversation-panel,
+html[data-theme="dark"] .page-col-center,
+html[data-theme="dark"] .tab-content,
+html[data-theme="dark"] .tab-pane {
+  background: transparent !important;
+}
+
+html[data-theme="dark"] .page-col-left,
+html[data-theme="dark"] .page-col-right,
+html[data-theme="dark"] .conv-header,
+html[data-theme="dark"] .tab-bar,
+html[data-theme="dark"] .tab-header,
+html[data-theme="dark"] .panel-header {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.020), rgba(255,255,255,0.006)),
+    rgba(5, 6, 9, 0.58);
+  backdrop-filter: blur(16px) saturate(1.16);
+  -webkit-backdrop-filter: blur(16px) saturate(1.16);
+}
+
+html[data-theme="dark"] .cinema-edge-left,
+html[data-theme="dark"] .cinema-edge-right {
+  background: rgba(5, 6, 9, 0.42);
+  backdrop-filter: blur(18px) saturate(1.18);
+  -webkit-backdrop-filter: blur(18px) saturate(1.18);
+}
+
+html[data-theme="dark"] .dialog,
+html[data-theme="dark"] .mode-dropdown,
+html[data-theme="dark"] .slash-popup,
+html[data-theme="dark"] .page-switcher-menu,
+html[data-theme="dark"] .ag-edit-panel,
+html[data-theme="dark"] .ag-ctx-menu,
+html[data-theme="dark"] .tp-panel,
+html[data-theme="dark"] .workspace-binding-dialog {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.024)),
+    var(--raycast-glass-bg-strong) !important;
+  border-color: var(--raycast-glass-border-strong) !important;
+  border-radius: var(--raycast-radius-window) !important;
+  backdrop-filter: blur(30px) saturate(1.38);
+  -webkit-backdrop-filter: blur(30px) saturate(1.38);
+  box-shadow: 0 20px 64px rgba(0,0,0,0.48);
+}
+
+html[data-theme="dark"] .ag-svg {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+html[data-theme="dark"] .ag-edit-footer,
+html[data-theme="dark"] .ag-tool-section-head {
+  background: rgba(8, 9, 12, 0.72);
+  backdrop-filter: blur(18px) saturate(1.24);
+  -webkit-backdrop-filter: blur(18px) saturate(1.24);
+}
+
+html[data-theme="dark"] .form-field input[type="text"],
+html[data-theme="dark"] .form-field input[type="number"],
+html[data-theme="dark"] .form-field input[type="search"],
+html[data-theme="dark"] .form-field input[type="password"],
+html[data-theme="dark"] .form-field input[type="url"],
+html[data-theme="dark"] .form-field input[type="email"],
+html[data-theme="dark"] .form-field textarea,
+html[data-theme="dark"] .form-field select,
+html[data-theme="dark"] .form-section input:not([type]),
+html[data-theme="dark"] .form-section input[type="text"],
+html[data-theme="dark"] .form-section input[type="number"],
+html[data-theme="dark"] .form-section input[type="search"],
+html[data-theme="dark"] .form-section input[type="password"],
+html[data-theme="dark"] .form-section input[type="url"],
+html[data-theme="dark"] .form-section input[type="email"],
+html[data-theme="dark"] .form-section select,
+html[data-theme="dark"] .form-section textarea,
+html[data-theme="dark"] .ui-input,
+html[data-theme="dark"] .ui-select,
+html[data-theme="dark"] .ui-textarea,
+html[data-theme="dark"] .skill-form-input,
+html[data-theme="dark"] .skill-form-textarea,
+html[data-theme="dark"] .skill-import-file-input,
+html[data-theme="dark"] .tp-search-input,
+html[data-theme="dark"] .ws-browser-url,
+html[data-theme="dark"] .ag-edit-body input:not([type]),
+html[data-theme="dark"] .ag-edit-body input[type="text"],
+html[data-theme="dark"] .ag-edit-body input[type="number"],
+html[data-theme="dark"] .ag-edit-body input[type="search"],
+html[data-theme="dark"] .ag-edit-body input[type="password"],
+html[data-theme="dark"] .ag-edit-body input[type="url"],
+html[data-theme="dark"] .ag-edit-body input[type="email"],
+html[data-theme="dark"] .ag-edit-body select,
+html[data-theme="dark"] .ag-edit-body textarea,
+html[data-theme="dark"] .ag-tool-search,
+html[data-theme="dark"] .input-textarea,
+html[data-theme="dark"] .cinema-textarea {
+  border: 1px solid transparent !important;
+  border-radius: var(--raycast-radius-control) !important;
+  background:
+    linear-gradient(var(--raycast-field-bg), var(--raycast-field-bg)) padding-box,
+    conic-gradient(from var(--raycast-border-angle),
+      rgba(255,255,255,0.08),
+      rgba(255,64,88,0.24),
+      rgba(72,156,255,0.18),
+      rgba(255,255,255,0.08)) border-box !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.035);
+  animation: none;
+}
+
+html[data-theme="dark"] .cinema-textarea {
+  box-sizing: border-box;
+  padding: 12px 14px !important;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+html[data-theme="dark"] .cinema-textarea::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+html[data-theme="dark"] .form-field input[type="text"]:focus,
+html[data-theme="dark"] .form-field input[type="number"]:focus,
+html[data-theme="dark"] .form-field input[type="search"]:focus,
+html[data-theme="dark"] .form-field input[type="password"]:focus,
+html[data-theme="dark"] .form-field input[type="url"]:focus,
+html[data-theme="dark"] .form-field input[type="email"]:focus,
+html[data-theme="dark"] .form-field textarea:focus,
+html[data-theme="dark"] .form-field select:focus,
+html[data-theme="dark"] .form-section input:not([type]):focus,
+html[data-theme="dark"] .form-section input[type="text"]:focus,
+html[data-theme="dark"] .form-section input[type="number"]:focus,
+html[data-theme="dark"] .form-section input[type="search"]:focus,
+html[data-theme="dark"] .form-section input[type="password"]:focus,
+html[data-theme="dark"] .form-section input[type="url"]:focus,
+html[data-theme="dark"] .form-section input[type="email"]:focus,
+html[data-theme="dark"] .form-section select:focus,
+html[data-theme="dark"] .form-section textarea:focus,
+html[data-theme="dark"] .ui-input:focus,
+html[data-theme="dark"] .ui-select:focus,
+html[data-theme="dark"] .ui-textarea:focus,
+html[data-theme="dark"] .skill-form-input:focus,
+html[data-theme="dark"] .skill-form-textarea:focus,
+html[data-theme="dark"] .skill-import-file-input:focus,
+html[data-theme="dark"] .tp-search-input:focus,
+html[data-theme="dark"] .ws-browser-url:focus,
+html[data-theme="dark"] .ag-edit-body input:not([type]):focus,
+html[data-theme="dark"] .ag-edit-body input[type="text"]:focus,
+html[data-theme="dark"] .ag-edit-body input[type="number"]:focus,
+html[data-theme="dark"] .ag-edit-body input[type="search"]:focus,
+html[data-theme="dark"] .ag-edit-body input[type="password"]:focus,
+html[data-theme="dark"] .ag-edit-body input[type="url"]:focus,
+html[data-theme="dark"] .ag-edit-body input[type="email"]:focus,
+html[data-theme="dark"] .ag-edit-body select:focus,
+html[data-theme="dark"] .ag-edit-body textarea:focus,
+html[data-theme="dark"] .ag-tool-search:focus,
+html[data-theme="dark"] .input-textarea:focus,
+html[data-theme="dark"] .cinema-textarea:focus {
+  outline: none;
+  background:
+    linear-gradient(var(--raycast-field-bg-focus), var(--raycast-field-bg-focus)) padding-box,
+    conic-gradient(from var(--raycast-border-angle),
+      rgba(255,255,255,0.14),
+      rgba(255,64,88,0.72),
+      rgba(255,190,204,0.42),
+      rgba(42,151,255,0.38),
+      rgba(255,255,255,0.14)) border-box !important;
+  box-shadow:
+    0 0 0 3px rgba(255, 64, 88, 0.10),
+    0 0 22px rgba(255, 64, 88, 0.10),
+    inset 0 1px 0 rgba(255,255,255,0.05);
+  animation: raycast-border-spin 2.8s linear infinite;
+}
+
+html[data-theme="dark"] .ag-tool-card,
+html[data-theme="dark"] .form-section,
+html[data-theme="dark"] .agent-card,
+html[data-theme="dark"] .plg-card,
+html[data-theme="dark"] .mem-card,
+html[data-theme="dark"] .skill-card,
+html[data-theme="dark"] .sub-session-card,
+html[data-theme="dark"] .tool-call-card,
+html[data-theme="dark"] .think-card {
+  background: var(--raycast-card-fill);
+  border-color: transparent;
+  border-radius: var(--raycast-radius-control);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.020);
+}
+
+html[data-theme="dark"] .ag-tool-card:hover,
+html[data-theme="dark"] .list-item:hover,
+html[data-theme="dark"] .tab-btn:hover,
+html[data-theme="dark"] .tab-btn.active,
+html[data-theme="dark"] .page-switcher-item:hover {
+  background: var(--raycast-card-fill-hover);
+}
+
+html[data-theme="dark"] .layout-split-handle:hover,
+html[data-theme="dark"] .layout-split-handle.active,
+html[data-theme="dark"] .resize-handle:hover,
+html[data-theme="dark"] .resize-handle.active {
+  background: linear-gradient(180deg, rgba(255,64,88,0.1), rgba(255,64,88,0.72), rgba(255,64,88,0.1));
+}
+
+html[data-theme="dark"] .cinema-input-area {
+  margin-bottom: 4px;
+  padding: 8px 12px;
+  border: 0 !important;
+  border-radius: var(--raycast-radius-window);
+  background: transparent !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html[data-theme="dark"] .cinema-flow {
+  padding-top: 16px;
+  padding-bottom: 8px;
+}
+
+html[data-theme="dark"] .input-panel-row {
+  padding: 8px 12px;
+}
+
+html[data-theme="dark"] .page-col-left,
+html[data-theme="dark"] .page-col-right,
+html[data-theme="dark"] .detail-section {
+  padding: 8px;
+}
+
+html[data-theme="dark"] .skills-grid,
+html[data-theme="dark"] .mem-grid {
+  gap: 8px;
+}
+
+html[data-theme="dark"] .page-switcher-menu,
+html[data-theme="dark"] .mode-dropdown,
+html[data-theme="dark"] .slash-popup,
+html[data-theme="dark"] .ag-ctx-menu {
+  border-radius: var(--raycast-radius-control) !important;
+}
+
+html[data-theme="dark"] button,
+html[data-theme="dark"] .btn,
+html[data-theme="dark"] .ui-btn,
+html[data-theme="dark"] .cinema-tool-btn,
+html[data-theme="dark"] .tab-btn,
+html[data-theme="dark"] .tab-panel-tab,
+html[data-theme="dark"] .ag-tool-card,
+html[data-theme="dark"] .form-section,
+html[data-theme="dark"] .skill-card,
+html[data-theme="dark"] .mem-card,
+html[data-theme="dark"] .plg-card {
+  border-radius: var(--raycast-radius-control);
+}
+
+/* Deep Raycast pass: one shell, faint separators, filled rows instead of boxed cards. */
+html[data-theme="dark"] #page-area,
+html[data-theme="dark"] #sessions-panel,
+html[data-theme="dark"] .conversation-panel,
+html[data-theme="dark"] .plugin-page-container,
+html[data-theme="dark"] .ws-page,
+html[data-theme="dark"] .ws-split-container,
+html[data-theme="dark"] .ws-browser-placeholder {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html[data-theme="dark"] .page-col-left {
+  border-right-color: rgba(255, 255, 255, 0.034) !important;
+}
+
+html[data-theme="dark"] .page-col-right {
+  border-left-color: rgba(255, 255, 255, 0.034) !important;
+}
+
+html[data-theme="dark"] .cinema-edge-left {
+  border-right-color: rgba(255, 255, 255, 0.026) !important;
+}
+
+html[data-theme="dark"] .cinema-edge-right {
+  border-left-color: rgba(255, 255, 255, 0.026) !important;
+}
+
+html[data-theme="dark"] .conv-header,
+html[data-theme="dark"] .tab-bar,
+html[data-theme="dark"] .tab-header,
+html[data-theme="dark"] .panel-header,
+html[data-theme="dark"] .ws-toolbar,
+html[data-theme="dark"] .ws-tab-bar,
+html[data-theme="dark"] .ws-browser-bar,
+html[data-theme="dark"] .ag-edit-header,
+html[data-theme="dark"] .ag-edit-footer,
+html[data-theme="dark"] .ag-tool-section-head {
+  border-color: rgba(255, 255, 255, 0.036) !important;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.024), rgba(255,255,255,0.006)),
+    rgba(5, 6, 9, 0.50) !important;
+  box-shadow: none !important;
+}
+
+html[data-theme="dark"] .ui-card,
+html[data-theme="dark"] .cinema-card,
+html[data-theme="dark"] .skill-card,
+html[data-theme="dark"] .mem-card,
+html[data-theme="dark"] .plg-card,
+html[data-theme="dark"] .agent-card,
+html[data-theme="dark"] .ag-tool-card,
+html[data-theme="dark"] .form-section,
+html[data-theme="dark"] .sub-session-card,
+html[data-theme="dark"] .tool-call-card,
+html[data-theme="dark"] .tool-result-card,
+html[data-theme="dark"] .think-card,
+html[data-theme="dark"] .task-panel-card,
+html[data-theme="dark"] .workspace-binding-card,
+html[data-theme="dark"] .ws-browser-menu,
+html[data-theme="dark"] .ws-browser-ctx-menu,
+html[data-theme="dark"] .ws-tree-context-menu {
+  border-color: transparent !important;
+  background: var(--raycast-card-fill) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.020) !important;
+}
+
+html[data-theme="dark"] .ui-card-interactive:hover,
+html[data-theme="dark"] .skill-card:hover,
+html[data-theme="dark"] .mem-card:hover,
+html[data-theme="dark"] .plg-card:hover,
+html[data-theme="dark"] .agent-card:hover,
+html[data-theme="dark"] .ag-tool-card:hover,
+html[data-theme="dark"] .ws-toolbar-btn:hover,
+html[data-theme="dark"] .ws-tab:hover,
+html[data-theme="dark"] .ws-tab-plus:hover,
+html[data-theme="dark"] .ws-browser-nav-btn:hover,
+html[data-theme="dark"] .ws-tree-node:hover,
+html[data-theme="dark"] .ws-browser-menu-item:hover,
+html[data-theme="dark"] .ws-browser-ctx-item:hover,
+html[data-theme="dark"] .ws-tree-context-item:hover,
+html[data-theme="dark"] .list-item:hover {
+  border-color: transparent !important;
+  background: var(--raycast-card-fill-hover) !important;
+}
+
+html[data-theme="dark"] .list-item.selected,
+html[data-theme="dark"] .tab-btn.active,
+html[data-theme="dark"] .ws-tab.active,
+html[data-theme="dark"] .ws-tree-node.selected,
+html[data-theme="dark"] .ag-tool-card--on {
+  border-color: transparent !important;
+  background: var(--raycast-selected-fill) !important;
+  color: var(--color-text-primary) !important;
+}
+
+html[data-theme="dark"] .plg-card,
+html[data-theme="dark"] .ws-tab,
+html[data-theme="dark"] .ws-toolbar,
+html[data-theme="dark"] .ws-tab-bar,
+html[data-theme="dark"] .ws-browser-bar,
+html[data-theme="dark"] .ws-file-tree-pane,
+html[data-theme="dark"] .ws-browser-menu-divider,
+html[data-theme="dark"] .ws-browser-ctx-divider,
+html[data-theme="dark"] .ws-tree-context-divider {
+  border-color: rgba(255, 255, 255, 0.034) !important;
+}
+
+html[data-theme="dark"] .skill-card,
+html[data-theme="dark"] .mem-card,
+html[data-theme="dark"] .plg-card,
+html[data-theme="dark"] .ui-card,
+html[data-theme="dark"] .form-section {
+  padding: 14px;
+}
+
+html[data-theme="dark"] .plugins-grid,
+html[data-theme="dark"] .skills-grid,
+html[data-theme="dark"] .mem-grid {
+  gap: 8px;
+}
+
+html[data-theme="dark"] .detail-section {
+  padding: 10px 12px;
+}
+
+html[data-theme="dark"] .dialog,
+html[data-theme="dark"] .mode-dropdown,
+html[data-theme="dark"] .slash-popup,
+html[data-theme="dark"] .page-switcher-menu,
+html[data-theme="dark"] .ag-edit-panel,
+html[data-theme="dark"] .ag-ctx-menu,
+html[data-theme="dark"] .tp-panel,
+html[data-theme="dark"] .workspace-binding-dialog {
+  border-color: rgba(255,255,255,0.080) !important;
+  box-shadow:
+    0 24px 72px rgba(0,0,0,0.52),
+    inset 0 1px 0 rgba(255,255,255,0.035) !important;
+}
+
+html[data-theme="dark"] .btn,
+html[data-theme="dark"] .ui-btn,
+html[data-theme="dark"] .btn-secondary,
+html[data-theme="dark"] .cinema-tool-btn,
+html[data-theme="dark"] .skill-card-edit-btn,
+html[data-theme="dark"] .ws-toolbar-btn,
+html[data-theme="dark"] .ag-tools-actions button,
+html[data-theme="dark"] .ag-edit-btn-cancel,
+html[data-theme="dark"] .ag-edit-btn-save {
+  border-color: rgba(255,255,255,0.065) !important;
+  background: rgba(255,255,255,0.038);
+  box-shadow: none;
+}
+
+html[data-theme="dark"] .btn:hover,
+html[data-theme="dark"] .ui-btn:hover,
+html[data-theme="dark"] .btn-secondary:hover,
+html[data-theme="dark"] .cinema-tool-btn:hover,
+html[data-theme="dark"] .skill-card-edit-btn:hover,
+html[data-theme="dark"] .ag-tools-actions button:hover,
+html[data-theme="dark"] .ag-edit-btn-cancel:hover,
+html[data-theme="dark"] .ag-edit-btn-save:hover {
+  border-color: rgba(255,255,255,0.105) !important;
+  background: rgba(255,255,255,0.070);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  html[data-theme="dark"] .page-container,
+  html[data-theme="dark"] .topbar-cinema,
+  html[data-theme="dark"] .dialog,
+  html[data-theme="dark"] .mode-dropdown,
+  html[data-theme="dark"] .slash-popup,
+  html[data-theme="dark"] .page-switcher-menu,
+  html[data-theme="dark"] .ag-edit-panel {
+    background: rgba(8, 9, 12, 0.94) !important;
+  }
+}
+
+.anoclaw-slot-pill {
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid rgba(255,255,255,0.085);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.070), rgba(255,255,255,0.025)),
+    rgba(7,8,12,0.66);
+  color: rgba(255,255,255,0.72);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0;
+  white-space: nowrap;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.035);
+  backdrop-filter: blur(18px) saturate(1.18);
+  -webkit-backdrop-filter: blur(18px) saturate(1.18);
+}
+
+.anoclaw-slot-pill .slot-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.32);
+}
+
+.anoclaw-slot-pill[data-tone="ok"] .slot-dot {
+  background: #59d499;
+  box-shadow: 0 0 8px rgba(89,212,153,0.34);
+}
+
+.anoclaw-slot-pill[data-tone="warn"] .slot-dot {
+  background: #ffc533;
+  box-shadow: 0 0 8px rgba(255,197,51,0.28);
+}
+
+.anoclaw-slot-pill[data-tone="danger"] .slot-dot {
+  background: #ff4058;
+  box-shadow: 0 0 8px rgba(255,64,88,0.32);
+}
+
+.anoclaw-slot-pill[data-tone="info"] .slot-dot {
+  background: #57c1ff;
+  box-shadow: 0 0 8px rgba(87,193,255,0.32);
+}
+
+.anoclaw-slot-pill strong {
+  color: rgba(255,255,255,0.88);
+  font-weight: 700;
+}

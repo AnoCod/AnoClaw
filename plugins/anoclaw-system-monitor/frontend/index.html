@@ -1,0 +1,1419 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>System Monitor</title>
+<style>
+:root {
+  --bg: #050608;
+  --panel: rgba(255,255,255,0.034);
+  --panel-strong: rgba(255,255,255,0.058);
+  --panel-hover: rgba(255,255,255,0.074);
+  --hairline: rgba(255,255,255,0.052);
+  --hairline-strong: rgba(255,255,255,0.11);
+  --text: #f4f4f6;
+  --muted: rgba(255,255,255,0.64);
+  --faint: rgba(255,255,255,0.38);
+  --dim: rgba(255,255,255,0.22);
+  --red: #ff4058;
+  --red-soft: rgba(255,64,88,0.16);
+  --blue: #489cff;
+  --blue-soft: rgba(72,156,255,0.15);
+  --green: #59d499;
+  --green-soft: rgba(89,212,153,0.15);
+  --yellow: #ffc533;
+  --yellow-soft: rgba(255,197,51,0.14);
+  --radius: 8px;
+  --radius-lg: 12px;
+  --font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
+
+[data-theme="light"] {
+  --bg: #f7f7f4;
+  --panel: rgba(0,0,0,0.035);
+  --panel-strong: rgba(0,0,0,0.058);
+  --panel-hover: rgba(0,0,0,0.075);
+  --hairline: rgba(0,0,0,0.06);
+  --hairline-strong: rgba(0,0,0,0.13);
+  --text: rgba(0,0,0,0.88);
+  --muted: rgba(0,0,0,0.60);
+  --faint: rgba(0,0,0,0.38);
+  --dim: rgba(0,0,0,0.20);
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  min-height: 100%;
+  color: var(--text);
+  font-family: var(--font);
+  background: var(--bg);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  pointer-events: none;
+}
+
+body::before {
+  inset: -22%;
+  background:
+    linear-gradient(126deg, transparent 0 23%, rgba(255,64,88,0.18) 32%, rgba(255,130,154,0.10) 40%, transparent 53%),
+    linear-gradient(126deg, transparent 40%, rgba(72,156,255,0.14) 51%, rgba(255,64,88,0.10) 62%, transparent 77%),
+    radial-gradient(circle at 78% 12%, rgba(72,156,255,0.20), transparent 22%),
+    radial-gradient(circle at 16% 72%, rgba(255,64,88,0.20), transparent 24%),
+    linear-gradient(180deg, #07111b 0%, #08080c 48%, #050608 100%);
+  opacity: .78;
+  transform: translate3d(-1%, -1%, 0) scale(1.03);
+  animation: drift 16s ease-in-out infinite alternate, flow 22s ease-in-out infinite;
+}
+
+body::after {
+  inset: 0;
+  background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.012) 0 1px, transparent 1px 5px),
+    linear-gradient(180deg, rgba(0,0,0,0.05), rgba(0,0,0,0.56));
+  opacity: .42;
+  mix-blend-mode: overlay;
+}
+
+@keyframes drift {
+  to { transform: translate3d(2%, 1.5%, 0) scale(1.07); }
+}
+
+@keyframes flow {
+  0% { background-position: 0% 0%, 100% 40%, 80% 10%, 10% 80%, 0 0; }
+  50% { background-position: 42% 18%, 60% 58%, 70% 28%, 22% 62%, 0 0; }
+  100% { background-position: 100% 34%, 0% 72%, 86% 18%, 12% 70%, 0 0; }
+}
+
+.app {
+  position: relative;
+  z-index: 1;
+  height: 100vh;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.command {
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: 34px minmax(180px, 1fr) 130px auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px;
+  border: 1px solid rgba(255,255,255,0.078);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.065), rgba(255,255,255,0.018)),
+    rgba(5,6,9,0.76);
+  backdrop-filter: blur(24px) saturate(1.3);
+  -webkit-backdrop-filter: blur(24px) saturate(1.3);
+  box-shadow: 0 22px 60px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.04);
+}
+
+.icon-btn,
+.btn,
+.select,
+.search {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: rgba(255,255,255,0.038);
+  color: var(--text);
+  font-family: inherit;
+  outline: none;
+}
+
+.icon-btn,
+.btn {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 12px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.icon-btn {
+  width: 34px;
+  padding: 0;
+}
+
+.btn:hover,
+.icon-btn:hover,
+.select:hover {
+  background: var(--panel-hover);
+  border-color: var(--hairline-strong);
+}
+
+.btn.active {
+  color: var(--green);
+  background: var(--green-soft);
+  border-color: rgba(89,212,153,0.22);
+}
+
+.btn.danger {
+  color: var(--red);
+  background: var(--red-soft);
+  border-color: rgba(255,64,88,0.24);
+}
+
+.btn.warn {
+  color: var(--yellow);
+  background: var(--yellow-soft);
+  border-color: rgba(255,197,51,0.22);
+}
+
+.btn:disabled {
+  color: var(--dim);
+  border-color: rgba(255,255,255,0.035);
+  background: rgba(255,255,255,0.022);
+  cursor: default;
+  opacity: .62;
+}
+
+.btn.compact {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+.search-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.search-wrap svg {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--faint);
+}
+
+.search {
+  width: 100%;
+  height: 34px;
+  padding: 0 14px 0 38px;
+  font-size: 14px;
+}
+
+.search::placeholder { color: var(--faint); }
+.select {
+  height: 34px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  color: var(--faint);
+  font-size: 11px;
+  min-width: 128px;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 14px var(--green-soft);
+}
+
+.dot.busy { background: var(--yellow); box-shadow: 0 0 14px var(--yellow-soft); }
+.dot.error { background: var(--red); box-shadow: 0 0 14px var(--red-soft); }
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(110px, 1fr));
+  gap: 8px;
+}
+
+.kpi,
+.panel,
+.detail-card {
+  background: var(--panel);
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.025);
+}
+
+.kpi {
+  min-height: 92px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.kpi-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.kpi-value {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.kpi-sub {
+  color: var(--faint);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bar {
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.065);
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--red), var(--blue));
+  transition: width .35s ease;
+}
+
+.layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(330px, 0.86fr) minmax(450px, 1.14fr);
+  gap: 10px;
+}
+
+.panel {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.010)),
+    rgba(5,6,9,0.58);
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+}
+
+.panel-head {
+  min-height: 44px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.034);
+}
+
+.panel-title {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.panel-meta {
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.process-list,
+.detail-body {
+  min-height: 0;
+  overflow: auto;
+}
+
+.process-list::-webkit-scrollbar,
+.detail-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.process-list::-webkit-scrollbar-track,
+.detail-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.process-list::-webkit-scrollbar-thumb,
+.detail-body::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.09);
+  border-radius: 999px;
+}
+
+.process-row {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 74px 86px;
+  align-items: center;
+  gap: 10px;
+}
+
+.process-row:hover { background: var(--panel-hover); }
+.process-row.active {
+  background: linear-gradient(90deg, rgba(255,64,88,0.20), rgba(255,255,255,0.060));
+}
+
+.proc-name {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.proc-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(255,64,88,0.18), rgba(72,156,255,0.16));
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+.proc-title {
+  min-width: 0;
+}
+
+.proc-title strong {
+  display: block;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.proc-title span,
+.metric-sub {
+  display: block;
+  color: var(--faint);
+  font-size: 10px;
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metric {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.034);
+}
+
+.tab {
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--faint);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 8px 12px;
+}
+
+.tab:hover { background: var(--panel-hover); color: var(--muted); }
+.tab.active {
+  color: var(--text);
+  background: var(--panel-strong);
+}
+
+.detail-body {
+  padding: 12px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.detail-card {
+  padding: 14px;
+}
+
+.detail-card.wide { grid-column: 1 / -1; }
+
+.card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  border-radius: 999px;
+  padding: 0 9px;
+  background: rgba(255,255,255,0.052);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.pill.good { color: var(--green); background: var(--green-soft); }
+.pill.warn { color: var(--yellow); background: var(--yellow-soft); }
+.pill.bad { color: var(--red); background: var(--red-soft); }
+
+.spec {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  gap: 10px;
+  min-height: 27px;
+  align-items: center;
+  border-bottom: 1px solid rgba(255,255,255,0.030);
+}
+
+.spec:last-child { border-bottom: 0; }
+.spec-label {
+  color: var(--faint);
+  font-size: 11px;
+}
+.spec-value {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.disk-row,
+.adapter-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 160px 110px;
+  gap: 14px;
+  align-items: center;
+  padding: 11px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.030);
+}
+
+.adapter-row {
+  grid-template-columns: minmax(150px, 1fr) 120px 1fr;
+}
+
+.disk-row:last-child,
+.adapter-row:last-child { border-bottom: 0; }
+
+.manager-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.manager-toolbar .search {
+  height: 32px;
+  padding-left: 12px;
+}
+
+.manager-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.manager-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 120px auto;
+  gap: 12px;
+  align-items: center;
+  padding: 11px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.030);
+}
+
+.manager-row:last-child { border-bottom: 0; }
+
+.target-row {
+  grid-template-columns: 26px minmax(180px, 1fr) 120px 92px;
+}
+
+.target-check {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--red);
+}
+
+.row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.name-line strong {
+  display: block;
+  font-size: 12px;
+}
+
+.name-line span {
+  display: block;
+  color: var(--faint);
+  font-size: 10px;
+  margin-top: 2px;
+}
+
+.empty,
+.error {
+  color: var(--faint);
+  font-size: 12px;
+  padding: 24px;
+  text-align: center;
+}
+
+.error { color: var(--red); }
+
+svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (max-width: 980px) {
+  .app { overflow: auto; }
+  body { overflow: auto; }
+  .command { grid-template-columns: 34px 1fr; }
+  .select, .status { display: none; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .layout { grid-template-columns: 1fr; }
+  .panel { min-height: 420px; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="command">
+    <button class="icon-btn" id="refreshBtn" title="Refresh" aria-label="Refresh"></button>
+    <div class="search-wrap">
+      <span id="searchIcon"></span>
+      <input id="searchInput" class="search" type="search" placeholder="Search processes">
+    </div>
+    <select id="sortSelect" class="select">
+      <option value="cpu">CPU first</option>
+      <option value="memory">Memory first</option>
+      <option value="name">Name</option>
+      <option value="pid">PID</option>
+    </select>
+    <button class="btn active" id="autoBtn"></button>
+    <div class="status"><span class="dot" id="statusDot"></span><span id="statusText">Starting</span></div>
+  </div>
+
+  <section class="kpis" id="kpis"></section>
+
+  <main class="layout">
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title">Processes</div>
+          <div class="panel-meta" id="processMeta">0 items</div>
+        </div>
+        <span class="pill" id="hostPill">Host</span>
+      </div>
+      <div class="process-list" id="processList"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title" id="detailTitle">System</div>
+          <div class="panel-meta" id="detailMeta">Hardware snapshot</div>
+        </div>
+        <span class="pill" id="healthPill">Normal</span>
+      </div>
+      <div class="tabs">
+        <button class="tab active" data-tab="overview">Overview</button>
+        <button class="tab" data-tab="hardware">Hardware</button>
+        <button class="tab" data-tab="storage">Storage</button>
+        <button class="tab" data-tab="network">Network</button>
+        <button class="tab" data-tab="process">Process</button>
+        <button class="tab" data-tab="cleanup">Cleanup</button>
+        <button class="tab" data-tab="apps">Apps</button>
+        <button class="tab" data-tab="startup">Startup</button>
+        <button class="tab" data-tab="services">Services</button>
+      </div>
+      <div class="detail-body" id="detailBody"></div>
+    </section>
+  </main>
+</div>
+
+<script>
+const API = '/api/v1/plugins/system-monitor';
+const icons = {
+  refresh: '<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.7-4.4L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.7 4.4L20 16"/><path d="M20 20v-4h-4"/></svg>',
+  search: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+  cpu: '<svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M4 9h3M4 15h3M17 9h3M17 15h3M9 4v3M15 4v3M9 17v3M15 17v3"/></svg>',
+  memory: '<svg viewBox="0 0 24 24"><path d="M6 8h12v8H6z"/><path d="M8 8V5M12 8V5M16 8V5M8 19v-3M12 19v-3M16 19v-3M4 10h2M4 14h2M18 10h2M18 14h2"/></svg>',
+  disk: '<svg viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v8c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/><path d="M5 10c0 1.7 3.1 3 7 3s7-1.3 7-3"/></svg>',
+  process: '<svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/><path d="M8 6v.01M8 12v.01M8 18v.01"/></svg>',
+  network: '<svg viewBox="0 0 24 24"><path d="M12 20v-6"/><path d="M6 8a10 10 0 0 1 12 0"/><path d="M9 11a5 5 0 0 1 6 0"/><path d="M12 14h.01"/></svg>',
+  clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v5l3 2"/></svg>',
+  play: '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>',
+  pause: '<svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>',
+  monitor: '<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="2"/><path d="M9 20h6M12 16v4"/></svg>',
+};
+
+const state = {
+  snapshot: null,
+  processes: [],
+  selectedPid: null,
+  tab: 'overview',
+  auto: true,
+  loading: false,
+  timer: null,
+  cleanup: null,
+  cleanupSelected: new Set(),
+  apps: null,
+  appQuery: '',
+  startup: null,
+  services: null,
+  serviceQuery: '',
+};
+
+const el = id => document.getElementById(id);
+
+el('refreshBtn').innerHTML = icons.refresh;
+el('searchIcon').innerHTML = icons.search;
+el('autoBtn').innerHTML = icons.pause + '<span>Live</span>';
+
+window.addEventListener('message', event => {
+  if (!event.data || event.data.type !== 'anoclaw:theme') return;
+  document.documentElement.setAttribute('data-theme', event.data.theme || 'dark');
+});
+
+el('refreshBtn').addEventListener('click', () => loadAll(true));
+el('autoBtn').addEventListener('click', () => {
+  state.auto = !state.auto;
+  renderAuto();
+  schedule();
+});
+el('sortSelect').addEventListener('change', () => loadProcesses());
+el('searchInput').addEventListener('input', debounce(() => loadProcesses(), 180));
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    state.tab = btn.dataset.tab;
+    renderTabs();
+    renderDetails();
+    ensureTabData();
+  });
+});
+
+loadAll(true);
+schedule();
+
+function schedule() {
+  clearInterval(state.timer);
+  if (state.auto) state.timer = setInterval(() => loadAll(false), 7000);
+}
+
+async function loadAll(force) {
+  if (state.loading && !force) return;
+  state.loading = true;
+  setStatus('busy', 'Refreshing');
+  try {
+    const snapshot = await fetchJson(`${API}/snapshot?processes=1&limit=28`);
+    state.snapshot = snapshot;
+    state.processes = snapshot.processes?.items || [];
+    if (!state.selectedPid && state.processes[0]) state.selectedPid = state.processes[0].pid;
+    render();
+    await loadProcesses(false);
+    setStatus('ok', 'Updated ' + new Date().toLocaleTimeString());
+  } catch (err) {
+    setStatus('error', err.message || 'Failed');
+    renderError(err);
+  } finally {
+    state.loading = false;
+  }
+}
+
+async function loadProcesses(updateStatus = true) {
+  try {
+    const q = encodeURIComponent(el('searchInput').value.trim());
+    const sort = encodeURIComponent(el('sortSelect').value);
+    const data = await fetchJson(`${API}/processes?q=${q}&sort=${sort}&limit=180`);
+    state.processes = data.items || [];
+    if (!state.processes.some(p => p.pid === state.selectedPid)) {
+      state.selectedPid = state.processes[0]?.pid || null;
+    }
+    renderProcesses();
+    renderDetails();
+    if (updateStatus) setStatus('ok', 'Updated ' + new Date().toLocaleTimeString());
+  } catch (err) {
+    setStatus('error', err.message || 'Process read failed');
+  }
+}
+
+async function fetchJson(url) {
+  const resp = await fetch(url);
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.message || data.error || resp.statusText);
+  return data;
+}
+
+async function postJson(url, body) {
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.message || data.error || resp.statusText);
+  return data;
+}
+
+function ensureTabData() {
+  if (state.tab === 'cleanup' && !state.cleanup) loadCleanup();
+  if (state.tab === 'apps' && !state.apps) loadApps();
+  if (state.tab === 'startup' && !state.startup) loadStartup();
+  if (state.tab === 'services' && !state.services) loadServices();
+}
+
+async function loadCleanup() {
+  try {
+    setStatus('busy', 'Scanning cleanup');
+    const data = await fetchJson(`${API}/cleanup/scan`);
+    state.cleanup = data;
+    state.cleanupSelected = new Set((data.items || []).filter(x => x.bytes > 0).map(x => x.id));
+    if (state.tab === 'cleanup') renderDetails();
+    setStatus('ok', 'Cleanup scan ready');
+  } catch (err) {
+    setStatus('error', err.message || 'Cleanup scan failed');
+  }
+}
+
+async function loadApps() {
+  try {
+    setStatus('busy', 'Reading apps');
+    const query = encodeURIComponent(state.appQuery);
+    state.apps = await fetchJson(`${API}/apps?q=${query}&limit=260`);
+    if (state.tab === 'apps') renderDetails();
+    setStatus('ok', 'Apps ready');
+  } catch (err) {
+    setStatus('error', err.message || 'Apps read failed');
+  }
+}
+
+async function loadStartup() {
+  try {
+    setStatus('busy', 'Reading startup');
+    state.startup = await fetchJson(`${API}/startup`);
+    if (state.tab === 'startup') renderDetails();
+    setStatus('ok', 'Startup ready');
+  } catch (err) {
+    setStatus('error', err.message || 'Startup read failed');
+  }
+}
+
+async function loadServices() {
+  try {
+    setStatus('busy', 'Reading services');
+    const query = encodeURIComponent(state.serviceQuery);
+    state.services = await fetchJson(`${API}/services?q=${query}&limit=260`);
+    if (state.tab === 'services') renderDetails();
+    setStatus('ok', 'Services ready');
+  } catch (err) {
+    setStatus('error', err.message || 'Services read failed');
+  }
+}
+
+function render() {
+  const s = state.snapshot;
+  if (!s) return;
+  el('hostPill').textContent = s.overview?.host || 'Host';
+  el('detailTitle').textContent = s.overview?.host || 'System';
+  el('detailMeta').textContent = `${s.overview?.platform || ''} ${s.overview?.release || ''}`.trim();
+  const h = mostSevereHealth(s.health);
+  el('healthPill').className = 'pill ' + (h === 'critical' ? 'bad' : h === 'busy' ? 'warn' : 'good');
+  el('healthPill').textContent = h === 'critical' ? 'Pressure' : h === 'busy' ? 'Busy' : 'Normal';
+  renderKpis();
+  renderProcesses();
+  renderDetails();
+}
+
+function renderKpis() {
+  const s = state.snapshot;
+  const disks = s.storage?.logicalDisks || [];
+  const diskUsed = disks.length ? Math.max(...disks.map(d => d.usedPercent || 0)) : 0;
+  const activeNet = s.network?.adapters?.filter(a => String(a.status).toLowerCase() === 'up').length || s.network?.interfaces?.length || 0;
+  const kpis = [
+    { icon: icons.cpu, label: 'CPU', value: pct(s.cpu?.usagePercent), sub: `${s.cpu?.logicalCores || 0} logical cores`, bar: s.cpu?.usagePercent || 0 },
+    { icon: icons.memory, label: 'Memory', value: pct(s.memory?.usedPercent), sub: `${bytes(s.memory?.usedBytes)} / ${bytes(s.memory?.totalBytes)}`, bar: s.memory?.usedPercent || 0 },
+    { icon: icons.disk, label: 'Storage', value: pct(diskUsed), sub: `${disks.length} logical disks`, bar: diskUsed },
+    { icon: icons.process, label: 'Processes', value: String(state.processes.length), sub: 'visible items', bar: Math.min(100, state.processes.length / 2) },
+    { icon: icons.network, label: 'Network', value: String(activeNet), sub: 'active adapters', bar: activeNet ? 65 : 12 },
+  ];
+  el('kpis').innerHTML = kpis.map(k => `
+    <article class="kpi">
+      <div class="kpi-top"><span>${k.label}</span>${k.icon}</div>
+      <div class="kpi-value">${k.value}</div>
+      <div>
+        <div class="kpi-sub">${escapeHtml(k.sub)}</div>
+        <div class="bar"><div class="bar-fill" style="width:${Math.max(0, Math.min(100, k.bar))}%"></div></div>
+      </div>
+    </article>
+  `).join('');
+}
+
+function renderProcesses() {
+  el('processMeta').textContent = `${state.processes.length} visible`;
+  const list = el('processList');
+  if (!state.processes.length) {
+    list.innerHTML = '<div class="empty">No matching process</div>';
+    return;
+  }
+  list.innerHTML = state.processes.map(p => `
+    <button class="process-row ${p.pid === state.selectedPid ? 'active' : ''}" data-pid="${p.pid}">
+      <div class="proc-name">
+        <span class="proc-icon">${icons.process}</span>
+        <span class="proc-title"><strong>${escapeHtml(p.name)}</strong><span>PID ${p.pid}</span></span>
+      </div>
+      <div><div class="metric">${processCpu(p)}</div><span class="metric-sub">CPU</span></div>
+      <div><div class="metric">${bytes(p.memoryBytes)}</div><span class="metric-sub">Memory</span></div>
+    </button>
+  `).join('');
+  list.querySelectorAll('.process-row').forEach(row => {
+    row.addEventListener('click', () => {
+      state.selectedPid = Number(row.dataset.pid);
+      state.tab = 'process';
+      renderTabs();
+      renderProcesses();
+      renderDetails();
+    });
+  });
+}
+
+function renderTabs() {
+  document.querySelectorAll('.tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === state.tab);
+  });
+}
+
+function renderDetails() {
+  const s = state.snapshot;
+  const body = el('detailBody');
+  if (!s) return;
+  if (state.tab === 'overview') body.innerHTML = renderOverview(s);
+  if (state.tab === 'hardware') body.innerHTML = renderHardware(s.hardware);
+  if (state.tab === 'storage') body.innerHTML = renderStorage(s.storage);
+  if (state.tab === 'network') body.innerHTML = renderNetwork(s.network);
+  if (state.tab === 'process') body.innerHTML = renderProcessDetail();
+  if (state.tab === 'cleanup') { body.innerHTML = renderCleanup(); bindCleanup(); }
+  if (state.tab === 'apps') { body.innerHTML = renderApps(); bindApps(); }
+  if (state.tab === 'startup') { body.innerHTML = renderStartup(); bindStartup(); }
+  if (state.tab === 'services') { body.innerHTML = renderServices(); bindServices(); }
+  if (state.tab === 'process') bindProcessActions();
+}
+
+function renderOverview(s) {
+  const health = s.health?.summary || [];
+  return `
+    <div class="detail-grid">
+      <article class="detail-card">
+        <div class="card-title"><span>Machine</span>${icons.monitor}</div>
+        ${spec('Host', s.overview?.host)}
+        ${spec('Platform', `${s.overview?.platform || ''} ${s.overview?.arch || ''}`)}
+        ${spec('Release', s.overview?.release)}
+        ${spec('Uptime', duration(s.overview?.uptimeSec))}
+      </article>
+      <article class="detail-card">
+        <div class="card-title"><span>Health</span><span class="pill good">Live</span></div>
+        ${health.map((x, i) => spec(i === 0 ? 'CPU' : i === 1 ? 'Memory' : 'Storage', x)).join('')}
+      </article>
+      <article class="detail-card wide">
+        <div class="card-title"><span>Top Activity</span><span class="pill">${state.processes.length} items</span></div>
+        ${state.processes.slice(0, 8).map(p => `
+          <div class="adapter-row">
+            <div class="name-line"><strong>${escapeHtml(p.name)}</strong><span>PID ${p.pid}</span></div>
+            <div>${processCpu(p)} CPU</div>
+            <div>${bytes(p.memoryBytes)}</div>
+          </div>
+        `).join('')}
+      </article>
+    </div>
+  `;
+}
+
+function renderHardware(h = {}) {
+  const cpu = (h.cpu || [])[0] || {};
+  const computer = h.computer || {};
+  const osInfo = h.os || {};
+  const gpu = h.gpus || [];
+  const memoryModules = h.memoryModules || [];
+  return `
+    <div class="detail-grid">
+      <article class="detail-card">
+        <div class="card-title"><span>CPU</span>${icons.cpu}</div>
+        ${spec('Name', cpu.Name || state.snapshot?.cpu?.model)}
+        ${spec('Cores', `${cpu.NumberOfCores || state.snapshot?.cpu?.physicalCores || '-'} physical / ${cpu.NumberOfLogicalProcessors || state.snapshot?.cpu?.logicalCores || '-'} logical`)}
+        ${spec('Clock', `${cpu.CurrentClockSpeed || cpu.MaxClockSpeed || state.snapshot?.cpu?.speedMHz || '-'} MHz`)}
+        ${spec('Socket', cpu.SocketDesignation)}
+      </article>
+      <article class="detail-card">
+        <div class="card-title"><span>Computer</span>${icons.monitor}</div>
+        ${spec('Manufacturer', computer.Manufacturer)}
+        ${spec('Model', computer.Model)}
+        ${spec('System type', computer.SystemType)}
+        ${spec('User', computer.UserName)}
+      </article>
+      <article class="detail-card">
+        <div class="card-title"><span>Operating System</span><span class="pill">${escapeHtml(osInfo.OSArchitecture || '')}</span></div>
+        ${spec('Caption', osInfo.Caption)}
+        ${spec('Version', osInfo.Version)}
+        ${spec('Build', osInfo.BuildNumber)}
+        ${spec('Boot', shortDate(osInfo.LastBootUpTime))}
+      </article>
+      <article class="detail-card">
+        <div class="card-title"><span>Memory Modules</span><span class="pill">${memoryModules.length}</span></div>
+        ${memoryModules.length ? memoryModules.map(m => spec(m.DeviceLocator || m.BankLabel || 'Slot', `${bytes(m.Capacity)} ${m.Speed || m.ConfiguredClockSpeed || ''} MHz ${m.Manufacturer || ''}`)).join('') : '<div class="empty">No module details</div>'}
+      </article>
+      <article class="detail-card wide">
+        <div class="card-title"><span>Graphics</span><span class="pill">${gpu.length}</span></div>
+        ${gpu.length ? gpu.map(g => `
+          <div class="adapter-row">
+            <div class="name-line"><strong>${escapeHtml(g.Name || 'GPU')}</strong><span>${escapeHtml(g.VideoProcessor || '')}</span></div>
+            <div>${bytes(g.AdapterRAM)}</div>
+            <div>${escapeHtml(g.DriverVersion || '')}</div>
+          </div>
+        `).join('') : '<div class="empty">No GPU details</div>'}
+      </article>
+    </div>
+  `;
+}
+
+function renderStorage(storage = {}) {
+  const logical = storage.logicalDisks || [];
+  const physical = storage.physicalDisks || [];
+  return `
+    <div class="detail-grid">
+      <article class="detail-card wide">
+        <div class="card-title"><span>Logical Disks</span><span class="pill">${logical.length}</span></div>
+        ${logical.length ? logical.map(d => `
+          <div class="disk-row">
+            <div class="name-line"><strong>${escapeHtml(d.id || d.name || 'Disk')}</strong><span>${escapeHtml([d.name, d.fileSystem, d.type].filter(Boolean).join(' - '))}</span></div>
+            <div><div class="bar"><div class="bar-fill" style="width:${d.usedPercent || 0}%"></div></div></div>
+            <div>${bytes(d.usedBytes)} / ${bytes(d.sizeBytes)}</div>
+          </div>
+        `).join('') : '<div class="empty">No disk details</div>'}
+      </article>
+      <article class="detail-card wide">
+        <div class="card-title"><span>Physical Disks</span><span class="pill">${physical.length}</span></div>
+        ${physical.length ? physical.map(d => `
+          <div class="adapter-row">
+            <div class="name-line"><strong>${escapeHtml(d.name)}</strong><span>${escapeHtml([d.mediaType, d.busType].filter(Boolean).join(' - '))}</span></div>
+            <div><span class="pill ${String(d.healthStatus).toLowerCase() === 'healthy' ? 'good' : 'warn'}">${escapeHtml(d.healthStatus || 'Unknown')}</span></div>
+            <div>${bytes(d.sizeBytes)}</div>
+          </div>
+        `).join('') : '<div class="empty">No physical disk details</div>'}
+      </article>
+    </div>
+  `;
+}
+
+function renderNetwork(network = {}) {
+  const adapters = network.adapters || [];
+  const interfaces = network.interfaces || [];
+  return `
+    <div class="detail-grid">
+      <article class="detail-card wide">
+        <div class="card-title"><span>Adapters</span>${icons.network}</div>
+        ${adapters.length ? adapters.map(a => `
+          <div class="adapter-row">
+            <div class="name-line"><strong>${escapeHtml(a.name)}</strong><span>${escapeHtml(a.description || a.macAddress || '')}</span></div>
+            <div><span class="pill ${String(a.status).toLowerCase() === 'up' ? 'good' : ''}">${escapeHtml(a.status || 'Unknown')}</span></div>
+            <div>${escapeHtml(a.linkSpeed || '')} - ${bytes(a.receivedBytes)} in / ${bytes(a.sentBytes)} out</div>
+          </div>
+        `).join('') : '<div class="empty">No adapter details</div>'}
+      </article>
+      <article class="detail-card wide">
+        <div class="card-title"><span>Addresses</span><span class="pill">${interfaces.length}</span></div>
+        ${interfaces.length ? interfaces.map(i => `
+          <div class="adapter-row">
+            <div class="name-line"><strong>${escapeHtml(i.name)}</strong><span>${escapeHtml((i.addresses || []).map(a => a.mac).filter(Boolean)[0] || '')}</span></div>
+            <div>${(i.addresses || []).length} address</div>
+            <div>${escapeHtml((i.addresses || []).map(a => a.address).join(', '))}</div>
+          </div>
+        `).join('') : '<div class="empty">No network addresses</div>'}
+      </article>
+    </div>
+  `;
+}
+
+function renderProcessDetail() {
+  const p = state.processes.find(x => x.pid === state.selectedPid);
+  if (!p) return '<div class="empty">Select a process</div>';
+  return `
+    <div class="detail-grid">
+      <article class="detail-card">
+        <div class="card-title"><span>${escapeHtml(p.name)}</span><span class="pill">PID ${p.pid}</span></div>
+        ${spec('CPU', processCpu(p))}
+        ${spec('Memory', bytes(p.memoryBytes))}
+        ${spec('Threads', p.threads)}
+        ${spec('Handles', p.handles)}
+      </article>
+      <article class="detail-card">
+        <div class="card-title"><span>Lineage</span>${icons.process}</div>
+        ${spec('Parent PID', p.parentPid)}
+        ${spec('Started', shortDate(p.startedAt))}
+        ${spec('Path', p.path || '-')}
+      </article>
+      <article class="detail-card wide">
+        <div class="card-title"><span>Actions</span><span class="pill warn">Confirm required</span></div>
+        <div class="row-actions" style="justify-content:flex-start">
+          <button class="btn danger" id="terminateProcessBtn" data-pid="${p.pid}" data-name="${escapeHtml(p.name)}">Terminate process</button>
+        </div>
+      </article>
+    </div>
+  `;
+}
+
+function renderCleanup() {
+  if (!state.cleanup) return '<div class="empty">Scanning cleanup targets...</div>';
+  const items = state.cleanup.items || [];
+  return `
+    <div class="detail-grid">
+      <article class="detail-card wide">
+        <div class="card-title">
+          <span>Cleanup</span>
+          <span class="pill">${bytes(state.cleanup.totalBytes)} reclaimable</span>
+        </div>
+        <div class="manager-toolbar">
+          <button class="btn compact" id="cleanupScanBtn">Scan again</button>
+          <button class="btn compact danger" id="cleanupRunBtn">Clean selected</button>
+        </div>
+        <div class="manager-list">
+          ${items.map(item => `
+            <label class="manager-row target-row">
+              <input class="target-check" type="checkbox" data-target="${item.id}" ${state.cleanupSelected.has(item.id) ? 'checked' : ''}>
+              <div class="name-line">
+                <strong>${escapeHtml(item.name)}</strong>
+                <span>${escapeHtml(item.description || '')}</span>
+              </div>
+              <div>${bytes(item.bytes)}</div>
+              <div>${item.files || 0} files</div>
+            </label>
+          `).join('')}
+        </div>
+      </article>
+    </div>
+  `;
+}
+
+function bindCleanup() {
+  document.querySelectorAll('.target-check').forEach(input => {
+    input.addEventListener('change', () => {
+      if (input.checked) state.cleanupSelected.add(input.dataset.target);
+      else state.cleanupSelected.delete(input.dataset.target);
+    });
+  });
+  document.getElementById('cleanupScanBtn')?.addEventListener('click', () => loadCleanup());
+  document.getElementById('cleanupRunBtn')?.addEventListener('click', async () => {
+    const targetIds = [...state.cleanupSelected];
+    if (!targetIds.length) return;
+    if (!confirm(`Clean ${targetIds.length} selected target(s)? Locked files will be skipped.`)) return;
+    try {
+      setStatus('busy', 'Cleaning');
+      const result = await postJson(`${API}/cleanup/run`, { targetIds, confirm: 'CLEAN' });
+      state.cleanup = null;
+      await loadCleanup();
+      setStatus('ok', `Cleaned ${bytes(result.totalDeletedBytes)}`);
+    } catch (err) {
+      setStatus('error', err.message || 'Cleanup failed');
+    }
+  });
+}
+
+function renderApps() {
+  if (!state.apps) return '<div class="empty">Reading installed apps...</div>';
+  const apps = state.apps.items || [];
+  return `
+    <div class="detail-grid">
+      <article class="detail-card wide">
+        <div class="card-title"><span>Applications</span><span class="pill">${state.apps.total} apps</span></div>
+        <div class="manager-toolbar">
+          <input class="search" id="appSearch" placeholder="Search apps or publishers" value="${escapeHtml(state.appQuery)}">
+          <button class="btn compact" id="appsRefreshBtn">Refresh</button>
+        </div>
+        <div class="manager-list">
+          ${apps.map(app => `
+            <div class="manager-row">
+              <div class="name-line">
+                <strong>${escapeHtml(app.name)}</strong>
+                <span>${escapeHtml([app.publisher, app.version].filter(Boolean).join(' - '))}</span>
+              </div>
+              <div>${app.estimatedSizeBytes ? bytes(app.estimatedSizeBytes) : '-'}</div>
+              <div class="row-actions">
+                <button class="btn compact danger" data-uninstall="${app.id}" ${app.hasUninstall ? '' : 'disabled'}>Uninstall</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </article>
+    </div>
+  `;
+}
+
+function bindApps() {
+  const search = document.getElementById('appSearch');
+  if (search) {
+    search.addEventListener('input', debounce(() => {
+      state.appQuery = search.value.trim();
+      loadApps();
+    }, 260));
+  }
+  document.getElementById('appsRefreshBtn')?.addEventListener('click', () => { state.apps = null; loadApps(); });
+  document.querySelectorAll('[data-uninstall]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const app = (state.apps.items || []).find(x => x.id === btn.dataset.uninstall);
+      if (!app) return;
+      const typed = prompt(`Type the app name to launch its uninstaller:\n${app.name}`);
+      if (typed !== app.name) return;
+      try {
+        setStatus('busy', 'Launching uninstaller');
+        await postJson(`${API}/apps/${encodeURIComponent(app.id)}/uninstall`, { confirmName: app.name });
+        setStatus('ok', 'Uninstaller launched');
+      } catch (err) {
+        setStatus('error', err.message || 'Uninstall failed');
+      }
+    });
+  });
+}
+
+function renderStartup() {
+  if (!state.startup) return '<div class="empty">Reading startup items...</div>';
+  const items = state.startup.items || [];
+  return `
+    <div class="detail-grid">
+      <article class="detail-card wide">
+        <div class="card-title"><span>Startup Items</span><span class="pill">${items.length} entries</span></div>
+        <div class="manager-toolbar"><button class="btn compact" id="startupRefreshBtn">Refresh</button></div>
+        <div class="manager-list">
+          ${items.map(item => `
+            <div class="manager-row">
+              <div class="name-line"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.command || '')}</span></div>
+              <div><span class="pill ${item.enabled ? 'good' : ''}">${item.enabled ? 'Enabled' : 'Disabled'}</span></div>
+              <div class="row-actions">
+                <button class="btn compact ${item.enabled ? 'warn' : 'active'}" data-startup="${item.id}" data-enabled="${item.enabled ? '0' : '1'}">${item.enabled ? 'Disable' : 'Enable'}</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </article>
+    </div>
+  `;
+}
+
+function bindStartup() {
+  document.getElementById('startupRefreshBtn')?.addEventListener('click', () => { state.startup = null; loadStartup(); });
+  document.querySelectorAll('[data-startup]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const enabled = btn.dataset.enabled === '1';
+      if (!confirm(`${enabled ? 'Enable' : 'Disable'} this startup item?`)) return;
+      try {
+        setStatus('busy', 'Updating startup');
+        await postJson(`${API}/startup/toggle`, { id: btn.dataset.startup, enabled, confirm: 'STARTUP' });
+        state.startup = null;
+        await loadStartup();
+      } catch (err) {
+        setStatus('error', err.message || 'Startup update failed');
+      }
+    });
+  });
+}
+
+function renderServices() {
+  if (!state.services) return '<div class="empty">Reading services...</div>';
+  const services = state.services.items || [];
+  return `
+    <div class="detail-grid">
+      <article class="detail-card wide">
+        <div class="card-title"><span>Services</span><span class="pill">${state.services.total} services</span></div>
+        <div class="manager-toolbar">
+          <input class="search" id="serviceSearch" placeholder="Search services" value="${escapeHtml(state.serviceQuery)}">
+          <button class="btn compact" id="servicesRefreshBtn">Refresh</button>
+        </div>
+        <div class="manager-list">
+          ${services.map(s => `
+            <div class="manager-row">
+              <div class="name-line"><strong>${escapeHtml(s.displayName || s.name)}</strong><span>${escapeHtml(s.name)}</span></div>
+              <div><span class="pill ${String(s.status).toLowerCase() === 'running' ? 'good' : ''}">${escapeHtml(s.status)}</span></div>
+              <div class="row-actions">
+                <button class="btn compact active" data-service="${escapeHtml(s.name)}" data-action="start">Start</button>
+                <button class="btn compact warn" data-service="${escapeHtml(s.name)}" data-action="restart">Restart</button>
+                <button class="btn compact danger" data-service="${escapeHtml(s.name)}" data-action="stop">Stop</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </article>
+    </div>
+  `;
+}
+
+function bindServices() {
+  const search = document.getElementById('serviceSearch');
+  if (search) {
+    search.addEventListener('input', debounce(() => {
+      state.serviceQuery = search.value.trim();
+      loadServices();
+    }, 260));
+  }
+  document.getElementById('servicesRefreshBtn')?.addEventListener('click', () => { state.services = null; loadServices(); });
+  document.querySelectorAll('[data-service]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const name = btn.dataset.service;
+      const action = btn.dataset.action;
+      if (!confirm(`${action} service "${name}"? Some services require administrator permission.`)) return;
+      try {
+        setStatus('busy', `${action} service`);
+        await postJson(`${API}/services/${encodeURIComponent(name)}/control`, { action, confirm: 'SERVICE' });
+        state.services = null;
+        await loadServices();
+      } catch (err) {
+        setStatus('error', err.message || 'Service control failed');
+      }
+    });
+  });
+}
+
+function bindProcessActions() {
+  document.getElementById('terminateProcessBtn')?.addEventListener('click', async (event) => {
+    const btn = event.currentTarget;
+    const pid = btn.dataset.pid;
+    const name = btn.dataset.name;
+    const typed = prompt(`Type the process name to terminate PID ${pid}:\n${name}`);
+    if (typed !== name) return;
+    try {
+      setStatus('busy', 'Terminating process');
+      await postJson(`${API}/processes/${encodeURIComponent(pid)}/terminate`, { confirmName: name });
+      await loadProcesses(false);
+      setStatus('ok', 'Process terminated');
+    } catch (err) {
+      setStatus('error', err.message || 'Terminate failed');
+    }
+  });
+}
+
+function renderAuto() {
+  el('autoBtn').classList.toggle('active', state.auto);
+  el('autoBtn').innerHTML = (state.auto ? icons.pause : icons.play) + `<span>${state.auto ? 'Live' : 'Paused'}</span>`;
+}
+
+function setStatus(kind, text) {
+  const dot = el('statusDot');
+  dot.className = 'dot' + (kind === 'busy' ? ' busy' : kind === 'error' ? ' error' : '');
+  el('statusText').textContent = text;
+}
+
+function renderError(err) {
+  el('detailBody').innerHTML = `<div class="error">${escapeHtml(err.message || String(err))}</div>`;
+}
+
+function mostSevereHealth(health = {}) {
+  const values = [health.cpu, health.memory, health.storage];
+  if (values.includes('critical')) return 'critical';
+  if (values.includes('busy')) return 'busy';
+  return 'normal';
+}
+
+function spec(label, value) {
+  return `<div class="spec"><div class="spec-label">${escapeHtml(label)}</div><div class="spec-value" title="${escapeHtml(value ?? '-')}">${escapeHtml(value ?? '-')}</div></div>`;
+}
+
+function bytes(value) {
+  const n = Number(value || 0);
+  if (!n) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const idx = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
+  return `${(n / Math.pow(1024, idx)).toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
+function pct(value) {
+  const n = Number(value || 0);
+  return `${Math.max(0, Math.min(100, n)).toFixed(1)}%`;
+}
+
+function processCpu(p) {
+  if (Number(p.cpuPercent || 0) > 0) return pct(p.cpuPercent);
+  const seconds = Number(p.cpuSeconds || 0);
+  if (!seconds) return '0s';
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m ${s}s`;
+}
+
+function duration(sec) {
+  const s = Number(sec || 0);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function shortDate(value) {
+  if (!value) return '-';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString();
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[c]);
+}
+
+function debounce(fn, ms) {
+  let timer = 0;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  };
+}
+</script>
+</body>
+</html>

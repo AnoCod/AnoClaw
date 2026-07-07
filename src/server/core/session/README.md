@@ -97,8 +97,10 @@ Central hub for session lifecycle. Extends `EventEmitter`. Manages in-memory
 - **`setWorkspace(sessionId, workspace): Promise<void>`** — update workspace path.
 - **`setMetadata(sessionId, key, value): void`** — set arbitrary metadata.
 - **`archiveSession(sessionId): Promise<void>`** — archive session and all children recursively.
-- **`setRunningMode(sessionId, mode): void`** — set `'normal'` or `'infinite'`.
-- **`getRunningMode(sessionId): string`** — read running mode.
+- **`setSessionPermissionMode(sessionId, mode): Promise<PermissionMode>`** — persist root-session permission mode.
+- **`setSessionEffortMode(sessionId, enabled): Promise<boolean>`** — persist root-session effort mode.
+- **`setGoal(sessionId, objective): Promise<SessionGoal>`** — start or replace the active root-session goal.
+- **`updateGoalStatus(sessionId, status): Promise<SessionGoal | null>`** — pause, resume, or delete the active goal.
 
 ### Internal (package-private)
 

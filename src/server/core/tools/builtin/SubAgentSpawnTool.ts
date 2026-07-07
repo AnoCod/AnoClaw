@@ -1,4 +1,4 @@
-// SubAgentSpawnTool — create a temporary SubAgent for one-off tasks
+// SubAgentSpawnTool - create a temporary SubAgent for one-off tasks
 // The SubAgent is destroyed after completion (or error). Does NOT persist to org tree.
 // Uses AgentRuntime.spawnSubAgent().
 
@@ -15,37 +15,31 @@ import type { Message } from '../../../../shared/types/session.js';
 export class SubAgentSpawnTool extends Tool {
 
   static category = 'Task Delegation';
-  static toolDescription = 'Launches a new agent to handle complex multi-step tasks autonomously.';
+  static toolDescription = 'Creates a temporary helper agent for isolated research, planning, or parallel execution.';
   name(): string {
     return 'SubAgentSpawn';
   }
 
   description(): string {
-    return 'Create a SubAgent for a one-off task. Set persist=true to save the full conversation history to a persistent sub-session linked to your current session — the agent is still destroyed after completion, but the transcript (including all think/text/tool calls) is written to JSONL disk and can be found later via the session tree or SessionManager. Without persist, no history is saved. Types: Explore (codebase exploration), Plan (design/planning), general-purpose (open-ended tasks).';
+    return 'Create a temporary SubAgent for one-off work. Use it for isolated exploration, planning, or parallel execution. Persistent team work belongs in TaskAssign to a permanent subordinate.';
   }
 
   prompt(): string {
-    return '## SubAgentSpawn Usage\n' +
-      '### When to Use\n' +
-      '- Tasks spanning 4+ files or systems\n' +
-      '- Tasks requiring independent exploration or planning\n' +
-      '- Parallel work on separate areas\n\n' +
-      '### When NOT to Use\n' +
-      '- Reading a specific file → use Read\n' +
-      '- Searching for code → use Glob or Grep\n' +
-      '- Simple 1-3 file changes → do it yourself with Edit/Write\n' +
-      '- The target is already known → use Read/Edit directly\n\n' +
-      '### Agent Types\n' +
-      '- **Explore**: fast read-only search for locating code\n' +
-      '- **Plan**: design implementation approaches\n' +
-      '- **general-purpose**: open-ended multi-step tasks\n\n' +
-      '### Persistence (save transcript)\n' +
-      '- By default, SubAgents are destroyed after task completion with no history saved.\n' +
-      '- Set `persist: true` to save the full conversation transcript to a persistent sub-session.\n' +
-      '- The sub-session is linked to your current session and appears in the session tree.\n' +
-      '- The agent itself is still destroyed — only the conversation record persists.\n' +
-      '- Useful for: forensics, cross-session indexing, audit trails, task debriefing.\n' +
-      '- Use SharedContextStore to pass additional shared state to the SubAgent.';
+    return [
+      '## SubAgentSpawn Usage',
+      'Use a SubAgent for bounded temporary work that should not become durable org context.',
+      '',
+      'Good uses:',
+      '- Independent codebase exploration.',
+      '- Drafting or checking an implementation plan.',
+      '- Parallel verification on a separate area.',
+      '- Research where the result can be summarized and discarded.',
+      '',
+      'Do not use SubAgentSpawn for simple reads/searches, known file edits, or durable team responsibilities. Use direct tools or TaskAssign instead.',
+      '',
+      'Prompt requirements: one clear task, relevant context, constraints, expected output, and verification expectations.',
+      'Set persist=true only when the transcript is needed for audit, forensics, or later review.',
+    ].join('\n');
   }
 
   minRole(): string { return 'Member'; }
@@ -129,9 +123,10 @@ export class SubAgentSpawnTool extends Tool {
       const startedAt = Date.now();
       runtime.spawnSubAgent(subAgentConfig, ctx.agentId, ctx.sessionId).then(async (result) => {
         const durationMs = Date.now() - startedAt;
+        const subSessionId = (result.structured as any)?.subSessionId || `subagent-${Date.now()}`;
         TypedEventBus.emit('delegation:completed', {
           parentSessionId: ctx.sessionId,
-          subSessionId: `subagent-${Date.now()}`,
+          subSessionId,
           subAgentId: `SubAgent-${subagentType}`,
           taskSummary: description.slice(0, 60),
           turnCount: 0,
@@ -163,7 +158,7 @@ export class SubAgentSpawnTool extends Tool {
         logger.error('Background SubAgent failed', { type: subagentType, error: errMsg, sid: ctx.sessionId });
         TypedEventBus.emit('delegation:error', {
           parentSessionId: ctx.sessionId,
-          subSessionId: `subagent-${Date.now()}`,
+          subSessionId: `subagent-err-${Date.now()}`,
           subAgentId: `SubAgent-${subagentType}`,
           taskSummary: description.slice(0, 60),
           elapsedMs: durationMs,

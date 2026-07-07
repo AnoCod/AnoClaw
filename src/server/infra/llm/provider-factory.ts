@@ -6,13 +6,17 @@ import type { LLMProvider } from './LLMProvider.js';
 import { OpenAICompatibleProvider } from './OpenAICompatibleProvider.js';
 import { OllamaProvider } from './OllamaProvider.js';
 
+export interface LLMProviderFactory {
+  (params: { provider: string }): LLMProvider;
+}
+
 export function createLLMProvider(provider: string, extPoints?: { get(point: string): ((...args: unknown[]) => unknown) | null }): LLMProvider {
   // Check for plugin override
   if (extPoints) {
     const override = extPoints.get('llmProvider');
     if (override) {
-      const customProvider = override({ provider }) as LLMProvider;
-      if (customProvider && typeof (customProvider as unknown as { chat: unknown }).chat === 'function') {
+      const customProvider = (override as LLMProviderFactory)({ provider });
+      if (customProvider && typeof customProvider.chat === 'function') {
         return customProvider;
       }
     }

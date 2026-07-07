@@ -39,6 +39,7 @@ export class ToolCard {
     this._fullResult = state.result || '';
     this._expanded = state.status === 'running';
     this.element = this.render(state);
+    if (!this._expanded) this.collapse();
     this._injectKeyframes();
   }
 
@@ -89,11 +90,8 @@ export class ToolCard {
       indicator.appendChild(dur);
     }
 
-    const hasBody = this._fullResult && this._fullResult.length > 0;
-    if (hasBody) {
-      indicator.classList.add('clickable');
-      indicator.addEventListener('click', () => this._toggle());
-    }
+    indicator.classList.add('clickable');
+    indicator.addEventListener('click', () => this._toggle());
 
     return indicator;
   }
@@ -110,11 +108,11 @@ export class ToolCard {
     if (isLong) {
       const btn = document.createElement('button');
       btn.className = 'ui-toolcard-more';
-      btn.textContent = this._expanded ? 'Show less' : 'Show more';
+      btn.textContent = this._expanded ? 'Show less' : 'Show details';
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         this._toggle();
-        btn.textContent = this._expanded ? 'Show less' : 'Show more';
+        btn.textContent = this._expanded ? 'Show less' : 'Show details';
       });
       this._showMoreBtn = btn;
       const wrap = document.createElement('div');
@@ -147,12 +145,37 @@ export class ToolCard {
   }
 
   protected _toggle(): void {
-    this._expanded = !this._expanded;
-    if (this._bodyEl) {
-      if (this._expanded) { this._bodyEl.textContent = this._fullResult; this._bodyEl.hidden = false; }
-      else { this._bodyEl.hidden = true; }
+    if (this._expanded) this.collapse();
+    else this.expand();
+  }
+
+  collapse(): void {
+    this._expanded = false;
+    this.element.classList.add('is-collapsed');
+    for (const child of Array.from(this.element.children) as HTMLElement[]) {
+      if (!child.classList.contains('ui-toolcard-indicator')) child.hidden = true;
     }
-    if (this._showMoreBtn) this._showMoreBtn.textContent = this._expanded ? 'Show less' : 'Show more';
+    if (this._bodyEl) this._bodyEl.hidden = true;
+    if (this._showMoreBtn) {
+      this._showMoreBtn.textContent = 'Show details';
+      this._showMoreBtn.hidden = true;
+    }
+  }
+
+  expand(): void {
+    this._expanded = true;
+    this.element.classList.remove('is-collapsed');
+    for (const child of Array.from(this.element.children) as HTMLElement[]) child.hidden = false;
+    if (this._bodyEl) {
+      this._bodyEl.textContent = this._fullResult;
+      this._bodyEl.hidden = false;
+      this._bodyEl.style.maxHeight = 'none';
+      this._bodyEl.style.overflow = 'visible';
+    }
+    if (this._showMoreBtn) {
+      this._showMoreBtn.textContent = 'Show less';
+      this._showMoreBtn.hidden = false;
+    }
   }
 
   private _injectKeyframes(): void {

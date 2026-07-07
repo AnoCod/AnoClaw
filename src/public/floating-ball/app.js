@@ -75,10 +75,10 @@ function renderSatellites(sessions) {
 function handleAction(el) {
   const action = el.dataset.action;
   if (action === 'new-session') {
-    api?.send('floating-ball-action', 'new-session');
+    api?.floatingBallAction?.('new-session');
   } else if (action === 'session') {
     const idx = parseInt(el.dataset.sessionIndex);
-    api?.send('floating-ball-action', 'open-session', idx);
+    api?.floatingBallAction?.('open-session', idx);
   }
 }
 
@@ -103,7 +103,7 @@ document.addEventListener('mousemove', (e) => {
 
 async function init() {
   try {
-    const sessions = await api?.invoke('floating-ball-sessions');
+    const sessions = await api?.floatingBallGetSessions?.();
     renderSatellites(sessions || []);
   } catch {
     renderSatellites([]);

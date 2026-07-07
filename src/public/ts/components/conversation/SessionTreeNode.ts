@@ -4,6 +4,7 @@
 // clean arrow toggle, and hover-reveal action buttons.
 
 import type { SessionNode, AgentStatus } from './types.js';
+import type { SessionStatus } from '../../types.js';
 import { ClientLogger } from '../../ClientLogger.js';
 
 // ── SVG icon builders (inline, no external files) ──
@@ -332,7 +333,7 @@ export class SessionTreeNode {
     }
   }
 
-  updateStatus(status: AgentStatus): void {
+  updateStatus(status: SessionStatus): void {
     this.node.status = status;
     this.updateStatusDot();
   }

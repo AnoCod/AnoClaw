@@ -167,8 +167,10 @@ export class Skill extends EventEmitter {
     if (this._paths.length === 0) return false;
     const normalized = filePath.replace(/\\/g, '/');
     for (const pattern of this._paths) {
+      // Escape regex special chars, then convert glob ** and * to regex equivalents
+      const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
       const regex = new RegExp(
-        '^' + pattern.replace(/\*\*/g, '§§').replace(/\*/g, '[^/]*').replace(/§§/g, '.*') + '$'
+        '^' + escaped.replace(/\*\*/g, '§§').replace(/\*/g, '[^/]*').replace(/§§/g, '.*') + '$'
       );
       if (regex.test(normalized)) return true;
     }

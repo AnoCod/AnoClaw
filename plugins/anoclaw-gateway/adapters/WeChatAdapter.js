@@ -1,7 +1,7 @@
-// WeChatAdapter — connects to personal WeChat via Tencent iLink Bot API.
+// WeChatAdapter - connects to personal WeChat via Tencent iLink Bot API.
 // Outbound: HTTPS POST /ilink/bot/sendmessage
 // Inbound: Long-poll HTTPS POST /ilink/bot/getupdates (35s timeout)
-// No external dependencies — uses native https module.
+// No external dependencies - uses native https module.
 // Credentials: token (Bearer) + accountId
 // Rich messages: image (IMG), file (FILE), link card (LINK),
 // mini-program (MINI_PROGRAM), emoji (EMOJI)
@@ -65,7 +65,7 @@ export class WeChatAdapter {
     this._token = config.token || '';
     this._accountId = config.accountId || '';
     this._baseUrl = (config.baseUrl || ILINK_BASE).replace(/\/+$/, '');
-    this._contextTokens = {};   // chatId → context_token (needed for replies)
+    this._contextTokens = {};   // chatId -> context_token (needed for replies)
     this._syncBuf = '';         // cursor for long-poll continuation
     this._running = false;
     this._onMessage = null;
@@ -128,7 +128,7 @@ export class WeChatAdapter {
       msg.context_token = this._contextTokens[chatId];
     }
     const result = await this._request(EP_SEND, { msg, base_info: { channel_version: CHANNEL_VER } });
-    // errcode -14 means session expired — clear the stale token
+    // errcode -14 means session expired - clear the stale token
     if (result.errcode === -14) {
       delete this._contextTokens[chatId];
       throw new Error(`WeChat session expired for ${chatId}`);
@@ -224,7 +224,7 @@ export class WeChatAdapter {
           }
         }
       } catch {
-        // Poll failure (timeout, network) — wait and retry
+        // Poll failure (timeout, network) - wait and retry
         await sleep(5000);
       }
     }

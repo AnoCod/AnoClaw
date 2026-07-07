@@ -22,6 +22,7 @@ const UI_DEFAULTS: Record<string, unknown> = {
 export class GetSettingsRoute implements RouteHandler {
   method = 'GET' as const;
   path = '/api/v1/settings/ui';
+  permission = 'admin';
 
   async handle(
     _match: RouteMatch, _req: IncomingMessage, res: ServerResponse, _token: ApiToken | null,
@@ -36,6 +37,7 @@ export class GetSettingsRoute implements RouteHandler {
 export class PutSettingsRoute implements RouteHandler {
   method = 'PUT' as const;
   path = '/api/v1/settings/ui';
+  permission = 'admin';
 
   async handle(
     _match: RouteMatch, req: IncomingMessage, res: ServerResponse, _token: ApiToken | null,

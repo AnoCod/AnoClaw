@@ -5,7 +5,9 @@ import type { ApiToken } from '../ApiAuth.js';
 import { sendJson, readBody } from '../RouteHelpers.js';
 import { AgentRegistry } from '../../core/agent/AgentRegistry.js';
 import { AgentState, AgentRole } from '../../../shared/types/agent.js';
+import { TypedEventBus } from '../../core/events/TypedEventBus.js';
 import { requireWsAny } from '../WsRequired.js';
+import { hierarchyValidationMessage, levelForRole } from '../../core/agent/AgentConstraints.js';
 
 export class SetAgentStateRoute implements RouteHandler {
   method = 'PATCH' as const; path = '/api/v1/agents/:id/state';
@@ -22,6 +24,7 @@ export class SetAgentStateRoute implements RouteHandler {
       }
       agent.setState(state as AgentState);
       AgentRegistry.getInstance().saveAgent(agent.id);
+      TypedEventBus.emit('agent:changed', { action: 'state', agentId: agent.id });
       sendJson(res, 200, { agentId: agent.id, state: agent.state });
     } catch (err) { sendJson(res, 500, { error: (err as Error).message }); }
     return true;
@@ -38,12 +41,17 @@ export class ReassignAgentParentRoute implements RouteHandler {
       if (!agent) { sendJson(res, 404, { error: 'Agent not found' }); return true; }
       const body = await readBody(req);
       const parentId = body.parentAgentId as string;
-      const level = body.level as number;
-      if (!parentId || typeof level !== 'number') {
-        sendJson(res, 400, { error: 'parentAgentId and level are required' }); return true;
+      if (!parentId) {
+        sendJson(res, 400, { error: 'parentAgentId is required' }); return true;
       }
+      const hierarchyError = hierarchyValidationMessage(agent.id, agent.role, parentId);
+      if (hierarchyError) {
+        sendJson(res, 400, { error: hierarchyError }); return true;
+      }
+      const level = levelForRole(agent.role);
       agent.reassignParent(parentId, level);
       AgentRegistry.getInstance().saveAgent(agent.id);
+      TypedEventBus.emit('agent:changed', { action: 'parent', agentId: agent.id });
       sendJson(res, 200, { agentId: agent.id, parentAgentId: parentId, level });
     } catch (err) { sendJson(res, 500, { error: (err as Error).message }); }
     return true;
@@ -89,6 +97,7 @@ export class ReloadAgentsRoute implements RouteHandler {
     try {
       const reg = AgentRegistry.getInstance();
       await reg.loadFromDirectory();
+      TypedEventBus.emit('agent:changed', { action: 'reloaded', agentId: '*' });
       sendJson(res, 200, { reloaded: true, count: reg.allAgents().length });
     } catch (err) { sendJson(res, 500, { error: (err as Error).message }); }
     return true;

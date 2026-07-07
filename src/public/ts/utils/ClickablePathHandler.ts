@@ -1,8 +1,9 @@
 // AnoClaw — ClickablePathHandler: central click delegation for file paths and external URLs
-// Used by SessionsPage, SessionsPageOverfly, and FilesTab to intercept clicks
+// Used by SessionsPage and SessionsPageOverfly to intercept clicks
 // on .clickable-path spans and a[data-external-url] links.
 
 import { ToastManager } from '../ToastManager.js';
+import { resolveClickedFilePath } from './PathReferences.js';
 
 interface ElectronAPI {
   openExternal?: (url: string) => Promise<{ ok: boolean; error?: string }>;
@@ -14,15 +15,8 @@ function getAPI(): ElectronAPI | undefined {
 }
 
 /** Resolve a file path: absolute paths stay as-is, relative paths join to workspace. */
-function resolvePath(clickedPath: string, workspacePath: string): string | null {
-  if (/^[a-zA-Z]:[\\\/]/.test(clickedPath) || clickedPath.startsWith('/') || clickedPath.startsWith('~/')) {
-    return clickedPath;
-  }
-  if (workspacePath) {
-    const sep = workspacePath.includes('\\') ? '\\' : '/';
-    return `${workspacePath}${sep}${clickedPath.replace(/^[\\\/]+/, '')}`;
-  }
-  return null;
+export function resolvePath(clickedPath: string, workspacePath: string): string | null {
+  return resolveClickedFilePath(clickedPath, workspacePath);
 }
 
 /**
@@ -48,7 +42,7 @@ export function handlePathClick(e: MouseEvent, workspacePath: string): void {
 
       const resolved = resolvePath(rawPath, workspacePath);
       if (!resolved) {
-        ToastManager.getInstance().info('No workspace bound — open the Files tab to bind one first.', 4000);
+        ToastManager.getInstance().info('No workspace bound. Open Workspace and bind a folder first.', 4000);
         return;
       }
       if (api?.openPath) {

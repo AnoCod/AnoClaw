@@ -99,7 +99,11 @@ export class TypedEventBusImpl {
     }
     this._handlers.get(key)!.add(handler);
     return () => {
-      this._handlers.get(key)?.delete(handler);
+      const set = this._handlers.get(key);
+      if (set) {
+        set.delete(handler);
+        if (set.size === 0) this._handlers.delete(key);
+      }
     };
   }
 

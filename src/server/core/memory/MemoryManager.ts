@@ -46,6 +46,7 @@ export class MemoryManager extends EventEmitter {
   /** Synchronous cache populated by search/load — for PromptAssembler.
    * Capped at 50 entries to prevent unbounded growth from old sessions. */
   private _recentCache: Map<string, MemoryEntry[]> = new Map();
+  private _cacheTimestamps: Map<string, number> = new Map();
   private static readonly _MAX_CACHE_ENTRIES = 50;
 
   /** ExtensionPoints registry — injected by PluginHostManager for plugin memoryStore override */
@@ -124,17 +125,29 @@ export class MemoryManager extends EventEmitter {
       }
     }
 
+    // Hard cap before populating cache
+    const capped = entries.slice(0, 100);
+
     // Populate synchronous cache
     const cacheKey = scope === MemoryScope.Team ? 'team:team'
       : scope === MemoryScope.Session ? `session:${sessionId || 'unknown'}` : `${scope}:${agentId}`;
     const existing = this._recentCache.get(cacheKey) || [];
     const merged = new Map<string, MemoryEntry>();
-    for (const e of [...existing, ...entries]) merged.set(e.name, e);
+    for (const e of [...existing, ...capped]) merged.set(e.name, e);
     const maxEntries = scope === MemoryScope.Session ? 20 : 50;
     this._recentCache.set(cacheKey, [...merged.values()].slice(0, maxEntries));
+    this._cacheTimestamps.set(cacheKey, Date.now());
     while (this._recentCache.size > MemoryManager._MAX_CACHE_ENTRIES) {
-      const oldest = this._recentCache.keys().next().value as string;
-      if (oldest) this._recentCache.delete(oldest);
+      // LRU eviction: remove the entry with the oldest timestamp
+      let oldestKey = '';
+      let oldestTime = Infinity;
+      for (const [k, t] of this._cacheTimestamps) {
+        if (t < oldestTime) { oldestTime = t; oldestKey = k; }
+      }
+      if (oldestKey) {
+        this._recentCache.delete(oldestKey);
+        this._cacheTimestamps.delete(oldestKey);
+      }
     }
     // Emit event for StatsCollector to track memory retrieval
     try {
@@ -142,11 +155,11 @@ export class MemoryManager extends EventEmitter {
         agentId,
         scope: String(scope),
         query,
-        memoryNames: entries.map(e => e.name),
+        memoryNames: capped.map(e => e.name),
       });
     } catch { /* non-critical */ }
 
-    return entries.slice(0, 100);
+    return capped;
   }
 
   /** Try MemoryDatabase v2. Returns [] if not available, letting caller fall back to filesystem. */
@@ -164,14 +177,19 @@ export class MemoryManager extends EventEmitter {
       const scopeId = scope === MemoryScope.Session ? (sessionId || targetId) : targetId;
 
       const docs = await db.getAllDocuments({ scope: scopeStr, scopeId });
-      const entries = docs.map(d => ({
-        name: d.id,
-        type: mapType(d.memoryType),
-        description: d.content.slice(0, 100),
-        content: d.content,
-        scope,
-        updatedAt: new Date(d.updatedAt).getTime(),
-      }));
+      const entries = docs.map(d => {
+        // d.id is composite (e.g. "agent:myAgent:memory-name") — extract the short name
+        const idParts = d.id.split(':');
+        const shortName = idParts.length >= 3 ? idParts.slice(2).join(':') : d.id;
+        return {
+          name: shortName,
+          type: mapType(d.memoryType),
+          description: d.content.slice(0, 100),
+          content: d.content,
+          scope,
+          updatedAt: new Date(d.updatedAt).getTime(),
+        };
+      });
 
       if (query) {
         const { scoreEntries } = await import('./MemorySearchScorer.js');
@@ -255,35 +273,20 @@ export class MemoryManager extends EventEmitter {
     const savedEntry: MemoryEntry = { ...entry, scope };
     if (sessionId) savedEntry.sessionId = sessionId;
 
-    let handledByPlugin = false;
-    if (this._extPoints) {
-      const pluginOverride = this._extPoints.get('memoryStore');
-      if (pluginOverride) {
-        try {
-          await pluginOverride({ action: 'save', entry: savedEntry, scope, agentId, sessionId, manager: this });
-          handledByPlugin = true;
-        } catch (err) {
-          throw err;
-        }
-      }
+    let targetId: string;
+    if (scope === MemoryScope.Team) { targetId = 'team'; }
+    else if (scope === MemoryScope.Session) { targetId = sessionId || path.basename(agentId); }
+    else { targetId = path.basename(agentId); }
+
+    // Primary: write to SQLite database
+    try {
+      await this._saveToDatabaseSync(savedEntry, targetId);
+    } catch (err) {
+      log.warn('MemoryDatabase save failed, falling back to filesystem', { error: (err as Error).message });
     }
 
-    if (!handledByPlugin) {
-      let targetId: string;
-      if (scope === MemoryScope.Team) { targetId = 'team'; }
-      else if (scope === MemoryScope.Session) { targetId = sessionId || path.basename(agentId); }
-      else { targetId = path.basename(agentId); }
-
-      // Primary: write to SQLite database
-      try {
-        await this._saveToDatabaseSync(savedEntry, targetId);
-      } catch (err) {
-        log.warn('MemoryDatabase save failed, falling back to filesystem', { error: (err as Error).message });
-      }
-
-      // Backup: write to filesystem (fire-and-forget, don't error if it fails)
-      saveMemory(savedEntry, targetId, sessionId).catch(() => { /* non-critical */ });
-    }
+    // Backup: write to filesystem (fire-and-forget, don't error if it fails)
+    saveMemory(savedEntry, targetId, sessionId).catch(() => { /* non-critical */ });
 
     // Invalidate the prompt cache for this agent (Memory section)
     try {
@@ -295,6 +298,7 @@ export class MemoryManager extends EventEmitter {
     }
 
     this.emit('memorySaved', agentId, scope, savedEntry.name);
+    TypedEventBus.emit('memory:changed', { action: 'updated', name: savedEntry.name, scope });
   }
 
   /**
@@ -387,6 +391,7 @@ export class MemoryManager extends EventEmitter {
       }
 
       this.emit('memoryRemoved', agentId, scope, name);
+      TypedEventBus.emit('memory:changed', { action: 'deleted', name, scope });
     }
 
     return deleted;
@@ -472,11 +477,7 @@ export class MemoryManager extends EventEmitter {
           const fact = match[1].trim().slice(0, 200);
           if (fact.length < 5) continue;
 
-          // Check for duplicates against existing memories
-          const existingLower = existing.map((e) =>
-            (e.content + e.description).toLowerCase(),
-          );
-
+          // Check for duplicates against existing memories (computed once above)
           const factLower = fact.toLowerCase();
           const tooSimilar = existingLower.some((e) => {
             const factWords = new Set(factLower.split(/\s+/));

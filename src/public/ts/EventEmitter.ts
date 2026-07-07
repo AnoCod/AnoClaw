@@ -44,7 +44,8 @@ export class EventEmitter {
     }
     this._emitDepth.set(event, depth);
     try {
-      for (const handler of set) {
+      // Copy before iterating — handlers that call off() mid-emit won't skip others
+      for (const handler of [...set]) {
         try {
           handler(...args);
         } catch (e) {

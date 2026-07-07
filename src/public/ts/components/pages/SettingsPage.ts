@@ -8,7 +8,10 @@ import type { Page, AppSettings } from '../../types.js';
 import { ConfirmDialog } from '../ConfirmDialog.js';
 import { ClientLogger } from '../../ClientLogger.js';
 import { ToastManager } from '../../ToastManager.js';
+import { slotRegistry } from '../../SlotRegistry.js';
 import { Toggle } from '../ui/Toggle.js';
+
+const SVG_REVIEW = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18h8"/><path d="M3 22h18"/><path d="M14 22a7 7 0 0 0-7-7"/><path d="M10 14 21 3"/><path d="m21 3-4 12-7-5z"/></svg>`;
 
 export class SettingsPage implements Page {
   name = 'settings';
@@ -204,7 +207,7 @@ export class SettingsPage implements Page {
           <div id="evo-tags"><div class="evo-empty">Loading...</div></div>
 
           <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
-            <button type="button" id="btn-evolve" class="cinema-btn">🔬 Review Evolution</button>
+            <button type="button" id="btn-evolve" class="cinema-btn cinema-btn-with-icon">${SVG_REVIEW}<span>Review Evolution</span></button>
             <span id="evolve-status" style="font-size:11px;color:var(--color-cinema-text-tertiary);">Deep analysis — runs pattern + score + memory audit</span>
           </div>
           <div id="evolve-results" style="display:none;font-size:11px;color:var(--color-cinema-text-secondary);line-height:1.6;"></div>
@@ -220,6 +223,7 @@ export class SettingsPage implements Page {
     const bottomSlot = document.createElement('div');
     bottomSlot.setAttribute('data-slot', 'settings-bottom');
     form.appendChild(bottomSlot);
+    slotRegistry._onSlotReady('settings-bottom');
 
     // Create Toggle components for showThinkCards and showToolCards
     const thinkToggle = new Toggle({ checked: s.showThinkCards });

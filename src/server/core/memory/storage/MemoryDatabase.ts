@@ -6,6 +6,7 @@
 
 import * as path from 'node:path';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { writeFileSync } from 'node:fs';
 import { createLogger } from '../../logger.js';
 import type {
   MemoryDocument,
@@ -15,7 +16,7 @@ import type {
 } from '../../../../shared/types/memory.js';
 
 // ---------------------------------------------------------------------------
-// Standalone interfaces for sql.js (the npm package ships no .d.ts)
+// sql.js runtime types — mirrored in sql.js.d.ts for external consumers
 // ---------------------------------------------------------------------------
 
 interface SqlJsStatic {
@@ -61,7 +62,7 @@ const DEFAULT_DB_PATH = path.resolve(process.cwd(), 'data', 'memory.db');
 const DEFAULT_CONFIG: MemoryStoreConfig = {
   dbPath: DEFAULT_DB_PATH,
   embeddingDim: 384,
-  bm25K1: 1.5,
+  bm25K1: 1.2,
   bm25B: 0.75,
   maxDocuments: 10000,
   autoSaveIntervalMs: 5000,
@@ -305,8 +306,11 @@ export class MemoryDatabase {
 
   async updateDocument(id: string, updates: Partial<MemoryDocument>): Promise<void> {
     await this._init();
-    const existing = await this.getDocument(id);
-    if (!existing) return;
+    // Use direct SELECT to avoid accidental access_count increment from getDocument()
+    const result = this._db!.exec('SELECT * FROM documents WHERE id = ?', [id]);
+    if (!result.length || !result[0].values.length) return;
+
+    const existing = this._rowToDocument(result[0].columns, result[0].values[0]);
 
     // Read current importance from DB (not in MemoryDocument type)
     const impResult = this._db!.exec('SELECT importance FROM documents WHERE id = ?', [id]);
@@ -553,9 +557,7 @@ export class MemoryDatabase {
     if (this._db) {
       try {
         const data = Buffer.from(this._db.export());
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const fsSync = require('node:fs') as any;
-        fsSync.writeFileSync(this._dbPath, data);
+        writeFileSync(this._dbPath, data);
       } catch {
         // Best-effort
       }

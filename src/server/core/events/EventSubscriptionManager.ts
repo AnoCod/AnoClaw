@@ -254,12 +254,10 @@ export class EventSubscriptionManager {
         log.warn('Failed to deliver event to subscriber', {
           topic, sid: sub.sessionId, subId: sub.id, error: (err as Error).message,
         });
-        continue;
-      }
-
-      // OneShot cleanup only on successful delivery
-      if (sub.oneShot) {
-        this._unsubscribeById(sub.id);
+      } finally {
+        if (sub.oneShot) {
+          this._unsubscribeById(sub.id);
+        }
       }
     }
 

@@ -24,7 +24,15 @@ export const MIME: Record<string, string> = {
 export function serveStatic(res: http.ServerResponse, urlPath: string, publicDir: string): void {
   const safePath = urlPath === '/' || urlPath === '' ? 'index.html'
     : path.normalize(urlPath).replace(/^(\.\.(\/|\\|$))+/, '').replace(/^[\/\\]+/, '');
-  const filePath = path.join(publicDir, safePath);
+  const resolvedDir = path.resolve(publicDir);
+  const filePath = path.resolve(resolvedDir, safePath);
+
+  // Prevent path traversal: resolved file must stay within publicDir
+  if (!filePath.startsWith(resolvedDir + path.sep) && filePath !== resolvedDir) {
+    res.writeHead(403, { 'Content-Type': 'text/plain' });
+    res.end('Forbidden');
+    return;
+  }
 
   const ext = path.extname(filePath).toLowerCase();
   const contentType = MIME[ext] || 'application/octet-stream';

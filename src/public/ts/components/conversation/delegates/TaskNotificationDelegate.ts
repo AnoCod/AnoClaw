@@ -1,5 +1,7 @@
-// AnoClaw Cinema — TaskNotificationDelegate: background task completion/failure card
-// Displays as a colored notification card in the chat flow.
+/**
+ * TaskNotificationDelegate — background task completion/failure card.
+ * Displays as a colored notification card in the chat flow.
+ */
 
 export interface TaskNotificationData {
   subSessionId: string;
@@ -22,6 +24,26 @@ export class TaskNotificationDelegate {
         ? `Completed: ${data.summary}`
         : `Failed: ${data.summary}`;
       w.electronAPI.showNotification(title, data.result.slice(0, 200)).catch(() => {});
+    }
+  }
+
+  /** Update in-place: refresh border colour, header text, and body content. */
+  update(data: TaskNotificationData): void {
+    const status = data.status;
+    this.element.setAttribute('data-status', status);
+    const borderColor = status === 'completed'
+      ? 'var(--color-success, #4ade80)'
+      : 'var(--color-error, #f87171)';
+    this.element.style.borderLeftColor = borderColor;
+
+    const header = this.element.firstElementChild as HTMLElement | null;
+    if (header) {
+      const agentName = data.subAgentId || 'sub-agent';
+      header.textContent = `${status === 'completed' ? 'Task completed' : 'Task failed'}: ${agentName} — ${data.summary}`;
+    }
+    if (data.result) {
+      const body = this.element.children[1] as HTMLElement | null;
+      if (body) body.textContent = data.result.slice(0, 500);
     }
   }
 

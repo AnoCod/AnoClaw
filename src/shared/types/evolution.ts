@@ -72,6 +72,7 @@ export interface ToolStats {
   avgTokens: number;
   p50Tokens: number;
   p95Tokens: number;
+  avgDurationMs: number;
   lastUsedAt: string;
 }
 

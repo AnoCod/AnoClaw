@@ -1,4 +1,4 @@
-// MeetingTable.ts — Interactive oval meeting table visualization
+// MeetingTable.ts - Interactive oval meeting table visualization
 // Displays participants as avatar seats positioned around an elliptical table.
 // Dynamically resizes based on participant count. Shows speaking indicators,
 // turn rings, observer positioning, join/leave animations.
@@ -211,13 +211,13 @@ export class MeetingTable {
       // Role icon overlay
       if (p.role === 'moderator') {
         const roleIcon = document.createElement('span');
-        roleIcon.style.cssText = 'position:absolute;top:-4px;right:-4px;font-size:12px;pointer-events:none;';
-        roleIcon.textContent = '👑';
+        roleIcon.style.cssText = 'position:absolute;top:-4px;right:-4px;font-size:9px;pointer-events:none;background:var(--c-accent);color:#fff;border-radius:3px;padding:1px 3px;';
+        roleIcon.textContent = 'M';
         seat.appendChild(roleIcon);
       } else if (p.role === 'observer' || (this.data.participantRoles && this.data.participantRoles[p.id] === 'observer')) {
         const roleIcon = document.createElement('span');
-        roleIcon.style.cssText = 'position:absolute;top:-4px;right:-4px;font-size:10px;pointer-events:none;';
-        roleIcon.textContent = '👁';
+        roleIcon.style.cssText = 'position:absolute;top:-4px;right:-4px;font-size:9px;pointer-events:none;background:var(--c-surface-elevated);color:var(--c-text-tertiary);border-radius:3px;padding:1px 3px;';
+        roleIcon.textContent = 'O';
         seat.appendChild(roleIcon);
       }
 

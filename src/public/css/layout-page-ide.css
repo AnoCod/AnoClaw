@@ -52,6 +52,12 @@
 .ws-browser-action { font-size:11px; width:auto; padding:0 7px; min-width:26px; }
 .ws-browser-url { flex:1; padding:4px 8px; border:1px solid var(--color-hairline,#242728); border-radius:6px; background:var(--color-bg,#07080a); color:var(--color-text,#f4f4f6); font-size:12px; font-family:inherit; outline:none; min-width:120px; }
 .ws-browser-url:focus { border-color:var(--color-accent,#fff); }
+.ws-browser-agent-trace { display:none; align-items:center; gap:6px; min-height:28px; max-height:56px; padding:4px 8px; border-bottom:1px solid var(--color-hairline,#242728); background:var(--color-surface,#0d0d0d); color:var(--color-text-secondary,#9c9c9d); font-size:11px; overflow-x:auto; overflow-y:hidden; flex-shrink:0; }
+.ws-browser-agent-trace-label { font-size:10px; letter-spacing:0; color:var(--color-text-tertiary,#6a6b6c); flex-shrink:0; }
+.ws-browser-agent-trace-chip { max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex-shrink:0; padding:3px 7px; border:1px solid var(--color-hairline,#242728); border-radius:4px; background:var(--color-bg,#07080a); color:var(--color-text-secondary,#9c9c9d); }
+.ws-browser-agent-trace-chip.start { color:#ffc533; border-color:rgba(255,197,51,0.35); background:rgba(255,197,51,0.08); }
+.ws-browser-agent-trace-chip.done { color:#4ade80; border-color:rgba(74,222,128,0.3); background:rgba(74,222,128,0.08); }
+.ws-browser-agent-trace-chip.error { color:#f87171; border-color:rgba(248,113,113,0.35); background:rgba(248,113,113,0.08); }
 .ws-browser-placeholder { flex:1; min-height:0; background:var(--color-bg,#07080a); }
 
 /* Loading progress bar animation */

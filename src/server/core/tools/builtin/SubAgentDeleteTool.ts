@@ -1,4 +1,4 @@
-// SubAgentDeleteTool — destroy a temporary SubAgent
+// SubAgentDeleteTool - destroy a temporary SubAgent
 // Only works on SubAgents (role === SubAgent). Does NOT destroy Managers/Members.
 // Unregisters the agent from AgentRegistry.
 
@@ -22,9 +22,9 @@ export class SubAgentDeleteTool extends Tool {
 
   prompt(): string {
     return '## SubAgentDelete Usage\n' +
-      'Clean up a SubAgent spawned with SubAgentSpawn. Only works on SubAgent role — you cannot delete Managers or Members.\n\n' +
+      'Clean up a SubAgent spawned with SubAgentSpawn. Only works on SubAgent role - you cannot delete Managers or Members.\n\n' +
       '**When to use:** After receiving a SubAgent result and you no longer need it. To cancel a misbehaving temporary agent.\n\n' +
-      '**Delegation cleanup:** SubAgentSpawn (create) → use the result → SubAgentDelete (clean up). Permanent team members (TaskAssign targets) should NOT be deleted this way.';
+      '**Delegation cleanup:** SubAgentSpawn (create) -> use the result -> SubAgentDelete (clean up). Permanent team members (TaskAssign targets) should NOT be deleted this way.';
   }
 
   parametersSchema(): Record<string, unknown> {

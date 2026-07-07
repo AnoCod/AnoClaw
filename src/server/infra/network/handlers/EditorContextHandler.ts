@@ -1,14 +1,30 @@
-// EditorContextHandler — handles 'editor_context' WS messages
-// Stores editor state (open files, cursor, selection) into session metadata
-// so EditorContextSection can inject it into the system prompt.
-
+/**
+ * EditorContextHandler — handles 'editor_context' WS messages.
+ *
+ * Input:  `{ type: 'editor_context', openFiles?, activeFile?, cursorLine?, cursorColumn?,
+ *           selectedText?, selectedStartLine?, selectedEndLine?, sessionId }`
+ * Output: Stores editor state on session metadata for EditorContextSection to inject
+ *         into the system prompt. Returns error if no session exists.
+ */
 import type { WsMessageHandler } from '../WsMessageRouter.js';
 import { SessionManager } from '../../../core/session/SessionManager.js';
+import { LogManager } from '../../logging/LogManager.js';
+import { WsMessageType } from '../../../../shared/types/ws-protocol.js';
+
+const log = LogManager.getInstance().logger('anochat.ws');
 
 export const editorContextHandler: WsMessageHandler = (ctx) => {
   const msg = ctx.data;
   const session = SessionManager.getInstance().session(ctx.sessionId);
-  if (!session) return;
+  if (!session) {
+    log.warn('Editor context update for non-existent session', { sid: ctx.sessionId });
+    ctx.ws.send(ctx.sessionId, {
+      type: WsMessageType.Error,
+      errorMessage: 'No active session for editor context update',
+      code: 'NO_SESSION',
+    });
+    return;
+  }
 
   const ec: Record<string, unknown> = {};
   if (msg.openFiles) ec.openFiles = msg.openFiles;

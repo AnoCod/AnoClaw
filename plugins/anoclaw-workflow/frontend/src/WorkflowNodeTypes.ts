@@ -1,4 +1,4 @@
-// WorkflowNodeTypes.ts — Node type definitions, constants, ID counters
+// WorkflowNodeTypes.ts - Node type definitions, constants, ID counters
 // 14 node types: agent_task, loop, end, wait, http_request, code_transform, condition, set_variable, delay, webhook, database_query, file_read, sub_workflow, approval
 
 export type WorkflowStatus = 'idle' | 'running' | 'completed' | 'error'

@@ -1,11 +1,11 @@
-// AgentLoop — ReAct loop, the core execution engine
-// Replicates patterns from anochat/agent.js runAgent() — the reference Claude Code implementation.
+﻿// AgentLoop 鈥?ReAct loop, the core execution engine
+// Replicates patterns from anochat/agent.js runAgent() 鈥?the reference Claude Code implementation.
 //
 // KEY PATTERNS FROM REFERENCE:
 // 1. Generator-based loop: yield SSE events, consumer iterates
 // 2. SSE event types: 'think', 'text', 'tool_call', 'tool_result', 'done', 'sleep', 'wake'
-// 3. Retry: 429/503/529 → exponential backoff (1s,2s,4s,8s, max 60s), max 10 retries
-// 4. Context overflow detection: >70% of context window → trigger compaction
+// 3. Retry: 429/503/529 鈫?exponential backoff (1s,2s,4s,8s, max 60s), max 10 retries
+// 4. Context overflow detection: >70% of context window 鈫?trigger compaction
 // 5. Tool result compression before injecting into conversation
 // 6. Interrupt behavior: check AbortSignal before each LLM call
 // 7. StallDetector: 5 consecutive no-tool turns, 3 consecutive same-tool failures, >50 tools/turn
@@ -36,18 +36,25 @@ import { StallDetector } from './StallDetector.js';
 import type { StallResult } from './StallDetector.js';
 import {
   messageToApiMessage,
+  selectHistoryForContext,
+  truncateMessagesPreservingTask,
+  truncateMessagesToTail,
 } from './AgentLoopHelpers.js';
 import type { ApiMessage } from './AgentLoopHelpers.js';
 import { extensionPoints } from '../plugin-host/ExtensionPoints.js';
-import { compactAndRebuildMessages, shouldCompact } from '../context/index.js';
-import { ContextCompressor } from '../context/ContextCompressor.js';
+import { compactAndRebuildMessages } from '../context/index.js';
 import { callLLMWithRetry } from './AgentLoopLLM.js';
-import { createLLMProvider } from '../../infra/llm/provider-factory.js';
 import { AgentChannel } from './AgentChannel.js';
 import { TypedEventBus } from '../events/TypedEventBus.js';
 import { BackgroundTaskManager } from './supervision/BackgroundTaskManager.js';
+import { SharedContextStore } from './SharedContextStore.js';
+import { createAgentLoopSummarizer } from './AgentLoopSummarizer.js';
+import { normalizePermissionMode, type PermissionMode } from './PermissionModePolicy.js';
+import { ConfirmationRegistry } from './ConfirmationRegistry.js';
+import { WsServer } from '../../infra/network/WsServer.js';
+import { RiskLevel } from '../../../shared/types/tool.js';
 
-// ── AgentLoopConfig ──
+// 鈹€鈹€ AgentLoopConfig 鈹€鈹€
 
 export interface AgentLoopConfig {
   maxTurns: number;
@@ -55,12 +62,14 @@ export interface AgentLoopConfig {
   contextWindow: number;
   agentId: string;
   sessionId: string;
+  permissionMode?: string;
+  effort?: string;
 }
 
-// ── AgentLoop ──
+// 鈹€鈹€ AgentLoop 鈹€鈹€
 
 /**
- * AgentLoop — ReAct loop execution engine
+ * AgentLoop 鈥?ReAct loop execution engine
  *
  * Each AgentLoop instance is bound to a single (agentId, sessionId) pair.
  * run() returns an AsyncGenerator that yields SSE events one by one:
@@ -69,7 +78,7 @@ export interface AgentLoopConfig {
  * Core flow:
  *   1. Assemble system prompt + history messages + user message
  *   2. Load the agent's allowed tool list
- *   3. ReAct loop: LLM call → tool execution → append results → next turn
+ *   3. ReAct loop: LLM call 鈫?tool execution 鈫?append results 鈫?next turn
  *   4. Built-in: retry (exponential backoff), context compression, stall detection, memory extraction
  */
 
@@ -79,6 +88,8 @@ export class AgentLoop {
   readonly maxTurns: number;
   readonly temperature: number;
   readonly contextWindow: number;
+  readonly permissionMode?: string;
+  readonly effort?: string;
 
   private stallDetector: StallDetector;
   private toolCallHistory: Array<{ name: string; result: string; ts: number }> = [];
@@ -89,6 +100,8 @@ export class AgentLoop {
     this.maxTurns = config.maxTurns ?? MAX_TURNS_DEFAULT;
     this.temperature = config.temperature;
     this.contextWindow = config.contextWindow;
+    this.permissionMode = config.permissionMode;
+    this.effort = config.effort;
     this.stallDetector = new StallDetector();
   }
 
@@ -97,9 +110,9 @@ export class AgentLoop {
     history: Message[],
     _signal?: AbortSignal,
   ): AsyncGenerator<SSEEvent> {
-    // Mutable copy — soft interrupts create fresh AbortControllers mid-loop
+    // Mutable copy 鈥?soft interrupts create fresh AbortControllers mid-loop
     let signal = _signal;
-    // ExtensionPoints: agentLoop override — plugin replaces the entire ReAct loop
+    // ExtensionPoints: agentLoop override 鈥?plugin replaces the entire ReAct loop
     const agentLoopOverride = extensionPoints.get('agentLoop');
     if (agentLoopOverride) {
       try {
@@ -132,39 +145,26 @@ export class AgentLoop {
       maxTurns: this.maxTurns,
     });
 
-    // Wire L4 LLM summarizer for context compression (set once per provider)
-    ContextCompressor.getInstance().setSummarizer(async (msgs, budget) => {
-      const provider = createLLMProvider(agent.provider, extensionPoints);
-      const sysPrompt = ContextCompressor.getInstance().structuredSummaryPrompt;
-      const transcript = msgs.slice(-60).map(m => {
-        const prefix = m.role === 'user' ? 'USER' : m.role === 'assistant' ? 'ASSISTANT' : 'SYSTEM';
-        return `[${prefix}] ${(m.content || '').slice(0, 500)}`;
-      }).join('\n\n');
-
-      const stream = provider.chat(
-        [{ role: 'user', content: transcript.slice(0, 50000) }],
-        [],
-        sysPrompt,
-        {
-          model: agent.modelName,
-          maxTokens: Math.min(budget, 4096),
-          temperature: 0.3,
-          contextWindow: agent.contextWindow,
-          apiUrl: agent.apiUrl || '',
-          apiKey: agent.apiKey || '',
-        },
-      );
-
-      let summary = '';
-      for await (const event of stream) {
-        if (event.type === 'text_delta') {
-          summary += event.content || '';
-        }
-      }
-      return summary;
+    let summarizer = createAgentLoopSummarizer({
+      provider: agent.provider,
+      modelName: agent.modelName,
+      contextWindow: agent.contextWindow,
+      apiUrl: agent.apiUrl,
+      apiKey: agent.apiKey,
     });
 
-    const systemPrompt = PromptAssembler.getInstance().buildEffectivePrompt(this.agentId, this.sessionId);
+    const promptAssembler = PromptAssembler.getInstance();
+    const promptBuildContext = () => ({
+      permissionMode: this.permissionMode,
+      effort: this.effort,
+      hideUserInteractionTools: this._isAutoMode(),
+    });
+    let systemPrompt = promptAssembler.buildEffectivePrompt(
+      this.agentId,
+      this.sessionId,
+      undefined,
+      promptBuildContext(),
+    );
 
     const messages: ApiMessage[] = [
       { role: 'system', content: systemPrompt },
@@ -172,8 +172,26 @@ export class AgentLoop {
 
     createLogger('anochat.agent').debug('AgentLoop system prompt built', { sid: this.sessionId, promptLen: systemPrompt.length });
 
-    // Load conversation history (last 200 messages)
-    for (const h of history.slice(-200)) {
+    const toolRegistry = ToolRegistry.getInstance();
+    let allowedNames = agent.allowedTools();
+    let agentTools = toolRegistry.toolsForAgent(allowedNames, {
+      hideUserInteractionTools: this._isAutoMode(),
+    });
+    // In auto mode, hide tools that require user interaction 閳?user chose
+    // to be hands-off; the agent should work autonomously without asking.
+    const tools = agentTools.map((t) => t.toAnthropicTool());
+    createLogger('anochat.agent').debug('AgentLoop tools loaded', { sid: this.sessionId, toolCount: tools.length, toolNames: agentTools.map(t => t.name()), autoMode: this._isAutoMode() });
+
+    const selectedHistory = selectHistoryForContext(history, {
+      contextWindow: this.contextWindow,
+      reservedTokens: TokenCounter.estimate(systemPrompt)
+        + TokenCounter.estimate(JSON.stringify(tools))
+        + TokenCounter.estimate(userMessage.content || ''),
+      excludeMessageIds: [userMessage.id],
+    });
+
+    // Load conversation history using the active context window instead of a fixed message count.
+    for (const h of selectedHistory) {
       if (h.compressed) {
         messages.push({ role: h.role as ApiMessage['role'], content: h.content || '' });
         continue;
@@ -194,23 +212,18 @@ export class AgentLoop {
 
     messages.push({ role: 'user', content: userMessage.content });
 
-    createLogger('anochat.agent').debug('AgentLoop messages built', { sid: this.sessionId, messageCount: messages.length });
-
-    const toolRegistry = ToolRegistry.getInstance();
-    let allowedNames = agent.allowedTools();
-    let agentTools = toolRegistry.toolsForAgent(allowedNames);
-    // In auto mode, hide tools that require user interaction — user chose
-    // to be hands-off; the agent should work autonomously without asking.
-    if (this._isAutoMode()) {
-      agentTools = agentTools.filter(t => !t.requiresUserInteraction());
-    }
-    const tools = agentTools.map((t) => t.toAnthropicTool());
-    createLogger('anochat.agent').debug('AgentLoop tools loaded', { sid: this.sessionId, toolCount: tools.length, toolNames: agentTools.map(t => t.name()), autoMode: this._isAutoMode() });
+    createLogger('anochat.agent').debug('AgentLoop messages built', {
+      sid: this.sessionId,
+      messageCount: messages.length,
+      historyLen: history.length,
+      selectedHistoryLen: selectedHistory.length,
+      contextWindow: this.contextWindow,
+    });
 
     const sessionManager = SessionManager.getInstance();
     let lastKnownMsgCount = sessionManager.getMessageCount(this.sessionId);
 
-    // ── AgentChannel subscription: real-time agent-to-agent messages ──
+    // 鈹€鈹€ AgentChannel subscription: real-time agent-to-agent messages 鈹€鈹€
     // Messages arrive via TypedEventBus (no polling delay). Checked every turn.
     const channelMsgs: Array<{ role: 'system' | 'user'; content: string }> = [];
     const unsubChannel = AgentChannel.getInstance().subscribe(
@@ -219,6 +232,12 @@ export class AgentLoop {
         channelMsgs.push({ role: msg.role, content: msg.content });
       },
     );
+
+    // 鈹€鈹€ SharedContextStore polling: bidirectional parent鈫攃hild state sharing 鈹€鈹€
+    // Checked every inter-turn. Agents read context written by teammates in real-time.
+    const sharedStore = SharedContextStore.getInstance();
+    const teamScope = agent?.teamName || this.sessionId;
+    let lastSharedContextCheck = Date.now();
 
     let turn = 0;
     let compactCheckCounter = 0;
@@ -237,8 +256,8 @@ export class AgentLoop {
 
     try {
     while (turn < maxTurns) {
-      // Re-read agent from registry every turn — config may have been updated
-      // via Agents page while the loop is running (infinite mode).
+      // Re-read agent from registry every turn 鈥?config may have been updated
+      // via Agents page while the loop is running (for example, during goal mode).
       const currentAgent = registry.agent(this.agentId);
       if (!currentAgent || !currentAgent.isActive) {
         yield { type: SSEEventType.Error, errorMessage: 'Agent destroyed or removed' };
@@ -258,15 +277,21 @@ export class AgentLoop {
         });
         allowedNames.length = 0;
         allowedNames.push(...newAllowedNames);
-        agentTools = toolRegistry.toolsForAgent(allowedNames);
-        if (this._isAutoMode()) {
-          agentTools = agentTools.filter(t => !t.requiresUserInteraction());
-        }
+        agentTools = toolRegistry.toolsForAgent(allowedNames, {
+          hideUserInteractionTools: this._isAutoMode(),
+        });
         tools.length = 0;
         tools.push(...agentTools.map((t) => t.toAnthropicTool()));
+        summarizer = createAgentLoopSummarizer({
+          provider: currentAgent.provider,
+          modelName: currentAgent.modelName,
+          contextWindow: currentAgent.contextWindow,
+          apiUrl: currentAgent.apiUrl,
+          apiKey: currentAgent.apiKey,
+        });
       }
 
-      /** Interrupt check — soft interrupt (user message queued) continues the loop */
+      /** Interrupt check 鈥?soft interrupt (user message queued) continues the loop */
       if (signal?.aborted) {
         const ic = InterruptController.getInstance();
         const pending = ic.takePendingUserMessage(this.sessionId);
@@ -276,7 +301,7 @@ export class AgentLoop {
           // Create a fresh controller for this continuation turn
           signal = ic.createController(this.sessionId).signal;
           this.stallDetector.reset();
-          // Sync message count — pending message was also appended to session store
+          // Sync message count 鈥?pending message was also appended to session store
           lastKnownMsgCount = sessionManager.getMessageCount(this.sessionId);
           continue;
         }
@@ -294,10 +319,21 @@ export class AgentLoop {
       }
 
       turn++;
+      compactCheckCounter++;
+
+      systemPrompt = promptAssembler.buildEffectivePrompt(
+        this.agentId,
+        this.sessionId,
+        undefined,
+        promptBuildContext(),
+      );
+      if (messages[0]?.role === 'system') {
+        messages[0].content = systemPrompt;
+      }
 
       createLogger('anochat.agent').debug('AgentLoop turn start', { sid: this.sessionId, turn, messageCount: messages.length });
 
-      /** Context compaction check — runs every 8 turns or when token growth > 50% since last compaction */
+      /** Context compaction check 鈥?runs every 8 turns or when token growth > 50% since last compaction */
       if (compactCheckCounter > 7) {
         compactCheckCounter = 0;
         // Quick token estimate on conversation messages (skip expensive tool def re-count)
@@ -307,22 +343,26 @@ export class AgentLoop {
         const shouldCheck = lastCompactionTokenCount === 0
           || convEstimate > lastCompactionTokenCount * 1.5;
 
-        if (!shouldCheck) continue; // not enough growth to warrant a check
-
-        if (consecutiveCompactFailures >= MAX_CONSECUTIVE_COMPACT_FAILURES) {
-          createLogger('anochat.agent').debug('Compaction circuit breaker open — skipping', { sid: this.sessionId, consecutiveCompactFailures });
+        if (!shouldCheck) {
+          createLogger('anochat.agent').debug('Compaction check skipped: token growth below threshold', {
+            sid: this.sessionId,
+            convEstimate,
+            lastCompactionTokenCount,
+          });
+        } else if (consecutiveCompactFailures >= MAX_CONSECUTIVE_COMPACT_FAILURES) {
+          createLogger('anochat.agent').debug('Compaction circuit breaker open 鈥?skipping', { sid: this.sessionId, consecutiveCompactFailures });
         } else {
           const breakdown = TokenCounter.breakdown(
             systemPrompt, tools, '', messages.filter(m => m.role !== 'system') as unknown as Message[],
             this.contextWindow,
           );
           const estimatedTokens = breakdown.total;
-          const threshold = Math.floor(this.contextWindow * COMPRESSION_TRIGGER_RATIO);
+          const threshold = Math.floor(this.contextWindow * this._compressionTriggerRatio());
 
           if (estimatedTokens > threshold) {
             createLogger('anochat.agent').info('Context compaction triggered', { sid: this.sessionId, estimatedTokens, threshold, turn });
             yield { type: SSEEventType.StatusInfo, content: 'Compacting context...' };
-            const compaction = await compactAndRebuildMessages(messages, this.contextWindow, this.sessionId, 15);
+            const compaction = await compactAndRebuildMessages(messages, this.contextWindow, this.sessionId, 15, summarizer);
             if (compaction.wasCompacted) {
               consecutiveCompactFailures = 0;
               lastCompactionTokenCount = TokenCounter.estimateMessages(
@@ -338,7 +378,7 @@ export class AgentLoop {
         }
       }
 
-      /** Inter-turn message injection — AgentChannel (real-time) + polling (fallback) */
+      /** Inter-turn message injection 鈥?AgentChannel (real-time) + SharedContext (polling) + session messages (polling) */
       // 1. Drain AgentChannel queue first (sub-millisecond delivery, no JSONL read)
       while (channelMsgs.length > 0) {
         const chMsg = channelMsgs.shift()!;
@@ -349,7 +389,29 @@ export class AgentLoop {
         };
       }
 
-      // 2. Fallback: polling-based detection for externally-appended session messages
+      // 2. Poll SharedContextStore for team-wide bidirectional state sharing
+      {
+        const newEntries = sharedStore.getSince(teamScope, lastSharedContextCheck);
+        if (newEntries.length > 0) {
+          const contextText = newEntries
+            .filter(e => e.writtenBy !== this.agentId) // don't read own writes
+            .map(e => `[${e.writtenBy}] ${e.key}: ${String(e.value).slice(0, 300)}`)
+            .join('\n');
+          if (contextText) {
+            messages.push({
+              role: 'system',
+              content: `[Shared context updates from team]:\n${contextText}`,
+            } as unknown as ApiMessage);
+            createLogger('anochat.agent').debug('Injected shared context into loop', {
+              sid: this.sessionId,
+              entryCount: newEntries.length,
+            });
+          }
+        }
+        lastSharedContextCheck = Date.now();
+      }
+
+      // 3. Fallback: polling-based detection for externally-appended session messages
       const currentMsgCount = sessionManager.getMessageCount(this.sessionId);
       if (currentMsgCount > lastKnownMsgCount) {
         try {
@@ -388,7 +450,7 @@ export class AgentLoop {
         lastKnownMsgCount = currentMsgCount;
       }
 
-      /** API call with retry — delegated to AgentLoopLLM */
+      /** API call with retry 鈥?delegated to AgentLoopLLM */
       let assistantMessage: ApiMessage | null = null;
       let hadThinkContent = false;
       {
@@ -405,6 +467,7 @@ export class AgentLoop {
             contextWindow: this.contextWindow,
             turn,
             postWait,
+            summarizer,
           },
           messages,
           systemPrompt,
@@ -425,7 +488,7 @@ export class AgentLoop {
         assistantMessage = llmResult.assistantMessage;
         hadThinkContent = llmResult.hadThinkContent;
 
-        // Retries exhausted — final compression attempt
+        // Retries exhausted 鈥?final compression attempt
         if (!assistantMessage) {
           consecutiveFatalErrors++;
           if (consecutiveFatalErrors >= MAX_CONSECUTIVE_FATAL) {
@@ -436,18 +499,15 @@ export class AgentLoop {
             break;
           }
           yield { type: SSEEventType.Think, content: '(API error after retries, compressing and retrying once more...)' };
-          const compaction = await compactAndRebuildMessages(messages, this.contextWindow, this.sessionId, 8);
+          const compaction = await compactAndRebuildMessages(messages, this.contextWindow, this.sessionId, 8, summarizer);
           if (!compaction.wasCompacted) {
-            const sysMsg = messages[0];
-            const tail = messages.slice(-8);
-            messages.length = 0;
-            messages.push(sysMsg, ...tail);
+            truncateMessagesToTail(messages, 8);
           }
           continue;
         }
       }
 
-      // LLM call succeeded — reset fatal error counter
+      // LLM call succeeded 鈥?reset fatal error counter
       consecutiveFatalErrors = 0;
 
       // If signal was aborted during the API call, check for soft interrupt
@@ -500,7 +560,7 @@ export class AgentLoop {
             });
           }
         } catch {
-          // Non-critical — keyword extraction is best-effort
+          // Non-critical 鈥?keyword extraction is best-effort
         }
       }
 
@@ -508,7 +568,7 @@ export class AgentLoop {
       skillNudgeTurn++;
       if (skillNudgeTurn >= 20 && turn >= 10) {
         skillNudgeTurn = 0;
-        yield { type: SSEEventType.Think, content: '(Skill nudge — not yet integrated)' };
+        yield { type: SSEEventType.Think, content: '(Skill nudge 鈥?not yet integrated)' };
       }
 
       /** Tool execution gate */
@@ -516,7 +576,7 @@ export class AgentLoop {
         const textContent = assistantMessage.content || '';
         const hasNoContent = textContent.trim().length === 0;
 
-        // P0: LLM returned empty content — trigger stall detection + context reduction
+        // P0: LLM returned empty content 鈥?trigger stall detection + context reduction
         if (hasNoContent) {
           consecutiveEmptyResponses++;
           this.stallDetector.recordEmptyResponse();
@@ -538,15 +598,12 @@ export class AgentLoop {
               continue;
             } else if (stallCheck.action === 'compact') {
               yield { type: SSEEventType.StatusInfo, content: '(Compacting context to reorient...)' };
-              const compaction = await compactAndRebuildMessages(messages, this.contextWindow, this.sessionId, 15);
+              const compaction = await compactAndRebuildMessages(messages, this.contextWindow, this.sessionId, 15, summarizer);
               if (compaction.wasCompacted) {
                 this.stallDetector.reset();
                 consecutiveEmptyResponses = 0;
               } else {
-                const sysMsg = messages[0];
-                const tail = messages.slice(-15);
-                messages.length = 0;
-                messages.push(sysMsg, ...tail);
+                truncateMessagesToTail(messages, 15);
               }
               continue;
             } else if (stallCheck.action === 'yield') {
@@ -558,22 +615,23 @@ export class AgentLoop {
             }
           }
 
-          // Not at stall threshold yet — reduce context and retry
+          // Not at stall threshold yet 鈥?reduce context and retry
           yield {
             type: SSEEventType.Think,
             content: `(LLM returned empty response (${consecutiveEmptyResponses}/${MAX_CONSECUTIVE_EMPTY}), reducing context and retrying...)`,
           };
 
-          const sysMsg = messages[0];
-          const tail = messages.slice(-4);
-          messages.length = 0;
-          messages.push(sysMsg, ...tail);
+          messages.push({
+            role: 'system',
+            content: '[Recovery: The previous model response was empty. Continue the current user task from the preserved request and recent tool results. Do not restart, greet the user, or ask what to do next.]',
+          } as unknown as ApiMessage);
+          truncateMessagesPreservingTask(messages, 12);
           continue;
         }
 
         createLogger('anochat.agent').debug('AgentLoop: no tool calls, finishing', { sid: this.sessionId, turn, textLen: assistantMessage.content?.length || 0 });
         if (hadThinkContent && !assistantMessage.content && turn < this.maxTurns - 1) {
-          yield { type: SSEEventType.Think, content: '(Reasoning complete — requesting final answer)' };
+          yield { type: SSEEventType.Think, content: '(Reasoning complete 鈥?requesting final answer)' };
           messages.push({
             role: 'user',
             content: 'Please provide your final answer based on your reasoning above. Do not repeat the reasoning.',
@@ -582,7 +640,7 @@ export class AgentLoop {
           continue;
         }
 
-        // ── Wait for background tasks (event-driven) ──
+        // 鈹€鈹€ Wait for background tasks (event-driven) 鈹€鈹€
         // If this agent dispatched background work (Bash run_in_background, TaskAssign,
         // SubAgentSpawn), don't exit the loop. Subscribe to BackgroundTaskManager
         // taskCompletedInSession events for instant wakeup instead of polling.
@@ -624,7 +682,7 @@ export class AgentLoop {
                   taskWaitInterrupted = true;
                   break;
                 }
-                // Hard abort — exit wait
+                // Hard abort 鈥?exit wait
                 break;
               }
 
@@ -663,7 +721,7 @@ export class AgentLoop {
       createLogger('anochat.agent').debug('AgentLoop executing tools', { sid: this.sessionId, turn, toolCount: toolCalls.length, toolNames: toolCalls.map(tc => tc.function.name) });
 
       agent.setSessionStatus(this.sessionId, AgentStatus.WaitingTool);
-      // Tell frontend what's happening — avoids dead silence during tool execution
+      // Tell frontend what's happening 鈥?avoids dead silence during tool execution
       yield {
         type: SSEEventType.StatusInfo,
         content: toolCalls.length === 1
@@ -694,12 +752,21 @@ export class AgentLoop {
 
         const tool = agentTools.find((t) => t.name() === toolName);
 
-        const isAutoMode = this._isAutoMode();
-        if (!isAutoMode && tool?.requiresConfirmation({ sessionId: this.sessionId, agentId: this.agentId, workspace: sessionWorkspace, userConfirmed: false })) {
-          yield {
-            type: SSEEventType.Think,
-            content: `(Tool '${toolName}' requires user confirmation. Waiting for approval...)`,
-          };
+        // 鈹€鈹€ Tool confirmation check 鈹€鈹€
+        let userRejected = false;
+        if (tool && this._needsConfirmation(tool, this._permissionMode())) {
+          WsServer.getInstance().send(this.sessionId, {
+            type: 'tool_confirm_request',
+            toolCallId: tc.id,
+            toolName: tool.name(),
+            displayName: tool.displayName?.() ?? tool.name(),
+            riskLevel: tool.riskLevel(),
+            params: args,
+          });
+          const approved = await ConfirmationRegistry.getInstance().waitForConfirmation(tc.id, 60000, signal);
+          if (!approved) {
+            userRejected = true;
+          }
         }
 
         if (tool && !tool.shouldDefer()) {
@@ -711,17 +778,22 @@ export class AgentLoop {
 
         const t0 = Date.now();
         let result: { success: boolean; content: string; errorMessage?: string; structured?: unknown };
+        if (userRejected) {
+          result = { success: false, content: '', errorMessage: `User rejected tool "${toolName}".` };
+        } else {
         try {
           result = await toolRegistry.execute(toolName, args, {
             sessionId: this.sessionId,
             agentId: this.agentId,
             workspace: sessionWorkspace,
-            userConfirmed: isAutoMode,
+            userConfirmed: true,
+            mode: this._toolExecutionMode(),
             callerRole: agent.role,
             signal: signal,
           });
         } catch (err) {
           result = { success: false, content: '', errorMessage: `Tool crash: ${(err as Error).message}` };
+        }
         }
         createLogger('anochat.agent').debug('Tool executed', { sid: this.sessionId, toolName, success: result.success, durationMs: Date.now() - t0, turn });
 
@@ -739,6 +811,15 @@ export class AgentLoop {
           structured: result.structured,
         };
 
+        // Emit plan_enter / plan_exit so frontend shows plan mode UI
+        if (result.success && (toolName === 'EnterPlanMode' || toolName === 'ExitPlanMode')) {
+          const planEventType = toolName === 'EnterPlanMode' ? 'plan_enter' : 'plan_exit';
+          yield { type: planEventType as SSEEventType };
+          if (toolName === 'EnterPlanMode') {
+            yield { type: SSEEventType.Think, content: '(Plan mode active 鈥?only read-only tools are available. Use ExitPlanMode to return to normal execution.)' };
+          }
+        }
+
         // Pipeline already handles output normalization + truncation
         const toolResultContent = result.success
           ? (result.content || '')
@@ -751,7 +832,7 @@ export class AgentLoop {
         completedToolIds.add(tc.id);
       }
       } finally {
-        // Always backfill missing tool_result messages — signal abort or
+        // Always backfill missing tool_result messages 鈥?signal abort or
         // exceptions during tool execution can leave orphan tool_use blocks
         // that crash DeepSeek API on the next call.
         for (const tc of toolCalls) {
@@ -783,14 +864,16 @@ export class AgentLoop {
       };
 
       if (allDeferred && toolCalls.length > 0) {
+        // Deferred tools don't count as a full turn 鈥?the LLM hasn't seen results yet,
+        // so don't consume turn budget until the deferred execution completes.
         turn--;
       }
 
       // If any tool requires user interaction (e.g. AskUserQuestion), pause the loop
-      // until the user responds — don't keep calling the LLM while waiting.
+      // until the user responds 鈥?don't keep calling the LLM while waiting.
       if (anyUserInteraction) {
         const WAIT_POLL_MS = 500;
-        const WAIT_TIMEOUT_MS = 5 * 60_000; // 5 min — same as delegation timeout
+        const WAIT_TIMEOUT_MS = 5 * 60_000; // 5 min 鈥?same as delegation timeout
         const waitStartedAt = Date.now();
         yield { type: SSEEventType.StatusInfo, content: '(Waiting for user response...)' };
 
@@ -808,7 +891,7 @@ export class AgentLoop {
             }
           }
 
-          // Polling fallback — user message appended outside interrupt path
+          // Polling fallback 鈥?user message appended outside interrupt path
           const currentCount = sessionManager.getMessageCount(this.sessionId);
           if (currentCount > lastKnownMsgCount) {
             const fullHistory = await sessionManager.getHistory(this.sessionId);
@@ -828,7 +911,7 @@ export class AgentLoop {
           }
 
           if (Date.now() - waitStartedAt > WAIT_TIMEOUT_MS) {
-            yield { type: SSEEventType.StatusInfo, content: '(User response timeout — continuing)' };
+            yield { type: SSEEventType.StatusInfo, content: '(User response timeout 鈥?continuing)' };
             break;
           }
 
@@ -847,7 +930,7 @@ export class AgentLoop {
         this.toolCallHistory = this.toolCallHistory.slice(-40);
       }
 
-      /** Stall detection — escalate through hint → compact → yield */
+      /** Stall detection 鈥?escalate through hint 鈫?compact 鈫?yield */
       this.stallDetector.record(toolNames, toolResults);
       const stallCheck = this.stallDetector.check();
       if (stallCheck.stalled) {
@@ -865,14 +948,11 @@ export class AgentLoop {
           } as unknown as ApiMessage);
         } else if (stallCheck.action === 'compact') {
           yield { type: SSEEventType.StatusInfo, content: '(Compacting context to reorient...)' };
-          const compaction = await compactAndRebuildMessages(messages, this.contextWindow, this.sessionId, 15);
+          const compaction = await compactAndRebuildMessages(messages, this.contextWindow, this.sessionId, 15, summarizer);
           if (compaction.wasCompacted) {
             this.stallDetector.reset();
           } else {
-            const sysMsg = messages[0];
-            const tail = messages.slice(-15);
-            messages.length = 0;
-            messages.push(sysMsg, ...tail);
+            truncateMessagesToTail(messages, 15);
           }
         } else if (stallCheck.action === 'yield') {
           yield {
@@ -884,7 +964,7 @@ export class AgentLoop {
         continue;
       }
 
-      compactCheckCounter++;
+      // compactCheckCounter is incremented at the top of the while loop
     } // end while
 
     } finally {
@@ -910,10 +990,56 @@ export class AgentLoop {
 
   private _isAutoMode(): boolean {
     try {
-      const mode = SettingsManager.getInstance().get<string>('ui.permissionMode', 'Auto');
+      const mode = this._permissionMode();
       return mode === 'Auto' || mode === 'AutoEdit';
     } catch {
       return true;
     }
   }
+
+  private _permissionMode(): PermissionMode {
+    try {
+      return normalizePermissionMode(
+        this.permissionMode || SettingsManager.getInstance().get<string>('ui.permissionMode', 'Auto'),
+      );
+    } catch {
+      return 'Auto';
+    }
+  }
+
+  private _toolExecutionMode(): string {
+    const mode = this._permissionMode();
+    if (mode === 'Plan') return 'read_only';
+    if (mode === 'Ask') return 'ask';
+    if (mode === 'AutoEdit') return 'auto_edit';
+    return 'auto';
+  }
+
+  private _needsConfirmation(tool: { isReadOnly(): boolean; riskLevel(): string }, mode: PermissionMode): boolean {
+    if (tool.isReadOnly()) return false;
+    const risk = tool.riskLevel();
+    if (risk === RiskLevel.Safe) return false;
+    switch (mode) {
+      case 'Ask':
+        return risk === RiskLevel.Low || risk === RiskLevel.Medium || risk === RiskLevel.High || risk === RiskLevel.Critical;
+      case 'Auto':
+        return risk === RiskLevel.High || risk === RiskLevel.Critical;
+      case 'AutoEdit':
+      case 'Plan':
+        return false;
+      default:
+        return risk === RiskLevel.High || risk === RiskLevel.Critical;
+    }
+  }
+
+  private _compressionTriggerRatio(): number {
+    try {
+      const pct = SettingsManager.getInstance().get<number>('ui.compactionThreshold', COMPRESSION_TRIGGER_RATIO * 100);
+      if (!Number.isFinite(pct)) return COMPRESSION_TRIGGER_RATIO;
+      return Math.min(0.9, Math.max(0.3, pct / 100));
+    } catch {
+      return COMPRESSION_TRIGGER_RATIO;
+    }
+  }
 }
+

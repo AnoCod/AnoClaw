@@ -1,4 +1,4 @@
-// TaskOutputTool — get the output/result from a delegated task
+// TaskOutputTool - get the output/result from a delegated task
 // Returns the result if the task has completed, or the current status if still running.
 
 import { Tool, RiskLevel } from '../Tool.js';
@@ -10,23 +10,23 @@ import { BackgroundTaskManager } from '../../agent/supervision/BackgroundTaskMan
 export class TaskOutputTool extends Tool {
 
   static category = 'Task Delegation';
-  static toolDescription = 'Retrieves output from a running or completed background task.';
+  static toolDescription = 'Retrieves the output or status of a delegated or background task.';
   name(): string {
     return 'TaskOutput';
   }
 
   description(): string {
-    return 'Get the result from a delegated task by taskId. Returns the full result if completed, or current status and partial output if still running.';
+    return 'Retrieve output for a delegated task by taskId. Use after a task notification or when TaskList indicates completion, failure, or unclear status.';
   }
 
   prompt(): string {
-    return '## TaskOutput Usage\n' +
-      'Retrieve the output of a delegated task. Use after receiving a `<task-notification>` or when TaskList shows a task as completed.\n\n' +
-      '**Parameters:**\n' +
-      '- `taskId`: The sub-session ID (shown in TaskList and `<task-notification>`).\n' +
-      '- `block`: Set to true to wait for completion (max 30s default timeout).\n' +
-      '- `timeout`: Override the wait timeout in ms.\n\n' +
-      'If the task is still running, returns current status. If completed, returns the full result. If failed, returns error details.';
+    return [
+      '## TaskOutput Usage',
+      'Use TaskOutput to inspect a specific task result, especially after a <task-notification>.',
+      '',
+      'Use it when you need the child output to integrate, review, retry, or report the final result.',
+      'If the task is still running, use the returned status to decide whether to wait, amend with AgentMessage, or stop it.',
+    ].join('\n');
   }
 
   parametersSchema(): Record<string, unknown> {
@@ -44,6 +44,10 @@ export class TaskOutputTool extends Tool {
 
   riskLevel(): RiskLevel {
     return RiskLevel.Safe;
+  }
+
+  isReadOnly(): boolean {
+    return true;
   }
 
   async execute(
@@ -78,7 +82,7 @@ export class TaskOutputTool extends Tool {
       );
     }
 
-    // If archived, task completed — return the full history
+    // If archived, task completed - return the full history
     if (session.isArchived()) {
       const history = await sessionManager.getHistory(taskId);
       if (history.length === 0) {
@@ -103,7 +107,7 @@ export class TaskOutputTool extends Tool {
       );
     }
 
-    // Still active — return current status
+    // Still active - return current status
     const history = await sessionManager.getHistory(taskId);
     const lastMessage = history[history.length - 1];
 

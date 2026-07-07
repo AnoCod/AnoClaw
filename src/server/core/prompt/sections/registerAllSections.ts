@@ -4,6 +4,7 @@
 
 import type { PromptAssembler } from '../PromptAssembler.js';
 import { createSystemRulesSection, sectionMeta as rulesMeta } from './SystemRulesSection.js';
+import { createAnoclawMdSection, sectionMeta as anoclawMdMeta } from './AnoclawMdSection.js';
 import { createDocsSection, sectionMeta as docsMeta } from './DocsSection.js';
 import { createPluginDevSection, sectionMeta as pluginDevMeta } from './PluginDevSection.js';
 import { createTaskExecutionSection, sectionMeta as taskMeta } from './TaskExecutionSection.js';
@@ -32,6 +33,7 @@ interface SectionEntry {
 
 const SECTIONS: SectionEntry[] = [
   { meta: rulesMeta, factory: createSystemRulesSection },
+  { meta: anoclawMdMeta, factory: createAnoclawMdSection },
   { meta: docsMeta, factory: createDocsSection },
   { meta: pluginDevMeta, factory: createPluginDevSection },
   { meta: taskMeta, factory: createTaskExecutionSection },

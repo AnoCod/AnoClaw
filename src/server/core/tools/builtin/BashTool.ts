@@ -1,4 +1,4 @@
-// BashTool — executes shell commands
+// BashTool - executes shell commands
 // RiskLevel: High/Critical (depends on command).
 // InterruptBehavior: Block for destructive commands, Cancel otherwise.
 // Based on Claude Code's BashTool pattern.
@@ -19,11 +19,16 @@ const DEFAULT_TIMEOUT_MS = 30000;
 /** Maximum output size before truncation. */
 const MAX_OUTPUT_CHARS = 10000;
 
+/** Maximum TTL for background processes before forced cleanup (30 minutes). */
+const BG_TTL_MS = 30 * 60 * 1000;
+
 /** Registry of background child processes, keyed by sessionId:timestamp */
 const backgroundProcesses = new Map<string, {
   child: ReturnType<typeof exec>;
   startedAt: number;
   command: string;
+  sessionId: string;
+  watchdog: ReturnType<typeof setTimeout>;
 }>();
 
 /** Destructive command patterns that require user confirmation. */
@@ -90,7 +95,7 @@ export class BashTool extends Tool {
       '- Communication: output text directly (NOT echo/printf)\n' +
       '- If a command will create new files/directories, verify the parent directory exists first\n' +
       '- Multi-command chaining: use && (sequential, stop on failure) or ; (sequential, ignore failure)\n' +
-      '- Never use sleep between commands that can run immediately — just run them\n' +
+      '- Never use sleep between commands that can run immediately - just run them\n' +
       '- For long-running commands, use run_in_background instead of blocking with sleep';
   }
 
@@ -109,10 +114,6 @@ export class BashTool extends Tool {
         timeout: {
           type: 'number',
           description: `Optional timeout in milliseconds (max ${DEFAULT_TIMEOUT_MS * 20}). Default: ${DEFAULT_TIMEOUT_MS}.`,
-        },
-        dangerouslyDisableSandbox: {
-          type: 'boolean',
-          description: 'Set this to true to dangerously override sandbox mode and run commands without sandboxing.',
         },
         run_in_background: {
           type: 'boolean',
@@ -161,7 +162,7 @@ export class BashTool extends Tool {
   ): Promise<ToolResult> {
     const command = params.command as string;
     const description = params.description as string | undefined;
-    const timeout = (params.timeout as number) || DEFAULT_TIMEOUT_MS;
+    const timeout = (params.timeout as number) ?? DEFAULT_TIMEOUT_MS;
     const runInBackground = (params.run_in_background as boolean) ?? false;
 
     if (!command || typeof command !== 'string') {
@@ -207,10 +208,16 @@ export class BashTool extends Tool {
         if (bgTask) bgTask.pid = child.pid;
 
         const bgKey = `${ctx.sessionId}:${startTime}`;
-        backgroundProcesses.set(bgKey, { child, startedAt: startTime, command });
+        const watchdog = setTimeout(() => {
+          killBgProcess(bgKey);
+        }, BG_TTL_MS);
+
+        backgroundProcesses.set(bgKey, {
+          child, startedAt: startTime, command, sessionId: ctx.sessionId, watchdog,
+        });
 
         child.on('exit', (code) => {
-          backgroundProcesses.delete(bgKey);
+          clearBgProcess(bgKey);
           const durationMs = Date.now() - startTime;
           if (code === 0) {
             bgManager.complete(bgTaskId, { content: `Background process exited with code 0.`, durationMs }).catch(err => {
@@ -227,7 +234,7 @@ export class BashTool extends Tool {
 
         // Handle process errors
         child.on('error', (err: Error) => {
-          backgroundProcesses.delete(bgKey);
+          clearBgProcess(bgKey);
           const durationMs = Date.now() - startTime;
           bgManager.fail(bgTaskId, err.message, durationMs).catch(err2 => {
             const log = createLogger('anochat.tool');
@@ -274,7 +281,7 @@ export class BashTool extends Tool {
             },
           );
 
-          // Listen for interrupt abort — kill the child process when user interjects
+          // Listen for interrupt abort - kill the child process when user interjects
           if (ctx.signal) {
             const onAbort = () => {
               if (child.exitCode === null && !child.killed) {
@@ -288,7 +295,7 @@ export class BashTool extends Tool {
               }
             };
             if (ctx.signal.aborted) {
-              onAbort(); // Already aborted — kill immediately
+              onAbort(); // Already aborted - kill immediately
             } else {
               ctx.signal.addEventListener('abort', onAbort, { once: true });
             }
@@ -309,10 +316,6 @@ export class BashTool extends Tool {
       if (!output) output = '(no output)';
 
       const wasTruncated = output.length > MAX_OUTPUT_CHARS;
-      if (wasTruncated) {
-        output = output.slice(0, MAX_OUTPUT_CHARS) +
-          `\n... [truncated, ${output.length} chars total]`;
-      }
 
       return this.makeResult(output, { startedAt, wasTruncated });
     } catch (err: unknown) {
@@ -359,24 +362,45 @@ export class BashTool extends Tool {
 
   /** Kill a background process by its registry key. Returns true if found and killed. */
   static killBackgroundProcess(key: string): boolean {
-    const entry = backgroundProcesses.get(key);
-    if (!entry) return false;
-    try {
-      entry.child.kill('SIGTERM');
-      backgroundProcesses.delete(key);
-      return true;
-    } catch {
-      return false;
+    return killBgProcess(key);
+  }
+
+  /** Clean up all background processes for a given session. */
+  static cleanupSession(sessionId: string): void {
+    for (const [key, entry] of backgroundProcesses) {
+      if (entry.sessionId === sessionId) {
+        killBgProcess(key);
+      }
     }
+  }
+}
+
+/** Kill a single background process and clear its watchdog. Returns true if found. */
+function killBgProcess(key: string): boolean {
+  const entry = backgroundProcesses.get(key);
+  if (!entry) return false;
+  try {
+    entry.child.kill('SIGTERM');
+  } catch { /* ignore */ }
+  clearBgProcess(key);
+  return true;
+}
+
+/** Remove from registry and clear watchdog timer. */
+function clearBgProcess(key: string): void {
+  const entry = backgroundProcesses.get(key);
+  if (entry) {
+    clearTimeout(entry.watchdog);
+    backgroundProcesses.delete(key);
   }
 }
 
 /** Extract the base command name from a shell command string. */
 function extractBaseCommand(command: string): string {
   const trimmed = command.trim();
-  // Handle chained commands (e.g. "cd /tmp && ls") — extract first command
+  // Handle chained commands (e.g. "cd /tmp && ls") - extract first command
   const first = trimmed.split(/\s*(?:\|\||&&|;|\|)\s*/)[0].trim();
-  // Handle shell builtins, env vars, etc. — take the first word that looks like a command
+  // Handle shell builtins, env vars, etc. - take the first word that looks like a command
   const words = first.split(/\s+/);
   // Skip leading variable assignments (e.g. VAR=val cmd)
   let idx = 0;
@@ -384,7 +408,7 @@ function extractBaseCommand(command: string): string {
     idx++;
   }
   if (idx < words.length) {
-    // Strip path prefix (e.g. /usr/bin/git → git)
+    // Strip path prefix (e.g. /usr/bin/git -> git)
     const cmd = words[idx];
     const slashIdx = cmd.lastIndexOf('/');
     return slashIdx >= 0 ? cmd.slice(slashIdx + 1) : cmd;

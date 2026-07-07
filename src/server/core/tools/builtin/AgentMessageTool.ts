@@ -1,4 +1,4 @@
-// AgentMessageTool — send a message to another agent along the org tree
+// AgentMessageTool - send a message to another agent along the org tree
 // Posts a message to the target agent's session via SessionManager.
 // Communication follows the org tree: up to managers, down to subordinates.
 // Now with delivery status feedback: reports whether target is actively processing,
@@ -15,41 +15,40 @@ import { createLogger } from '../../logger.js';
 import { TypedEventBus } from '../../events/TypedEventBus.js';
 import { AgentChannel } from '../../agent/AgentChannel.js';
 import { InterruptController } from '../../agent/supervision/InterruptController.js';
+import { BackgroundTaskManager } from '../../agent/supervision/BackgroundTaskManager.js';
 import { bubbleEventToParent } from '../../agent/AgentDelegation.js';
 import { SessionStore } from '../../session/SessionStore.js';
+import { WsServer } from '../../../infra/network/WsServer.js';
 
 export class AgentMessageTool extends Tool {
 
   static category = 'Task Delegation';
-  static toolDescription = 'Sends a message to another agent along the organization tree with delivery status feedback.';
+  static toolDescription = 'Sends a coordination update to a direct parent or child agent without creating a new task.';
   name(): string {
     return 'AgentMessage';
   }
 
   description(): string {
-    return 'Send a message to another agent along the organization tree. DOWNWARD ONLY — messages can be sent to agents who report to you, never upward to your own superior. The recipient sees your agent ID and can reply.';
+    return 'Send a coordination message to a directly related agent in the org tree. Use it to clarify, amend, interrupt, or review existing work; it does not create a tracked task.';
   }
 
   prompt(): string {
-    return '## AgentMessage Usage\n' +
-      'Send a real-time message to a subordinate. DOWNWARD ONLY. Never message your superior — report results through your session output instead.\n\n' +
-      '**AgentMessage vs TaskAssign:**\n' +
-      '- TaskAssign = formal task delegation with clear specs, creates a tracked task\n' +
-      '- AgentMessage = quick coordination message, no new task created\n\n' +
-      '**When to use AgentMessage:**\n' +
-      '- Adding requirements or clarifications to an already-running task (do NOT create a second TaskAssign)\n' +
-      '- Asking for a quick status update\n' +
-      '- Giving feedback on delivered work\n' +
-      '- Coordinating between parallel tasks\n\n' +
-      '**IMPORTANT — One-way only:**\n' +
-      'Your message is delivered to the target agent\'s SESSION. You will NOT see their response in your own session.\n' +
-      'AgentMessage is NOT a real-time chat — the recipient processes it independently and reports via their session output or TaskList.\n' +
-      'If you need a reply, ask them to report via session output or use TaskOutput.\n\n' +
-      '**When NOT to use:**\n' +
-      '- Formal task delegation (use TaskAssign)\n' +
-      '- Reporting to your boss (use your session output)\n' +
-      '- Trivial messages that don\'t add value\n' +
-      '- Expecting an immediate response in your session';
+    return [
+      '## AgentMessage Usage',
+      'Use AgentMessage for coordination inside an existing parent-child relationship.',
+      '',
+      'AgentMessage vs TaskAssign:',
+      '- TaskAssign starts a distinct tracked task with acceptance criteria.',
+      '- AgentMessage updates, clarifies, interrupts, or reviews active work without creating a new task.',
+      '',
+      'Use AgentMessage for:',
+      '- New constraints or requirements for a running task.',
+      '- Feedback after reviewing child output.',
+      '- A focused status request when a task appears stuck.',
+      '- Cancellation guidance before using TaskStop.',
+      '',
+      'Do not expect a synchronous chat reply. The recipient processes the message in its own session and reports through that session or task output.',
+    ].join('\n');
   }
   
   parametersSchema(): Record<string, unknown> {
@@ -114,19 +113,39 @@ export class AgentMessageTool extends Tool {
     }
 
     // ── Find or create target session ──
-    const allSessions = sessionManager.listSessions();
-    let targetSession = allSessions.find(
-      (s) => s.agentId === targetAgentId && !s.isArchived(),
-    );
+    const currentSession = sessionManager.session(ctx.sessionId);
+    if (!currentSession) {
+      return this.makeError(`Cannot send message: current session '${ctx.sessionId}' was not found.`);
+    }
+
+    let targetSession;
+    if (isDirectSubordinate) {
+      targetSession = sessionManager.subsessionsOf(ctx.sessionId).find(
+        (s) => s.agentId === target.id && !s.isArchived(),
+      );
+    } else {
+      const parentSessionId = currentSession.parentSessionId;
+      if (!parentSessionId) {
+        return this.makeError(`Cannot send message to '${targetAgentId}': current session has no parent session.`);
+      }
+
+      targetSession = sessionManager.session(parentSessionId);
+      if (!targetSession || targetSession.isArchived() || targetSession.agentId !== target.id) {
+        return this.makeError(
+          `Cannot send message to '${targetAgentId}': parent session '${parentSessionId}' does not belong to that agent.`,
+        );
+      }
+      InterruptController.getInstance().linkChild(targetSession.id, ctx.sessionId);
+    }
 
     if (!targetSession) {
-      const parentSessionId = isDirectSubordinate
-        ? ctx.sessionId
-        : (allSessions.find((s) => s.agentId === targetAgentId && s.isMain() && !s.isArchived())?.id ?? ctx.sessionId);
+      if (!isDirectSubordinate) {
+        return this.makeError(`Cannot send message to '${targetAgentId}': target session was not found in this session tree.`);
+      }
 
       try {
-        targetSession = await sessionManager.createSubSession(parentSessionId, targetAgentId);
-        // Link for interrupt propagation — stop propagates from caller to target
+        targetSession = await sessionManager.createSubSession(ctx.sessionId, target.id);
+        // Link for interrupt propagation - stop propagates from caller to target
         InterruptController.getInstance().linkChild(ctx.sessionId, targetSession.id);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -163,7 +182,7 @@ export class AgentMessageTool extends Tool {
         `[${caller.name} says]: ${content}`,
         'system',
       );
-    } catch { /* best-effort — session injection already succeeded */ }
+    } catch { /* best-effort - session injection already succeeded */ }
 
     // ── Notify target's browser session via TypedEventBus ──
     try {
@@ -173,32 +192,42 @@ export class AgentMessageTool extends Tool {
         agentId: targetAgentId,
         title: `Msg: ${content.slice(0, 40)}`,
       });
-    } catch { /* non-critical — UI notification is best-effort */ }
+    } catch { /* non-critical - UI notification is best-effort */ }
 
     // ── Determine delivery status ──
     const targetActive = runtime.isSessionActive(targetSession.id);
 
     if (targetActive) {
-      // Target is already in an AgentLoop — message will be seen on next turn
+      // Target is already in an AgentLoop - message will be seen on next turn
       return this.makeResult(
         `Message delivered to '${targetAgentId}' (session: ${targetSession.id}). ` +
-        `Agent is currently active — the message will be seen on their next turn.`,
+        `Agent is currently active - the message will be seen on their next turn.`,
       );
     }
 
-    // Target is idle — start a background AgentLoop that persists events.
+    // Target is idle - start a background AgentLoop that persists events.
     // Uses StreamPersister for JSONL durability + bubbleEventToParent for
     // the parent session's delegation activity card.
+    // Registered with BackgroundTaskManager so UI panel can track it.
     logger.debug('AgentMessage starting background processing', { from: ctx.agentId, to: targetAgentId, sid: targetSession.id });
     const parentSessionId = ctx.sessionId;
+    const bgManager = BackgroundTaskManager.getInstance();
+    const bgTaskId = bgManager.register({
+      type: 'subagent',
+      parentSessionId: ctx.sessionId,
+      parentAgentId: ctx.agentId,
+      summary: `Msg to ${targetAgentId}: ${content.slice(0, 60)}`,
+    });
+    const bgStartMs = Date.now();
     (async () => {
       const { StreamPersister } = await import('../../../infra/StreamPersister.js');
       const store = SessionStore.getInstance();
-      const persister = new StreamPersister(store, targetSession.id,
+      const persister = new StreamPersister(store, targetSession!.id,
         `msg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-        '00000000-0000-0000-0000-000000000000');
+        '00000000-0000-0000-0000-000000000000',
+        targetAgentId);
       try {
-        for await (const event of runtime.processMessage(targetSession.id, targetAgentId, message)) {
+        for await (const event of runtime.processMessage(targetSession!.id, targetAgentId, message)) {
           // ── Persist to JSONL ──
           if (event.type === 'text') {
             await persister.persistEvent('text', { content: event.content || '' });
@@ -218,20 +247,23 @@ export class AgentMessageTool extends Tool {
             });
           }
           // ── Bubble to parent for live delegation card ──
-          bubbleEventToParent(null as any, parentSessionId, targetSession.id, targetAgentId, event);
+          bubbleEventToParent(null as any, parentSessionId, targetSession!.id, targetAgentId, event);
+          WsServer.getInstance().send(targetSession!.id, event as unknown as Record<string, unknown>);
         }
         await persister.flushDeltas();
-        SessionManager.getInstance().rebuildMessageCache(targetSession.id).catch(() => {});
-        logger.debug('AgentMessage processed by recipient', { from: ctx.agentId, to: targetAgentId, sid: targetSession.id });
+        SessionManager.getInstance().rebuildMessageCache(targetSession!.id).catch(() => {});
+        bgManager.complete(bgTaskId, { content: 'Message processed', durationMs: Date.now() - bgStartMs }).catch(() => {});
+        logger.debug('AgentMessage processed by recipient', { from: ctx.agentId, to: targetAgentId, sid: targetSession!.id });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         logger.warn('AgentMessage background processing error', { from: ctx.agentId, to: targetAgentId, error: msg });
+        bgManager.fail(bgTaskId, msg, Date.now() - bgStartMs).catch(() => {});
       }
     })();
 
     return this.makeResult(
       `Message delivered to '${targetAgentId}' (session: ${targetSession.id}). ` +
-      `Agent was idle — processing started in background.`,
+      `Agent was idle - processing started in background.`,
     );
   }
 }

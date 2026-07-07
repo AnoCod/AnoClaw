@@ -3,7 +3,6 @@ import { SystemPromptSection, PromptContext } from '../PromptSection.js';
 import * as os from 'os';
 import * as fs from 'fs';
 import { SessionManager } from '../../session/index.js';
-import { TokenCounter } from '../../context/TokenCounter.js';
 
 /** Detect which shell the Bash tool actually runs on Windows */
 function detectShell(): string {
@@ -42,7 +41,7 @@ export function createEnvironmentSection(): SystemPromptSection {
         '   ├── plugins/     — Plugin source code. Editable. One subdirectory per plugin.',
         '   │                   Each plugin has plugin.json + extension.js (or .ts).',
         '   ├── skills/      — 26 built-in skill definitions (SKILL.md files). Read-only.',
-        '   ├── docs/        — Documentation: plugin-api.md, plugin-dev.md, design-md/ (74 brand DESIGN.md).',
+        '   ├── docs/        — Agent-readable knowledge base: README.md, manifest.json, plugin/API guides, architecture, UI, troubleshooting, design-md/.',
         '   ├── data/        — Runtime data.',
         '   │   ├── agents/  — Agent config files (JSON). Read/Write to modify agent settings.',
         '   │   └── sessions/— Session transcripts (JSONL shards). Append-only, do NOT edit.',

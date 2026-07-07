@@ -1,4 +1,4 @@
-// ExitPlanModeTool — signals the agent to exit plan mode
+// ExitPlanModeTool - signals the agent to exit plan mode
 // Returns to normal execution mode, allowing destructive tools.
 // shouldDefer: true (does not consume a model turn).
 // RiskLevel: Safe.
@@ -67,10 +67,14 @@ export class ExitPlanModeTool extends Tool {
     params: Record<string, unknown>,
     ctx: ExecutionContext,
   ): Promise<ToolResult> {
-    ToolPipeline.exitPlanMode();
+    ToolPipeline.exitPlanMode(ctx.sessionId);
     const allowedPrompts = params.allowedPrompts as
       | Array<{ tool: string; prompt: string }>
       | undefined;
+
+    if (allowedPrompts && allowedPrompts.length > 0) {
+      ToolPipeline.setAllowedPrompts(ctx.sessionId, allowedPrompts);
+    }
 
     let result = 'Exiting plan mode. Returning to normal execution mode.' +
       '\nDestructive tools (Write, Edit, Bash) are now allowed.' +

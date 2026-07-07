@@ -1,4 +1,4 @@
-// HireEmployeeTool — create a new Agent in the organization
+// HireEmployeeTool - create a new Agent in the organization
 // Only CEO and Managers can hire. Creates an Agent, registers with
 // AgentRegistry, and persists config to disk.
 
@@ -11,52 +11,43 @@ import { AgentRole, AgentState } from '../../../../shared/types/agent.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { createLogger } from '../../logger.js';
+import { writablePath } from '../../../infra/WritablePath.js';
 
 export class HireEmployeeTool extends Tool {
 
   static category = 'Organization Management';
-  static toolDescription = 'Creates a new employee agent with specified role and configuration.';
+  static toolDescription = 'Creates a durable Manager or Member agent in the organization.';
 
   name(): string {
     return 'HireEmployee';
   }
 
   description(): string {
-    return 'Create a new Agent (employee) in the organization. Only CEO and Managers can hire. '
-      + 'Model, API URL, API key, provider, and context window are ALL inherited from you (the hiring agent) '
-      + '— you do NOT need to specify them. The new agent gets your exact LLM connection config.';
+    return 'Create a durable employee agent. Use this only when the organization needs persistent specialist or manager capacity. LLM connection settings are inherited from the hiring agent unless explicitly overridden.';
   }
 
   prompt(): string {
-    return '## HireEmployee — Creating Team Members\n'
-      + '### Inheritance (automatic — you do NOT set these)\n'
-      + 'Model, API URL, API key, provider, and context window are all inherited from you. '
-      + 'The new agent connects to the same LLM backend with the same credentials.\n\n'
-      + '### Naming Guidelines\n'
-      + '- Use professional role-based names: "Frontend Engineer", "Security Auditor", "DevOps Lead"\n'
-      + '- NOT generic names: "agent1", "helper", "worker"\n'
-      + '- Name should reflect the agent\'s specialty and rank: "Senior Data Analyst", "QA Tester"\n\n'
-      + '### Agent Prompt (system instructions)\n'
-      + '- Write a clear role definition: "You are a senior frontend engineer specializing in React/TS."\n'
-      + '- Define the agent\'s scope: what it CAN do and what it should NOT do\n'
-      + '- Set expectations: quality bar, when to escalate, communication style\n'
-      + '- Keep it focused — 3-8 lines. Overlong prompts confuse the agent.\n'
-      + '- Example: "You are a QA tester. Your job is to write and run tests. You do NOT modify source code. '
-      + 'Report bugs clearly with reproduction steps. Escalate if you find a security issue."\n\n'
-      + '### Tool Allocation\n'
-      + '- Give agents ONLY the tools they need for their job. Do NOT give every tool.\n'
-      + '- Read-only agents (QA, reviewer, researcher): Read, Glob, Grep, WebFetch, WebSearch\n'
-      + '- Code-writing agents (engineer, developer): add Write, Edit, Bash\n'
-      + '- Team-lead agents (manager, architect): add TaskAssign, TaskList, TaskOutput, TaskStop\n'
-      + '- NEVER give destructive tools (Bash rm -rf, etc.) to junior agents\n'
-      + '- NEVER give HireEmployee or SubAgentSpawn to Members — only Managers may delegate\n\n'
-      + '### Skills & MCP Servers\n'
-      + '- Skills: assign relevant skills by name. Check available skills before assigning.\n'
-      + '- MCP servers: only assign if the agent needs external API access (Slack, GitHub, etc.)\n'
-      + '- When in doubt, leave enabledSkills and mcpServers empty — agents can ask for more later.\n\n'
-      + '### Team Name\n'
-      + '- Use descriptive team names: "Engineering", "QA", "Design", "Operations"\n'
-      + '- Agents in the same team share a SharedContextStore for state sharing.';
+    return [
+      '## HireEmployee Usage',
+      'Hire only for durable responsibilities, not for a one-off task. Use SubAgentSpawn for temporary helpers and TaskAssign for existing employees.',
+      '',
+      'Good hires have:',
+      '- A professional role-based name, such as Frontend Engineer, QA Tester, or Security Auditor.',
+      '- A narrow durable specialty and clear scope boundaries.',
+      '- A concise agentPrompt: identity, scope, quality bar, escalation rules, and communication style.',
+      '- Only the tools and skills needed for the role.',
+      '',
+      'Org rules:',
+      '- MainAgent may hire Managers or Members.',
+      '- Managers should hire Members, not other Managers.',
+      '- Members execute work and should not receive organization-management tools.',
+      '',
+      'Tool allocation guidance:',
+      '- Read-only reviewers: Read, Glob, Grep, WebFetch, WebSearch.',
+      '- Code implementers: add Write, Edit, Bash where appropriate.',
+      '- Team leads: add TaskAssign, TaskList, TaskOutput, TaskStop.',
+      '- Avoid broad destructive capability unless the role truly needs it.',
+    ].join('\n');
   }
 
   minRole(): string { return 'Manager'; }
@@ -77,7 +68,7 @@ export class HireEmployeeTool extends Tool {
         },
         parentAgentId: {
           type: 'string',
-          description: 'Your own agent ID — the new agent reports to you in the org tree',
+          description: 'Your own agent ID - the new agent reports to you in the org tree',
         },
         model: {
           type: 'string',
@@ -87,8 +78,8 @@ export class HireEmployeeTool extends Tool {
         agentPrompt: {
           type: 'string',
           description: 'System prompt defining the agent\'s identity and behavior. Must include: '
-            + '(1) Role definition — who they are, (2) Scope — what they can/cannot do, '
-            + '(3) Quality expectations, (4) Escalation rules. Keep it 3-8 lines — overlong prompts confuse agents. '
+            + '(1) Role definition - who they are, (2) Scope - what they can/cannot do, '
+            + '(3) Quality expectations, (4) Escalation rules. Keep it 3-8 lines - overlong prompts confuse agents. '
             + 'Example: "You are a senior QA tester. Write and run tests. Do NOT modify source code. '
             + 'Report bugs with reproduction steps. Escalate security issues immediately."',
         },
@@ -162,7 +153,7 @@ export class HireEmployeeTool extends Tool {
     const mcpServers = (params.mcpServers as string[]) || [];
 
     if (!parent.isActive) {
-      return this.makeError(`Parent agent '${parentAgentId}' is destroyed — cannot hire under it`);
+      return this.makeError(`Parent agent '${parentAgentId}' is destroyed - cannot hire under it`);
     }
 
     // Validate parent can manage subordinates
@@ -172,7 +163,7 @@ export class HireEmployeeTool extends Tool {
       );
     }
 
-    // Manager→Manager restriction ──
+    // Manager->Manager restriction ──
     // Only the CEO (MainAgent) can create Managers. Managers can only create Members.
     if (roleStr === 'Manager' && parent.role !== AgentRole.MainAgent) {
       return this.makeError(
@@ -191,7 +182,7 @@ export class HireEmployeeTool extends Tool {
     // Determine level based on parent
     const level = parent.level + 1;
 
-    // Build the agent config — inherit model/connection from parent
+    // Build the agent config - inherit model/connection from parent
     const config = {
       id: agentId,
       name,
@@ -232,12 +223,12 @@ export class HireEmployeeTool extends Tool {
 
     // Initialize memory directory ──
     try {
-      const memDir = path.resolve(process.cwd(), 'memory', 'agents', agentId);
+      const memDir = writablePath('memory', 'agents', agentId);
       await fs.promises.mkdir(memDir, { recursive: true });
       const memFile = path.join(memDir, 'MEMORY.md');
       await fs.promises.writeFile(
         memFile,
-        `# ${name} — Memory\n\n*Created: ${new Date().toISOString()}*\n\n## Preferences\n\n## Learnings\n\n## References\n`,
+        `# ${name} - Memory\n\n*Created: ${new Date().toISOString()}*\n\n## Preferences\n\n## Learnings\n\n## References\n`,
         'utf-8',
       );
     } catch (err) {

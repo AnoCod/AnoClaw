@@ -1,4 +1,10 @@
-// SendMessageHandler — handles 'send_message' WS messages
+/**
+ * SendMessageHandler — handles 'send_message' WS messages.
+ *
+ * Input:  `{ type: 'send_message', content, mode?, effort?, attachments?, parentSessionId?, sessionId }`
+ * Output: Streams agent response events (text, think, tool_call, tool_result, etc.) to the session.
+ *         Auto-creates session if needed. Soft-interrupts active sessions.
+ */
 // Extracted from main.ts: session creation, history loading, agent streaming, persistence.
 
 import type { WsMessageHandler } from '../WsMessageRouter.js';
@@ -12,9 +18,9 @@ import { SessionStore } from '../../../core/session/SessionStore.js';
 import { LogManager } from '../../logging/LogManager.js';
 import { pickFunMessage } from '../../../core/agent/StatusMessages.js';
 import { InterruptController, InterruptReason } from '../../../core/agent/supervision/InterruptController.js';
-import { SettingsManager } from '../../../infra/storage/SettingsManager.js';
+import { selectRunnableAgent } from '../../../core/agent/AgentSelection.js';
+import { resolveSessionEffort, resolveSessionPermissionMode } from '../../../core/agent/PermissionModePolicy.js';
 
-const DEFAULT_MAIN_AGENT_ID = 'main-agent';
 const log = LogManager.getInstance().logger('anochat.ws');
 
 export const sendMessageHandler: WsMessageHandler = async (ctx) => {
@@ -32,11 +38,36 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
   let effectiveSessionId = ctx.sessionId;
   let session = sessionManager.session(effectiveSessionId);
   if (!session) {
-    const mainAgent = registry.mainAgent();
-    const agentId = mainAgent?.id || registry.allAgents()[0]?.id || DEFAULT_MAIN_AGENT_ID;
+    const agentSelection = selectRunnableAgent();
+    if (!agentSelection.ok || !agentSelection.agentId) {
+      ctx.ws.send(ctx.sessionId, {
+        type: WsMessageType.Error,
+        errorMessage: agentSelection.message || 'No runnable agent is configured',
+        code: 'AGENT_REQUIRED',
+      });
+      return;
+    }
+    const agentId = agentSelection.agentId;
     const parentId = msg.parentSessionId as string | undefined;
     try {
-      if (parentId && sessionManager.session(parentId)) {
+      if (parentId) {
+        const parentSession = sessionManager.session(parentId);
+        if (!parentSession) {
+          ctx.ws.send(ctx.sessionId, {
+            type: WsMessageType.Error,
+            errorMessage: `Parent session "${parentId}" not found`,
+            code: 'PARENT_NOT_FOUND',
+          });
+          return;
+        }
+        if (parentSession.isArchived()) {
+          ctx.ws.send(ctx.sessionId, {
+            type: WsMessageType.Error,
+            errorMessage: `Parent session "${parentId}" is archived`,
+            code: 'PARENT_ARCHIVED',
+          });
+          return;
+        }
         session = await sessionManager.createSubSession(parentId, agentId, (msg.content as string)?.slice(0, 30) || 'Sub Session');
       } else {
         session = await sessionManager.createMainSession(agentId, (msg.content as string)?.slice(0, 30) || 'New Session');
@@ -47,7 +78,7 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
         content: `Session created: ${effectiveSessionId}\n`,
       });
       ctx.ws.send(effectiveSessionId, {
-        type: 'subsession_created',
+        type: WsMessageType.SubsessionCreated,
         sessionId: effectiveSessionId,
         parentSessionId: parentId || null,
         agentId,
@@ -62,7 +93,16 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
     }
   }
 
-  const agentId = session.agentId || registry.mainAgent()?.id || DEFAULT_MAIN_AGENT_ID;
+  const agentSelection = selectRunnableAgent(session.agentId);
+  if (!agentSelection.ok || !agentSelection.agentId) {
+    ctx.ws.send(effectiveSessionId, {
+      type: WsMessageType.Error,
+      errorMessage: agentSelection.message || 'No runnable agent is configured',
+      code: 'AGENT_REQUIRED',
+    });
+    return;
+  }
+  const agentId = agentSelection.agentId;
   const agent = registry.agent(agentId);
   if (!agent) {
     ctx.ws.send(effectiveSessionId, { type: WsMessageType.Error, errorMessage: `Agent not found: ${agentId}`, code: 'AGENT_NOT_FOUND' });
@@ -70,11 +110,16 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
   }
 
   // Store permission mode + effort so AgentLoop picks them up (frontend→server bridge)
-  const MODE_MAP: Record<string, string> = { 'ask': 'Ask', 'auto-edit': 'AutoEdit', 'plan': 'Plan', 'auto': 'Auto' };
-  const sm = SettingsManager.getInstance();
-  sm.set('ui.permissionMode', MODE_MAP[(msg.mode as string) || 'auto'] || 'Auto');
-  sm.set('ui.effort', (msg.effort as boolean) !== false ? 'HIGH' : 'NORMAL');
-  sm.save().catch(() => {});
+  const effectivePermissionMode = resolveSessionPermissionMode(sessionManager, effectiveSessionId, msg.mode);
+  const effectiveEffort = resolveSessionEffort(sessionManager, effectiveSessionId, msg.effort);
+  if (session.isRoot()) {
+    await sessionManager.setSessionPermissionMode(effectiveSessionId, effectivePermissionMode);
+    await sessionManager.setSessionEffortMode(effectiveSessionId, effectiveEffort === 'HIGH');
+  }
+  const loopOptions = {
+    permissionMode: effectivePermissionMode,
+    effort: effectiveEffort,
+  };
 
   // Soft interrupt: if session already has an active AgentLoop, queue the message
   // without creating a second loop. The running AgentLoop handles it mid-turn.
@@ -90,7 +135,7 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
       compressed: false,
       timestamp: new Date().toISOString(),
     };
-    await sessionManager.appendMessage(effectiveSessionId, userMsg);
+    await sessionManager.appendMessage(effectiveSessionId, userMsg, { notify: false });
     InterruptController.getInstance().setPendingUserMessage(effectiveSessionId, (msg.content as string) || '');
     InterruptController.getInstance().requestInterrupt(effectiveSessionId, InterruptReason.UserSteer);
     ctx.ws.send(effectiveSessionId, {
@@ -127,11 +172,11 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
   try {
     history = await sessionManager.getHistory(effectiveSessionId);
   } catch { /* fresh session */ }
-  const fullHistory = history.slice(-200);
+  const fullHistory = history;
 
   // Append user message
   try {
-    await sessionManager.appendMessage(effectiveSessionId, userMessage);
+    await sessionManager.appendMessage(effectiveSessionId, userMessage, { notify: false });
   } catch (err) {
     log.error('Failed to persist user message', { sid: effectiveSessionId, error: (err as Error).message });
   }
@@ -141,7 +186,7 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
   const turnMsgId = `msg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const initialPrevUuid = session.lastEventUuid || '00000000-0000-0000-0000-000000000000';
   const { StreamPersister } = await import('../../../infra/StreamPersister.js');
-  const persister = new StreamPersister(store, effectiveSessionId, turnMsgId, initialPrevUuid);
+  const persister = new StreamPersister(store, effectiveSessionId, turnMsgId, initialPrevUuid, agentId);
   const { StreamConsumer } = await import('../../../infra/stream/StreamConsumer.js');
   const consumer = new StreamConsumer(ctx.ws, effectiveSessionId, persister, {
     editIntervalMs: 20,
@@ -158,7 +203,7 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
       });
     }, 3000);
 
-    for await (const event of runtime.processMessage(effectiveSessionId, agentId, userMessage, fullHistory)) {
+    for await (const event of runtime.processMessage(effectiveSessionId, agentId, userMessage, fullHistory, loopOptions)) {
       switch (event.type) {
         case 'text':
           consumer.onDelta('text', event.content as string);
@@ -195,6 +240,24 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
           }
           consumer.sendDirect(event as unknown as Record<string, unknown>);
           break;
+        case 'error':
+          await consumer.beforeToolEvent();
+          await persister.persistEvent('error', {
+            error: event.errorMessage || event.message || event.content || 'Unknown error',
+            source: 'agent_loop',
+          });
+          consumer.sendDirect(event as unknown as Record<string, unknown>);
+          break;
+        case 'plan_enter':
+          await persister.flushDeltas();
+          await persister.persistEvent('plan_enter', {});
+          consumer.sendDirect(event as unknown as Record<string, unknown>);
+          break;
+        case 'plan_exit':
+          await persister.flushDeltas();
+          await persister.persistEvent('plan_exit', {});
+          consumer.sendDirect(event as unknown as Record<string, unknown>);
+          break;
         default:
           consumer.sendDirect(event as unknown as Record<string, unknown>);
       }
@@ -206,9 +269,12 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
     sessionManager.rebuildMessageCache(effectiveSessionId).catch(() => {});
   } catch (err) {
     if (statusInterval) clearInterval(statusInterval);
+    const errorMessage = `Agent error: ${(err as Error).message}`;
+    await persister.flushDeltas();
+    await persister.persistEvent('error', { error: errorMessage, source: 'send_message_handler' });
     ctx.ws.send(effectiveSessionId, {
       type: WsMessageType.Error,
-      errorMessage: `Agent error: ${(err as Error).message}`,
+      errorMessage,
       code: 'AGENT_ERROR',
     });
   }

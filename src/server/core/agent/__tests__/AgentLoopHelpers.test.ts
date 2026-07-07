@@ -8,7 +8,13 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { messageToApiMessage, estimateTokens, interruptibleSleep } from '../AgentLoopHelpers.js';
+import {
+  messageToApiMessage,
+  estimateTokens,
+  interruptibleSleep,
+  selectHistoryForContext,
+  truncateMessagesPreservingTask,
+} from '../AgentLoopHelpers.js';
 import type { ApiMessage } from '../AgentLoopHelpers.js';
 import { AgentRegistry } from '../AgentRegistry.js';
 import { Agent } from '../Agent.js';
@@ -36,7 +42,7 @@ function makeConfig(overrides: Partial<AgentConfigWithKey> = {}): AgentConfigWit
     apiKey: overrides.apiKey ?? 'sk-test',
     model: overrides.model ?? '',
     contextWindow: overrides.contextWindow ?? 128000,
-    maxTurns: overrides.maxTurns ?? 25,
+    maxTurns: overrides.maxTurns ?? 0,
     temperature: overrides.temperature ?? 0.7,
     agentPrompt: overrides.agentPrompt ?? '',
     preferredLanguage: overrides.preferredLanguage ?? 'en',
@@ -475,6 +481,120 @@ describe('estimateTokens', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
+describe('selectHistoryForContext', () => {
+  it('excludes the current user message to avoid duplicating the active turn', () => {
+    const current = makeMessage({ id: 'current', role: 'user', content: 'Continue the active goal.' });
+    const history = [
+      makeMessage({ id: 'old', role: 'user', content: 'Original task' }),
+      current,
+      makeMessage({ id: 'assistant', role: 'assistant', content: 'Working on it.' }),
+    ];
+
+    const selected = selectHistoryForContext(history, {
+      contextWindow: 8000,
+      reservedTokens: 1000,
+      excludeMessageIds: ['current'],
+    });
+
+    expect(selected.map(m => m.id)).not.toContain('current');
+    expect(selected.map(m => m.id)).toContain('assistant');
+  });
+
+  it('preserves compacted summaries while filling the rest from recent history', () => {
+    const summary = makeMessage({
+      id: 'summary',
+      role: 'system',
+      content: 'Compacted milestone summary: architecture decision and remaining work.',
+      compressed: true,
+    });
+    const history = [
+      summary,
+      ...Array.from({ length: 12 }, (_, i) => makeMessage({
+        id: `msg-${i}`,
+        role: i % 2 === 0 ? 'user' : 'assistant',
+        content: `Recent work item ${i}: ${'detail '.repeat(220)}`,
+      })),
+    ];
+
+    const selected = selectHistoryForContext(history, {
+      contextWindow: 3000,
+      reservedTokens: 1200,
+    });
+
+    expect(selected.map(m => m.id)).toContain('summary');
+    expect(selected.at(-1)?.id).toBe('msg-11');
+    expect(selected.length).toBeLessThan(history.length);
+  });
+
+  it('allows larger context windows to retain more history than smaller windows', () => {
+    const history = Array.from({ length: 30 }, (_, i) => makeMessage({
+      id: `m-${i}`,
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      content: `Message ${i}: ${'context '.repeat(40)}`,
+    }));
+
+    const small = selectHistoryForContext(history, {
+      contextWindow: 2200,
+      reservedTokens: 800,
+    });
+    const large = selectHistoryForContext(history, {
+      contextWindow: 20000,
+      reservedTokens: 800,
+    });
+
+    expect(large.length).toBeGreaterThan(small.length);
+    expect(large.length).toBeLessThanOrEqual(history.length);
+  });
+});
+
+describe('truncateMessagesPreservingTask', () => {
+  it('keeps the original user task when reducing context after empty responses', () => {
+    const messages: ApiMessage[] = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: 'Please keep developing the 2D RPG game.' },
+      { role: 'assistant', content: 'I will build version 2.' },
+      { role: 'assistant', content: '', tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'Bash', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'call-1', content: 'no html files' },
+      { role: 'assistant', content: 'Writing a large file.' },
+      { role: 'system', content: '[Recovery: empty response]' },
+    ];
+
+    const result = truncateMessagesPreservingTask(messages, 3);
+
+    expect(result).toBe(messages);
+    expect(messages[0].role).toBe('system');
+    expect(messages.some((msg) => msg.content === 'Please keep developing the 2D RPG game.')).toBe(true);
+    expect(messages.at(-1)?.content).toBe('[Recovery: empty response]');
+  });
+
+  it('does not duplicate the original user task when it is already in the tail', () => {
+    const task: ApiMessage = { role: 'user', content: 'Continue the game.' };
+    const messages: ApiMessage[] = [
+      { role: 'system', content: 'system prompt' },
+      task,
+      { role: 'assistant', content: 'Working.' },
+    ];
+
+    truncateMessagesPreservingTask(messages, 3);
+
+    expect(messages.filter((msg) => msg === task)).toHaveLength(1);
+  });
+
+  it('skips task notifications when selecting the preserved user task', () => {
+    const messages: ApiMessage[] = [
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: '<task-notification>\nfailed\n</task-notification>' },
+      { role: 'user', content: 'Build the requested game upgrade.' },
+      { role: 'assistant', content: 'Checking files.' },
+      { role: 'tool', content: 'no html files' },
+    ];
+
+    truncateMessagesPreservingTask(messages, 2);
+
+    expect(messages.some((msg) => msg.content === 'Build the requested game upgrade.')).toBe(true);
+  });
+});
+
 // interruptibleSleep — AbortSignal behavior
 // ═══════════════════════════════════════════════════════════════════════
 

@@ -4,6 +4,8 @@
  */
 export class EditResultDelegate {
   element: HTMLElement;
+  private _bodyEl: HTMLElement | null = null;
+  private _expanded = false;
 
   constructor(filePath: string, oldStr: string, newStr: string, success: boolean) {
     this.element = this.render(filePath, oldStr, newStr, success);
@@ -11,6 +13,7 @@ export class EditResultDelegate {
 
   private render(filePath: string, oldStr: string, newStr: string, success: boolean): HTMLElement {
     const card = document.createElement('div');
+    card.className = 'edit-result-card is-collapsed';
     card.style.cssText = `margin-bottom: 12px;`;
 
     const fileName = filePath.replace(/\\/g, '/').split('/').pop() || filePath;
@@ -20,7 +23,7 @@ export class EditResultDelegate {
     header.style.cssText = `
       font-size: 9px; color: var(--cinema-text-muted); letter-spacing: 1px;
       display: flex; gap: 6px; align-items: center;
-      margin-bottom: 8px;
+      margin-bottom: 8px; cursor: pointer;
     `;
     const dot = document.createElement('span');
     dot.style.cssText = `width:4px;height:4px;border-radius:50%;flex-shrink:0;background:${success ? 'rgba(134,239,172,0.4)' : 'rgba(248,113,113,0.4)'};`;
@@ -37,6 +40,7 @@ export class EditResultDelegate {
     file.textContent = fileName;
     file.style.cssText = 'letter-spacing: 0;';
     header.appendChild(file);
+    header.addEventListener('click', () => this._toggle());
     card.appendChild(header);
 
     // Diff body — side by side, no outer border
@@ -46,8 +50,27 @@ export class EditResultDelegate {
     body.appendChild(this._col('—', oldStr.slice(0, 500), 'rgba(248,113,113,0.08)', '#fca5a5'));
     body.appendChild(this._col('+', newStr.slice(0, 500), 'rgba(134,239,172,0.05)', '#86efac'));
 
+    body.hidden = true;
+    this._bodyEl = body;
     card.appendChild(body);
     return card;
+  }
+
+  collapse(): void {
+    this._expanded = false;
+    this.element.classList.add('is-collapsed');
+    if (this._bodyEl) this._bodyEl.hidden = true;
+  }
+
+  expand(): void {
+    this._expanded = true;
+    this.element.classList.remove('is-collapsed');
+    if (this._bodyEl) this._bodyEl.hidden = false;
+  }
+
+  private _toggle(): void {
+    if (this._expanded) this.collapse();
+    else this.expand();
   }
 
   private _col(label: string, text: string, bg: string, color: string): HTMLElement {

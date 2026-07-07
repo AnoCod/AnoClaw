@@ -5,6 +5,7 @@
 
 import { LLMProvider } from './LLMProvider.js';
 import type { LLMOptions, LLMStreamEvent } from '../../../shared/types/llm.js';
+import { PROVIDER_OPENAI_COMPATIBLE } from '../../../shared/constants.js';
 
 interface OpenAIDeltaToolCall {
   index?: number;
@@ -45,7 +46,7 @@ export class OpenAICompatibleProvider extends LLMProvider {
   private _chunkTimeoutMs = 60_000;  // 1 min — abort if between-chunk pause exceeds this
 
   providerName(): string {
-    return 'openai-compatible';
+    return PROVIDER_OPENAI_COMPATIBLE;
   }
 
   cancel(): void {
@@ -282,10 +283,6 @@ export class OpenAICompatibleProvider extends LLMProvider {
                   toolInput,
                 };
               }
-            }
-
-            if (finishReason === 'stop' || finishReason === 'tool_calls' || finishReason === 'function_call') {
-              // The [DONE] marker or final chunk should also trigger done
             }
           }
         }

@@ -1,6 +1,6 @@
 // PluginDevSection — concise plugin development guide for agents.
-// Gives the agent the exact patterns needed to create a working AnoClaw plugin
-// without reading the full docs. Short enough to stay in context every turn.
+// Gives the agent the minimum pattern for a working AnoClaw plugin while the
+// full source-aligned references live in docs/plugin-dev.md and docs/plugin-api.md.
 
 import type { SystemPromptSection, PromptContext } from '../PromptSection.js';
 
@@ -18,8 +18,8 @@ export function createPluginDevSection(): SystemPromptSection {
       return [
         '# Plugin Development Guide',
         '',
-        'Plugins live in `plugins/<name>/`. Each plugin needs exactly 2 files: `plugin.json` + `extension.js`.',
-        'Changes auto-reload within 1-2 seconds — no restart needed.',
+        'Plugins live in `plugins/<name>/`. A minimal plugin needs `plugin.json` + `extension.js`.',
+        'Changes auto-reload within 1-2 seconds. Do not restart unless the runtime requires it.',
         '',
         '## plugin.json template',
         '```json',
@@ -27,8 +27,23 @@ export function createPluginDevSection(): SystemPromptSection {
         '  "name": "my-plugin",',
         '  "displayName": "My Plugin",',
         '  "version": "1.0.0",',
+        '  "description": "What this plugin does",',
         '  "main": "extension.js",',
-        '  "activationEvents": ["onStartup"]',
+        '  "activationEvents": ["onStartup"],',
+        '  "contributes": {',
+        '    "tools": [{ "name": "myTool" }],',
+        '    "capabilities": [',
+        '      {',
+        '        "id": "my-plugin.doThing",',
+        '        "title": "Do a user-level thing",',
+        '        "domain": "utility",',
+        '        "kind": "artifact",',
+        '        "triggers": ["do thing", "make thing"],',
+        '        "requiredTools": ["myTool"],',
+        '        "outputs": [{ "type": "artifact", "artifactType": "result" }]',
+        '      }',
+        '    ]',
+        '  }',
         '}',
         '```',
         '',
@@ -57,12 +72,13 @@ export function createPluginDevSection(): SystemPromptSection {
         '```',
         '',
         '## Critical rules',
-        '- **PluginBase import**: MUST use `const { PluginBase } = globalThis;` — do NOT import from filesystem.',
+        '- **PluginBase import**: MUST use `const { PluginBase } = globalThis;` — do not import from filesystem.',
         '- **plugin.json**: Name must be kebab-case, unique. `main` points to entry file.',
-        '- **tools**: `executeTool()` must return `Promise<string>`. For structured data use `JSON.stringify()`.',
+        '- **capabilities**: declare user-level tasks in `contributes.capabilities`; tools are implementation details, capabilities are how AnoClaw routes ordinary user requests.',
+        '- **tools**: `onToolExecute()` / `executeTool()` must return a string. For structured data use `JSON.stringify()`.',
         '- **hot reload**: Save file, wait 2s, check status. Plugin errors appear as SYSTEM messages in this conversation.',
-        '- **check status**: `Read /api/v1/plugins` or use Bash: `curl http://127.0.0.1:3456/api/v1/plugins`',
-        '- **full API**: Read `docs/plugin-api.md` for complete reference on all 12 `anoclaw.*` APIs.',
+        '- **check status**: use `ApiCall` with `GET /api/v1/plugins`, or Bash: `curl http://127.0.0.1:3456/api/v1/plugins`.',
+        '- **full docs**: Read `docs/plugin-dev.md` before creating plugins and `docs/plugin-api.md` before using API details.',
       ].join('\n');
     },
   };

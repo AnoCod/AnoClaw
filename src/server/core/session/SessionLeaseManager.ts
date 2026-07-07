@@ -19,11 +19,15 @@ export class SessionLeaseManager {
     return SessionLeaseManager._instance;
   }
 
-  constructor(
-    private _maxConcurrent: number = Infinity,
+  private constructor(
     private _idleTimeoutMs: number = 5 * 60 * 1000,
     private _reaperIntervalMs: number = 30000,
   ) {}
+
+  /** Test-only factory — bypasses singleton enforcement. Not for production use. */
+  static _createForTest(idleTimeoutMs: number, reaperIntervalMs: number): SessionLeaseManager {
+    return new SessionLeaseManager(idleTimeoutMs, reaperIntervalMs);
+  }
 
   acquire(sessionId: string): LeaseToken | null {
     // If already has a lease, refresh it

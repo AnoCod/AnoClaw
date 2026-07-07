@@ -9,6 +9,7 @@ import type { TalentPoolGroup, TalentPoolTemplate, HireTemplateRequest, SaveToPo
 import { AgentRegistry } from '../agent/AgentRegistry.js';
 import { Agent } from '../agent/Agent.js';
 import { defaultConfig, saveAgentConfig } from '../agent/AgentConfig.js';
+import { hasMainAgentConflict, hierarchyValidationMessage, normalizeAgentHierarchy } from '../agent/AgentConstraints.js';
 import { PATHS } from '../../../shared/constants.js';
 
 const POOL_DIR = 'data/talent-pool';
@@ -196,30 +197,28 @@ export class TalentPoolService {
     if (!template) return { success: false, error: 'Template not found' };
 
     const registry = AgentRegistry.getInstance();
-    const parentAgent = registry.agent(req.parentAgentId);
-    if (!parentAgent) return { success: false, error: 'Parent agent not found' };
+    const parentAgent = req.parentAgentId ? registry.agent(req.parentAgentId) : undefined;
+    if (req.role !== 'MainAgent' && !parentAgent) return { success: false, error: 'Parent agent not found' };
 
-    // Validate hierarchy
-    const hierarchyError = this._validateHierarchy(parentAgent, req.role);
+    const agentId = randomUUID();
+    const hierarchyError = parentAgent
+      ? this._validateHierarchy(parentAgent, req.role)
+      : hierarchyValidationMessage(agentId, req.role, req.parentAgentId || null);
     if (hierarchyError) return { success: false, error: hierarchyError };
 
-    // Check MainAgent uniqueness
-    if (req.role === 'MainAgent') {
-      const existingMain = registry.mainAgent();
-      if (existingMain) return { success: false, error: 'A MainAgent (CEO) already exists. Only one CEO is allowed.' };
+    if (hasMainAgentConflict(agentId, req.role)) {
+      return { success: false, error: 'A MainAgent (CEO) already exists. Only one CEO is allowed.' };
     }
-
-    const level = req.role === 'MainAgent' ? 0 : req.role === 'Manager' ? 1 : 2;
 
     const name = req.name || template.name;
 
     // Build agent config from template defaults + request overrides
-    const config = defaultConfig({
+    const config = defaultConfig(normalizeAgentHierarchy({
+      id: agentId,
       name,
       role: req.role as any,
-      parentAgentId: req.parentAgentId,
-      level,
-      teamName: parentAgent.teamName || 'default',
+      parentAgentId: req.parentAgentId || null,
+      teamName: parentAgent?.teamName || 'default',
       provider: template.provider,
       model: template.model,
       agentPrompt: template.agentPrompt,
@@ -227,7 +226,7 @@ export class TalentPoolService {
       conversationLanguage: template.conversationLanguage,
       allowedTools: template.allowedTools,
       enabledSkills: template.enabledSkills,
-    } as any);
+    } as any));
 
     try {
       await saveAgentConfig(config);
@@ -242,6 +241,8 @@ export class TalentPoolService {
   /** Validate that parent can have a child with the given role.
    *  Returns error string or null if valid. */
   private _validateHierarchy(parent: Agent, childRole: string): string | null {
+    return hierarchyValidationMessage(`candidate-${Date.now()}`, childRole, parent.id);
+    /*
     const parentRole = parent.role;
 
     // Member is a leaf node — cannot have children
@@ -263,6 +264,7 @@ export class TalentPoolService {
     }
 
     return null; // valid
+    */
   }
 
   // ═══ Built-in Presets ════════════════════════════════════

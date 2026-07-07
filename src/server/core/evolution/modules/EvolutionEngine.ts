@@ -177,7 +177,10 @@ export class EvolutionEngine {
           const skillPath = path.join(skillsDir, change.skillId);
           const archivedPath = path.join(archivedDir, change.skillId);
           await fs.mkdir(archivedDir, { recursive: true });
-          await fs.rename(skillPath, archivedPath);
+          // Use copy + delete instead of rename to avoid EXDEV on Windows
+          // when skillsDir and archivedDir are on different mount points.
+          await fs.cp(skillPath, archivedPath, { recursive: true });
+          await fs.rm(skillPath, { recursive: true, force: true });
           this._log.info('Skill archived', { skillId: change.skillId });
         } catch (err) {
           this._log.warn('Failed to archive skill', { skillId: change.skillId, error: (err as Error).message });
@@ -203,9 +206,6 @@ export class EvolutionEngine {
     for (const [skillId, stat] of Object.entries(skillStats)) {
       const lastUsed = new Date(stat.lastUsedAt).getTime();
       const daysSinceUse = (now - lastUsed) / (24 * 60 * 60 * 1000);
-      const agentScores = Object.entries(scoreStats.byAgent)
-        .filter(([_, v]) => v.count >= 3)
-        .map(([_, v]) => v.avg);
 
       if (daysSinceUse > opts.skillArchiveDays) {
         changes.push({
@@ -216,15 +216,19 @@ export class EvolutionEngine {
         continue;
       }
 
-      if (stat.loadCount > 10 && agentScores.length > 0) {
-        const avgScore = agentScores.reduce((a, b) => a + b, 0) / agentScores.length;
-        if (avgScore < opts.scoreThreshold) {
-          changes.push({
-            skillId,
-            action: 'promote_branch',
-            reason: `Score ${avgScore.toFixed(1)} is below threshold ${opts.scoreThreshold}. ${stat.loadCount} loads. Consider revision.`,
-          });
-        }
+      // Per-skill score check: flag skill if the owning agent's average is below threshold.
+      // We don't have a direct skill→agent mapping, so check all agents with sufficient
+      // score samples — if any relevant agent scores low, the skill may need revision.
+      const lowAgentScores = Object.entries(scoreStats.byAgent)
+        .filter(([_, v]) => v.count >= 3 && v.avg < opts.scoreThreshold);
+
+      if (stat.loadCount > 10 && lowAgentScores.length > 0) {
+        const worstAgent = lowAgentScores.reduce((a, b) => a[1].avg < b[1].avg ? a : b);
+        changes.push({
+          skillId,
+          action: 'promote_branch',
+          reason: `Agent "${worstAgent[0]}" score ${worstAgent[1].avg.toFixed(1)} is below threshold ${opts.scoreThreshold}. ${stat.loadCount} loads. Consider revision.`,
+        });
       }
     }
 
@@ -290,16 +294,12 @@ export class EvolutionEngine {
 
       // Detect high token usage patterns
       if (stat.avgTokens > 2000) {
-        const p95Estimate = stat.avgTokens * 2; // Approximate without true p50/p95
-        // If p95 estimate is much higher than average, suggest optimization
-        if (stat.avgTokens > 0 && p95Estimate > stat.avgTokens * 1.5) {
-          findings.push({
-            toolName,
-            finding: `High token usage (avg ${stat.avgTokens.toFixed(0)} tokens, ${stat.callCount} calls).`,
-            recommendation: `Consider limiting output size or using pagination for ${toolName}.`,
-            estimatedSavings: Math.round(stat.avgTokens * stat.callCount * 0.3),
-          });
-        }
+        findings.push({
+          toolName,
+          finding: `High token usage (avg ${stat.avgTokens.toFixed(0)} tokens, ${stat.callCount} calls).`,
+          recommendation: `Consider limiting output size or using pagination for ${toolName}.`,
+          estimatedSavings: Math.round(stat.avgTokens * stat.callCount * 0.3),
+        });
       }
     }
 

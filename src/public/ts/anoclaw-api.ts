@@ -60,14 +60,22 @@ export function initAnoClawAPI(): void {
         console.log(`[AnoClaw] ToolCard override: "${toolName}"`);
       },
       unregisterToolCard: (toolName: string) => toolCardRegistry.unregister(toolName),
-      mount: (slot: string, el: HTMLElement, position?: 'append' | 'prepend', replace?: boolean) => {
-        slotRegistry.mount(slot, el, position, replace, 'plugin-runtime');
+      mount: (
+        slot: string,
+        el: HTMLElement,
+        positionOrOpts?: 'append' | 'prepend' | { position?: 'append' | 'prepend'; replace?: boolean; id?: string; priority?: number; pluginName?: string },
+        replace?: boolean,
+      ) => {
+        const pluginName = typeof positionOrOpts === 'object' && positionOrOpts?.pluginName
+          ? positionOrOpts.pluginName
+          : (el.dataset.pluginName || 'plugin-runtime');
+        slotRegistry.mount(slot, el, positionOrOpts as any, replace, pluginName);
       },
       unmount: (slot: string, el: HTMLElement) => {
         slotRegistry.unmount(slot, el);
       },
-      unmountAll: (slot: string) => {
-        slotRegistry.unmountAll(slot);
+      unmountAll: (slot: string, pluginName?: string) => {
+        slotRegistry.unmountAll(slot, pluginName);
       },
     },
   };

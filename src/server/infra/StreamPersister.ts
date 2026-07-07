@@ -17,6 +17,7 @@ export class StreamPersister {
   private store: SessionStore;
   private sessionId: string;
   private turnMsgId: string;
+  private agentId: string;
   private logger: MinimalLogger;
 
   constructor(
@@ -24,11 +25,13 @@ export class StreamPersister {
     sessionId: string,
     turnMsgId: string,
     initialPrevUuid: string,
+    agentId: string = '',
     logger?: MinimalLogger,
   ) {
     this.store = store;
     this.sessionId = sessionId;
     this.turnMsgId = turnMsgId;
+    this.agentId = agentId;
     this._prevUuid = initialPrevUuid;
     this.logger = logger || LogManager.getInstance().logger('anochat.core');
   }
@@ -57,7 +60,7 @@ export class StreamPersister {
    * @returns the new UUID if persisted, or the unchanged prevUuid if evType is unknown
    */
   async persistEvent(
-    evType: 'text' | 'think' | 'tool_call' | 'tool_result' | 'todo_write' | 'compacted',
+    evType: 'text' | 'think' | 'tool_call' | 'tool_result' | 'todo_write' | 'compacted' | 'error' | 'plan_enter' | 'plan_exit',
     payload: Record<string, unknown>,
   ): Promise<string> {
     const evUuid = this.mkUuid();
@@ -68,18 +71,21 @@ export class StreamPersister {
         type: 'assistant', uuid: evUuid, parentUuid: this._prevUuid,
         sessionId: this.sessionId, timestamp: this.ts(),
         message: { id: this.turnMsgId, role: 'assistant', content: [{ type: 'text', text: payload.content }] },
+        agentId: this.agentId || undefined,
       };
     } else if (evType === 'think') {
       jsonlEvent = {
         type: 'assistant', uuid: evUuid, parentUuid: this._prevUuid,
         sessionId: this.sessionId, timestamp: this.ts(),
         message: { id: this.turnMsgId, role: 'assistant', content: [{ type: 'thinking', thinking: payload.content }] },
+        agentId: this.agentId || undefined,
       };
     } else if (evType === 'tool_call') {
       jsonlEvent = {
         type: 'assistant', uuid: evUuid, parentUuid: this._prevUuid,
         sessionId: this.sessionId, timestamp: this.ts(),
         message: { id: this.turnMsgId, role: 'assistant', content: [{ type: 'tool_use', id: payload.id, name: payload.name, input: payload.input || {} }] },
+        agentId: this.agentId || undefined,
       };
     } else if (evType === 'tool_result') {
       jsonlEvent = {
@@ -95,10 +101,27 @@ export class StreamPersister {
       };
     } else if (evType === 'compacted') {
       jsonlEvent = {
-        type: 'compacted', uuid: evUuid, parentUuid: this._prevUuid,
+        type: 'compaction', uuid: evUuid, parentUuid: this._prevUuid,
         sessionId: this.sessionId, timestamp: this.ts(),
         summary: payload.summary || '',
         prunedCount: payload.prunedCount || 0,
+      };
+    } else if (evType === 'error') {
+      jsonlEvent = {
+        type: 'error', uuid: evUuid, parentUuid: this._prevUuid,
+        sessionId: this.sessionId, timestamp: this.ts(),
+        error: payload.error || payload.errorMessage || payload.message || payload.content || 'unknown',
+        source: payload.source || 'stream',
+      };
+    } else if (evType === 'plan_enter') {
+      jsonlEvent = {
+        type: 'plan_enter', uuid: evUuid, parentUuid: this._prevUuid,
+        sessionId: this.sessionId, timestamp: this.ts(),
+      };
+    } else if (evType === 'plan_exit') {
+      jsonlEvent = {
+        type: 'plan_exit', uuid: evUuid, parentUuid: this._prevUuid,
+        sessionId: this.sessionId, timestamp: this.ts(),
       };
     } else {
       return this._prevUuid; // unknown event — skip persistence
@@ -146,9 +169,15 @@ export class StreamPersister {
   private _scheduleFlush(immediate: boolean): void {
     if (this._flushTimer) { clearTimeout(this._flushTimer); this._flushTimer = null; }
     if (immediate) {
-      this.flushDeltas().catch(() => {});
+      this.flushDeltas().catch((err) => {
+        this.logger.error('Failed to flush stream deltas', { sid: this.sessionId, error: (err as Error).message });
+      });
     } else {
-      this._flushTimer = setTimeout(() => { this.flushDeltas().catch(() => {}); }, 250);
+      this._flushTimer = setTimeout(() => {
+        this.flushDeltas().catch((err) => {
+          this.logger.error('Failed to flush stream deltas', { sid: this.sessionId, error: (err as Error).message });
+        });
+      }, 250);
     }
   }
 }

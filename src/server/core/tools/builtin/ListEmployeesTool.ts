@@ -1,4 +1,4 @@
-// ListEmployeesTool — list the current organization structure
+// ListEmployeesTool - list the current organization structure
 // Returns the full org tree from the MainAgent down.
 
 import { Tool, RiskLevel } from '../Tool.js';
@@ -38,6 +38,10 @@ export class ListEmployeesTool extends Tool {
     return RiskLevel.Safe;
   }
 
+  isReadOnly(): boolean {
+    return true;
+  }
+
   async execute(
     _params: Record<string, unknown>,
     _ctx: ExecutionContext,
@@ -47,7 +51,7 @@ export class ListEmployeesTool extends Tool {
 
     if (!root) {
       return this.makeResult(
-        '(organization is empty — no MainAgent registered)',
+        '(organization is empty - no MainAgent registered)',
       );
     }
 
@@ -72,14 +76,14 @@ export class ListEmployeesTool extends Tool {
     visited: Set<string>,
   ): void {
     if (visited.has(node.agentId)) {
-      lines.push(`${prefix}${isLast ? '└── ' : '├── '}${node.agentId} (circular reference — skipped)`);
+      lines.push(`${prefix}${isLast ? '`-- ' : '|-- '}${node.agentId} (circular reference - skipped)`);
       return;
     }
     visited.add(node.agentId);
 
     const agent = registry.agent(node.agentId);
-    const status = agent?.isActive ? '●' : '◌';
-    const connector = isLast ? '└── ' : '├── ';
+    const status = agent?.isActive ? '[active]' : '◌';
+    const connector = isLast ? '`-- ' : '|-- ';
     const roleLabel = node.orgRole === OrgRole.Manager ? '[Manager]' : '[Member]';
     const teamStr = node.teamName ? ` (${node.teamName})` : '';
 
@@ -88,7 +92,7 @@ export class ListEmployeesTool extends Tool {
     );
 
     const children = registry.agentsByParent(node.agentId);
-    const childPrefix = prefix + (isLast ? '    ' : '│   ');
+    const childPrefix = prefix + (isLast ? '    ' : '|   ');
 
     for (let i = 0; i < children.length; i++) {
       const child = children[i];

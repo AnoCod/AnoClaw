@@ -2,32 +2,89 @@
 // Handles: browse workspace, read workspace file, create directory, bind workspace
 // Part of the AnoClaw v2.0 rewrite: Gateway system (SA-10)
 
-import * as http from 'http';
 import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import * as path from 'path';
 import * as zlib from 'zlib';
+import micromatch from 'micromatch';
+import type { IncomingMessage, ServerResponse } from 'http';
 import { SessionManager } from '../../core/session/SessionManager.js';
 import { requireWs, requireWsAny } from '../WsRequired.js';
+import type { SendJson, ReadBody } from '../RouteHelpers.js';
 
 // ---------------------------------------------------------------------------
-// Utility types + helpers
+// Internal helpers — path resolution + gitignore filtering
 // ---------------------------------------------------------------------------
 
-type SendJson = (res: http.ServerResponse, statusCode: number, data: Record<string, unknown>) => void;
-type ReadBody = (req: http.IncomingMessage) => Promise<Record<string, unknown>>;
-
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`Timeout: ${label} exceeded ${ms}ms`)), ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+/**
+ * Resolve a relative or absolute path against a base (workspace root),
+ * enforcing that the result does not escape the base directory.
+ *
+ * @param base  - Absolute workspace root directory.
+ * @param rel   - User-supplied path (may be relative or absolute).
+ * @returns Absolute, validated path within the base directory.
+ * @throws  If the resolved path escapes the base directory.
+ */
+export function resolveWorkspacePath(base: string, rel: string): string {
+  const absBase = path.resolve(base);
+  const rawRel = rel || '';
+  let absPath: string;
+  if (rawRel === '/' || rawRel === '\\') {
+    absPath = absBase;
+  } else if (process.platform === 'win32' && /^[/\\]+/.test(rawRel) && !/^[a-zA-Z]:[\\/]/.test(rawRel)) {
+    // Browser file-tree paths use POSIX-style workspace-relative paths. On
+    // Windows, treat a leading slash as "workspace root", not the drive root.
+    absPath = path.resolve(absBase, rawRel.replace(/^[/\\]+/, ''));
+  } else if (path.isAbsolute(rawRel)) {
+    absPath = path.resolve(rawRel);
+  } else {
+    absPath = path.resolve(absBase, rawRel);
+  }
+  const relative = path.relative(absBase, absPath);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('Path escapes workspace root');
+  }
+  return absPath;
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers for gitignore filtering
-// ---------------------------------------------------------------------------
+/** Simple path resolution against cwd (legacy mutation handlers without session scope).
+ *  Throws on path escape — callers should catch and return 403. */
+function workspaceRootForSession(sessionId: string): string {
+  if (!sessionId) return process.cwd();
+  const session = SessionManager.getInstance().session(sessionId);
+  if (!session) {
+    throw new Error(`Session '${sessionId}' not found`);
+  }
+  return path.resolve(session.workspace || process.cwd());
+}
+
+function resolveToAbs(filePath: string, sessionId = ''): string {
+  return resolveWorkspacePath(workspaceRootForSession(sessionId), filePath);
+}
+
+function sendWorkspaceError(err: unknown, res: ServerResponse, sendJson: SendJson, fallback: string): void {
+  if (err instanceof Error && err.message === 'Path escapes workspace root') {
+    sendJson(res, 403, { error: 'Forbidden', message: err.message });
+    return;
+  }
+  if (err instanceof Error && /^Session '.+' not found$/.test(err.message)) {
+    sendJson(res, 404, { error: 'Not Found', message: err.message });
+    return;
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  sendJson(res, 500, { error: fallback, message });
+}
+
+function isPlainFileName(name: string): boolean {
+  return !!name && name !== '.' && name !== '..' && !name.includes('/') && !name.includes('\\');
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('Operation timed out')), ms)),
+  ]);
+}
 
 /** Load .gitignore patterns from workspace root */
 function loadGitignore(workspaceRoot: string): string[] {
@@ -43,22 +100,36 @@ function loadGitignore(workspaceRoot: string): string[] {
   }
 }
 
-/** Check if relative path matches .gitignore patterns */
+/** Check if relative path matches root .gitignore patterns used by the file tree. */
 function isGitignored(relPath: string, isDir: boolean, patterns: string[]): boolean {
-  for (const pattern of patterns) {
-    // Normalize pattern: strip trailing /
-    const pat = pattern.replace(/\/$/, '');
-    // Directory-only pattern
-    if (pattern.endsWith('/') && !isDir) continue;
+  const rel = relPath.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '');
+  if (!rel) return false;
 
-    // Exact match
-    if (relPath === pat || relPath.startsWith(pat + '/')) return true;
+  const segments = rel.split('/').filter(Boolean);
+  const matchOptions = { dot: true, nocase: process.platform === 'win32' };
 
-    // Wildcard match (basic — handle node_modules/, *.log, dist/, etc.)
-    if (pat.includes('*')) {
-      const regex = new RegExp('^' + pat.replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]') + '(/.*)?$');
-      if (regex.test(relPath)) return true;
+  for (const rawPattern of patterns) {
+    const pattern = rawPattern.replace(/\\/g, '/').replace(/^\/+/, '');
+    const directoryOnly = pattern.endsWith('/');
+    const pat = pattern.replace(/\/+$/, '');
+    if (!pat) continue;
+
+    if (!pat.includes('/')) {
+      for (let i = 0; i < segments.length; i++) {
+        if (!micromatch.isMatch(segments[i], pat, matchOptions)) continue;
+        if (!directoryOnly || i < segments.length - 1 || isDir) return true;
+      }
+      continue;
     }
+
+    if (micromatch.isMatch(rel, pat, matchOptions)) {
+      if (!directoryOnly || isDir) return true;
+    }
+
+    if (directoryOnly && micromatch.isMatch(rel, `${pat}/**`, matchOptions)) {
+      return true;
+    }
+
   }
   return false;
 }
@@ -69,33 +140,24 @@ function isGitignored(relPath: string, isDir: boolean, patterns: string[]): bool
 
 /** GET /api/v1/workspace/browse — List workspace directory contents */
 export async function handleBrowseWorkspace(
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
+  req: IncomingMessage,
+  res: ServerResponse,
   sendJson: SendJson,
   host: string,
   port: number,
 ): Promise<void> {
   try {
-    const url = new URL(req.url || '/', `http://${host}:${port}`);
+    const baseUrl = 'http://' + host + ':' + port;
+    const url = new URL(req.url || '/', baseUrl);
     const sessionId = url.searchParams.get('sessionId') || '';
     const browsePath = url.searchParams.get('path') || '/';
 
-    // Get workspace root from session
-    const sessionManager = SessionManager.getInstance();
-    let workspaceRoot = process.cwd();
-    if (sessionId) {
-      const session = sessionManager.session(sessionId);
-      if (session && session.workspace) {
-        workspaceRoot = path.resolve(session.workspace);
-      }
-    }
+    const workspaceRoot = workspaceRootForSession(sessionId);
 
-    const absPath = path.resolve(workspaceRoot, browsePath.replace(/^\//, ''));
-    // Security: ensure path doesn't escape workspace root
-    if (!absPath.startsWith(path.resolve(workspaceRoot))) {
-      sendJson(res, 403, { error: 'Forbidden', message: 'Path escapes workspace root' });
-      return;
-    }
+    let absPath: string;
+    try { absPath = resolveWorkspacePath(workspaceRoot, browsePath); }
+    catch { sendJson(res, 403, { error: 'Forbidden', message: 'Path escapes workspace root' }); return; }
+
     if (!fs.existsSync(absPath)) {
       sendJson(res, 404, { error: 'Not Found', message: `Path '${browsePath}' not found` });
       return;
@@ -151,21 +213,21 @@ export async function handleBrowseWorkspace(
 
     sendJson(res, 200, { path: browsePath, workspaceRoot, nodes });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    sendJson(res, 500, { error: 'Browse failed', message });
+    sendWorkspaceError(err, res, sendJson, 'Browse failed');
   }
 }
 
 /** GET /api/v1/workspace/read — Read file contents */
 export async function handleReadWorkspaceFile(
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
+  req: IncomingMessage,
+  res: ServerResponse,
   sendJson: SendJson,
   host: string,
   port: number,
 ): Promise<void> {
   try {
-    const url = new URL(req.url || '/', `http://${host}:${port}`);
+    const baseUrl = 'http://' + host + ':' + port;
+    const url = new URL(req.url || '/', baseUrl);
     const sessionId = url.searchParams.get('sessionId') || '';
     const filePath = url.searchParams.get('path') || '';
 
@@ -174,22 +236,12 @@ export async function handleReadWorkspaceFile(
       return;
     }
 
-    // Get workspace root from session
-    const sessionManager = SessionManager.getInstance();
-    let workspaceRoot = process.cwd();
-    if (sessionId) {
-      const session = sessionManager.session(sessionId);
-      if (session && session.workspace) {
-        workspaceRoot = path.resolve(session.workspace);
-      }
-    }
+    const workspaceRoot = workspaceRootForSession(sessionId);
 
-    const absPath = path.resolve(workspaceRoot, filePath.replace(/^\//, ''));
-    // Security: ensure path doesn't escape workspace root
-    if (!absPath.startsWith(path.resolve(workspaceRoot))) {
-      sendJson(res, 403, { error: 'Forbidden', message: 'Path escapes workspace root' });
-      return;
-    }
+    let absPath: string;
+    try { absPath = resolveWorkspacePath(workspaceRoot, filePath); }
+    catch { sendJson(res, 403, { error: 'Forbidden', message: 'Path escapes workspace root' }); return; }
+
     if (!fs.existsSync(absPath)) {
       sendJson(res, 404, { error: 'Not Found', message: `File '${filePath}' not found` });
       return;
@@ -238,28 +290,33 @@ export async function handleReadWorkspaceFile(
       modifiedAt: stat.mtime.toISOString(),
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    sendJson(res, 500, { error: 'Read failed', message });
+    sendWorkspaceError(err, res, sendJson, 'Read failed');
   }
 }
 
 /** POST /api/v1/workspace/create-dir — Create directory */
 export async function handleCreateWorkspaceDir(
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
+  req: IncomingMessage,
+  res: ServerResponse,
   sendJson: SendJson,
   readBody: ReadBody,
 ): Promise<void> {
   if (!requireWsAny(res, sendJson)) return;
   try {
     const body = await readBody(req);
+    const sessionId = String(body.sessionId || '');
     const parentPath = String(body.path || '/');
 
     const dirName = typeof body.name === 'string' && body.name.trim()
       ? body.name.trim()
       : null;
 
-    const absParentPath = resolveToAbs(parentPath);
+    if (dirName && !isPlainFileName(dirName)) {
+      sendJson(res, 400, { error: 'Bad Request', message: 'Invalid directory name' });
+      return;
+    }
+
+    const absParentPath = resolveToAbs(parentPath, sessionId);
     const absPath = dirName
       ? path.join(absParentPath, dirName)
       : absParentPath;
@@ -276,16 +333,15 @@ export async function handleCreateWorkspaceDir(
       : parentPath;
     sendJson(res, 200, { path: relPath, created: true });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    sendJson(res, 500, { error: 'Create dir failed', message });
+    sendWorkspaceError(err, res, sendJson, 'Create directory failed');
   }
 }
 
 /** PATCH /api/v1/sessions/:id/bind-workspace — Bind workspace path */
 export async function handleBindWorkspace(
   sessionId: string,
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
+  req: IncomingMessage,
+  res: ServerResponse,
   sendJson: SendJson,
   readBody: ReadBody,
 ): Promise<void> {
@@ -342,28 +398,21 @@ export async function handleBindWorkspace(
 }
 
 // ---------------------------------------------------------------------------
-// Path helper — resolve relative/absolute path to an absolute fs path
-// ---------------------------------------------------------------------------
-
-function resolveToAbs(filePath: string): string {
-  return path.resolve(process.cwd(), filePath);
-}
-
-// ---------------------------------------------------------------------------
 // Mutation handlers
 // ---------------------------------------------------------------------------
 
 /** DELETE /api/v1/workspace/file — Delete a file or directory */
 export async function handleDeleteWorkspaceFile(
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
+  req: IncomingMessage,
+  res: ServerResponse,
   sendJson: SendJson,
   host: string,
   port: number,
 ): Promise<void> {
   if (!requireWsAny(res, sendJson)) return;
   try {
-    const url = new URL(req.url || '/', `http://${host}:${port}`);
+    const baseUrl = 'http://' + host + ':' + port;
+    const url = new URL(req.url || '/', baseUrl);
     const sessionId = url.searchParams.get('sessionId') || '';
     const filePath = url.searchParams.get('path') || '';
 
@@ -372,7 +421,7 @@ export async function handleDeleteWorkspaceFile(
       return;
     }
 
-    const absPath = resolveToAbs(filePath);
+    const absPath = resolveToAbs(filePath, sessionId);
 
     if (!fs.existsSync(absPath)) {
       sendJson(res, 404, { error: 'Not Found', message: `Path '${filePath}' not found` });
@@ -389,21 +438,21 @@ export async function handleDeleteWorkspaceFile(
     const fileName = path.basename(absPath);
     sendJson(res, 200, { path: filePath, deleted: true, name: fileName });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    sendJson(res, 500, { error: 'Delete failed', message });
+    sendWorkspaceError(err, res, sendJson, 'Delete failed');
   }
 }
 
 /** PATCH /api/v1/workspace/rename — Rename a file or directory */
 export async function handleRenameWorkspaceFile(
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
+  req: IncomingMessage,
+  res: ServerResponse,
   sendJson: SendJson,
   readBody: ReadBody,
 ): Promise<void> {
   if (!requireWsAny(res, sendJson)) return;
   try {
     const body = await readBody(req);
+    const sessionId = String(body.sessionId || '');
     const oldPath = String(body.path || '');
     const newName = String(body.newName || '');
 
@@ -411,12 +460,12 @@ export async function handleRenameWorkspaceFile(
       sendJson(res, 400, { error: 'Bad Request', message: 'Missing "path" field' });
       return;
     }
-    if (!newName || newName.includes('/') || newName.includes('\\')) {
+    if (!isPlainFileName(newName)) {
       sendJson(res, 400, { error: 'Bad Request', message: 'Invalid new name — must be a plain file/dir name with no slashes' });
       return;
     }
 
-    const absPath = resolveToAbs(oldPath);
+    const absPath = resolveToAbs(oldPath, sessionId);
 
     if (!fs.existsSync(absPath)) {
       sendJson(res, 404, { error: 'Not Found', message: `Path '${oldPath}' not found` });
@@ -440,30 +489,30 @@ export async function handleRenameWorkspaceFile(
 
     sendJson(res, 200, { oldPath, newPath: newRelPath, newName, renamed: true });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    sendJson(res, 500, { error: 'Rename failed', message });
+    sendWorkspaceError(err, res, sendJson, 'Rename failed');
   }
 }
 
 /** POST /api/v1/workspace/create-file — Create a new empty file */
 export async function handleCreateWorkspaceFile(
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
+  req: IncomingMessage,
+  res: ServerResponse,
   sendJson: SendJson,
   readBody: ReadBody,
 ): Promise<void> {
   if (!requireWsAny(res, sendJson)) return;
   try {
     const body = await readBody(req);
+    const sessionId = String(body.sessionId || '');
     const parentPath = String(body.path || '/');
     const fileName = String(body.name || '');
 
-    if (!fileName || fileName.includes('/') || fileName.includes('\\')) {
+    if (!isPlainFileName(fileName)) {
       sendJson(res, 400, { error: 'Bad Request', message: 'Invalid file name' });
       return;
     }
 
-    const absParentPath = resolveToAbs(parentPath);
+    const absParentPath = resolveToAbs(parentPath, sessionId);
 
     const absPath = path.join(absParentPath, fileName);
 
@@ -489,21 +538,21 @@ export async function handleCreateWorkspaceFile(
       modifiedAt: stat.mtime.toISOString(),
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    sendJson(res, 500, { error: 'Create file failed', message });
+    sendWorkspaceError(err, res, sendJson, 'Create file failed');
   }
 }
 
 /** POST /api/v1/workspace/move — Move/rename a file or directory (cut-paste or drag-drop) */
 export async function handleMoveWorkspaceFile(
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
+  req: IncomingMessage,
+  res: ServerResponse,
   sendJson: SendJson,
   readBody: ReadBody,
 ): Promise<void> {
   if (!requireWsAny(res, sendJson)) return;
   try {
     const body = await readBody(req);
+    const sessionId = String(body.sessionId || '');
     const sourcePath = String(body.source || '');
     const destDir = String(body.destDir || '');
 
@@ -516,8 +565,8 @@ export async function handleMoveWorkspaceFile(
       return;
     }
 
-    const srcAbsPath = resolveToAbs(sourcePath);
-    const dstAbsDir = resolveToAbs(destDir);
+    const srcAbsPath = resolveToAbs(sourcePath, sessionId);
+    const dstAbsDir = resolveToAbs(destDir, sessionId);
 
     if (!fs.existsSync(srcAbsPath)) {
       sendJson(res, 404, { error: 'Not Found', message: `Source '${sourcePath}' not found` });
@@ -538,7 +587,8 @@ export async function handleMoveWorkspaceFile(
     }
 
     // Don't allow moving a directory into itself
-    if (destAbsPath.startsWith(srcAbsPath + path.sep)) {
+    const moveRelative = path.relative(srcAbsPath, destAbsPath);
+    if (moveRelative && !moveRelative.startsWith('..') && !path.isAbsolute(moveRelative)) {
       sendJson(res, 400, { error: 'Bad Request', message: 'Cannot move a directory into itself' });
       return;
     }
@@ -556,15 +606,14 @@ export async function handleMoveWorkspaceFile(
       moved: true,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    sendJson(res, 500, { error: 'Move failed', message });
+    sendWorkspaceError(err, res, sendJson, 'Move failed');
   }
 }
 
 /** GET /api/v1/sessions/:id/workspace — Get current workspace path */
 export function handleGetWorkspace(
   sessionId: string,
-  res: http.ServerResponse,
+  res: ServerResponse,
   sendJson: SendJson,
 ): void {
   const session = SessionManager.getInstance().session(sessionId);
@@ -581,14 +630,15 @@ export function handleGetWorkspace(
 
 /** PUT /api/v1/workspace/write — Write content to a file (create or overwrite) */
 export async function handleWriteWorkspaceFile(
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
+  req: IncomingMessage,
+  res: ServerResponse,
   sendJson: SendJson,
   readBody: ReadBody,
 ): Promise<void> {
   if (!requireWsAny(res, sendJson)) return;
   try {
     const body = await readBody(req);
+    const sessionId = String(body.sessionId || '');
     const filePath = String(body.path || '');
     const content = String(body.content || '');
 
@@ -597,7 +647,7 @@ export async function handleWriteWorkspaceFile(
       return;
     }
 
-    const absPath = resolveToAbs(filePath);
+    const absPath = resolveToAbs(filePath, sessionId);
     const parentDir = path.dirname(absPath);
 
     if (!fs.existsSync(parentDir)) {
@@ -614,8 +664,7 @@ export async function handleWriteWorkspaceFile(
       modifiedAt: stat.mtime.toISOString(),
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    sendJson(res, 500, { error: 'Write failed', message });
+    sendWorkspaceError(err, res, sendJson, 'Write failed');
   }
 }
 
@@ -755,14 +804,15 @@ function extractXmlText(xml: Buffer): string {
  * @param port - Server port.
  */
 export async function handleConvertOffice(
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
+  req: IncomingMessage,
+  res: ServerResponse,
   sendJson: SendJson,
   host: string,
   port: number,
 ): Promise<void> {
   try {
-    const url = new URL(req.url || '/', `http://${host}:${port}`);
+    const baseUrl = 'http://' + host + ':' + port;
+    const url = new URL(req.url || '/', baseUrl);
     const sessionId = url.searchParams.get('sessionId') || '';
     const filePath = url.searchParams.get('path') || '';
 
@@ -772,17 +822,11 @@ export async function handleConvertOffice(
     }
 
     // Resolve path
-    const sessionManager = SessionManager.getInstance();
-    let workspaceRoot = process.cwd();
-    if (sessionId) {
-      const session = sessionManager.session(sessionId);
-      if (session && session.workspace) workspaceRoot = path.resolve(session.workspace);
-    }
-    const absPath = path.resolve(workspaceRoot, filePath.replace(/^\//, ''));
-    if (!absPath.startsWith(path.resolve(workspaceRoot))) {
-      sendJson(res, 403, { error: 'Forbidden', message: 'Path escapes workspace' });
-      return;
-    }
+    const workspaceRoot = workspaceRootForSession(sessionId);
+    let absPath: string;
+    try { absPath = resolveWorkspacePath(workspaceRoot, filePath); }
+    catch { sendJson(res, 403, { error: 'Forbidden', message: 'Path escapes workspace' }); return; }
+
     if (!fs.existsSync(absPath)) {
       sendJson(res, 404, { error: 'Not Found' });
       return;

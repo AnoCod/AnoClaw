@@ -1,4 +1,4 @@
-// MemoryRecallTool.ts — fetch full memory content by index or ID
+// MemoryRecallTool.ts - fetch full memory content by index or ID
 // Part of the progressive disclosure pattern: Section shows index, agent recalls details on demand.
 
 import { Tool, RiskLevel } from '../Tool.js';
@@ -15,7 +15,7 @@ export class MemoryRecallTool extends Tool {
   name(): string { return 'memory_recall'; }
 
   description(): string {
-    return 'Retrieve the full content of a specific memory entry, identified by index number or name. Use this instead of MemorySearch when you already know which entry you want and just need its details. The Memory section in the system prompt shows an indexed list — call this with the index number to get the full content.';
+    return 'Retrieve the full content of a specific memory entry, identified by index number or name. Use this instead of MemorySearch when you already know which entry you want and just need its details. The Memory section in the system prompt shows an indexed list - call this with the index number to get the full content.';
   }
 
   prompt(): string {
@@ -38,6 +38,8 @@ export class MemoryRecallTool extends Tool {
   }
 
   riskLevel(): RiskLevel { return RiskLevel.Safe; }
+
+  isReadOnly(): boolean { return true; }
 
   async execute(params: Record<string, unknown>, ctx: ExecutionContext): Promise<ToolResult> {
     const id = String(params.id || '');

@@ -1,17 +1,16 @@
-// SessionGuidanceSection — session type + level guidance from SessionManager
 import { SystemPromptSection, PromptContext } from '../PromptSection.js';
 import { SessionManager } from '../../session/index.js';
-
 
 export const sectionMeta = {
   name: 'sessionguidance',
   type: 'dynamic' as const,
   priority: 90,
 };
+
 export function createSessionGuidanceSection(): SystemPromptSection {
   return {
     name: 'SessionGuidance',
-    cacheBreak: false, // Session type/level doesn't change mid-session
+    cacheBreak: false,
     compute: (ctx: PromptContext) => {
       const session = SessionManager.getInstance().session(ctx.sessionId);
       const isMain = !session || session.type === 'Main';
@@ -19,30 +18,36 @@ export function createSessionGuidanceSection(): SystemPromptSection {
       const sessionType = session?.type || 'Main';
       const parentId = session?.parentSessionId || 'none';
 
-      return [
-        '# Session guidance',
+      const lines = [
+        '# Session Guidance',
         '',
-        `You are currently in session "${ctx.sessionId}", which is a ${sessionType.toLowerCase()} session at level ${level}.`,
+        `Session: ${ctx.sessionId}`,
+        `Type: ${sessionType}`,
+        `Level: ${level}`,
         `Parent session: ${parentId}`,
         '',
-        isMain
-          ? [
-              '- This is a main session (level 0): You are speaking directly with the user.',
-              '  Understand their intent and decide how best to deliver the outcome. You can',
-              '  handle tasks directly, or decompose and delegate to your team via TaskAssign',
-              '  or SubAgentSpawn when that produces a better result. Choose the approach that',
-              '  fits the task — not every request needs delegation.',
-            ].join('\n')
-          : [
-              '- This is a sub-session: You are communicating with another agent. Execute',
-              '  the assigned task efficiently. Report results back through the session chain.',
-            ].join('\n'),
+      ];
+
+      if (isMain) {
+        lines.push(
+          'You are speaking directly with the human user.',
+          'Own intent clarification, final answer quality, and integration of delegated work.',
+          'Delegate only when it improves quality, parallelism, specialist depth, or context separation.',
+        );
+      } else {
+        lines.push(
+          'You are in an agent-to-agent sub-session.',
+          'The immediate user message is your assignment from your parent agent.',
+          'Execute efficiently, verify, and report results back through this session.',
+        );
+      }
+
+      lines.push(
         '',
-        'You have access to HireEmployee/ListEmployees/UpdateOrg for managing your organizational',
-        'chart, TaskAssign for assigning work to permanent team members, SubAgentSpawn for',
-        'one-off helpers, AgentMessage (downward only) for real-time coordination with subordinates,',
-        'TaskList/TaskOutput for tracking delegated work status, and TaskStop to cancel running tasks.',
-      ].join('\n');
+        'Coordination tools: TaskAssign starts durable child work; AgentMessage updates active child work; TaskList and TaskOutput inspect delegated task status; TaskStop cancels running tasks.',
+      );
+
+      return lines.join('\n');
     },
   };
 }

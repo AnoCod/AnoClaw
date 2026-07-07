@@ -1,20 +1,22 @@
-// AnoClaw Cinema — AgentMessageDelegate: editorial AI reply block
-// Left 1px bar, full markdown body with syntax highlighting + images.
-// Footer includes StarRating widget for quality feedback.
-// Star ratings are suppressed for system notifications — interrupt messages,
-// halt markers ("Halted."), and ultra-short content — to avoid prompting
-// the user to rate non-substantive system output.
+/**
+ * AgentMessageDelegate — editorial AI reply block.
+ * Left 1px bar, full markdown body with syntax highlighting + images.
+ * Footer includes StarRating widget for quality feedback.
+ * Star ratings are suppressed for system notifications — interrupt messages,
+ * halt markers ("Halted."), and ultra-short content — to avoid prompting
+ * the user to rate non-substantive system output.
+ */
 
-import type { Message } from '../types.js';
+import type { ConversationMessage } from '../types.js';
 import { renderMarkdown } from '../../../MarkdownRenderer.js';
 import { StarRating } from '../../evolution/StarRating.js';
 import { App } from '../../../app.js';
 
 export class AgentMessageDelegate {
   element: HTMLElement;
-  private _msg: Message;
+  private _msg: ConversationMessage;
 
-  constructor(msg: Message) {
+  constructor(msg: ConversationMessage) {
     this._msg = msg;
     this.element = this.render();
   }
@@ -47,10 +49,12 @@ export class AgentMessageDelegate {
       const footer = document.createElement('div');
       footer.className = 'star-rating__footer';
       const app = App.getInstance();
+      const sessionId = this._msg.sessionId || app.sessionVM.activeSession?.id || '';
+      const sessionAgentId = sessionId ? app.sessionVM.sessions.getById(sessionId)?.agentId : '';
       const starRating = new StarRating(footer, {
         messageId: this._msg.id || `msg-${Date.now()}`,
-        sessionId: app.sessionVM.activeSession?.id || '',
-        agentId: this._msg.agentId || '',
+        sessionId,
+        agentId: this._msg.agentId || sessionAgentId || '',
         turnNumber: 0,
       });
       // Wire star-click → quality-score WS message

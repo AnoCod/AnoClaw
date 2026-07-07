@@ -1,4 +1,4 @@
-// WebFetchTool — fetches content from a URL and processes it
+// WebFetchTool - fetches content from a URL and processes it
 // Strips HTML tags, scripts, styles to produce readable text.
 // Includes a 15-minute cache to avoid repeated fetches.
 // RiskLevel: Low (network request, no filesystem effects).
@@ -16,8 +16,23 @@ const MAX_CONTENT_LENGTH = 15000;
 /** Cache TTL in milliseconds (15 minutes). */
 const CACHE_TTL_MS = 15 * 60 * 1000;
 
-/** Simple in-memory cache: URL → { content, timestamp }. */
+/** Simple in-memory cache: URL to { content, timestamp }. */
 const _fetchCache = new Map<string, { content: string; timestamp: number }>();
+
+/** Time-bucketed eviction: entries grouped by coarse 5-minute buckets for O(1) expiration. */
+const _cacheBuckets = new Map<number, Set<string>>();
+const BUCKET_MS = 5 * 60 * 1000; // 5-minute buckets
+
+function _addToCache(key: string, value: { content: string; timestamp: number }): void {
+  _fetchCache.set(key, value);
+  const bucket = Math.floor(value.timestamp / BUCKET_MS);
+  let keys = _cacheBuckets.get(bucket);
+  if (!keys) {
+    keys = new Set();
+    _cacheBuckets.set(bucket, keys);
+  }
+  keys.add(key);
+}
 
 export class WebFetchTool extends Tool {
 
@@ -36,7 +51,7 @@ export class WebFetchTool extends Tool {
       'Fetch and read a web page. HTML is converted to markdown for readability.\n\n' +
       '**Caching:** Results are cached for 15 minutes. Repeated fetches of the same URL within that window return instantly.\n\n' +
       '**Limitations:** Authenticated URLs (Google Docs, Confluence, GitHub private repos) WILL FAIL. Use specialized MCP tools for authenticated services instead. HTTP is auto-upgraded to HTTPS.\n\n' +
-      '**Use the `prompt` parameter** to extract specific information from the page — don\'t just dump the raw content.';
+      '**Use the `prompt` parameter** to extract specific information from the page - don\'t just dump the raw content.';
   }
 
   parametersSchema(): Record<string, unknown> {
@@ -78,7 +93,11 @@ export class WebFetchTool extends Tool {
   }
 
   defaultTimeoutMs(): number {
-    return 30000;
+    return 90000;
+  }
+
+  outputLimit(): number {
+    return 15000; // WebFetch results can be large
   }
 
   async execute(
@@ -130,7 +149,7 @@ export class WebFetchTool extends Tool {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
 
       // Also abort when user interjects (external signal from InterruptController)
       if (ctx.signal) {
@@ -141,7 +160,7 @@ export class WebFetchTool extends Tool {
         }
       }
 
-      const response = await webFetch(url.href, { signal: controller.signal });
+      const response = await fetchWithRetry(url.href, { signal: controller.signal });
       clearTimeout(timeoutId);
 
       if (!response.ok) {
@@ -166,15 +185,10 @@ export class WebFetchTool extends Tool {
         text = await response.text();
       }
 
-      // Truncate if needed
       const wasTruncated = text.length > MAX_CONTENT_LENGTH;
-      if (wasTruncated) {
-        text = text.slice(0, MAX_CONTENT_LENGTH) +
-          '\n... [truncated, content too large]';
-      }
 
       // Cache the result
-      _fetchCache.set(url.href, { content: text, timestamp: Date.now() });
+      _addToCache(url.href, { content: text, timestamp: Date.now() });
 
       return this.makeResult(
         `[${url.href}]\n\n${text}`,
@@ -211,6 +225,32 @@ export class WebFetchTool extends Tool {
   }
 }
 
+/** Retry wrapper: up to 3 attempts with exponential backoff. */
+async function fetchWithRetry(
+  url: string,
+  opts: { signal: AbortSignal },
+): ReturnType<typeof webFetch> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      if (opts.signal.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+      }
+      return await webFetch(url, opts);
+    } catch (err: unknown) {
+      lastErr = err;
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        throw err; // Don't retry user-initiated cancels
+      }
+      if (attempt < 2) {
+        // Exponential backoff: 1s, 2s
+        await new Promise((r) => setTimeout(r, 1000 * (1 << attempt)));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 /** Strip HTML tags, scripts, styles, and common noisy elements. */
 function stripHtml(html: string): string {
   return html
@@ -230,12 +270,17 @@ function stripHtml(html: string): string {
     .trim();
 }
 
-/** Remove stale cache entries (older than 15 minutes). */
+/** Remove stale cache entries using time-bucketed eviction (O(buckets) not O(entries)). */
 function cleanCache(): void {
   const now = Date.now();
-  for (const [key, entry] of _fetchCache) {
-    if (now - entry.timestamp > CACHE_TTL_MS) {
-      _fetchCache.delete(key);
+  const expireBefore = now - CACHE_TTL_MS;
+  const expireBucket = Math.floor(expireBefore / BUCKET_MS);
+  for (const [bucket, keys] of _cacheBuckets) {
+    if (bucket <= expireBucket) {
+      for (const key of keys) {
+        _fetchCache.delete(key);
+      }
+      _cacheBuckets.delete(bucket);
     }
   }
 }
@@ -346,7 +391,7 @@ async function isInternalHostname(hostname: string): Promise<boolean> {
     }
     return false;
   } catch {
-    // DNS resolution failed — allow the fetch (may still fail downstream)
+    // DNS resolution failed - allow the fetch (may still fail downstream)
     return false;
   }
 }

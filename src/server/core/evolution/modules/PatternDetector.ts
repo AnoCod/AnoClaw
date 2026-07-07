@@ -1,9 +1,9 @@
 /**
  * PatternDetector — M1: detect repeated tool call sequences across sessions.
  *
- * Normalizes tool call sequences into canonical signatures (sorted parameter names)
- * so the same pattern from different sessions or with slightly different params
- * is recognized as the same. Stores patterns in EvolutionStore for persistence.
+ * Normalizes tool call sequences into canonical signatures by tool name only.
+ * Same tool-name sequence from different sessions or with different params
+ * is recognized as the same pattern. Stores patterns in EvolutionStore for persistence.
  *
  * Threshold for triggering skill creation: count >= 3
  * Threshold for re-evaluation: count >= 5 and skill already exists

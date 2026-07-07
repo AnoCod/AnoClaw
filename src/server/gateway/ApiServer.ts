@@ -18,27 +18,11 @@ import { LogManager } from '../infra/logging/LogManager.js';
 import type { RouteHandler, RouteMatch } from './RouteHandler.js';
 import { matchRoute } from './RouteHandler.js';
 
-// Route groups
-import { MemoryRoutes } from './routes/MemoryRoutes.js';
-
-// Extracted handler functions
+// Extracted handler functions (only those still used by legacy route() branches)
 import {
-  handleListSessions, handleCreateSession, handleGetSession, handleArchiveSession,
-  handleClearAllSessions, handleRenameSession, handleAutoTitle, handleSessionMessages,
-  handleSendMessage, handleSessionToolStats, handleGlobalToolStats, handleSearchSessions,
-  handleGetOverview,
+  handleSessionMessages,
+  handleSendMessage,
 } from './handlers/SessionHandlers.js';
-import {
-  handleListAgents, handleGetAgent, handleCreateAgent, handleUpdateAgent, handleDeleteAgent,
-  handleAgentStatus,
-} from './handlers/AgentHandlers.js';
-import { handleInlineSuggest } from './handlers/InlineSuggestHandler.js';
-import {
-  handleHealth, handleStats, handleGetLogEntries, handleOpenFile,
-} from './handlers/SystemHandlers.js';
-import {
-  handleListTools, handleListCommands,
-} from './handlers/ToolHandlers.js';
 
 // ── Types ──
 
@@ -63,6 +47,64 @@ const INTERNAL_TOKEN: ApiToken = {
   lastUsedAt: null,
 };
 
+/** Same-host browser UI calls are trusted, but cross-origin localhost requests are not. */
+const LOCAL_UI_TOKEN: ApiToken = {
+  token: '__local_ui__',
+  name: 'Local UI Call',
+  permissions: Object.values(ApiPermission),
+  createdAt: '',
+  lastUsedAt: null,
+};
+
+function isLoopbackAddress(addr: string): boolean {
+  return addr.startsWith('127.') || addr === '::1' || addr === '::ffff:127.0.0.1';
+}
+
+function isAllowedLocalOrigin(origin: string | undefined, host: string, port: number): boolean {
+  if (!origin) return true;
+  if (origin === 'null') return false;
+  try {
+    const parsed = new URL(origin);
+    const hostname = parsed.hostname.toLowerCase();
+    const originPort = parsed.port ? Number(parsed.port) : (parsed.protocol === 'https:' ? 443 : 80);
+    const allowedHosts = new Set(['localhost', '127.0.0.1', '::1', host.toLowerCase()]);
+    const allowedPorts = new Set([port, 3456]);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+      && allowedHosts.has(hostname)
+      && allowedPorts.has(originPort);
+  } catch {
+    return false;
+  }
+}
+
+function parsePositiveLimit(value: string | null, fallback: number, max: number): number {
+  if (!value) return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(1, Math.min(max, Math.floor(parsed)));
+}
+
+function titleCaseSegment(segment: string): string {
+  return segment
+    .replace(/^:/, '')
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ') || 'System';
+}
+
+function inferEndpointCategory(pathname: string): string {
+  const parts = pathname.split('/').filter(Boolean);
+  const resource = parts[2] || parts[1] || 'system';
+  return titleCaseSegment(resource);
+}
+
+function fallbackEndpointDescription(method: string, pathname: string): string {
+  const parts = pathname.split('/').filter(Boolean).slice(2);
+  const resource = parts.filter((part) => !part.startsWith(':')).map(titleCaseSegment).join(' ');
+  return `${method.toUpperCase()} ${resource || pathname}`;
+}
+
 // ── ApiServer ──
 
 export class ApiServer extends EventEmitter {
@@ -80,16 +122,14 @@ export class ApiServer extends EventEmitter {
   private globalRequestsPerMinute: number = 300;
 
   // Route handler modules
-  private _memoryRoutes?: MemoryRoutes;
   private _routeTable: RouteHandler[] = [];
   private _endpointRegistry: EndpointEntry[] = [];
 
   // Plugin HTTP routes
-  private _pluginRoutes: Array<{ pluginName: string; method: string; path: string; handler: string }> = [];
+  private _pluginRoutes: Array<{ pluginName: string; method: string; path: string; handler: string; permission?: string }> = [];
 
   private constructor() {
     super();
-    this._initEndpointRegistry();
   }
 
   static getInstance(): ApiServer {
@@ -103,123 +143,35 @@ export class ApiServer extends EventEmitter {
 
   registerRoute(handler: RouteHandler): void {
     this._routeTable.push(handler);
-    if (handler.description) {
-      this._endpointRegistry.push({
-        method: handler.method, path: handler.path,
-        description: handler.description, category: handler.category,
-      });
+    this._upsertEndpoint({
+      method: handler.method,
+      path: handler.path,
+      description: handler.description || fallbackEndpointDescription(handler.method, handler.path),
+      category: handler.category || inferEndpointCategory(handler.path),
+    });
+  }
+
+  /** Register non-declarative endpoints (not backed by RouteHandler) for discovery. */
+  registerNonDeclarativeEndpoint(method: string, path: string, description: string, category?: string): void {
+    this._upsertEndpoint({
+      method,
+      path,
+      description,
+      category: category || inferEndpointCategory(path),
+    });
+  }
+
+  private _upsertEndpoint(entry: EndpointEntry): void {
+    const method = entry.method.toUpperCase();
+    const existing = this._endpointRegistry.find((candidate) =>
+      candidate.method.toUpperCase() === method && candidate.path === entry.path
+    );
+    if (existing) {
+      existing.description = entry.description || existing.description;
+      existing.category = entry.category || existing.category;
+      return;
     }
-  }
-
-  registerEndpoint(method: string, path: string, description: string, category?: string): void {
-    this._endpointRegistry.push({ method, path, description, category });
-  }
-
-  private _initEndpointRegistry(): void {
-    const R = (m: string, p: string, d: string, c?: string) => this.registerEndpoint(m, p, d, c);
-
-    // System
-    R('GET', '/api/v1/health', 'Server health + version + uptime', 'System');
-    R('GET', '/api/v1/system/info', 'Process info: uptime, memory, agent/session counts', 'System');
-    R('GET', '/api/v1/stats', 'Global agent/session/memory stats', 'System');
-    R('GET', '/api/v1/logs/entries?count=200', 'Read recent log entries by category', 'System');
-    R('GET', '/api/v1/logs/search?q=...&limit=50', 'Search log entries by keyword', 'System');
-    R('PUT', '/api/v1/logs/level', 'Set minimum log level (body: { level })', 'System');
-    R('GET', '/api/v1/settings', 'Read full settings (hides apiKey)', 'System');
-    R('PUT', '/api/v1/settings/:key', 'Update a setting value (body: { value })', 'System');
-    R('GET', '/api/v1/settings/ui', 'Read UI settings', 'System');
-    R('PUT', '/api/v1/settings/ui', 'Update UI settings', 'System');
-    R('GET', '/api/v1/endpoints', 'Discover all API endpoints (this list)', 'System');
-    R('GET', '/api/v1/prompt/cache-stats', 'Prompt cache hit/miss statistics', 'System');
-    R('POST', '/api/v1/prompt/clear-cache', 'Clear all prompt caches', 'System');
-    R('GET', '/api/v1/prompt/sections', 'List registered prompt sections', 'System');
-    R('PUT', '/api/v1/prompt/custom-cli', 'Set runtime CustomCLI instructions (body: { instructions })', 'System');
-    R('GET', '/api/v1/ws/connections', 'List active WebSocket connections', 'System');
-    R('POST', '/api/v1/ws/broadcast', 'Broadcast message to all WS clients', 'System');
-
-    // Sessions
-    R('GET', '/api/v1/sessions', 'List all sessions', 'Sessions');
-    R('POST', '/api/v1/sessions', 'Create a new session', 'Sessions');
-    R('GET', '/api/v1/sessions/tree', 'Full session hierarchy tree', 'Sessions');
-    R('GET', '/api/v1/sessions/:id', 'Get session details', 'Sessions');
-    R('GET', '/api/v1/sessions/:id/tree', 'Session subtree', 'Sessions');
-    R('PATCH', '/api/v1/sessions/:id', 'Rename a session', 'Sessions');
-    R('DELETE', '/api/v1/sessions/:id', 'Archive a session', 'Sessions');
-    R('DELETE', '/api/v1/sessions/:id/permanent', 'Hard-delete session from disk', 'Sessions');
-    R('POST', '/api/v1/sessions/clear', 'Clear all sessions', 'Sessions');
-    R('POST', '/api/v1/sessions/gc', 'Garbage collect idle >90 day sessions', 'Sessions');
-    R('GET', '/api/v1/sessions/:id/messages', 'Read session message history', 'Sessions');
-    R('POST', '/api/v1/sessions/:id/messages', 'Send message (triggers Agent execution)', 'Sessions');
-    R('GET', '/api/v1/sessions/:id/overview', 'Session overview', 'Sessions');
-    R('POST', '/api/v1/sessions/:id/auto-title', 'Auto-generate session title via LLM', 'Sessions');
-    R('GET', '/api/v1/sessions/:id/tool-stats', 'Per-session tool usage stats', 'Sessions');
-    R('POST', '/api/v1/sessions/:id/interrupt', 'Interrupt a running session', 'Sessions');
-    R('GET', '/api/v1/sessions/:id/interrupt-status', 'Check interrupt status', 'Sessions');
-    R('GET', '/api/v1/sessions/:id/parent', 'Get parent session', 'Sessions');
-    R('GET', '/api/v1/sessions/:id/root', 'Get root (top-level) session', 'Sessions');
-    R('GET', '/api/v1/sessions/:id/background-tasks', 'Active background delegation tasks', 'Sessions');
-    R('PATCH', '/api/v1/sessions/:id/metadata', 'Set session metadata (body: { key, value })', 'Sessions');
-
-    // Search
-    R('GET', '/api/v1/search?q=...', 'Unified search: session messages + cross-session memories', 'Search');
-
-    // Agents
-    R('GET', '/api/v1/agents', 'List all agents', 'Agents');
-    R('GET', '/api/v1/agents/org-tree', 'Agent organization tree', 'Agents');
-    R('GET', '/api/v1/agents/:id', 'Get agent config', 'Agents');
-    R('GET', '/api/v1/agents/:id/status', 'Agent runtime status', 'Agents');
-    R('GET', '/api/v1/agents/:id/report-chain', 'Report chain up to CEO', 'Agents');
-    R('GET', '/api/v1/agents/:id/prompt?sessionId=...', 'Preview effective system prompt', 'Agents');
-    R('PATCH', '/api/v1/agents/:id', 'Update agent config', 'Agents');
-    R('PATCH', '/api/v1/agents/:id/state', 'Activate/destroy agent (body: { state })', 'Agents');
-    R('PATCH', '/api/v1/agents/:id/parent', 'Move agent in org tree (body: { parentAgentId, level })', 'Agents');
-    R('POST', '/api/v1/agents/reload', 'Reload all agent configs from disk', 'Agents');
-    R('GET', '/api/v1/agents-find?q=...', 'Fuzzy-find agent by ID or name', 'Agents');
-    R('GET', '/api/v1/agents-filtered?role=&parent=', 'List agents by role or parent filter', 'Agents');
-
-    // Tools
-    R('GET', '/api/v1/tools', 'List all registered tools', 'Tools');
-    R('GET', '/api/v1/tools/groups', 'List tools organized by group', 'Tools');
-    R('GET', '/api/v1/tools/:name', 'Get tool detail (params, risk, timeout)', 'Tools');
-    R('GET', '/api/v1/tools-for-agent/:agentId', 'Tools available to an agent (respects allowlist)', 'Tools');
-    R('POST', '/api/v1/tools/execute', 'Execute a tool directly', 'Tools');
-    R('GET', '/api/v1/commands', 'List slash commands', 'Tools');
-    R('GET', '/api/v1/tools/stats', 'Global tool call statistics', 'Tools');
-
-    // Skills
-    R('GET', '/api/v1/skills', 'List all loaded skills', 'Skills');
-    R('GET', '/api/v1/skills/:name', 'Get skill detail with full body', 'Skills');
-    R('GET', '/api/v1/skills/for-agent/:agentId', 'Skills available to an agent', 'Skills');
-    R('POST', '/api/v1/skills/reload', 'Reload all skills from disk', 'Skills');
-    R('POST', '/api/v1/skills/auto-generate', 'Auto-generate SKILL.md from transcript', 'Skills');
-
-    // Memory
-    R('GET', '/api/v1/memory', 'List all memory entries', 'Memory');
-    R('GET', '/api/v1/memory/search?q=...&scope=all&type=&agent=&limit=50', 'Fuzzy search memories with filters', 'Memory');
-    R('POST', '/api/v1/memory', 'Create a new memory entry', 'Memory');
-    R('PATCH', '/api/v1/memory/:id', 'Update a memory entry', 'Memory');
-    R('DELETE', '/api/v1/memory/:id', 'Delete a memory entry', 'Memory');
-    R('POST', '/api/v1/memory/extract', 'Auto-extract facts from text (body: { text, agentId })', 'Memory');
-
-    // Meetings, Workflows, MCP, Gateway — served by plugins via _dispatchPluginRoute()
-
-    // System utilities
-    R('POST', '/api/v1/system/open-file', 'Open file in OS file manager', 'System');
-
-    // Plugin management
-    R('GET', '/api/v1/plugins', 'List all plugins', 'Plugins');
-    R('GET', '/api/v1/plugins/:name', 'Plugin detail with tools', 'Plugins');
-    R('GET', '/api/v1/plugins/status', 'Plugin host worker health check', 'Plugins');
-    R('GET', '/api/v1/plugins/extensions', 'Extension point overrides', 'Plugins');
-    R('GET', '/api/v1/plugins/:name/storage', 'List storage keys', 'Plugins');
-    R('GET', '/api/v1/plugins/:name/storage/:key', 'Read storage value', 'Plugins');
-    R('PUT', '/api/v1/plugins/:name/storage/:key', 'Write storage value', 'Plugins');
-    R('GET', '/api/v1/plugins/:name/config', 'Read plugin config', 'Plugins');
-    R('PUT', '/api/v1/plugins/:name/config', 'Write plugin config', 'Plugins');
-    R('POST', '/api/v1/plugins/reload', 'Reload a plugin', 'Plugins');
-    R('POST', '/api/v1/plugins/install', 'Install plugin from URL', 'Plugins');
-    R('GET', '/api/v1/plugins/market', 'Plugin marketplace', 'Plugins');
-    R('DELETE', '/api/v1/plugins/:name', 'Uninstall plugin', 'Plugins');
+    this._endpointRegistry.push({ ...entry, method });
   }
 
   // ── Lifecycle ──
@@ -264,15 +216,23 @@ export class ApiServer extends EventEmitter {
     const pathname = url.pathname;
     this.emit('requestReceived', method, pathname);
 
-    if (method === 'OPTIONS') { this.sendCorsHeaders(res); res.writeHead(204); res.end(); return; }
-    this.sendCorsHeaders(res);
+    if (!isAllowedLocalOrigin(req.headers.origin, this.host, this.port)) {
+      this.sendCorsHeaders(req, res);
+      this.sendJson(res, 403, { error: 'Forbidden', message: 'Cross-origin localhost API requests are not allowed' });
+      return;
+    }
+
+    if (method === 'OPTIONS') { this.sendCorsHeaders(req, res); res.writeHead(204); res.end(); return; }
+    this.sendCorsHeaders(req, res);
 
     let token: ApiToken | null = null;
     if (pathname !== '/api/v1/health') {
-      const isLocalhost = (req.socket.remoteAddress || '').startsWith('127.') || (req.socket.remoteAddress || '') === '::1';
-      if (!isLocalhost) {
-        token = this._authenticate(req);
-        if (!token) { this.sendJson(res, 401, { error: 'Unauthorized', message: 'Invalid or missing Bearer token' }); return; }
+      const remoteAddress = req.socket.remoteAddress || '';
+      const isLocalhost = isLoopbackAddress(remoteAddress);
+      token = this._authenticate(req);
+      if (!token) {
+        if (isLocalhost) token = LOCAL_UI_TOKEN;
+        else { this.sendJson(res, 401, { error: 'Unauthorized', message: 'Invalid or missing Bearer token' }); return; }
       }
     }
 
@@ -290,86 +250,23 @@ export class ApiServer extends EventEmitter {
 
   private route(method: string, pathname: string, req: http.IncomingMessage, res: http.ServerResponse, token: ApiToken | null): void {
     const send = this.sendJson.bind(this);
-    const read = this.readBody.bind(this);
 
     // Declarative route table (first priority)
     if (this._dispatchRouteTable(method, pathname, req, res, token)) return;
 
-    // Health
-    if (pathname === '/api/v1/health' && method === 'GET') { handleHealth(res, send); return; }
-
     // Endpoint discovery
     if (pathname === '/api/v1/endpoints' && method === 'GET') {
-      send(res, 200, { endpoints: this._endpointRegistry, total: this._endpointRegistry.length } as unknown as Record<string, unknown>);
+      send(res, 200, this._discoverEndpoints(req) as unknown as Record<string, unknown>);
       return;
     }
 
-    // Stats
-    if (pathname === '/api/v1/stats' && method === 'GET') { this.requirePermission(token, ApiPermission.Admin); handleStats(res, send); return; }
-
-    // Logs
-    if (pathname === '/api/v1/logs/entries' && method === 'GET') { handleGetLogEntries(req, res, send, this.host, this.port); return; }
-
-    // Memory
-    if (!this._memoryRoutes) this._memoryRoutes = new MemoryRoutes(this);
-    if (this._memoryRoutes.handle(method, pathname, req, res, token)) return;
-
-    // Sessions collection
-    if (pathname === '/api/v1/sessions' && method === 'GET') { this.requirePermission(token, ApiPermission.SessionsRead); handleListSessions(req, res, send, this.host); return; }
-    if (pathname === '/api/v1/search' && method === 'GET') { this.requirePermission(token, ApiPermission.SessionsRead); handleSearchSessions(req, res, send); return; }
-    if (pathname === '/api/v1/sessions' && method === 'POST') { this.requirePermission(token, ApiPermission.SessionsWrite); handleCreateSession(req, res, send, read); return; }
-
-    // Session by ID — messages
+    // Session messages (legacy — /api/v1/sessions/:id/messages)
     const sessionMsgMatch = pathname.match(/^\/api\/v1\/sessions\/([a-zA-Z0-9_\-\.]+)\/messages$/);
     if (sessionMsgMatch && method === 'GET') { this.requirePermission(token, ApiPermission.MessagesRead); handleSessionMessages(sessionMsgMatch[1], res, send); return; }
-    if (sessionMsgMatch && method === 'POST') { this.requirePermission(token, ApiPermission.MessagesSend); handleSendMessage(sessionMsgMatch[1], req, res, send, read); return; }
-
-    // Session overview
-    const overviewMatch = pathname.match(/^\/api\/v1\/sessions\/([a-zA-Z0-9_\-\.]+)\/overview$/);
-    if (overviewMatch && method === 'GET') { this.requirePermission(token, ApiPermission.SessionsRead); handleGetOverview(overviewMatch[1], res, send); return; }
-
-    // Session tool stats
-    const toolStatsMatch = pathname.match(/^\/api\/v1\/sessions\/([a-zA-Z0-9_\-\.]+)\/tool-stats$/);
-    if (toolStatsMatch && method === 'GET') { this.requirePermission(token, ApiPermission.SessionsRead); handleSessionToolStats(toolStatsMatch[1], res, send); return; }
-
-    // Global tool stats
-    if (pathname === '/api/v1/tools/stats' && method === 'GET') { this.requirePermission(token, ApiPermission.SessionsRead); handleGlobalToolStats(res, send); return; }
-
-    // Session auto-title
-    const autoTitleMatch = pathname.match(/^\/api\/v1\/sessions\/([a-zA-Z0-9_\-\.]+)\/auto-title$/);
-    if (autoTitleMatch && method === 'POST') { this.requirePermission(token, ApiPermission.SessionsWrite); handleAutoTitle(autoTitleMatch[1], req, res, send, read); return; }
-
-    // Session by ID
-    const sessionByIdMatch = pathname.match(/^\/api\/v1\/sessions\/([a-zA-Z0-9_\-\.]+)$/);
-    if (sessionByIdMatch && method === 'GET') { this.requirePermission(token, ApiPermission.SessionsRead); handleGetSession(sessionByIdMatch[1], res, send); return; }
-    if (sessionByIdMatch && method === 'DELETE') { this.requirePermission(token, ApiPermission.SessionsWrite); handleArchiveSession(sessionByIdMatch[1], res, send); return; }
-    if (pathname === '/api/v1/sessions/clear' && method === 'POST') { this.requirePermission(token, ApiPermission.SessionsWrite); handleClearAllSessions(res, send); return; }
-    if (sessionByIdMatch && method === 'PATCH') { this.requirePermission(token, ApiPermission.SessionsWrite); handleRenameSession(sessionByIdMatch[1], req, res, send, read); return; }
-
-    // Tools
-    if (pathname === '/api/v1/tools' && method === 'GET') { handleListTools(res, send); return; }
-    if (pathname === '/api/v1/commands' && method === 'GET') { handleListCommands(res, send); return; }
-
-    // Agents
-    if (pathname === '/api/v1/agents' && method === 'GET') { this.requirePermission(token, ApiPermission.AgentsRead); handleListAgents(res, send); return; }
-    if (pathname === '/api/v1/agents' && method === 'POST') { this.requirePermission(token, ApiPermission.AgentsWrite); handleCreateAgent(req, res, send, read); return; }
-
-    const agentStatusMatch = pathname.match(/^\/api\/v1\/agents\/([a-zA-Z0-9_\-]+)\/status$/);
-    if (agentStatusMatch && method === 'GET') { this.requirePermission(token, ApiPermission.AgentsRead); handleAgentStatus(agentStatusMatch[1], res, send); return; }
-
-    const agentByIdMatch = pathname.match(/^\/api\/v1\/agents\/([a-zA-Z0-9_\-]+)$/);
-    if (agentByIdMatch && method === 'GET') { this.requirePermission(token, ApiPermission.AgentsRead); handleGetAgent(agentByIdMatch[1], res, send); return; }
-    if (agentByIdMatch && method === 'PATCH') { this.requirePermission(token, ApiPermission.AgentsWrite); handleUpdateAgent(agentByIdMatch[1], req, res, send, read); return; }
-    if (agentByIdMatch && method === 'DELETE') { this.requirePermission(token, ApiPermission.AgentsWrite); handleDeleteAgent(agentByIdMatch[1], req, res, send, this.host); return; }
+    if (sessionMsgMatch && method === 'POST') { this.requirePermission(token, ApiPermission.MessagesSend); handleSendMessage(sessionMsgMatch[1], req, res, send, this.readBody.bind(this)); return; }
 
     // Plugin routes
-    if (this._dispatchPluginRoute(method, pathname, req, res)) return;
-
-    // System utilities
-    if (pathname === '/api/v1/system/open-file' && method === 'POST') { handleOpenFile(req, res, send, read); return; }
-
-    // Inline code completion
-    if (pathname === '/api/v1/inline-suggest' && method === 'POST') { handleInlineSuggest(req, res, send, read); return; }
+    if (this._dispatchPluginRoute(method, pathname, req, res, token)) return;
 
     // 404
     send(res, 404, { error: 'Not Found', message: `No route for ${method} ${pathname}` });
@@ -382,7 +279,8 @@ export class ApiServer extends EventEmitter {
       if (handler.method !== method) continue;
       const match = matchRoute(handler.path, pathname);
       if (!match) continue;
-      if (handler.permission && token && !hasPermission(token, handler.permission as ApiPermission)) {
+      match.query = new URL(req.url || '/', `http://${this.host}:${this.port}`).searchParams;
+      if (handler.permission && (!token || !hasPermission(token, handler.permission as ApiPermission))) {
         this.sendJson(res, 403, { error: 'Forbidden', message: `Missing permission: ${handler.permission}` });
         return true;
       }
@@ -409,16 +307,62 @@ export class ApiServer extends EventEmitter {
 
   // ── Plugin HTTP route dispatch ──
 
-  registerPluginRoutes(pluginName: string, routes: Array<{ method: string; path: string; handler: string }>): void {
+  registerPluginRoutes(pluginName: string, routes: Array<{ method: string; path: string; handler: string; permission?: string }>): void {
     for (const r of routes) this._pluginRoutes.push({ pluginName, ...r });
     LogManager.getInstance().logger('anochat.api').info(`Plugin ${pluginName} registered ${routes.length} route(s)`);
   }
 
-  private _dispatchPluginRoute(method: string, pathname: string, req: http.IncomingMessage, res: http.ServerResponse): boolean {
+  private _discoverEndpoints(req: http.IncomingMessage): {
+    endpoints: EndpointEntry[];
+    total: number;
+    availableTotal: number;
+    filters: Record<string, string | number>;
+  } {
+    const url = new URL(req.url || '/', `http://${this.host}:${this.port}`);
+    const search = (url.searchParams.get('q') || url.searchParams.get('search') || '').trim().toLowerCase();
+    const method = (url.searchParams.get('method') || '').trim().toUpperCase();
+    const category = (url.searchParams.get('category') || '').trim().toLowerCase();
+    const limit = parsePositiveLimit(url.searchParams.get('limit'), 100, 200);
+
+    let endpoints = [...this._endpointRegistry];
+    if (method) endpoints = endpoints.filter((endpoint) => endpoint.method.toUpperCase() === method);
+    if (category) endpoints = endpoints.filter((endpoint) => (endpoint.category || '').toLowerCase().includes(category));
+    if (search) {
+      const terms = search.split(/\s+/).filter(Boolean);
+      endpoints = endpoints.filter((endpoint) => {
+        const haystack = [
+          endpoint.method,
+          endpoint.path,
+          endpoint.description,
+          endpoint.category || '',
+        ].join(' ').toLowerCase();
+        return terms.every((term) => haystack.includes(term));
+      });
+    }
+
+    const filters: Record<string, string | number> = {};
+    if (search) filters.search = search;
+    if (method) filters.method = method;
+    if (category) filters.category = category;
+    filters.limit = limit;
+
+    return {
+      endpoints: endpoints.slice(0, limit),
+      total: endpoints.length,
+      availableTotal: this._endpointRegistry.length,
+      filters,
+    };
+  }
+
+  private _dispatchPluginRoute(method: string, pathname: string, req: http.IncomingMessage, res: http.ServerResponse, token: ApiToken | null): boolean {
     for (const route of this._pluginRoutes) {
       if (method !== route.method) continue;
       const params = this._matchPluginPath(route.path, pathname);
       if (params === null) continue;
+      if (route.permission && (!token || !hasPermission(token, route.permission as ApiPermission))) {
+        this.sendJson(res, 403, { error: 'Forbidden', message: `Missing permission: ${route.permission}` });
+        return true;
+      }
       this._executePluginHandler(route.pluginName, route.handler, req, params).then(result => {
         const r = result as { status: number; body: Record<string, unknown> } | null;
         if (r && typeof r === 'object' && 'status' in r) this.sendJson(res, r.status, r.body || {});
@@ -479,7 +423,9 @@ export class ApiServer extends EventEmitter {
   }
 
   public requirePermission(token: ApiToken | null, permission: ApiPermission): asserts token is ApiToken {
-    if (!token) return; // Localhost without token — allow all
+    if (!token) {
+      throw Object.assign(new Error(`Missing permission: ${permission}`), { statusCode: 403 });
+    }
     if (!hasPermission(token, permission)) {
       throw Object.assign(new Error(`Missing permission: ${permission}`), { statusCode: 403 });
     }
@@ -511,9 +457,13 @@ export class ApiServer extends EventEmitter {
 
   // ── CORS ──
 
-  public sendCorsHeaders(res: http.ServerResponse): void {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+  public sendCorsHeaders(req: http.IncomingMessage, res: http.ServerResponse): void {
+    const origin = req.headers.origin;
+    if (isAllowedLocalOrigin(origin, this.host, this.port) && origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     res.setHeader('Access-Control-Max-Age', '86400');
   }

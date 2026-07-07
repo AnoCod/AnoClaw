@@ -105,6 +105,99 @@ export function findConsolidationGroups(entries: MemoryEntry[], threshold: numbe
 }
 
 /**
+ * Build the consolidation prompt for a group of similar memories.
+ */
+export function buildConsolidationPrompt(group: MemoryEntry[]): { systemPrompt: string; userPrompt: string; topic: string } {
+  const memoryList = group.map((e, i) =>
+    `[${i + 1}] Name: ${e.name}\nType: ${e.type}\nContent: ${e.content}`
+  ).join('\n\n');
+  const topic = group[0].name.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 40);
+
+  const systemPrompt = 'You are a memory consolidation assistant. Your task is to merge related memories. Output ONLY the consolidated markdown content — no preamble, no explanation, no "Consolidated:" prefix.';
+  const userPrompt = `Consolidate these related memories into one comprehensive memory. Keep all unique facts. Remove redundant information. Merge complementary details into a cohesive summary.
+
+${memoryList}
+
+Consolidated memory (output only the content):`;
+
+  return { systemPrompt, userPrompt, topic };
+}
+
+/**
+ * Call LLM to consolidate a group of memories. Returns the consolidated text or null.
+ */
+async function callLLMForConsolidation(
+  userPrompt: string,
+  systemPrompt: string,
+  agentId: string,
+): Promise<string | null> {
+  let config;
+  try {
+    config = await loadAgentConfig(agentId);
+  } catch {
+    const { defaultConfig } = await import('../../agent/AgentConfig.js');
+    config = defaultConfig();
+    logger.warn('callLLMForConsolidation: failed to load agent config, using default', { agentId });
+  }
+
+  if (!config.apiKey && !config.apiUrl) {
+    logger.info('callLLMForConsolidation: no API credentials available, skipping consolidation');
+    return null;
+  }
+
+  const { createLLMProvider } = await import('../../../infra/llm/provider-factory.js');
+  const provider = createLLMProvider(config.provider || 'cloud_api');
+
+  const llmOptions: LLMOptions = {
+    model: config.model || 'deepseek-chat',
+    maxTokens: 4096,
+    temperature: 0.3,
+    contextWindow: config.contextWindow || 128000,
+    apiUrl: config.apiUrl || '',
+    apiKey: config.apiKey || '',
+  };
+
+  const messages = [{ role: 'user' as const, content: userPrompt }];
+  const stream = provider.chat(messages, [], systemPrompt, llmOptions);
+  let consolidatedContent = '';
+  for await (const event of stream) {
+    if (event.type === 'text_delta') {
+      consolidatedContent += event.content || '';
+    }
+  }
+
+  if (!consolidatedContent.trim()) {
+    logger.info('callLLMForConsolidation: LLM returned empty content');
+    return null;
+  }
+
+  return consolidatedContent.trim();
+}
+
+/**
+ * Create a consolidated memory entry from merged content.
+ */
+async function createConsolidatedEntry(
+  group: MemoryEntry[],
+  content: string,
+  topic: string,
+  agentId: string,
+): Promise<MemoryEntry> {
+  const mm = MemoryManager.getInstance();
+  const entry: MemoryEntry = {
+    name: `consolidated-${topic}`,
+    type: group[0].type,
+    description: `Consolidated memory from ${group.length} similar entries`,
+    content,
+    scope: group[0].scope || MemoryScope.Agent,
+    category: group[0].category || defaultCategory(group[0].type),
+  };
+
+  await mm.save(agentId, entry.scope, entry);
+  return entry;
+}
+
+/**
  * Use an LLM to merge a group of similar memories into one consolidated memory.
  * The old entries remain as-is. A new consolidated entry is created with
  * a summary that keeps all unique facts and removes redundant information.
@@ -118,85 +211,18 @@ export async function consolidateGroup(
   if (group.length < 2) return null;
 
   try {
-    // Build a prompt listing all memories in the group
-    const memoryList = group.map((e, i) =>
-      `[${i + 1}] Name: ${e.name}\nType: ${e.type}\nContent: ${e.content}`
-    ).join('\n\n');
-    const topic = group[0].name.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 40);
+    const { systemPrompt, userPrompt, topic } = buildConsolidationPrompt(group);
+    const consolidatedContent = await callLLMForConsolidation(userPrompt, systemPrompt, agentId);
+    if (!consolidatedContent) return null;
 
-    const systemPrompt = 'You are a memory consolidation assistant. Your task is to merge related memories. Output ONLY the consolidated markdown content — no preamble, no explanation, no "Consolidated:" prefix.';
-    const userPrompt = `Consolidate these related memories into one comprehensive memory. Keep all unique facts. Remove redundant information. Merge complementary details into a cohesive summary.
-
-${memoryList}
-
-Consolidated memory (output only the content):`;
-
-    // Load agent config to get provider/model settings
-    let config;
-    try {
-      config = await loadAgentConfig(agentId);
-    } catch {
-      // Fallback: use default config for main agent
-      const { defaultConfig } = await import('../../agent/AgentConfig.js');
-      config = defaultConfig();
-      logger.warn('consolidateGroup: failed to load agent config, using default', { agentId });
-    }
-
-    if (!config.apiKey && !config.apiUrl) {
-      logger.info('consolidateGroup: no API credentials available, skipping consolidation');
-      return null;
-    }
-
-    // Create provider (no extension points needed for consolidation)
-    const { createLLMProvider } = await import('../../../infra/llm/provider-factory.js');
-    const provider = createLLMProvider(config.provider || 'cloud_api');
-
-    const llmOptions: LLMOptions = {
-      model: config.model || 'deepseek-chat',
-      maxTokens: 4096,
-      temperature: 0.3, // Low temperature for factual consolidation
-      contextWindow: config.contextWindow || 128000,
-      apiUrl: config.apiUrl || '',
-      apiKey: config.apiKey || '',
-    };
-
-    // Single-turn: system prompt + one user message
-    const messages = [
-      { role: 'user' as const, content: userPrompt },
-    ];
-
-    const stream = provider.chat(messages, [], systemPrompt, llmOptions);
-    let consolidatedContent = '';
-    for await (const event of stream) {
-      if (event.type === 'text_delta') {
-        consolidatedContent += event.content || '';
-      }
-    }
-
-    if (!consolidatedContent.trim()) {
-      logger.info('consolidateGroup: LLM returned empty content, skipping consolidation');
-      return null;
-    }
-
-    // Create the consolidated entry
-    const mm = MemoryManager.getInstance();
-    const consolidatedEntry: MemoryEntry = {
-      name: `consolidated-${topic}`,
-      type: group[0].type,
-      description: `Consolidated memory from ${group.length} similar entries`,
-      content: consolidatedContent.trim(),
-      scope: group[0].scope || MemoryScope.Agent,
-      category: group[0].category || defaultCategory(group[0].type),
-    };
-
-    await mm.save(agentId, consolidatedEntry.scope, consolidatedEntry);
+    const entry = await createConsolidatedEntry(group, consolidatedContent, topic, agentId);
     logger.info('consolidateGroup: created consolidated memory', {
-      name: consolidatedEntry.name,
+      name: entry.name,
       sourceCount: group.length,
       agentId,
     });
 
-    return consolidatedEntry;
+    return entry;
   } catch (err) {
     logger.warn('consolidateGroup: consolidation failed (best-effort, continuing)', {
       error: (err as Error).message,

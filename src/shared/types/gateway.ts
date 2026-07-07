@@ -33,9 +33,28 @@ export enum ApiPermission {
   AgentsRead    = 'agents:read',
   AgentsWrite   = 'agents:write',
   WorkspaceRead = 'workspace:read',
+  WorkspaceWrite = 'workspace:write',
   MemoryRead    = 'memory:read',
   MemoryWrite   = 'memory:write',
   Admin         = 'admin',
+}
+
+/** Unified API error codes for all error responses. */
+export enum ApiErrorCode {
+  // 4xx
+  BadRequest       = 'BAD_REQUEST',
+  Unauthorized     = 'UNAUTHORIZED',
+  Forbidden        = 'FORBIDDEN',
+  NotFound         = 'NOT_FOUND',
+  MethodNotAllowed = 'METHOD_NOT_ALLOWED',
+  Conflict         = 'CONFLICT',
+  PayloadTooLarge  = 'PAYLOAD_TOO_LARGE',
+  TooManyRequests  = 'TOO_MANY_REQUESTS',
+  // 5xx
+  InternalError    = 'INTERNAL_ERROR',
+  ServiceUnavailable = 'SERVICE_UNAVAILABLE',
+  HandlerError     = 'HANDLER_ERROR',
+  PluginError      = 'PLUGIN_ERROR',
 }
 
 /** An API token with its associated permissions and usage metadata. */

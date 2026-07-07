@@ -5,6 +5,7 @@ import type { ApiToken } from '../ApiAuth.js';
 import { sendJson } from '../RouteHelpers.js';
 import { ToolRegistry } from '../../core/tools/ToolRegistry.js';
 import { AgentRegistry } from '../../core/agent/AgentRegistry.js';
+import { filterToolMeta, wantsDetails } from './ToolsRoute.js';
 
 export class GetToolDetailRoute implements RouteHandler {
   method = 'GET' as const; path = '/api/v1/tools/:name';
@@ -12,15 +13,9 @@ export class GetToolDetailRoute implements RouteHandler {
   handle(m: RouteMatch, _r: IncomingMessage, res: ServerResponse): boolean {
     try {
       const tr = ToolRegistry.getInstance();
-      const t = tr.tool(m.params['name']);
-      if (!t) { sendJson(res, 404, { error: 'Tool not found' }); return true; }
-      sendJson(res, 200, {
-        name: t.name(), description: t.description(),
-        isReadOnly: tr.isReadOnly(t.name()), isConcurrencySafe: tr.isConcurrencySafe(t.name()),
-        riskLevel: t.riskLevel?.() || 'Unknown', interruptBehavior: t.interruptBehavior?.(),
-        defaultTimeoutMs: t.defaultTimeoutMs?.() || 0,
-        parameters: t.parametersSchema(),
-      });
+      const tool = tr.allToolsWithMeta({ includeDetails: true }).find((candidate) => candidate.name === m.params['name']);
+      if (!tool) { sendJson(res, 404, { error: 'Tool not found' }); return true; }
+      sendJson(res, 200, tool);
     } catch (err) { sendJson(res, 500, { error: (err as Error).message }); }
     return true;
   }
@@ -29,17 +24,25 @@ export class GetToolDetailRoute implements RouteHandler {
 export class ToolsForAgentRoute implements RouteHandler {
   method = 'GET' as const; path = '/api/v1/tools-for-agent/:agentId';
   category = 'Tools'; description = 'List tools available to a specific agent (respects allowlist)';
-  handle(m: RouteMatch, _r: IncomingMessage, res: ServerResponse): boolean {
+  handle(m: RouteMatch, req: IncomingMessage, res: ServerResponse): boolean {
     try {
       const reg = AgentRegistry.getInstance();
       const agent = reg.agent(m.params['agentId']);
       const allowedTools = agent ? agent.allowedTools() : [];
       const tr = ToolRegistry.getInstance();
-      const tools = tr.toolsForAgent(allowedTools);
+      const url = new URL(req.url || '/', 'http://127.0.0.1');
+      const includeDetails = wantsDetails(url.searchParams.get('detail'));
+      const allTools = tr.toolsForAgentWithMeta(allowedTools, {}, { includeDetails });
+      const { tools, filters } = filterToolMeta(allTools, url.searchParams);
       sendJson(res, 200, {
         agentId: m.params['agentId'],
-        tools: tools.map(t => ({ name: t.name(), description: t.description() })),
+        agentFound: Boolean(agent),
+        tools,
         total: tools.length,
+        availableTotal: allTools.length,
+        configuredButUnavailable: tr.missingToolNames(allowedTools),
+        detail: includeDetails,
+        filters,
       });
     } catch (err) { sendJson(res, 500, { error: (err as Error).message }); }
     return true;

@@ -42,7 +42,7 @@ class SettingsManager extends EventEmitter {
 ```
 server:       { host: '127.0.0.1', port: 3456, apiPort: 15730 }
 llm:          { provider: 'openai-compatible', model: 'deepseek-chat', maxTokens: 200000, temperature: 1.0, apiKey: '', apiUrl: 'https://api.deepseek.com' }
-agent:        { maxTurns: 25, stallDetectionNoToolTurns: 5, stallDetectionConsecutiveFailures: 3, heartbeatIntervalSec: 60, taskTimeoutSec: 600, unresponsiveThresholdSec: 180 }
+agent:        { maxTurns: 0, stallDetectionNoToolTurns: 5, stallDetectionConsecutiveFailures: 3, heartbeatIntervalSec: 60, taskTimeoutSec: 600, unresponsiveThresholdSec: 180 }
 logging:      { level: 'info', logDir: 'logs', maxFileBytes: 10MB, maxFiles: 10 }
 rateLimit:    { perMinute: 100, enabled: true }
 workspace:    { root: 'company-workspace' }

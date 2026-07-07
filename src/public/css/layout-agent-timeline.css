@@ -1,0 +1,110 @@
+/* Minimal agent timeline: stream cards are timeline nodes. */
+
+.agent-flow-step {
+  --agent-flow-track-x: 18px;
+  --agent-flow-dot-size: 8px;
+  --agent-flow-dot-y: 10px;
+  --agent-flow-track-color: rgba(111, 220, 154, 0.88);
+  --agent-flow-dot-center-y: calc(var(--agent-flow-dot-y) + (var(--agent-flow-dot-size) / 2));
+
+  position: relative !important;
+  margin-left: 0 !important;
+  padding-left: 42px !important;
+  overflow: visible !important;
+}
+
+.agent-flow-step::before {
+  content: "";
+  position: absolute;
+  display: none;
+  left: calc(var(--agent-flow-track-x) + (var(--agent-flow-dot-size) / 2) - 1px);
+  top: calc(var(--agent-flow-dot-y) + var(--agent-flow-dot-size) + 2px);
+  height: max(0px, calc(var(--agent-flow-next-distance, 0px) - var(--agent-flow-dot-size) - 4px));
+  width: 2px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(111, 220, 154, 0.95), rgba(111, 220, 154, 0.42));
+  box-shadow: 0 0 10px rgba(111, 220, 154, 0.24);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.agent-flow-step.has-next-agent-flow-step::before {
+  display: block;
+}
+
+/* Tool result cards are also timeline nodes; keep the outside rail visible. */
+.agent-flow-step.tool-result-card,
+.agent-flow-step.delegate-tool-result {
+  overflow: visible !important;
+}
+
+.agent-flow-step.tool-result-card > .tool-result-header,
+.agent-flow-step.delegate-tool-result > .tool-result-header {
+  border-top-left-radius: inherit;
+  border-top-right-radius: inherit;
+}
+
+.agent-flow-step::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  left: var(--agent-flow-track-x);
+  top: var(--agent-flow-dot-y);
+  width: var(--agent-flow-dot-size);
+  height: var(--agent-flow-dot-size);
+  border-radius: 999px;
+  background: rgba(111, 220, 154, 0.96);
+  box-shadow: 0 0 0 3px rgba(14, 16, 20, 0.96), 0 0 14px rgba(111, 220, 154, 0.22);
+  pointer-events: none;
+}
+
+.agent-flow-step.is-running::after {
+  background: rgba(148, 163, 184, 0.9);
+  animation: agent-flow-dot-pulse 1.8s ease-in-out infinite;
+}
+
+.agent-flow-step.is-success::after {
+  background: rgba(111, 220, 154, 0.92);
+}
+
+.agent-flow-step.is-error::after {
+  background: rgba(255, 92, 105, 0.95);
+}
+
+.agent-flow-step--think::after,
+.agent-flow-step--respond::after {
+  background: rgba(148, 163, 184, 0.8);
+}
+
+.agent-flow-step--tool::after,
+.agent-flow-step--delegate::after,
+.agent-flow-step--todo::after {
+  background: rgba(111, 220, 154, 0.92);
+}
+
+.agent-flow-step--tool.is-error::after,
+.agent-flow-step--delegate.is-error::after {
+  background: rgba(255, 92, 105, 0.95);
+}
+
+.agent-flow-step--respond.cinema-agent-block {
+  border-left: 0;
+}
+
+.agent-flow-step--tool pre,
+.agent-flow-step--delegate pre {
+  max-width: 100%;
+}
+
+@keyframes agent-flow-dot-pulse {
+  0%, 100% { opacity: 0.42; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.16); }
+}
+
+@media (max-width: 720px) {
+  .agent-flow-step {
+    --agent-flow-track-x: 15px;
+    padding-left: 36px !important;
+  }
+}
+

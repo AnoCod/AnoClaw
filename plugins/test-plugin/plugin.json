@@ -1,0 +1,27 @@
+{
+  "name": "test-plugin",
+  "displayName": "Plugin Lab",
+  "version": "1.0.0",
+  "description": "Raycast-style plugin diagnostics lab for bridge, routes, tools, agents, and plugin host health.",
+  "publisher": "anoclaw",
+  "main": "extension.js",
+  "activationEvents": ["onStartup"],
+  "contributes": {
+    "tools": [
+      { "name": "TestPluginPing" }
+    ],
+    "pages": [
+      {
+        "id": "test-plugin",
+        "title": "Plugin Lab",
+        "html": "frontend/index.html"
+      }
+    ],
+    "apiRoutes": [
+      { "method": "GET", "path": "/api/v1/plugins/test-plugin/diagnostics" }
+    ]
+  },
+  "engines": {
+    "anoclaw": ">=2.1.0"
+  }
+}

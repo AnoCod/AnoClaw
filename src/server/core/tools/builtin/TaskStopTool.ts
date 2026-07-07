@@ -1,4 +1,4 @@
-// TaskStopTool — stop a running delegated task
+// TaskStopTool - stop a running delegated task
 // Uses InterruptController to abort the target session's AgentLoop.
 
 import { Tool, RiskLevel } from '../Tool.js';
@@ -20,9 +20,9 @@ export class TaskStopTool extends Tool {
 
   prompt(): string {
     return '## TaskStop Usage\n' +
-      'Cancel a running delegated task. The task stops immediately — partial results may be available via TaskOutput.\n\n' +
+      'Cancel a running delegated task. The task stops immediately - partial results may be available via TaskOutput.\n\n' +
       '**When to stop:** The task is going in the wrong direction. The requirements changed. The subordinate is stuck in a loop.\n\n' +
-      '**Delegation lifecycle:** TaskAssign → TaskList (track) → TaskOutput (retrieve) → TaskStop (cancel if needed).';
+      '**Delegation lifecycle:** TaskAssign -> TaskList (track) -> TaskOutput (retrieve) -> TaskStop (cancel if needed).';
   }
 
   parametersSchema(): Record<string, unknown> {

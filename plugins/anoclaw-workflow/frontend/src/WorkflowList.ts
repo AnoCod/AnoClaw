@@ -1,4 +1,4 @@
-// WorkflowList.ts — sidebar workflow list with add/delete/select
+// WorkflowList.ts - sidebar workflow list with add/delete/select
 
 import type { WorkflowMeta } from './WorkflowNodeTypes.js';
 
@@ -8,7 +8,7 @@ export interface ListCallbacks {
   onDelete: (id: string) => void;
 }
 
-/** Inline confirm dialog — styled to match the app's ConfirmDialog */
+/** Inline confirm dialog - styled to match the app's ConfirmDialog */
 export function confirmDialog(message: string, title = 'Confirm'): Promise<boolean> {
   return new Promise(resolve => {
     const overlay = document.createElement('div');

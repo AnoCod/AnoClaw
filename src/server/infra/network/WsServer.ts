@@ -15,6 +15,7 @@ import type { Server as HttpServer } from 'http';
 import type { IncomingMessage } from 'http';
 import { LogManager } from '../logging/LogManager.js';
 import type { Transport } from './Transport.js';
+import { WsMessageType } from '../../../shared/types/ws-protocol.js';
 
 export interface WsConnection {
   ws: WebSocket;
@@ -29,7 +30,8 @@ export class WsServer extends EventEmitter implements Transport {
   private _conn: WsConnection | null = null;
   private _heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   /** Event buffers keyed by sessionId — survive brief disconnects */
-  private _eventBuffers: Map<string, Array<{ event: Record<string, unknown>; ts: number }>> = new Map();
+  private _eventBuffers: Map<string, Array<{ event: Record<string, unknown>; ts: number; seq: number }>> = new Map();
+  private _seqCounter = 0;
   private static readonly MAX_BUFFERED_EVENTS = 300;
   private static readonly BUFFER_TTL_MS = 5 * 60_000; // 5 min — drop stale events while connected
   private static readonly BUFFER_TTL_DISCONNECTED_MS = 30_000; // 30s — aggressive cleanup when no client
@@ -75,7 +77,7 @@ export class WsServer extends EventEmitter implements Transport {
           const sessionId = (msg.sessionId as string) || 'default';
           this.emit('message', sessionId, msg);
         } catch {
-          ws.send(JSON.stringify({ type: 'error', errorMessage: 'Invalid JSON' }));
+          ws.send(JSON.stringify({ type: WsMessageType.Error, errorMessage: 'Invalid JSON' }));
         }
       });
 
@@ -106,9 +108,6 @@ export class WsServer extends EventEmitter implements Transport {
       this._conn.isAlive = false;
       try {
         this._conn.ws.ping();
-        if (this._conn.ws.readyState === WebSocket.OPEN) {
-          this._conn.ws.send(JSON.stringify({ type: 'heartbeat' }));
-        }
       } catch {}
     }, WsServer.HEARTBEAT_INTERVAL_MS);
 
@@ -122,11 +121,11 @@ export class WsServer extends EventEmitter implements Transport {
    *  Never throws. Drops on serialization failure (logged). */
   send(sessionId: string, data: Record<string, unknown>): boolean {
     if (!this._conn || this._conn.ws.readyState !== WebSocket.OPEN) {
-      // Buffer for reconnect (with timestamp for TTL eviction)
-      if (data.type !== 'ping' && data.type !== 'heartbeat') {
+      // Buffer for reconnect (with timestamp and sequence number)
+      if (data.type !== 'ping') {
         const buf = this._eventBuffers.get(sessionId) || [];
         if (buf.length < WsServer.MAX_BUFFERED_EVENTS) {
-          buf.push({ event: data, ts: Date.now() });
+          buf.push({ event: data, ts: Date.now(), seq: ++this._seqCounter });
           this._eventBuffers.set(sessionId, buf);
         }
       }
@@ -142,7 +141,7 @@ export class WsServer extends EventEmitter implements Transport {
           if (data.type !== 'ping') {
             const buf = this._eventBuffers.get(sessionId) || [];
             if (buf.length < WsServer.MAX_BUFFERED_EVENTS) {
-              buf.push({ event: data, ts: Date.now() });
+              buf.push({ event: data, ts: Date.now(), seq: ++this._seqCounter });
               this._eventBuffers.set(sessionId, buf);
             }
           }
@@ -189,24 +188,52 @@ export class WsServer extends EventEmitter implements Transport {
   }
 
   /** Flush ALL buffered events to a newly connected client.
+   *  Sorted by global sequence number to preserve event order across sessions.
    *  Drops events older than BUFFER_TTL_MS during flush. */
   private _flushAllBuffers(ws: WebSocket): void {
     const cutoff = Date.now() - WsServer.BUFFER_TTL_MS;
+    const logger = LogManager.getInstance().logger('anochat.core');
+    // Collect all fresh events from all buffers, then sort by seq
+    const allEntries: Array<{ sid: string; entry: { event: Record<string, unknown>; ts: number; seq: number } }> = [];
     for (const [sid, buf] of this._eventBuffers) {
-      // Drop stale events
       const fresh = buf.filter(e => e.ts >= cutoff);
       if (fresh.length === 0) {
         this._eventBuffers.delete(sid);
         continue;
       }
-      const logger = LogManager.getInstance().logger('anochat.core');
       const dropped = buf.length - fresh.length;
       logger.info('Flushing buffered events', { sid, count: fresh.length, dropped });
       for (const entry of fresh) {
-        if (ws.readyState === WebSocket.OPEN) {
-          try { ws.send(JSON.stringify({ ...entry.event, _sessionId: sid })); } catch {}
+        allEntries.push({ sid, entry });
+      }
+    }
+    // Sort by global sequence number — preserves causal order across sessions
+    allEntries.sort((a, b) => a.entry.seq - b.entry.seq);
+    for (const { sid, entry } of allEntries) {
+      if (ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ ...entry.event, _sessionId: sid }), (err?: Error) => {
+            if (err) {
+              const buf = this._eventBuffers.get(sid) || [];
+              if (buf.length < WsServer.MAX_BUFFERED_EVENTS) {
+                buf.push({ event: entry.event, ts: Date.now(), seq: ++this._seqCounter });
+                this._eventBuffers.set(sid, buf);
+              }
+              logger.warn('WS flush send failed, re-buffered', { sid, type: entry.event.type, error: err.message });
+            }
+          });
+        } catch (e) {
+          const buf = this._eventBuffers.get(sid) || [];
+          if (buf.length < WsServer.MAX_BUFFERED_EVENTS) {
+            buf.push({ event: entry.event, ts: Date.now(), seq: ++this._seqCounter });
+            this._eventBuffers.set(sid, buf);
+          }
+          logger.warn('WS flush send exception, re-buffered', { sid, type: entry.event.type, error: (e as Error).message });
         }
       }
+    }
+    // Clear all buffers after flushing
+    for (const sid of this._eventBuffers.keys()) {
       this._eventBuffers.delete(sid);
     }
   }

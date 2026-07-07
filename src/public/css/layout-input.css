@@ -1,8 +1,8 @@
-/* AnoClaw Layout Input — Mode selector, conversation panel, tab panel,
+﻿/* AnoClaw Layout Input 鈥?Mode selector, conversation panel, tab panel,
    input composer, attachments bar, send/stop buttons, context ring,
    and context tooltip. */
 
-/* Mode Selector — dropdown menu (trigger uses cinema-tool-btn) */
+/* Mode Selector 鈥?dropdown menu (trigger uses cinema-tool-btn) */
 
 .mode-dropdown {
   position: fixed;
@@ -83,7 +83,7 @@
   padding: 8px 10px;
 }
 
-.mode-infinite-row {
+.mode-goal-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -95,7 +95,7 @@
   color: var(--color-text-primary);
 }
 
-.mode-infinite-label {
+.mode-goal-label {
   font-size: var(--font-size-caption-md);
   color: var(--color-accent);
   font-weight: 500;
@@ -129,7 +129,7 @@
 }
 
 /* ========================================
-   Conversation Panel — header + toggle buttons
+   Conversation Panel 鈥?header + toggle buttons
    ======================================== */
 
 .conversation-panel {
@@ -179,7 +179,7 @@
 }
 
 /* ========================================
-   Tab Panel — right-side container
+   Tab Panel 鈥?right-side container
    ======================================== */
 
 .tab-bar {
@@ -199,7 +199,7 @@
   position: relative;
 }
 
-/* Tab button — underline style (distinct from session pill tabs) */
+/* Tab button 鈥?underline style (distinct from session pill tabs) */
 .tab-panel-tab {
   display: flex;
   align-items: center;
@@ -245,7 +245,7 @@
 }
 
 /* ========================================
-   Input Panel — message composer
+   Input Panel 鈥?message composer
    ======================================== */
 
 .input-panel-row {
@@ -492,4 +492,128 @@
   text-align: center;
   color: var(--color-text-quaternary);
   font-size: var(--font-size-caption-sm);
+}
+
+/* Goal card above the composer */
+.input-goal-card {
+  display: none;
+  border: 1px solid var(--hairline-cinema, var(--color-hairline));
+  border-radius: 6px;
+  background: var(--cinema-bg-card, rgba(255,255,255,0.02));
+  padding: 8px 10px;
+  gap: 8px;
+}
+.input-goal-card.visible {
+  display: flex;
+  flex-direction: column;
+}
+.input-goal-card-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+.input-goal-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--cinema-text-muted, var(--color-text-secondary));
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.input-goal-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent-cinema, var(--color-accent));
+  box-shadow: 0 0 8px var(--color-accent-cinema-glow, transparent);
+}
+.input-goal-card.paused .input-goal-dot {
+  background: var(--cinema-text-muted, var(--color-text-tertiary));
+  box-shadow: none;
+}
+.input-goal-summary {
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.input-goal-summary:hover {
+  color: var(--cinema-text-btn-hover, var(--color-text-primary));
+}
+.input-goal-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+.input-goal-action-btn {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 10px;
+}
+.input-goal-detail {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding-top: 2px;
+}
+.input-goal-meta {
+  color: var(--cinema-text-muted, var(--color-text-tertiary));
+  font-size: 10px;
+  line-height: 1.4;
+}
+.goal-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.goal-dialog-field {
+  margin-bottom: 0;
+}
+.goal-dialog-textarea {
+  min-height: 132px;
+  resize: vertical;
+}
+.goal-dialog-hint {
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.goal-dialog-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.mode-goal-start-btn {
+  min-width: 82px;
+}
+
+@media (max-width: 640px) {
+  .input-goal-card-main {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+  .input-goal-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+  .input-goal-summary {
+    white-space: normal;
+  }
 }

@@ -1,6 +1,6 @@
-// SessionsPageOverfly — right-bar overfly panels (overview, plan)
+﻿// SessionsPageOverfly 鈥?right-bar overfly panels (overview, plan)
 // Extracted from SessionsPage.ts to keep the main page class under 500 lines.
-// Files panel removed — replaced by WorkspacePage.
+// Files panel removed 鈥?replaced by WorkspacePage.
 
 import { App } from '../../app.js';
 import { handlePathClick } from '../../utils/ClickablePathHandler.js';
@@ -14,9 +14,6 @@ export class SessionsPageOverfly {
   private _activeSessionId: string | null = null;
   private _workspacePath: string = '';
   private _clickHandler: ((e: MouseEvent) => void) | null = null;
-
-  /** Called after files list is refreshed — fires with the file count. Kept for compatibility. */
-  onFilesRefreshed: ((count: number) => void) | null = null;
 
   get isOpen(): boolean { return this._panel !== null; }
 
@@ -32,7 +29,7 @@ export class SessionsPageOverfly {
     overfly.className = 'cinema-overfly';
     const openedAt = Date.now();
 
-    // Slot: sessions-overfly — plugins can add content here
+    // Slot: sessions-overfly 鈥?plugins can add content here
     const overflySlot = document.createElement('div');
     overflySlot.setAttribute('data-slot', 'sessions-overfly');
     overfly.appendChild(overflySlot);
@@ -53,9 +50,12 @@ export class SessionsPageOverfly {
       case 'overview': this._renderOverviewPanel(overfly, activeSessionId); break;
       case 'plan': this._renderPlanPanel(overfly); break;
       case 'tasks': this._renderTasksPanel(overfly, activeSessionId); break;
+      default:
+        this.close();
+        return;
     }
 
-    // Close on outside click — with a 300ms grace period so async renders
+    // Close on outside click 鈥?with a 300ms grace period so async renders
     // and streaming DOM updates don't spuriously trigger close.
     setTimeout(() => {
       const onOutsideClick = (e: MouseEvent) => {
@@ -83,11 +83,7 @@ export class SessionsPageOverfly {
     this._activeSessionId = null;
   }
 
-  refreshFilesIfOpen(_sessionId: string): void {
-    // Files panel moved to WorkspacePage. No-op for compatibility.
-  }
-
-  // ── Overview panel ──
+  // 鈹€鈹€ Overview panel 鈹€鈹€
 
   private _renderOverviewPanel(overfly: HTMLElement, activeSessionId: string | null): void {
     const title = document.createElement('div');
@@ -110,7 +106,7 @@ export class SessionsPageOverfly {
       { label: 'User Messages', value: stats.users },
       { label: 'Tool Calls', value: stats.tools },
       { label: 'Thinking Steps', value: stats.thinks },
-      { label: 'Session ID', value: activeSessionId?.slice(0, 8) || '—', mono: true },
+      { label: 'Session ID', value: activeSessionId?.slice(0, 8) || '-', mono: true },
     ];
 
     for (const item of items) {
@@ -125,7 +121,7 @@ export class SessionsPageOverfly {
     }
   }
 
-  // ── Plan panel ──
+  // 鈹€鈹€ Plan panel 鈹€鈹€
 
   private _renderPlanPanel(overfly: HTMLElement): void {
     const title = document.createElement('div');
@@ -136,9 +132,11 @@ export class SessionsPageOverfly {
     const convVM = App.getInstance().conversationVM;
     const agent = convVM.getAgent(this._activeSessionId || '');
     const msgs = agent.state.messages.messages || [];
-    const planMsgs = msgs.filter((m: any) => m.type === 'plan' || m.type === 'plan_step');
+    const latestTodos = [...msgs].reverse().find((m: any) => m.type === 'todo_write' && Array.isArray(m.todos)) as any;
+    const latestPlanBoundary = [...msgs].reverse().find((m: any) => m.type === 'plan_enter' || m.type === 'plan_exit') as any;
+    const todos = Array.isArray(latestTodos?.todos) ? latestTodos.todos : [];
 
-    if (!planMsgs.length) {
+    if (!todos.length && !latestPlanBoundary) {
       const empty = document.createElement('div');
       empty.style.cssText = 'color:var(--cinema-text-welcome-desc);font-size:11px;padding:12px;text-align:center;';
       empty.textContent = 'No active plan';
@@ -146,20 +144,31 @@ export class SessionsPageOverfly {
       return;
     }
 
-    for (const p of planMsgs) {
+    if (latestPlanBoundary) {
       const row = document.createElement('div');
       row.style.cssText = 'display:flex;gap:8px;align-items:flex-start;padding:4px 0;font-size:11px;';
-      const status = (p as any).status || 'pending';
-      const icons: Record<string, string> = { completed: '✓', in_progress: '●', pending: '○', error: '✗' };
+      const isExit = latestPlanBoundary.type === 'plan_exit';
       row.innerHTML = `
-        <span style="color:${status === 'completed' ? 'var(--color-success)' : status === 'in_progress' ? 'var(--color-accent-cinema)' : 'var(--cinema-text-muted)'}">${icons[status] || '○'}</span>
-        <span style="color:var(--cinema-text-overlay)">${_esc((p as any).content || (p as any).description || (p as any).title || '')}</span>
+        <span style="color:${isExit ? 'var(--cinema-text-muted)' : 'var(--color-accent-cinema)'}">${isExit ? '[done]' : '[active]'}</span>
+        <span style="color:var(--cinema-text-overlay)">${_esc(isExit ? 'Plan mode exited' : (latestPlanBoundary.planTitle || latestPlanBoundary.content || 'Plan mode active'))}</span>
+      `;
+      overfly.appendChild(row);
+    }
+
+    for (const todo of todos) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:8px;align-items:flex-start;padding:4px 0;font-size:11px;';
+      const status = String(todo.status || 'pending');
+      const marker = status === 'completed' ? '[x]' : status === 'in_progress' ? '[~]' : '[ ]';
+      row.innerHTML = `
+        <span style="color:${status === 'completed' ? 'var(--color-success)' : status === 'in_progress' ? 'var(--color-accent-cinema)' : 'var(--cinema-text-muted)'}">${marker}</span>
+        <span style="color:var(--cinema-text-overlay)">${_esc(String(todo.content || ''))}</span>
       `;
       overfly.appendChild(row);
     }
   }
 
-  // ── Tasks panel ──
+  // 鈹€鈹€ Tasks panel 鈹€鈹€
 
   private _renderTasksPanel(overfly: HTMLElement, activeSessionId: string | null): void {
     const title = document.createElement('div');
@@ -174,14 +183,8 @@ export class SessionsPageOverfly {
   }
 }
 
-// ── Shared helpers ──
+// 鈹€鈹€ Shared helpers 鈹€鈹€
 
 function _esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function _formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / 1048576).toFixed(1)}MB`;
 }

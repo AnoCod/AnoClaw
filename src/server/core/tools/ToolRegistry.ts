@@ -19,9 +19,54 @@ export interface ToolProfilerLike {
 }
 
 /** Metadata stored alongside each registered tool. */
+export type ToolSource = 'builtin' | 'plugin' | 'external';
+
+export interface ToolRegistrationMeta {
+  source?: ToolSource;
+  pluginName?: string;
+}
+
+export interface ToolMeta {
+  name: string;
+  description: string;
+  group: string;
+  displayName: string;
+  source: ToolSource;
+  pluginName?: string;
+  category: string;
+  isReadOnly: boolean;
+  isConcurrencySafe: boolean;
+  isDestructive: boolean;
+  riskLevel: string;
+  interruptBehavior: string;
+  defaultTimeoutMs: number;
+  minRole: string;
+  requiresUserInteraction: boolean;
+  parameterNames: string[];
+}
+
+export interface ToolDetailMeta extends ToolMeta {
+  parameters: Record<string, unknown>;
+  prompt: string;
+  outputLimit: number;
+  maxRetries: number;
+  shouldDefer: boolean;
+  workspacePathParams: string[];
+}
+
+export interface ToolMetaOptions {
+  includeDetails?: boolean;
+}
+
 interface ToolEntry {
   tool: Tool;
   group: string;
+  source: ToolSource;
+  pluginName?: string;
+}
+
+export interface ToolSelectionOptions {
+  hideUserInteractionTools?: boolean;
 }
 
 export class ToolRegistry extends EventEmitter {
@@ -66,13 +111,17 @@ export class ToolRegistry extends EventEmitter {
    * @param tool - The tool instance to register
    * @param group - Optional group name for categorization (default: 'uncategorized')
    */
-  registerTool(tool: Tool, group: string = 'uncategorized'): void {
+  registerTool(tool: Tool, group: string = 'uncategorized', meta: ToolRegistrationMeta = {}): void {
     const name = tool.name();
     if (this._tools.has(name)) {
-      // Duplicate registration — log as warning
-      this.log.warn('Duplicate tool registration', { toolName: name });
+      throw new Error(`Tool "${name}" is already registered. Duplicate tool registration is not allowed.`);
     }
-    this._tools.set(name, { tool, group });
+    this._tools.set(name, {
+      tool,
+      group,
+      source: meta.source || 'builtin',
+      pluginName: meta.pluginName,
+    });
 
     if (!this._groups.has(group)) {
       this._groups.set(group, new Set());
@@ -108,7 +157,7 @@ export class ToolRegistry extends EventEmitter {
   }
 
   /** Get tools filtered by the agent's allowed list. Empty list = no tools. */
-  toolsForAgent(allowedTools: string[]): Tool[] {
+  toolsForAgent(allowedTools: string[], options: ToolSelectionOptions = {}): Tool[] {
     if (!allowedTools || allowedTools.length === 0) {
       return [];
     }
@@ -116,10 +165,26 @@ export class ToolRegistry extends EventEmitter {
     const result: Tool[] = [];
     for (const [name, entry] of this._tools) {
       if (allowed.has(name)) {
+        if (options.hideUserInteractionTools && entry.tool.requiresUserInteraction()) {
+          continue;
+        }
         result.push(entry.tool);
       }
     }
     return result;
+  }
+
+  /** Return allowed tool names that are not currently registered. */
+  missingToolNames(allowedTools: string[]): string[] {
+    if (!allowedTools || allowedTools.length === 0) return [];
+    const seen = new Set<string>();
+    const missing: string[] = [];
+    for (const name of allowedTools) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+      if (!this._tools.has(name)) missing.push(name);
+    }
+    return missing;
   }
 
   /** Get tools for a specific group. */
@@ -140,13 +205,27 @@ export class ToolRegistry extends EventEmitter {
   }
 
   /** Get all tools with their group metadata (for API listing). */
-  allToolsWithMeta(): { name: string; description: string; group: string; displayName: string }[] {
-    return Array.from(this._tools.entries()).map(([name, entry]) => ({
-      name,
-      description: entry.tool.description(),
-      group: entry.group,
-      displayName: entry.tool.displayName?.() ?? toDisplayName(name),
-    }));
+  allToolsWithMeta(options: ToolMetaOptions = {}): Array<ToolMeta | ToolDetailMeta> {
+    return Array.from(this._tools.entries()).map(([name, entry]) =>
+      this._toolMeta(name, entry, options)
+    );
+  }
+
+  /** Get tools filtered by an agent allowlist with the same metadata shape as allToolsWithMeta(). */
+  toolsForAgentWithMeta(
+    allowedTools: string[],
+    selectionOptions: ToolSelectionOptions = {},
+    metaOptions: ToolMetaOptions = {},
+  ): Array<ToolMeta | ToolDetailMeta> {
+    if (!allowedTools || allowedTools.length === 0) return [];
+    const allowed = new Set(allowedTools);
+    const result: Array<ToolMeta | ToolDetailMeta> = [];
+    for (const [name, entry] of this._tools) {
+      if (!allowed.has(name)) continue;
+      if (selectionOptions.hideUserInteractionTools && entry.tool.requiresUserInteraction()) continue;
+      result.push(this._toolMeta(name, entry, metaOptions));
+    }
+    return result;
   }
 
   // ── Queries ──
@@ -196,6 +275,7 @@ export class ToolRegistry extends EventEmitter {
     toolName: string,
     params: Record<string, unknown>,
     ctx: ExecutionContext,
+    toolCallId?: string,
   ): Promise<ToolResult> {
     // ExtensionPoints: toolExecutor override — plugin intercepts all tool execution
     const toolOverride = extensionPoints.get('toolExecutor');
@@ -216,7 +296,7 @@ export class ToolRegistry extends EventEmitter {
       const now = Date.now();
       this.log.warn('Tool not found', { toolName, sid: ctx.sessionId, aid: ctx.agentId });
       return {
-        toolCallId: (params._toolCallId as string) ?? `${toolName}-${now}`,
+        toolCallId: toolCallId ?? `${toolName}-${now}`,
         success: false,
         content: `Error: Unknown tool: ${toolName}`,
         errorMessage: `Tool "${toolName}" is not registered`,
@@ -239,7 +319,7 @@ export class ToolRegistry extends EventEmitter {
         aid: ctx.agentId,
       });
       return {
-        toolCallId: (params._toolCallId as string) ?? `${toolName}-${now}`,
+        toolCallId: toolCallId ?? `${toolName}-${now}`,
         success: false,
         content: '',
         errorMessage: `Permission denied: role "${ctx.callerRole || 'unknown'}" cannot use "${toolName}" (requires "${tool.minRole()}")`,
@@ -252,7 +332,7 @@ export class ToolRegistry extends EventEmitter {
     }
 
     // Delegate to the tool through the pipeline — validation → security → execute → retry → normalize
-    const toolCallId = (params._toolCallId as string) ?? `${toolName}-${Date.now()}`;
+    const effectiveToolCallId = toolCallId ?? `${toolName}-${Date.now()}`;
     this.log.debug('Tool execution starting (pipeline)', {
       toolName,
       sid: ctx.sessionId,
@@ -266,7 +346,7 @@ export class ToolRegistry extends EventEmitter {
       toolName,
     });
 
-    const result = await ToolPipeline.run(tool, params, ctx, toolCallId);
+    const result = await ToolPipeline.run(tool, params, ctx, effectiveToolCallId);
 
     // Post-execution logging + profiling
     if (result.success) {
@@ -312,6 +392,42 @@ export class ToolRegistry extends EventEmitter {
   clear(): void {
     this._tools.clear();
     this._groups.clear();
+  }
+
+  private _toolMeta(name: string, entry: ToolEntry, options: ToolMetaOptions): ToolMeta | ToolDetailMeta {
+    const tool = entry.tool;
+    const ctor = tool.constructor as { category?: string; toolDescription?: string };
+    const parameters = tool.parametersSchema() || {};
+    const props = parameters.properties as Record<string, unknown> | undefined;
+    const base: ToolMeta = {
+      name,
+      description: tool.description(),
+      group: entry.group,
+      displayName: tool.displayName?.() ?? toDisplayName(name),
+      source: entry.source,
+      pluginName: entry.pluginName,
+      category: ctor.category || 'Other',
+      isReadOnly: tool.isReadOnly(),
+      isConcurrencySafe: tool.isConcurrencySafe(),
+      isDestructive: tool.isDestructive(),
+      riskLevel: String(tool.riskLevel()),
+      interruptBehavior: String(tool.interruptBehavior()),
+      defaultTimeoutMs: tool.defaultTimeoutMs(),
+      minRole: tool.minRole(),
+      requiresUserInteraction: tool.requiresUserInteraction(),
+      parameterNames: props ? Object.keys(props) : [],
+    };
+
+    if (!options.includeDetails) return base;
+    return {
+      ...base,
+      parameters,
+      prompt: tool.prompt(),
+      outputLimit: tool.outputLimit(),
+      maxRetries: tool.maxRetries(),
+      shouldDefer: tool.shouldDefer(),
+      workspacePathParams: tool.workspacePathParams(),
+    };
   }
 }
 

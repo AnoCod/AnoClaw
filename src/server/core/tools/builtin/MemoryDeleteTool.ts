@@ -30,6 +30,7 @@ export class MemoryDeleteTool extends Tool {
       properties: {
         scope: { type: 'string', enum: ['personal', 'team', 'project', 'session_personal', 'session_team'], description: 'Scope to delete from.' },
         name: { type: 'string', description: 'Name of the memory entry to delete (must match exactly).' },
+        dry_run: { type: 'boolean', description: 'Check whether the memory exists without deleting it. Default: false.' },
       },
       required: ['scope', 'name'],
     };
@@ -38,12 +39,14 @@ export class MemoryDeleteTool extends Tool {
   riskLevel(): RiskLevel { return RiskLevel.Safe; }
 
   async execute(params: Record<string, unknown>, ctx: ExecutionContext): Promise<ToolResult> {
-    const scope = params.scope as string;
-    const name = params.name as string;
+    const scopeResult = normalizeEnum(params.scope, 'scope', ['personal', 'team', 'project', 'session_personal', 'session_team']);
+    if (scopeResult.error) return this.makeError(scopeResult.error);
+    const nameResult = normalizeString(params.name, 'name');
+    if (nameResult.error) return this.makeError(nameResult.error);
 
-    if (!scope || !name) {
-      return this.makeError('Both scope and name are required.');
-    }
+    const scope = scopeResult.value!;
+    const name = nameResult.value!;
+    const dryRun = params.dry_run === true;
 
     try {
       const mm = MemoryManager.getInstance();
@@ -54,13 +57,55 @@ export class MemoryDeleteTool extends Tool {
         ? scope === 'session_team' ? `session:team:${sessionId}` : `session:personal:${sessionId}`
         : scope;
       const { scope: memScope, agentId: targetId, sessionId: parsedSessionId, subScope } = parseScopeParameter(parsedScope, ctx.agentId);
+
+      if (dryRun) {
+        const matches = await mm.search(targetId, memScope, name, parsedSessionId, subScope);
+        const exact = matches.some(entry => entry.name.toLowerCase() === name.toLowerCase());
+        return this.makeResult(
+          exact
+            ? `Memory "${name}" exists in ${scope} scope. dry_run=true; no deletion performed.`
+            : `Memory "${name}" was not found in ${scope} scope. dry_run=true; no deletion performed.`,
+          {
+            structured: {
+              scope,
+              effectiveScope: memScope,
+              targetId,
+              name,
+              status: exact ? 'found' : 'not_found',
+              dryRun: true,
+            },
+          },
+        );
+      }
+
       const deleted = await mm.remove(targetId, memScope, name, parsedSessionId, subScope);
       if (!deleted) {
-        return this.makeError(`Memory "${name}" not found in ${scope} scope.`);
+        return this.makeError(`Memory "${name}" not found in ${scope} scope.`, {
+          structured: { scope, effectiveScope: memScope, targetId, name, status: 'not_found', dryRun: false },
+        });
       }
-      return this.makeResult(`Memory "${name}" deleted from ${scope} scope.`);
+      return this.makeResult(`Memory "${name}" deleted from ${scope} scope.`, {
+        structured: { scope, effectiveScope: memScope, targetId, name, status: 'deleted', dryRun: false },
+      });
     } catch (err) {
       return this.makeError(`Failed to delete memory: ${(err as Error).message}`);
     }
   }
+}
+
+function normalizeString(value: unknown, field: string): { value: string; error?: undefined } | { value?: undefined; error: string } {
+  if (typeof value !== 'string') return { error: `${field} must be a string` };
+  const trimmed = value.trim();
+  if (!trimmed) return { error: `${field} must not be empty` };
+  return { value: trimmed };
+}
+
+function normalizeEnum(
+  value: unknown,
+  field: string,
+  allowed: string[],
+): { value: string; error?: undefined } | { value?: undefined; error: string } {
+  if (typeof value !== 'string') return { error: `${field} must be a string` };
+  if (!allowed.includes(value)) return { error: `${field} must be one of: ${allowed.join(', ')}` };
+  return { value };
 }

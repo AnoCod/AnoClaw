@@ -512,7 +512,7 @@ Updates the organization structure — move agents, change roles, reassign relat
 
 ### MemorySaveTool — `memory_save`
 
-Saves a new memory entry.
+Saves a durable memory entry with validation and structured feedback.
 
 | Property | Value |
 |---|---|
@@ -525,30 +525,33 @@ Saves a new memory entry.
 | `type` | string | ✓ | `user`, `feedback`, `project`, `reference` |
 | `name` | string | ✓ | Short descriptive name |
 | `content` | string | ✓ | Full memory content |
+| `description` | string | | Optional one-line summary |
 
 ---
 
 ### MemorySearchTool — `memory_search`
 
-Searches saved memories using fuzzy/semantic scoring (fuse.js).
+Searches saved memories with bounded snippets and structured results.
 
 | Property | Value |
 |---|---|
 | Risk | `Safe` |
+| Is read-only | Yes |
 
 **Parameters:**
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `query` | string | ✓ | Search query |
-| `scope` | string | | Filter by scope |
-| `type` | string | | Filter by memory type |
-| `limit` | number | | Max results (default 10) |
+| `scope` | string | | `team`, `personal`, `session_personal`, `session_team`, `all` (default) |
+| `fuzzy` | boolean | | Enable fuzzy matching; default true |
+| `limit` | number | | Max results returned, default 10, max 50 |
+| `max_snippet_chars` | number | | Max preview chars per memory, default 200, max 1000 |
 
 ---
 
 ### MemoryDeleteTool — `memory_delete`
 
-Deletes a memory entry by name or ID.
+Deletes a memory entry by exact name, or checks existence with `dry_run`.
 
 | Property | Value |
 |---|---|
@@ -557,24 +560,28 @@ Deletes a memory entry by name or ID.
 **Parameters:**
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | ✓ | Memory entry name or ID |
-| `scope` | string | | Memory scope |
+| `scope` | string | ✓ | `personal`, `team`, `project`, `session_personal`, `session_team` |
+| `name` | string | ✓ | Exact memory entry name |
+| `dry_run` | boolean | | Check existence without deleting |
 
 ---
 
 ### MemoryRecallTool — `memory_recall`
 
-Recalls specific memory entries. Returns full content for use in context.
+Recalls full memory content by index or name with bounded output.
 
 | Property | Value |
 |---|---|
 | Risk | `Safe` |
+| Is read-only | Yes |
 
 **Parameters:**
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | ✓ | Memory entry name or ID |
-| `scope` | string | | Memory scope |
+| `id` | string | ✓ | Index number from the Memory section, or memory name/query |
+| `scope` | string | | `agent`, `personal`, `team`, `session`, `all` (default) |
+| `max_content_chars` | number | | Max content returned per memory, default 12000, max 50000 |
+| `limit` | number | | Max named matches returned, default 5, max 20 |
 
 ---
 

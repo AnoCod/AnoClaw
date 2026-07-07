@@ -139,6 +139,7 @@ Fast file pattern matching using glob patterns.
 |---|---|---|---|
 | `pattern` | string | ✓ | Glob pattern (e.g., `**/*.ts`) |
 | `path` | string | | Search directory (default: workspace) |
+| `max_results` | number | | Max matching files to return (default 200, max 1000) |
 
 ---
 

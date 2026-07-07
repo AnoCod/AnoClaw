@@ -11,6 +11,8 @@ import type { ExecutionContext } from '../../../../shared/types/session.js';
 
 /** Maximum number of results to return (prevents context blowout). */
 const MAX_RESULTS = 200;
+const MAX_RESULTS_CAP = 1000;
+const MAX_SCANNED_ENTRIES = 100000;
 
 // Lazy-loaded via dynamic import
 // micromatch ESM/CJS interop: dynamic import returns { default: fn }, unwrap it
@@ -67,6 +69,10 @@ export class GlobTool extends Tool {
             ' IMPORTANT: Omit this field to use the default directory.' +
             ' DO NOT enter "undefined" or "null" - simply omit it for the default behavior.',
         },
+        max_results: {
+          type: 'number',
+          description: `Maximum matching files to return. Default ${MAX_RESULTS}, maximum ${MAX_RESULTS_CAP}.`,
+        },
       },
       required: ['pattern'],
     };
@@ -98,6 +104,7 @@ export class GlobTool extends Tool {
   ): Promise<ToolResult> {
     const pattern = params.pattern as string;
     const searchPath = (params.path as string) || ctx.workspace;
+    const maxResults = clampMaxResults(params.max_results as number | undefined);
 
     if (!pattern || typeof pattern !== 'string') {
       return this.makeError('pattern is required');
@@ -124,19 +131,30 @@ export class GlobTool extends Tool {
       }
 
       const micromatch = await getMM();
+      const matcher = createMatcher(micromatch, pattern);
 
-      // Collect all file paths recursively
-      const allFiles: string[] = [];
+      const matches: Array<{ filePath: string; mtimeMs: number }> = [];
+      let totalMatches = 0;
+      let scannedEntries = 0;
+      let scanTruncated = false;
+
       async function walk(dir: string): Promise<void> {
-        if (allFiles.length >= MAX_RESULTS * 2) return;
+        if (scanTruncated) return;
+        if (ctx.signal?.aborted) throw new Error('Glob interrupted by user');
         let entries: Array<{ name: string; isDirectory(): boolean; isFile(): boolean }>;
         try {
           entries = await fs.readdir(dir, { withFileTypes: true });
         } catch {
           return;
         }
+        entries.sort((a, b) => a.name.localeCompare(b.name));
         for (const entry of entries) {
-          if (allFiles.length >= MAX_RESULTS * 2) break;
+          if (scanTruncated) break;
+          scannedEntries++;
+          if (scannedEntries > MAX_SCANNED_ENTRIES) {
+            scanTruncated = true;
+            break;
+          }
           const fullPath = path.join(dir, entry.name);
           const relative = path.relative(resolved, fullPath).replace(/\\/g, '/');
           if (entry.isDirectory()) {
@@ -144,36 +162,38 @@ export class GlobTool extends Tool {
             if (entry.name === 'node_modules') continue;
             await walk(fullPath);
           } else if (entry.isFile()) {
-            allFiles.push(relative);
+            if (!matcher(relative)) continue;
+            totalMatches++;
+            let mtimeMs = 0;
+            try {
+              mtimeMs = (await fs.stat(fullPath)).mtimeMs;
+            } catch {
+              // keep default mtime
+            }
+            keepNewest(matches, { filePath: fullPath, mtimeMs }, maxResults);
           }
         }
       }
       await walk(resolved);
 
-      // Match using micromatch
-      const matched = micromatch(allFiles, pattern, { dot: false, nobrace: false });
-
-      if (matched.length === 0) {
+      if (matches.length === 0) {
         return this.makeResult('(no matches)', { startedAt });
       }
 
-      // Sort by modification time (newest first) - batch stat
-      const withMtime: Array<{ filePath: string; mtimeMs: number }> = [];
-      for (const rel of matched.slice(0, MAX_RESULTS)) {
-        try {
-          const s = await fs.stat(path.join(resolved, rel));
-          withMtime.push({ filePath: path.join(resolved, rel), mtimeMs: s.mtimeMs });
-        } catch {
-          withMtime.push({ filePath: path.join(resolved, rel), mtimeMs: 0 });
-        }
-      }
-      withMtime.sort((a, b) => b.mtimeMs - a.mtimeMs);
+      matches.sort(compareNewestFirst);
 
-      const results = withMtime.map(r => r.filePath);
-      const wasTruncated = matched.length > MAX_RESULTS;
+      const results = matches.map(r => r.filePath);
+      const wasTruncated = totalMatches > maxResults || scanTruncated;
+      const notes: string[] = [];
+      if (totalMatches > maxResults) {
+        notes.push(`${totalMatches - maxResults} matching files omitted.`);
+      }
+      if (scanTruncated) {
+        notes.push(`Scan stopped after ${MAX_SCANNED_ENTRIES} entries; narrow path or pattern for complete results.`);
+      }
       const content = results.join('\n') +
-        (wasTruncated
-          ? '\n(Results are truncated. Consider using a more specific path or pattern.)'
+        (notes.length > 0
+          ? `\n(Results are truncated. ${notes.join(' ')})`
           : '');
 
       return this.makeResult(content, { startedAt, wasTruncated });
@@ -203,4 +223,50 @@ export class GlobTool extends Tool {
   isSearchOrRead(): { isSearch: boolean; isRead: boolean } {
     return { isSearch: true, isRead: false };
   }
+}
+
+function clampMaxResults(value: number | undefined): number {
+  if (!Number.isFinite(value) || !value || value <= 0) return MAX_RESULTS;
+  return Math.min(MAX_RESULTS_CAP, Math.max(1, Math.floor(value)));
+}
+
+function createMatcher(micromatch: any, pattern: string): (filePath: string) => boolean {
+  const options = { dot: false, nobrace: false };
+  if (typeof micromatch.matcher === 'function') {
+    return micromatch.matcher(pattern, options);
+  }
+  if (typeof micromatch.isMatch === 'function') {
+    return (filePath: string) => micromatch.isMatch(filePath, pattern, options);
+  }
+  return (filePath: string) => micromatch([filePath], pattern, options).length > 0;
+}
+
+function keepNewest(
+  matches: Array<{ filePath: string; mtimeMs: number }>,
+  candidate: { filePath: string; mtimeMs: number },
+  maxResults: number,
+): void {
+  if (matches.length < maxResults) {
+    matches.push(candidate);
+    return;
+  }
+
+  let oldestIndex = 0;
+  for (let i = 1; i < matches.length; i++) {
+    if (compareNewestFirst(matches[i], matches[oldestIndex]) > 0) {
+      oldestIndex = i;
+    }
+  }
+
+  if (compareNewestFirst(candidate, matches[oldestIndex]) < 0) {
+    matches[oldestIndex] = candidate;
+  }
+}
+
+function compareNewestFirst(
+  a: { filePath: string; mtimeMs: number },
+  b: { filePath: string; mtimeMs: number },
+): number {
+  if (b.mtimeMs !== a.mtimeMs) return b.mtimeMs - a.mtimeMs;
+  return a.filePath.localeCompare(b.filePath);
 }

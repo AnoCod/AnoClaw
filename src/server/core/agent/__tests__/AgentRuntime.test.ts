@@ -19,18 +19,47 @@ import { AgentRole, AgentState } from '../../../../shared/types/agent.js';
 import { SSEEventType } from '../../../../shared/types/events.js';
 import { InterruptController } from '../supervision/InterruptController.js';
 import { SessionLeaseManager } from '../../session/SessionLeaseManager.js';
+import { CapabilityRegistry } from '../../capability/CapabilityRegistry.js';
+import { ToolRegistry } from '../../tools/ToolRegistry.js';
+import { Tool, type ExecutionContext } from '../../tools/Tool.js';
+import type { Message } from '../../../../shared/types/session.js';
+import type { ToolResult } from '../../../../shared/types/tool.js';
 
 // Reset singletons before each test
 beforeEach(() => {
   AgentRuntime.resetInstance();
   AgentRegistry.resetInstance();
+  CapabilityRegistry.resetInstance();
+  ToolRegistry.resetInstance();
   (InterruptController as any)._instance = null;
   // SessionLeaseManager can't be reset via static method easily; recreate
   const slm = SessionLeaseManager.getInstance();
   (slm as any)._leases?.clear();
 });
 
-function makeAgent(id: string, name: string, role: AgentRole): Agent {
+class FixtureTool extends Tool {
+  constructor(private readonly toolName: string) {
+    super();
+  }
+
+  name(): string {
+    return this.toolName;
+  }
+
+  description(): string {
+    return `${this.toolName} fixture`;
+  }
+
+  parametersSchema(): Record<string, unknown> {
+    return { type: 'object', properties: {} };
+  }
+
+  async execute(_params: Record<string, unknown>, _ctx: ExecutionContext): Promise<ToolResult> {
+    return this.makeResult('ok');
+  }
+}
+
+function makeAgent(id: string, name: string, role: AgentRole, allowedTools: string[] = []): Agent {
   return new Agent({
     id,
     name,
@@ -48,7 +77,7 @@ function makeAgent(id: string, name: string, role: AgentRole): Agent {
     agentPrompt: '',
     preferredLanguage: 'en',
     conversationLanguage: 'en',
-    allowedTools: [],
+    allowedTools,
     enabledSkills: [],
     mcpServers: [],
     state: AgentState.Active,
@@ -253,6 +282,118 @@ describe('AgentRuntime', () => {
 
       // Should NOT be a permission error
       expect(result.errorMessage).not.toContain('Permission denied');
+    });
+  });
+
+  describe('processMessage task routing', () => {
+    it('short-circuits with a plugin recommendation when a daily capability is recognized but unavailable', async () => {
+      const agent = makeAgent('main-1', 'MainAgent', AgentRole.MainAgent);
+      AgentRegistry.getInstance().registerAgent(agent);
+
+      const runtime = AgentRuntime.getInstance();
+      const loopSpy = vi.fn();
+      (runtime as any)._executeAndForwardLoop = loopSpy;
+
+      const events: any[] = [];
+      for await (const event of runtime.processMessage(
+        'session-1',
+        'main-1',
+        { id: 'm1', sessionId: 'session-1', role: 'user', content: '帮我做一个介绍太阳系的 PPT', tokenCount: 0, compressed: false, timestamp: new Date().toISOString() },
+      )) {
+        events.push(event);
+      }
+
+      expect(loopSpy).not.toHaveBeenCalled();
+      expect(events[0].type).toBe(SSEEventType.StatusInfo);
+      expect(events[0].taskResolution.bestCapability.id).toBe('presentation.create');
+      expect(events[0].agentMissingTools).toEqual([]);
+      expect(events.some((event) => event.type === SSEEventType.Text && String(event.content).includes('office'))).toBe(true);
+      expect(events.at(-1)?.type).toBe(SSEEventType.Done);
+    });
+
+    it('injects transient task routing context when a capability can start', async () => {
+      CapabilityRegistry.getInstance().setCatalogCapabilities([
+        {
+          id: 'widget.create',
+          title: 'Create a widget',
+          description: 'Create a widget artifact.',
+          domain: 'test',
+          kind: 'artifact',
+          triggers: ['widget'],
+          requiredTools: ['DoThing'],
+          outputs: [{ type: 'file', label: 'Widget file', extension: 'widget', artifactType: 'widget' }],
+        },
+      ]);
+      ToolRegistry.getInstance().registerTool(new FixtureTool('DoThing'));
+
+      const agent = makeAgent('main-1', 'MainAgent', AgentRole.MainAgent, ['DoThing']);
+      AgentRegistry.getInstance().registerAgent(agent);
+
+      const runtime = AgentRuntime.getInstance();
+      let capturedHistory: Message[] = [];
+      (runtime as any)._runGoalMode = vi.fn(async function* () {});
+      (runtime as any)._executeAndForwardLoop = vi.fn(async function* (
+        _loop: unknown,
+        _message: Message,
+        history: Message[],
+      ) {
+        capturedHistory = history;
+        yield { type: SSEEventType.Text, content: 'loop ran' };
+      });
+
+      const events: any[] = [];
+      for await (const event of runtime.processMessage(
+        'session-1',
+        'main-1',
+        { id: 'm1', sessionId: 'session-1', role: 'user', content: 'please create a widget for me', tokenCount: 0, compressed: false, timestamp: new Date().toISOString() },
+      )) {
+        events.push(event);
+      }
+
+      expect(events[0].type).toBe(SSEEventType.StatusInfo);
+      expect(events[0].taskResolution.bestCapability.id).toBe('widget.create');
+      expect(events.some((event) => event.type === SSEEventType.Text && event.content === 'loop ran')).toBe(true);
+      const routingContext = capturedHistory.find((msg) => msg.id.startsWith('task-resolution-'));
+      expect(routingContext?.role).toBe('system');
+      expect(routingContext?.content).toContain('widget.create');
+      expect(routingContext?.content).toContain('DoThing');
+    });
+
+    it('does not start the loop when capability tools are registered but not enabled for MainAgent', async () => {
+      CapabilityRegistry.getInstance().setCatalogCapabilities([
+        {
+          id: 'widget.create',
+          title: 'Create a widget',
+          description: 'Create a widget artifact.',
+          domain: 'test',
+          kind: 'artifact',
+          triggers: ['widget'],
+          requiredTools: ['DoThing'],
+        },
+      ]);
+      ToolRegistry.getInstance().registerTool(new FixtureTool('DoThing'));
+
+      const agent = makeAgent('main-1', 'MainAgent', AgentRole.MainAgent);
+      AgentRegistry.getInstance().registerAgent(agent);
+
+      const runtime = AgentRuntime.getInstance();
+      const loopSpy = vi.fn();
+      (runtime as any)._executeAndForwardLoop = loopSpy;
+
+      const events: any[] = [];
+      for await (const event of runtime.processMessage(
+        'session-1',
+        'main-1',
+        { id: 'm1', sessionId: 'session-1', role: 'user', content: 'please create a widget for me', tokenCount: 0, compressed: false, timestamp: new Date().toISOString() },
+      )) {
+        events.push(event);
+      }
+
+      expect(loopSpy).not.toHaveBeenCalled();
+      expect(events[0].type).toBe(SSEEventType.StatusInfo);
+      expect(events[0].agentMissingTools).toEqual(['DoThing']);
+      expect(events.some((event) => event.type === SSEEventType.Text && String(event.content).includes('DoThing'))).toBe(true);
+      expect(events.at(-1)?.type).toBe(SSEEventType.Done);
     });
   });
 });

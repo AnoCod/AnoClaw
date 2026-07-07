@@ -15,10 +15,11 @@ import type { AgentLoopConfig } from './AgentLoop.js';
 import type { Message } from '../../../shared/types/session.js';
 import { MessageRole } from '../../../shared/types/session.js';
 import type { SubAgentConfig } from '../../../shared/types/agent.js';
-import { AgentStatus } from '../../../shared/types/agent.js';
+import { AgentRole, AgentStatus } from '../../../shared/types/agent.js';
 import type { ToolResult } from '../../../shared/types/tool.js';
 import type { SSEEvent } from '../../../shared/types/events.js';
 import { SSEEventType, AgentRuntimeEvents } from '../../../shared/types/events.js';
+import type { CapabilityRecord, TaskResolveResult } from '../../../shared/types/capability.js';
 import { InterruptController, InterruptReason } from './supervision/InterruptController.js';
 import { SessionManager } from '../session/index.js';
 import { SessionStore } from '../session/SessionStore.js';
@@ -44,10 +45,16 @@ import {
   type DelegationState,
 } from './AgentDelegation.js';
 import { resolveSessionEffort, resolveSessionPermissionMode } from './PermissionModePolicy.js';
+import { TaskResolver } from '../capability/TaskResolver.js';
 
 export interface ProcessMessageOptions {
   permissionMode?: string;
   effort?: string;
+}
+
+interface UserTaskResolution {
+  result: TaskResolveResult;
+  agentMissingTools: string[];
 }
 
 export class AgentRuntime extends EventEmitter {
@@ -140,6 +147,25 @@ export class AgentRuntime extends EventEmitter {
       return;
     }
 
+    const taskResolution = await this._resolveUserTask(sessionId, agent, message, logger);
+    if (taskResolution) {
+      yield {
+        type: SSEEventType.StatusInfo,
+        content: this._formatTaskResolutionStatus(taskResolution),
+        taskResolution: summarizeTaskResolution(taskResolution.result),
+        agentMissingTools: taskResolution.agentMissingTools,
+      };
+
+      if (shouldStopForTaskResolution(taskResolution)) {
+        yield {
+          type: SSEEventType.Text,
+          content: this._formatTaskResolutionResponse(taskResolution),
+        };
+        yield buildImmediateDoneEvent();
+        return;
+      }
+    }
+
     // Acquire lease 鈥?reject if too many concurrent sessions
     const lease = SessionLeaseManager.getInstance().acquire(sessionId);
     if (!lease) {
@@ -182,7 +208,8 @@ export class AgentRuntime extends EventEmitter {
 
     try {
       // Run the AgentLoop
-      yield* this._executeAndForwardLoop(loop, message, history, signal, sessionId, agentId, logger);
+      const effectiveHistory = this._historyWithTaskResolution(history, sessionId, taskResolution);
+      yield* this._executeAndForwardLoop(loop, message, effectiveHistory, signal, sessionId, agentId, logger);
 
       // Loop completed successfully
       agent.setSessionStatus(sessionId, AgentStatus.Working); // back to "ready" (not actively in loop)
@@ -394,6 +421,139 @@ export class AgentRuntime extends EventEmitter {
 
       SupervisionManager.getInstance().heartbeat(sessionId);
     }
+  }
+
+  private async _resolveUserTask(
+    sessionId: string,
+    agent: { role: AgentRole; allowedTools(): string[] },
+    message: Message,
+    logger: ReturnType<typeof createLogger>,
+  ): Promise<UserTaskResolution | null> {
+    if (message.role !== MessageRole.User) return null;
+    if (agent.role !== AgentRole.MainAgent) return null;
+    if (typeof message.content !== 'string' || !message.content.trim()) return null;
+
+    const session = SessionManager.getInstance().session(sessionId);
+    if (session && !session.isRoot()) return null;
+
+    try {
+      const result = await new TaskResolver().resolve({
+        message: message.content,
+        includeUnavailable: true,
+      });
+      if (result.intent !== 'capability' || !result.bestCapability) return null;
+
+      const requiredTools = capabilityToolNames(result.bestCapability);
+      const allowedTools = new Set(agent.allowedTools());
+      const unavailableTools = new Set(result.missingTools);
+      const agentMissingTools = requiredTools.filter((toolName) => !unavailableTools.has(toolName) && !allowedTools.has(toolName));
+      logger.info('User task resolved to capability', {
+        sid: sessionId,
+        capabilityId: result.bestCapability.id,
+        nextAction: result.nextAction,
+        missingTools: result.missingTools,
+        agentMissingTools,
+      });
+      return { result, agentMissingTools };
+    } catch (err) {
+      logger.warn('Task resolution failed; falling back to normal agent loop', {
+        sid: sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+  }
+
+  private _historyWithTaskResolution(
+    history: Message[],
+    sessionId: string,
+    taskResolution: UserTaskResolution | null,
+  ): Message[] {
+    if (!taskResolution || shouldStopForTaskResolution(taskResolution)) return history;
+    const context = buildTaskResolutionContext(taskResolution);
+    if (!context) return history;
+    return [
+      ...history,
+      {
+        id: `task-resolution-${Date.now().toString(36)}`,
+        sessionId,
+        role: MessageRole.System,
+        content: context,
+        tokenCount: 0,
+        compressed: false,
+        timestamp: new Date().toISOString(),
+      },
+    ];
+  }
+
+  private _formatTaskResolutionStatus(taskResolution: UserTaskResolution): string {
+    const capability = taskResolution.result.bestCapability;
+    if (!capability) return 'Task understood.';
+    const action = taskResolution.agentMissingTools.length > 0 ? 'enable_tools' : taskResolution.result.nextAction;
+    if (isLikelyChinese(taskResolution.result.query)) {
+      if (action === 'execute_capability') return `已识别任务：${capability.title}。`;
+      if (action === 'ask_user') return `已识别任务：${capability.title}，还需要补充信息。`;
+      if (action === 'enable_tools') return `已识别任务：${capability.title}，但当前 Agent 还没启用所需工具。`;
+      return `已识别任务：${capability.title}，但需要先准备插件能力。`;
+    }
+    if (action === 'execute_capability') return `Resolved task: ${capability.title}.`;
+    if (action === 'ask_user') return `Resolved task: ${capability.title}; more input is needed.`;
+    if (action === 'enable_tools') return `Resolved task: ${capability.title}; required tools are not enabled for this agent.`;
+    return `Resolved task: ${capability.title}; a plugin capability is required.`;
+  }
+
+  private _formatTaskResolutionResponse(taskResolution: UserTaskResolution): string {
+    const capability = taskResolution.result.bestCapability;
+    if (!capability) return taskResolution.result.suggestedResponse;
+
+    if (taskResolution.agentMissingTools.length > 0) {
+      const tools = taskResolution.agentMissingTools.join(', ');
+      if (isLikelyChinese(taskResolution.result.query)) {
+        return [
+          `我识别到你想使用「${capability.title}」能力，但当前 MainAgent 还不能调用所需工具：${tools}。`,
+          '',
+          '请先在 Agent 的工具白名单里启用这些工具，或安装/启用提供该能力的插件；启用后你可以直接用同一句话让我继续完成。',
+        ].join('\n');
+      }
+      return [
+        `I recognized this as "${capability.title}", but MainAgent cannot use the required tools yet: ${tools}.`,
+        '',
+        'Enable those tools for the agent, or install/enable the plugin that provides them, then ask the same request again.',
+      ].join('\n');
+    }
+
+    if (taskResolution.result.nextAction === 'ask_user') {
+      const fields = taskResolution.result.missingInputs.map((field) => field.label || field.name).join(', ');
+      if (isLikelyChinese(taskResolution.result.query)) {
+        return `我可以处理「${capability.title}」，但还需要你补充：${fields}。`;
+      }
+      return `I can handle "${capability.title}", but I still need: ${fields}.`;
+    }
+
+    if (taskResolution.result.nextAction === 'recommend_plugin') {
+      const plugins = taskResolution.result.recommendedPlugins.length > 0
+        ? taskResolution.result.recommendedPlugins.join(', ')
+        : 'a plugin that provides this capability';
+      const tools = taskResolution.result.missingTools.length > 0
+        ? ` Missing tools: ${taskResolution.result.missingTools.join(', ')}.`
+        : '';
+      if (isLikelyChinese(taskResolution.result.query)) {
+        return [
+          `我识别到你想使用「${capability.title}」能力，但 AnoClaw 当前还缺少对应插件/工具。`,
+          '',
+          `建议插件：${plugins}。${tools}`,
+          '插件准备好后，你可以直接用同一句话让我继续完成。',
+        ].join('\n');
+      }
+      return [
+        `I recognized this as "${capability.title}", but AnoClaw does not have the required plugin/tool ready yet.`,
+        '',
+        `Recommended plugin: ${plugins}.${tools}`,
+        'Once it is ready, you can ask the same request again and I can continue.',
+      ].join('\n');
+    }
+
+    return taskResolution.result.suggestedResponse;
   }
 
   private _sleepUntilGoalWake(signal: AbortSignal, ms: number): Promise<void> {
@@ -999,6 +1159,108 @@ export class AgentRuntime extends EventEmitter {
   get activeSessionCount(): number {
     return this._activeLoops.size;
   }
+}
+
+function shouldStopForTaskResolution(taskResolution: UserTaskResolution): boolean {
+  return taskResolution.agentMissingTools.length > 0
+    || taskResolution.result.nextAction === 'ask_user'
+    || taskResolution.result.nextAction === 'recommend_plugin';
+}
+
+function buildTaskResolutionContext(taskResolution: UserTaskResolution): string {
+  const { result } = taskResolution;
+  const capability = result.bestCapability;
+  if (!capability) return '';
+
+  const requiredTools = capabilityToolNames(capability);
+  const outputs = (capability.outputs || [])
+    .map((output) => [output.label, output.extension, output.artifactType].filter(Boolean).join(' / '))
+    .filter(Boolean);
+
+  const lines = [
+    '[AnoClaw task routing]',
+    `User request resolved to capability: ${capability.id}`,
+    `Capability title: ${capability.title}`,
+    `Domain: ${capability.domain}`,
+    `Kind: ${capability.kind || 'utility'}`,
+    `Confidence: ${result.confidence.toFixed(2)}`,
+    `Reason: ${result.reason}`,
+  ];
+
+  if (requiredTools.length > 0) {
+    lines.push(`Prefer these tools for this task when available: ${requiredTools.join(', ')}`);
+  }
+  if (capability.skills?.length) {
+    lines.push(`Relevant skills: ${capability.skills.join(', ')}`);
+  }
+  if (outputs.length > 0) {
+    lines.push(`Expected outputs: ${outputs.join('; ')}`);
+  }
+  if (result.assumptions.length > 0) {
+    lines.push(`Assumptions: ${result.assumptions.join('; ')}`);
+  }
+
+  lines.push(
+    'Use this routing as the task plan. Do not ask the user to restate the same request.',
+    'If a required tool is not visible in your available tool list, explain that the tool must be enabled for this agent before execution.',
+  );
+  return lines.join('\n');
+}
+
+function summarizeTaskResolution(result: TaskResolveResult): Record<string, unknown> {
+  return {
+    intent: result.intent,
+    query: result.query,
+    confidence: result.confidence,
+    nextAction: result.nextAction,
+    canStart: result.canStart,
+    bestCapability: result.bestCapability ? {
+      id: result.bestCapability.id,
+      title: result.bestCapability.title,
+      domain: result.bestCapability.domain,
+      status: result.bestCapability.status,
+      source: result.bestCapability.source,
+      sourceName: result.bestCapability.sourceName,
+      pluginName: result.bestCapability.pluginName,
+    } : undefined,
+    missingInputs: result.missingInputs.map((input) => ({
+      name: input.name,
+      label: input.label,
+      type: input.type,
+    })),
+    missingTools: result.missingTools,
+    recommendedPlugins: result.recommendedPlugins,
+    reason: result.reason,
+  };
+}
+
+function capabilityToolNames(capability: CapabilityRecord): string[] {
+  return uniqueStrings([
+    ...(capability.requiredTools || []),
+    ...(capability.tools || []),
+  ]);
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function isLikelyChinese(value: string): boolean {
+  return /[\u3400-\u9fff]/.test(value);
+}
+
+function buildImmediateDoneEvent(): SSEEvent {
+  return {
+    type: SSEEventType.Done,
+    tokenUsage: {
+      systemPrompt: 0,
+      systemTools: 0,
+      skills: 0,
+      messages: 0,
+      freeSpace: 0,
+      total: 0,
+    },
+  };
 }
 
 // 鈹€鈹€ Memory lifecycle helper (lazy-import, fire-and-forget) 鈹€鈹€鈹€

@@ -27,6 +27,16 @@ const MAX_MANUAL_SCANNED_FILES = 50000;
 const MAX_MANUAL_FILE_BYTES = 2 * 1024 * 1024;
 
 let cachedRipgrepPath: string | null | undefined;
+type ManualReadFile = (filePath: string, encoding: 'utf-8') => Promise<string>;
+let manualReadFile: ManualReadFile = (filePath, encoding) => fs.readFile(filePath, encoding);
+
+export function setCachedRipgrepPathForTests(value: string | null | undefined): void {
+  cachedRipgrepPath = value;
+}
+
+export function setManualGrepReadFileForTests(readFile?: ManualReadFile): void {
+  manualReadFile = readFile ?? ((filePath, encoding) => fs.readFile(filePath, encoding));
+}
 
 export class GrepTool extends Tool {
 
@@ -281,6 +291,7 @@ export class GrepTool extends Tool {
           showLineNumbers,
           beforeLines: contextLines || before,
           afterLines: contextLines || after,
+          timeoutMs,
         }, ctx.signal);
         if (manualResult.error) {
           return this.makeError(manualResult.error, {
@@ -622,6 +633,7 @@ interface ManualGrepOptions {
   literal: boolean;
   includeHidden: boolean;
   multiline: boolean;
+  timeoutMs: number;
 }
 
 interface ManualGrepResult {
@@ -630,6 +642,16 @@ interface ManualGrepResult {
   notes: string[];
   error?: string;
   failure?: string;
+}
+
+class ManualGrepControlError extends Error {
+  constructor(
+    message: string,
+    readonly failure: 'aborted' | 'timeout',
+  ) {
+    super(message);
+    this.name = 'ManualGrepControlError';
+  }
 }
 
 async function manualGrep(
@@ -672,10 +694,65 @@ async function manualGrep(
   let scannedFiles = 0;
   let scanTruncated = false;
   let skippedLargeFiles = 0;
+  const deadline = Date.now() + opts.timeoutMs;
 
   const isLimited = () => opts.headLimit > 0 && results.length >= opts.headLimit;
   const ensureNotAborted = () => {
-    if (signal?.aborted) throw new Error('Grep cancelled by user');
+    if (signal?.aborted) throw new ManualGrepControlError('Grep cancelled by user', 'aborted');
+    if (Date.now() >= deadline) {
+      throw new ManualGrepControlError(
+        `Grep manual fallback timed out after ${opts.timeoutMs}ms. Narrow path/pattern or increase timeout_ms.`,
+        'timeout',
+      );
+    }
+  };
+  const withDeadline = async <T>(promise: Promise<T>, operation: string): Promise<T> => {
+    ensureNotAborted();
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      throw new ManualGrepControlError(
+        `Grep manual fallback timed out after ${opts.timeoutMs}ms. Narrow path/pattern or increase timeout_ms.`,
+        'timeout',
+      );
+    }
+
+    return await new Promise<T>((resolve, reject) => {
+      let settled = false;
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+      let removeAbort: (() => void) | null = null;
+
+      const settle = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        if (timeout) clearTimeout(timeout);
+        removeAbort?.();
+        fn();
+      };
+
+      timeout = setTimeout(() => {
+        settle(() => reject(new ManualGrepControlError(
+          `Grep manual fallback timed out after ${opts.timeoutMs}ms during ${operation}. Narrow path/pattern or increase timeout_ms.`,
+          'timeout',
+        )));
+      }, remainingMs);
+
+      if (signal) {
+        const onAbort = () => {
+          settle(() => reject(new ManualGrepControlError('Grep cancelled by user', 'aborted')));
+        };
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
+        signal.addEventListener('abort', onAbort, { once: true });
+        removeAbort = () => signal.removeEventListener('abort', onAbort);
+      }
+
+      promise.then(
+        value => settle(() => resolve(value)),
+        err => settle(() => reject(err)),
+      );
+    });
   };
 
   async function processFile(fullPath: string, displayPath: string): Promise<void> {
@@ -688,17 +765,18 @@ async function manualGrep(
     }
 
     try {
-      const fileStat = await fs.stat(fullPath);
+      const fileStat = await withDeadline(fs.stat(fullPath), 'file stat');
       if (fileStat.size > MAX_MANUAL_FILE_BYTES) {
         skippedLargeFiles++;
         return;
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof ManualGrepControlError) throw err;
       return;
     }
 
     try {
-      const content = await fs.readFile(fullPath, 'utf-8');
+      const content = await withDeadline(manualReadFile(fullPath, 'utf-8'), 'file read');
       if (content.includes('\u0000')) return;
       const lines = content.split('\n');
 
@@ -734,7 +812,8 @@ async function manualGrep(
           results.push(`${formatLocation(displayPath, i + 1, opts.showLineNumbers)}${line.trim()}`);
         }
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof ManualGrepControlError) throw err;
       // Skip unreadable files
     }
   }
@@ -745,8 +824,9 @@ async function manualGrep(
 
     let entries: Array<{ name: string; isDirectory(): boolean; isFile(): boolean }>;
     try {
-      entries = await fs.readdir(dir, { withFileTypes: true });
-    } catch {
+      entries = await withDeadline(fs.readdir(dir, { withFileTypes: true }), 'directory read');
+    } catch (err) {
+      if (err instanceof ManualGrepControlError) throw err;
       return;
     }
     entries.sort((a, b) => a.name.localeCompare(b.name));
@@ -771,8 +851,11 @@ async function manualGrep(
 
   let stat: Awaited<ReturnType<typeof fs.stat>>;
   try {
-    stat = await fs.stat(searchPath);
-  } catch {
+    stat = await withDeadline(fs.stat(searchPath), 'path stat');
+  } catch (err) {
+    if (err instanceof ManualGrepControlError) {
+      return { output: '', wasTruncated: false, notes: [], error: err.message, failure: err.failure };
+    }
     return { output: '', wasTruncated: false, notes: [] };
   }
 
@@ -789,7 +872,7 @@ async function manualGrep(
       wasTruncated: false,
       notes: [],
       error: message,
-      failure: signal?.aborted ? 'aborted' : 'runtime',
+      failure: err instanceof ManualGrepControlError ? err.failure : signal?.aborted ? 'aborted' : 'runtime',
     };
   }
 

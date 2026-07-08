@@ -1,8 +1,8 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { GrepTool } from '../builtin/GrepTool.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { GrepTool, setCachedRipgrepPathForTests, setManualGrepReadFileForTests } from '../builtin/GrepTool.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
 
 let tempDirs: string[] = [];
@@ -24,6 +24,10 @@ async function makeWorkspace(): Promise<string> {
 }
 
 afterEach(async () => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  setCachedRipgrepPathForTests(undefined);
+  setManualGrepReadFileForTests();
   const dirs = tempDirs;
   tempDirs = [];
   await Promise.all(dirs.map(dir => rm(dir, { recursive: true, force: true })));
@@ -157,6 +161,35 @@ describe('GrepTool', () => {
 
     expect(result.success).toBe(false);
     expect(result.errorMessage).toContain('cancelled by user');
+  });
+
+  it('times out manual fallback file reads with structured feedback', async () => {
+    const workspace = await makeWorkspace();
+    await writeFile(path.join(workspace, 'slow.txt'), 'needle');
+    setCachedRipgrepPathForTests(null);
+    let markReadStarted!: () => void;
+    const readStarted = new Promise<void>((resolve) => { markReadStarted = resolve; });
+    setManualGrepReadFileForTests(() => {
+      markReadStarted();
+      return new Promise<string>(() => {});
+    });
+    vi.useFakeTimers();
+
+    const pending = new GrepTool().execute(
+      { pattern: 'needle', path: workspace, literal: true, timeout_ms: 1000 },
+      ctx(workspace),
+    );
+
+    await readStarted;
+    await vi.advanceTimersByTimeAsync(1000);
+    const result = await pending;
+
+    expect(result.success).toBe(false);
+    expect(result.errorMessage).toContain('Grep manual fallback timed out after 1000ms');
+    expect(result.structured).toMatchObject({
+      backend: 'manual',
+      failure: 'timeout',
+    });
   });
 
   it('includes file paths when searching a single file in content mode', async () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ToolPipeline } from '../ToolPipeline.js';
+import { AgentMessageTool } from '../builtin/AgentMessageTool.js';
 import { ApiCallTool } from '../builtin/ApiCallTool.js';
 import { AskUserQuestionTool } from '../builtin/AskUserQuestionTool.js';
 import { BashTool } from '../builtin/BashTool.js';
@@ -327,6 +328,33 @@ describe('native tool parameter schemas', () => {
 
     expect(ToolPipeline.validateParams(new EnterPlanModeTool(), {
       anything: true,
+    })?.errorMessage).toContain('Unexpected parameter');
+  });
+
+  it('exposes AgentMessage content and summary bounds', () => {
+    const tool = new AgentMessageTool();
+
+    expect(ToolPipeline.validateParams(tool, {
+      targetAgentId: 'member-1',
+      content: 'Please check the current task status.',
+      summary: 'Status check',
+    })).toBeNull();
+
+    expect(ToolPipeline.validateParams(tool, {
+      targetAgentId: 'member-1',
+      content: '   ',
+    })?.errorMessage).toContain('content');
+
+    expect(ToolPipeline.validateParams(tool, {
+      targetAgentId: 'member-1',
+      content: 'Please check the current task status.',
+      summary: 'x'.repeat(121),
+    })?.errorMessage).toContain('summary');
+
+    expect(ToolPipeline.validateParams(tool, {
+      targetAgentId: 'member-1',
+      content: 'Please check the current task status.',
+      typo: true,
     })?.errorMessage).toContain('Unexpected parameter');
   });
 

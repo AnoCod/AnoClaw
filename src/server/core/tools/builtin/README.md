@@ -518,14 +518,19 @@ Sends a message to another agent in the org tree.
 
 | Property | Value |
 |---|---|
-| Risk | `Medium` |
+| Risk | `Low` |
 
 **Parameters:**
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `to` | string | ✓ | Recipient agent name or `main` |
-| `message` | string | ✓ | Plain text message content |
-| `summary` | string | | Short summary for UI |
+| `targetAgentId` | string | ✓ | Direct parent or child agent ID |
+| `content` | string | ✓ | Plain text coordination message; max 20,000 chars |
+| `summary` | string | | Short label for UI/background task list; max 120 chars |
+
+**Reliability notes:**
+- `targetAgentId`, `content`, and `summary` are strictly validated before registry/session work starts.
+- If the recipient is idle, the tool starts tracked background processing and returns a `Task ID`.
+- Background delivery failures are recorded as failed tasks, so callers can inspect them with `TaskOutput` instead of waiting indefinitely.
 
 ---
 

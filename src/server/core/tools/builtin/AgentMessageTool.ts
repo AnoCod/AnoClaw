@@ -19,6 +19,11 @@ import { BackgroundTaskManager } from '../../agent/supervision/BackgroundTaskMan
 import { bubbleEventToParent } from '../../agent/AgentDelegation.js';
 import { SessionStore } from '../../session/SessionStore.js';
 import { WsServer } from '../../../infra/network/WsServer.js';
+import type { StreamPersister } from '../../../infra/StreamPersister.js';
+
+const MAX_TARGET_AGENT_ID_CHARS = 200;
+const MAX_MESSAGE_CONTENT_CHARS = 20000;
+const MAX_MESSAGE_SUMMARY_CHARS = 120;
 
 export class AgentMessageTool extends Tool {
 
@@ -57,14 +62,28 @@ export class AgentMessageTool extends Tool {
       properties: {
         targetAgentId: {
           type: 'string',
+          minLength: 1,
+          maxLength: MAX_TARGET_AGENT_ID_CHARS,
+          pattern: '\\S',
           description: 'ID of the target agent to send the message to',
         },
         content: {
           type: 'string',
+          minLength: 1,
+          maxLength: MAX_MESSAGE_CONTENT_CHARS,
+          pattern: '\\S',
           description: 'Message content to send',
+        },
+        summary: {
+          type: 'string',
+          minLength: 1,
+          maxLength: MAX_MESSAGE_SUMMARY_CHARS,
+          pattern: '\\S',
+          description: 'Optional short label for the background task list and UI activity cards.',
         },
       },
       required: ['targetAgentId', 'content'],
+      additionalProperties: false,
     };
   }
 
@@ -76,12 +95,18 @@ export class AgentMessageTool extends Tool {
     params: Record<string, unknown>,
     ctx: ExecutionContext,
   ): Promise<ToolResult> {
-    const targetAgentId = params.targetAgentId as string;
-    const content = params.content as string;
+    const targetResult = normalizeString(params.targetAgentId, 'targetAgentId', MAX_TARGET_AGENT_ID_CHARS);
+    if (targetResult.error) return this.makeError(targetResult.error);
+    const targetAgentId = targetResult.value!;
 
-    if (!targetAgentId || !content) {
-      return this.makeError('Both targetAgentId and content are required.');
-    }
+    const contentResult = normalizeString(params.content, 'content', MAX_MESSAGE_CONTENT_CHARS);
+    if (contentResult.error) return this.makeError(contentResult.error);
+    const content = contentResult.value!;
+
+    const summaryResult = normalizeOptionalString(params.summary, 'summary', MAX_MESSAGE_SUMMARY_CHARS);
+    if (summaryResult.error) return this.makeError(summaryResult.error);
+    const summary = summaryResult.value;
+    const activitySummary = summary ?? `Msg to ${targetAgentId}: ${content.slice(0, 60)}`;
 
     const registry = AgentRegistry.getInstance();
     const sessionManager = SessionManager.getInstance();
@@ -190,7 +215,7 @@ export class AgentMessageTool extends Tool {
         sessionId: targetSession.id,
         parentSessionId: targetSession.parentSessionId || ctx.sessionId,
         agentId: targetAgentId,
-        title: `Msg: ${content.slice(0, 40)}`,
+        title: summary ?? `Msg: ${content.slice(0, 40)}`,
       });
     } catch { /* non-critical - UI notification is best-effort */ }
 
@@ -202,6 +227,7 @@ export class AgentMessageTool extends Tool {
       return this.makeResult(
         `Message delivered to '${targetAgentId}' (session: ${targetSession.id}). ` +
         `Agent is currently active - the message will be seen on their next turn.`,
+        { structured: { targetAgentId, targetSessionId: targetSession.id, active: true } },
       );
     }
 
@@ -216,54 +242,103 @@ export class AgentMessageTool extends Tool {
       type: 'subagent',
       parentSessionId: ctx.sessionId,
       parentAgentId: ctx.agentId,
-      summary: `Msg to ${targetAgentId}: ${content.slice(0, 60)}`,
+      summary: activitySummary,
     });
     const bgStartMs = Date.now();
+    const targetSessionId = targetSession.id;
     (async () => {
-      const { StreamPersister } = await import('../../../infra/StreamPersister.js');
-      const store = SessionStore.getInstance();
-      const persister = new StreamPersister(store, targetSession!.id,
-        `msg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-        '00000000-0000-0000-0000-000000000000',
-        targetAgentId);
+      let persister: StreamPersister | null = null;
       try {
-        for await (const event of runtime.processMessage(targetSession!.id, targetAgentId, message)) {
+        const { StreamPersister: StreamPersisterCtor } = await import('../../../infra/StreamPersister.js');
+        const store = SessionStore.getInstance();
+        persister = new StreamPersisterCtor(store, targetSessionId,
+          `msg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+          '00000000-0000-0000-0000-000000000000',
+          targetAgentId);
+        const activePersister = persister;
+
+        for await (const event of runtime.processMessage(targetSessionId, targetAgentId, message)) {
           // ── Persist to JSONL ──
           if (event.type === 'text') {
-            await persister.persistEvent('text', { content: event.content || '' });
+            await activePersister.persistEvent('text', { content: event.content || '' });
           } else if (event.type === 'think') {
-            await persister.persistEvent('think', { content: event.content || '' });
+            await activePersister.persistEvent('think', { content: event.content || '' });
           } else if (event.type === 'tool_call') {
-            await persister.persistEvent('tool_call', {
+            await activePersister.persistEvent('tool_call', {
               id: (event.toolCallId || event.toolId || '') as string,
               name: (event.toolName || event.name || '') as string,
               input: (event.params || event.args || event.input || event.toolInput || {}) as Record<string, unknown>,
             });
           } else if (event.type === 'tool_result') {
-            await persister.persistEvent('tool_result', {
+            await activePersister.persistEvent('tool_result', {
               toolCallId: (event.toolCallId || event.toolId || '') as string,
               is_error: (event as Record<string, unknown>).success === false,
               content: (event.result || event.content || '') as string,
             });
           }
           // ── Bubble to parent for live delegation card ──
-          bubbleEventToParent(null as any, parentSessionId, targetSession!.id, targetAgentId, event);
-          WsServer.getInstance().send(targetSession!.id, event as unknown as Record<string, unknown>);
+          bubbleEventToParent(null as any, parentSessionId, targetSessionId, targetAgentId, event);
+          WsServer.getInstance().send(targetSessionId, event as unknown as Record<string, unknown>);
         }
-        await persister.flushDeltas();
-        SessionManager.getInstance().rebuildMessageCache(targetSession!.id).catch(() => {});
+        await activePersister.flushDeltas();
+        SessionManager.getInstance().rebuildMessageCache(targetSessionId).catch(() => {});
         bgManager.complete(bgTaskId, { content: 'Message processed', durationMs: Date.now() - bgStartMs }).catch(() => {});
-        logger.debug('AgentMessage processed by recipient', { from: ctx.agentId, to: targetAgentId, sid: targetSession!.id });
+        logger.debug('AgentMessage processed by recipient', { from: ctx.agentId, to: targetAgentId, sid: targetSessionId });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         logger.warn('AgentMessage background processing error', { from: ctx.agentId, to: targetAgentId, error: msg });
+        try {
+          await persister?.flushDeltas();
+        } catch { /* best-effort before failure notification */ }
         bgManager.fail(bgTaskId, msg, Date.now() - bgStartMs).catch(() => {});
       }
     })();
 
     return this.makeResult(
       `Message delivered to '${targetAgentId}' (session: ${targetSession.id}). ` +
-      `Agent was idle - processing started in background.`,
+      `Agent was idle - processing started in background.\n` +
+      `Task ID: ${bgTaskId}`,
+      { structured: { taskId: bgTaskId, targetAgentId, targetSessionId: targetSession.id, background: true } },
     );
   }
+
+  getToolUseSummary(input?: Record<string, unknown>): string | null {
+    if (typeof input?.summary === 'string' && input.summary.trim()) {
+      return input.summary.trim();
+    }
+    if (typeof input?.content === 'string' && input.content.trim()) {
+      return this.truncate(input.content.trim(), 50);
+    }
+    return null;
+  }
+
+  getActivityDescription(input?: Record<string, unknown>): string | null {
+    const target = typeof input?.targetAgentId === 'string' && input.targetAgentId.trim()
+      ? input.targetAgentId.trim()
+      : 'agent';
+    return `Sending message to ${target}`;
+  }
+}
+
+function normalizeString(
+  value: unknown,
+  field: string,
+  maxLength: number,
+): { value: string; error?: undefined } | { value?: undefined; error: string } {
+  if (typeof value !== 'string') return { error: `${field} must be a string` };
+  const trimmed = value.trim();
+  if (!trimmed) return { error: `${field} must not be empty` };
+  if (trimmed.length > maxLength) {
+    return { error: `${field} must be ${maxLength} characters or less` };
+  }
+  return { value: trimmed };
+}
+
+function normalizeOptionalString(
+  value: unknown,
+  field: string,
+  maxLength: number,
+): { value?: string; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: undefined };
+  return normalizeString(value, field, maxLength);
 }

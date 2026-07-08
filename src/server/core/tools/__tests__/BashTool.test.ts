@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -159,6 +159,58 @@ describe('BashTool', () => {
       stdoutChars: 2000,
       outputLimit: 200,
     });
+  });
+
+  it('rejects ambiguous typed controls before spawning a process', async () => {
+    const workspace = await makeWorkspace();
+    const marker = path.join(workspace, 'should-not-exist.txt');
+    const tool = new BashTool();
+
+    const badBackground = await tool.execute(
+      {
+        command: nodeCommand(`require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran')`),
+        description: 'Reject background string',
+        run_in_background: 'false',
+      },
+      ctx(workspace),
+    );
+
+    expect(badBackground.success).toBe(false);
+    expect(badBackground.errorMessage).toContain('run_in_background must be a boolean');
+    await expect(stat(marker)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(BackgroundTaskManager.getInstance().getActive().filter(task => task.parentSessionId === 'bash-session')).toEqual([]);
+
+    const badTimeout = await tool.execute(
+      {
+        command: nodeCommand("process.stdout.write('should not run')"),
+        description: 'Reject fractional timeout',
+        timeout: 100.5,
+      },
+      ctx(workspace),
+    );
+    expect(badTimeout.success).toBe(false);
+    expect(badTimeout.errorMessage).toContain('timeout must be an integer');
+
+    const badOutputLimit = await tool.execute(
+      {
+        command: nodeCommand("process.stdout.write('should not run')"),
+        description: 'Reject fractional output limit',
+        max_output_chars: 200.25,
+      },
+      ctx(workspace),
+    );
+    expect(badOutputLimit.success).toBe(false);
+    expect(badOutputLimit.errorMessage).toContain('max_output_chars must be an integer');
+
+    const badDescription = await tool.execute(
+      {
+        command: nodeCommand("process.stdout.write('should not run')"),
+        description: '   ',
+      },
+      ctx(workspace),
+    );
+    expect(badDescription.success).toBe(false);
+    expect(badDescription.errorMessage).toContain('description must not be empty');
   });
 
   it('captures background stdout for later task output retrieval', async () => {

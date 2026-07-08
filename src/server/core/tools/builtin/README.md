@@ -72,6 +72,7 @@ Executes shell commands with confirmation, timeout, background-task, working-dir
 **Behavior notes:**
 - Non-zero exit codes, timeouts, and user interrupts return failed tool results with exit metadata.
 - Output includes stdout and labeled stderr, with middle truncation for oversized output.
+- `description`, `timeout`, `max_output_chars`, and `run_in_background` are strictly validated before any process is spawned.
 - `run_in_background` starts a supervised task; without an explicit `timeout`, the background watchdog TTL applies.
 
 ---

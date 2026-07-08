@@ -201,21 +201,32 @@ export class BashTool extends Tool {
     params: Record<string, unknown>,
     ctx: ExecutionContext,
   ): Promise<ToolResult> {
-    const command = params.command as string;
-    const description = params.description as string | undefined;
+    const commandResult = normalizeString(params.command, 'command');
+    if (commandResult.error) {
+      return this.makeError(commandResult.error);
+    }
+    const command = commandResult.value!;
+
+    const descriptionResult = normalizeString(params.description, 'description', 200);
+    if (descriptionResult.error) {
+      return this.makeError(descriptionResult.error);
+    }
+    const description = descriptionResult.value!;
+
     const timeoutResult = normalizeTimeout(params.timeout);
     const outputLimitResult = normalizeOutputLimit(params.max_output_chars);
-    const runInBackground = (params.run_in_background as boolean) ?? false;
+    const runInBackgroundResult = normalizeBoolean(params.run_in_background, 'run_in_background', false);
+    const runInBackground = runInBackgroundResult.value ?? false;
     const cwdParam = params.cwd;
 
-    if (!command || typeof command !== 'string') {
-      return this.makeError('command is required');
-    }
     if (timeoutResult.error) {
       return this.makeError(timeoutResult.error);
     }
     if (outputLimitResult.error) {
       return this.makeError(outputLimitResult.error);
+    }
+    if (runInBackgroundResult.error) {
+      return this.makeError(runInBackgroundResult.error);
     }
     if (cwdParam !== undefined && cwdParam !== null && typeof cwdParam !== 'string') {
       return this.makeError('cwd must be a string');
@@ -505,19 +516,45 @@ interface BashExecutionResult {
   durationMs: number;
 }
 
+function normalizeString(
+  value: unknown,
+  field: string,
+  maxLength?: number,
+): { value: string; error?: undefined } | { value?: undefined; error: string } {
+  if (typeof value !== 'string') return { error: `${field} must be a string` };
+  const trimmed = value.trim();
+  if (!trimmed) return { error: `${field} must not be empty` };
+  if (maxLength !== undefined && trimmed.length > maxLength) {
+    return { error: `${field} must be ${maxLength} characters or less` };
+  }
+  return { value: value };
+}
+
+function normalizeBoolean(
+  value: unknown,
+  field: string,
+  fallback: boolean,
+): { value: boolean; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: fallback };
+  if (typeof value !== 'boolean') return { error: `${field} must be a boolean` };
+  return { value };
+}
+
 function normalizeTimeout(value: unknown): { value: number; error?: undefined } | { value?: undefined; error: string } {
   if (value === undefined || value === null) return { value: DEFAULT_TIMEOUT_MS };
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return { error: 'timeout must be a finite number of milliseconds' };
   }
-  const normalized = Math.floor(value);
-  if (normalized < 100) {
+  if (!Number.isInteger(value)) {
+    return { error: 'timeout must be an integer number of milliseconds' };
+  }
+  if (value < 100) {
     return { error: 'timeout must be at least 100 milliseconds' };
   }
-  if (normalized > MAX_TIMEOUT_MS) {
+  if (value > MAX_TIMEOUT_MS) {
     return { error: `timeout must be ${MAX_TIMEOUT_MS} milliseconds or less` };
   }
-  return { value: normalized };
+  return { value };
 }
 
 function normalizeOutputLimit(value: unknown): { value: number; error?: undefined } | { value?: undefined; error: string } {
@@ -525,14 +562,16 @@ function normalizeOutputLimit(value: unknown): { value: number; error?: undefine
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return { error: 'max_output_chars must be a finite number' };
   }
-  const normalized = Math.floor(value);
-  if (normalized < 100) {
+  if (!Number.isInteger(value)) {
+    return { error: 'max_output_chars must be an integer' };
+  }
+  if (value < 100) {
     return { error: 'max_output_chars must be at least 100' };
   }
-  if (normalized > MAX_CONFIGURABLE_OUTPUT_CHARS) {
+  if (value > MAX_CONFIGURABLE_OUTPUT_CHARS) {
     return { error: `max_output_chars must be ${MAX_CONFIGURABLE_OUTPUT_CHARS} or less` };
   }
-  return { value: normalized };
+  return { value };
 }
 
 function resolveWorkingDirectory(cwd: string | undefined, workspace: string): { cwd: string; error?: undefined } | { cwd?: undefined; error: string } {

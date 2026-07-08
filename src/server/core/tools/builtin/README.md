@@ -693,6 +693,10 @@ Recalls full memory content by index or name with bounded output.
 | `max_content_chars` | number | | Max content returned per memory, default 12000, max 50000 |
 | `limit` | number | | Max named matches returned, default 5, max 20 |
 
+**Behavior notes:**
+- `scope`, `max_content_chars`, and `limit` are strictly typed; ambiguous values fail before memory search starts.
+- Structured results include the requested scope plus effective output limits so callers can tell whether content was truncated.
+
 ---
 
 ### SkillTool — `Skill`

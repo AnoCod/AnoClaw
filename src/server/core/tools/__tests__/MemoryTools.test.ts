@@ -149,10 +149,42 @@ describe('Memory tools', () => {
     expect(calls).toEqual([{ scope: MemoryScope.Agent, query: 'build' }]);
     expect(result.structured).toMatchObject({
       id: 'build',
+      scope: 'personal',
       status: 'found',
       count: 1,
       returned: 1,
+      maxContentChars: 12000,
+      limit: 5,
     });
+  });
+
+  it('memory_recall validates typed controls before searching', async () => {
+    let searchCalled = false;
+    setMemoryManager({
+      search: async () => {
+        searchCalled = true;
+        return [entry('unused', 'unused')];
+      },
+    });
+    const tool = new MemoryRecallTool();
+
+    const badScopeType = await tool.execute({ id: 'build', scope: 42 }, ctx);
+    expect(badScopeType.success).toBe(false);
+    expect(badScopeType.errorMessage).toContain('scope must be a string');
+
+    const badScopeValue = await tool.execute({ id: 'build', scope: 'global' }, ctx);
+    expect(badScopeValue.success).toBe(false);
+    expect(badScopeValue.errorMessage).toContain('scope must be one of');
+
+    const badContentLimit = await tool.execute({ id: 'build', max_content_chars: 300.5 }, ctx);
+    expect(badContentLimit.success).toBe(false);
+    expect(badContentLimit.errorMessage).toContain('max_content_chars must be an integer');
+
+    const badMatchLimit = await tool.execute({ id: 'build', limit: 2.25 }, ctx);
+    expect(badMatchLimit.success).toBe(false);
+    expect(badMatchLimit.errorMessage).toContain('limit must be an integer');
+
+    expect(searchCalled).toBe(false);
   });
 
   it('memory_recall supports numeric index lookup with truncation metadata', async () => {
@@ -174,9 +206,12 @@ describe('Memory tools', () => {
     expect(result.content).toContain('truncated');
     expect(result.structured).toMatchObject({
       id: '2',
+      requestedScope: 'team',
       status: 'found',
       name: 'beta',
       wasTruncated: true,
+      maxContentChars: 300,
+      limit: 5,
     });
   });
 

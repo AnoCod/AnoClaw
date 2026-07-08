@@ -54,7 +54,11 @@ export class MemoryRecallTool extends Tool {
     const idResult = normalizeString(params.id, 'id');
     if (idResult.error) return this.makeError(idResult.error);
     const id = idResult.value!;
-    const scope = (params.scope as string) || 'all';
+
+    const scopeResult = normalizeEnum(params.scope, 'scope', ['agent', 'personal', 'team', 'session', 'all'] as const, 'all');
+    if (scopeResult.error) return this.makeError(scopeResult.error);
+    const scope = scopeResult.value!;
+
     const contentLimitResult = normalizeInteger(params.max_content_chars, 'max_content_chars', DEFAULT_CONTENT_LIMIT, 200, MAX_CONTENT_LIMIT);
     if (contentLimitResult.error) return this.makeError(contentLimitResult.error);
     const matchLimitResult = normalizeInteger(params.limit, 'limit', DEFAULT_MATCH_LIMIT, 1, MAX_MATCH_LIMIT);
@@ -67,11 +71,7 @@ export class MemoryRecallTool extends Tool {
       const scopes: MemoryScope[] = (scope === 'agent' || scope === 'personal') ? [MemoryScope.Agent]
         : scope === 'team' ? [MemoryScope.Team]
         : scope === 'session' ? [MemoryScope.Session]
-        : scope === 'all' ? [MemoryScope.Agent, MemoryScope.Team, MemoryScope.Session]
-        : [];
-      if (scopes.length === 0) {
-        return this.makeError(`Invalid memory scope "${scope}". Expected one of: agent, personal, team, session, all.`);
-      }
+        : [MemoryScope.Agent, MemoryScope.Team, MemoryScope.Session];
 
       // Try numeric index first (from the MemorySection index table)
       const numIdx = parseInt(id, 10);
@@ -79,14 +79,14 @@ export class MemoryRecallTool extends Tool {
         const allEntries = await loadEntries(mm, ctx.agentId, scopes, '', ctx.sessionId);
         if (numIdx <= 0 || numIdx > allEntries.length) {
           return this.makeResult(`No memory found for index "${id}". Available: ${allEntries.length} memories across ${scope} scope.`, {
-            structured: { id, scope, status: 'not_found', available: allEntries.length },
+            structured: { id, scope, status: 'not_found', available: allEntries.length, maxContentChars, limit },
           });
         }
         const entry = allEntries[numIdx - 1];
         const { content, wasTruncated } = truncate(entry.content, maxContentChars);
         return this.makeResult(
           `## ${entry.name}\nType: ${entry.type} | Scope: ${entry.scope}\n\n${content}\n\n---\n(Full content loaded. Token estimate: ~${Math.ceil(content.length / 4)}${wasTruncated ? '; truncated' : ''}.)`,
-          { structured: { id, status: 'found', name: entry.name, type: entry.type, scope: entry.scope, content, wasTruncated } },
+          { structured: { id, requestedScope: scope, status: 'found', name: entry.name, type: entry.type, scope: entry.scope, content, wasTruncated, maxContentChars, limit } },
         );
       }
 
@@ -124,13 +124,15 @@ export class MemoryRecallTool extends Tool {
             status: 'found',
             count: byName.length,
             returned: returnedEntries.length,
+            maxContentChars,
+            limit,
             entries: structuredEntries,
           },
         });
       }
 
       return this.makeResult(`No memory found for "${id}" across ${scope} scope.`, {
-        structured: { id, scope, status: 'not_found', count: 0 },
+        structured: { id, scope, status: 'not_found', count: 0, maxContentChars, limit },
       });
     } catch (err) {
       return this.makeError(`Failed to recall memory: ${(err as Error).message}`);
@@ -169,9 +171,21 @@ function normalizeInteger(
 ): { value: number; error?: undefined } | { value?: undefined; error: string } {
   if (value === undefined || value === null) return { value: fallback };
   if (typeof value !== 'number' || !Number.isFinite(value)) return { error: `${field} must be a finite number` };
-  const normalized = Math.floor(value);
-  if (normalized < min || normalized > max) return { error: `${field} must be between ${min} and ${max}` };
-  return { value: normalized };
+  if (!Number.isInteger(value)) return { error: `${field} must be an integer` };
+  if (value < min || value > max) return { error: `${field} must be between ${min} and ${max}` };
+  return { value };
+}
+
+function normalizeEnum<T extends readonly string[]>(
+  value: unknown,
+  field: string,
+  allowed: T,
+  fallback: T[number],
+): { value: T[number]; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: fallback };
+  if (typeof value !== 'string') return { error: `${field} must be a string` };
+  if (!allowed.includes(value)) return { error: `${field} must be one of: ${allowed.join(', ')}` };
+  return { value };
 }
 
 function truncate(value: string, limit: number): { content: string; wasTruncated: boolean } {

@@ -86,6 +86,85 @@ describe('NotebookEditTool', () => {
     expect(updated.cells[1].outputs).toEqual([]);
   });
 
+  it('clears stale code outputs by default when replacing source', async () => {
+    const workspace = await makeWorkspace();
+    const file = path.join(workspace, 'analysis.ipynb');
+    await writeNotebook(file, notebook([
+      {
+        id: 'calc',
+        cell_type: 'code',
+        metadata: {},
+        execution_count: 7,
+        outputs: [{ output_type: 'stream', name: 'stdout', text: 'old result\n' }],
+        source: 'x = 1\nx\n',
+      },
+    ]));
+
+    const result = await new NotebookEditTool().execute(
+      {
+        notebook_path: file,
+        cell_id: 'calc',
+        new_source: 'x = 2\nx\n',
+      },
+      ctx(workspace),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.structured).toMatchObject({
+      editMode: 'replace',
+      cellId: 'calc',
+      cellType: 'code',
+      clearOutputs: true,
+      outputsCleared: true,
+      previousOutputCount: 1,
+      previousExecutionCount: 7,
+    });
+    const updated = await readNotebook(file);
+    expect(updated.cells[0].source).toBe('x = 2\nx\n');
+    expect(updated.cells[0].outputs).toEqual([]);
+    expect(updated.cells[0].execution_count).toBeNull();
+  });
+
+  it('preserves code outputs when clear_outputs is false', async () => {
+    const workspace = await makeWorkspace();
+    const file = path.join(workspace, 'analysis.ipynb');
+    const output = { output_type: 'execute_result', data: { 'text/plain': '1' }, metadata: {}, execution_count: 3 };
+    await writeNotebook(file, notebook([
+      {
+        id: 'calc',
+        cell_type: 'code',
+        metadata: {},
+        execution_count: 3,
+        outputs: [output],
+        source: 'x = 1\n',
+      },
+    ]));
+
+    const result = await new NotebookEditTool().execute(
+      {
+        notebook_path: file,
+        cell_id: 'calc',
+        new_source: 'x = 2\n',
+        clear_outputs: false,
+      },
+      ctx(workspace),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.structured).toMatchObject({
+      editMode: 'replace',
+      cellId: 'calc',
+      clearOutputs: false,
+      outputsCleared: false,
+      previousOutputCount: 1,
+      previousExecutionCount: 3,
+    });
+    const updated = await readNotebook(file);
+    expect(updated.cells[0].source).toBe('x = 2\n');
+    expect(updated.cells[0].outputs).toEqual([output]);
+    expect(updated.cells[0].execution_count).toBe(3);
+  });
+
   it('supports dry-run inserts without modifying the notebook', async () => {
     const workspace = await makeWorkspace();
     const file = path.join(workspace, 'analysis.ipynb');
@@ -165,6 +244,13 @@ describe('NotebookEditTool', () => {
     );
     expect(badDryRun.success).toBe(false);
     expect(badDryRun.errorMessage).toContain('dry_run must be a boolean');
+
+    const badClearOutputs = await tool.execute(
+      { notebook_path: file, clear_outputs: 'false', new_source: '# Changed\n' },
+      ctx(workspace),
+    );
+    expect(badClearOutputs.success).toBe(false);
+    expect(badClearOutputs.errorMessage).toContain('clear_outputs must be a boolean');
 
     const ambiguousTarget = await tool.execute(
       { notebook_path: file, cell_id: 'intro', cell_number: 0, new_source: '# Changed\n' },

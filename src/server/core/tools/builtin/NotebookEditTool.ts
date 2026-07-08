@@ -39,13 +39,14 @@ export class NotebookEditTool extends Tool {
   }
 
   description(): string {
-    return 'Replace, insert, or delete a single cell in a Jupyter notebook (.ipynb file). Use this instead of Write for notebook edits. Supports dry_run and expected_sha256 safety checks.';
+    return 'Replace, insert, or delete a single cell in a Jupyter notebook (.ipynb file). Use this instead of Write for notebook edits. Supports dry_run, expected_sha256, and code-cell output clearing safety checks.';
   }
 
   prompt(): string {
     return '## NotebookEdit Usage\n' +
       'Edit cells in .ipynb Jupyter notebooks. Use this instead of Write or Edit for notebook files - those tools work on raw JSON, this works on the cell structure.\n\n' +
       '**Operations:** `replace` (default) - changes a cell\'s source. `insert` - adds a new cell after the given cell_id. `delete` - removes a cell.\n\n' +
+      'When replacing a code cell, stale outputs and execution_count are cleared by default so the notebook does not imply that new code has already run. Set clear_outputs=false only when intentionally preserving outputs.\n\n' +
       'Use expected_sha256 after reading a notebook to guard against stale edits. Use dry_run=true to validate a risky notebook edit without writing.\n\n' +
       'You must Read the notebook first to see cell IDs. Only edit notebook files - for regular .ts/.js/.py files, use Edit.';
   }
@@ -89,6 +90,10 @@ export class NotebookEditTool extends Tool {
         dry_run: {
           type: 'boolean',
           description: 'Preview and validate the notebook edit without writing the file.',
+        },
+        clear_outputs: {
+          type: 'boolean',
+          description: 'When replacing a code cell, clear stale outputs and execution_count. Defaults to true.',
         },
       },
       required: ['notebook_path'],
@@ -147,6 +152,10 @@ export class NotebookEditTool extends Tool {
     const dryRunResult = normalizeBoolean(params.dry_run, 'dry_run', false);
     if (dryRunResult.error) return this.makeError(dryRunResult.error);
     const dryRun = dryRunResult.value!;
+
+    const clearOutputsResult = normalizeBoolean(params.clear_outputs, 'clear_outputs', true);
+    if (clearOutputsResult.error) return this.makeError(clearOutputsResult.error);
+    const clearOutputs = clearOutputsResult.value!;
 
     if (editMode !== 'delete' && newSource === undefined) {
       return this.makeError('new_source is required for replace and insert modes');
@@ -237,6 +246,9 @@ export class NotebookEditTool extends Tool {
       let affectedCellType: 'code' | 'markdown' | undefined;
       let sourceCharsBefore = 0;
       let sourceCharsAfter = 0;
+      let previousOutputCount: number | undefined;
+      let previousExecutionCount: number | null | undefined;
+      let outputsCleared = false;
 
       switch (editMode) {
         case 'replace': {
@@ -250,6 +262,16 @@ export class NotebookEditTool extends Tool {
           affectedCellType = target.cell_type;
           sourceCharsBefore = sourceToString(target.source).length;
           sourceCharsAfter = newSource!.length;
+          if (target.cell_type === 'code') {
+            previousOutputCount = Array.isArray(target.outputs) ? target.outputs.length : undefined;
+            previousExecutionCount = target.execution_count;
+            if (clearOutputs) {
+              target.execution_count = null;
+              target.outputs = [];
+              outputsCleared = (previousOutputCount ?? 0) > 0 ||
+                (previousExecutionCount !== undefined && previousExecutionCount !== null);
+            }
+          }
           target.source = applySourceFormat(newSource!, target.source);
           message = `Replaced source of cell ${targetIdx} (${affectedCellType}) in ${path.basename(resolved)}`;
           break;
@@ -309,6 +331,10 @@ export class NotebookEditTool extends Tool {
         sourceCharsBefore,
         sourceCharsAfter,
         sourceCharDelta: sourceCharsAfter - sourceCharsBefore,
+        clearOutputs,
+        outputsCleared,
+        previousOutputCount,
+        previousExecutionCount,
         previousBytes: rawBuffer.byteLength,
         bytes: Buffer.byteLength(output, 'utf-8'),
         previousSha256,

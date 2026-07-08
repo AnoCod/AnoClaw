@@ -342,9 +342,20 @@ export class ToolPipeline {
     if (maxRetries <= 0) return originalResult;
 
     const logger = createLogger('anochat.tools');
-    const startedAt = originalResult.startedAt;
+    const startedAt = originalResult.startedAt || Date.now();
+    let lastResult = originalResult;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      if (ctx.signal?.aborted) {
+        return makePipelineFailure(
+          tool,
+          retryToolCallId(tool, attempt, 'interrupted'),
+          startedAt,
+          'interrupted',
+          'Tool retry was interrupted before the next attempt started.',
+        );
+      }
+
       const delay = Math.min(2 ** attempt * 500, 5000);
       logger.debug('Tool retry', {
         toolName: tool.name(),
@@ -355,10 +366,25 @@ export class ToolPipeline {
         error: errorMsg.slice(0, 100),
       });
 
-      await new Promise(r => setTimeout(r, delay));
+      const interrupted = await waitForRetryDelay(
+        delay,
+        ctx.signal,
+        () => makePipelineFailure(
+          tool,
+          retryToolCallId(tool, attempt, 'delay-interrupted'),
+          startedAt,
+          'interrupted',
+          'Tool retry was interrupted during retry backoff.',
+        ),
+      );
+      if (interrupted) return interrupted;
 
-      const retryResult = await tool._executeWithEvents(params, ctx,
-        `${tool.name()}-retry-${attempt}-${Date.now()}`);
+      const retryResult = await ToolPipeline.execute(
+        tool,
+        params,
+        ctx,
+        retryToolCallId(tool, attempt),
+      );
 
       if (retryResult.success) {
         logger.debug('Tool retry succeeded', {
@@ -366,6 +392,12 @@ export class ToolPipeline {
           sid: ctx.sessionId,
           attempt,
         });
+        return retryResult;
+      }
+      lastResult = retryResult;
+
+      const retryStructured = retryResult.structured as { pipelineFailure?: string } | undefined;
+      if (retryStructured?.pipelineFailure === 'timeout' || retryStructured?.pipelineFailure === 'interrupted') {
         return retryResult;
       }
 
@@ -377,8 +409,8 @@ export class ToolPipeline {
 
     // All retries exhausted — return the last error
     return {
-      ...originalResult,
-      errorMessage: `${errorMsg} (retried ${maxRetries}×, all failed)`,
+      ...lastResult,
+      errorMessage: `${lastResult.errorMessage || errorMsg} (retried ${maxRetries}×, all failed)`,
     };
   }
 
@@ -408,6 +440,37 @@ function normalizeTimeoutMs(value: number | undefined): number {
 
 function formatMs(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(ms % 1000 === 0 ? 0 : 1)}s` : `${ms}ms`;
+}
+
+function retryToolCallId(tool: Tool, attempt: number, suffix?: string): string {
+  return `${tool.name()}-retry-${attempt}-${suffix ? `${suffix}-` : ''}${Date.now()}`;
+}
+
+function waitForRetryDelay(
+  delayMs: number,
+  signal: AbortSignal | undefined,
+  makeInterrupted: () => ToolResult,
+): Promise<ToolResult | null> {
+  if (signal?.aborted) return Promise.resolve(makeInterrupted());
+
+  return new Promise((resolve) => {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    let settled = false;
+    let onAbort: () => void;
+
+    const settle = (result: ToolResult | null) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      signal?.removeEventListener('abort', onAbort);
+      resolve(result);
+    };
+
+    onAbort = () => settle(makeInterrupted());
+
+    timeout = setTimeout(() => settle(null), delayMs);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 function makePipelineFailure(

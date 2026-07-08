@@ -594,6 +594,75 @@ describe('ToolPipeline.retry error classification', () => {
     expect(r.success).toBe(true);
   });
 
+  it('stops retry backoff when the session is interrupted', async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const execute = vi.fn().mockResolvedValue(makeResult('unexpected retry'));
+      const tool = mockTool({
+        maxRetries: 1,
+        _executeWithEvents: execute,
+      });
+
+      const pending = ToolPipeline.retry(
+        tool,
+        {},
+        ctx({ signal: controller.signal }),
+        makeError('ECONNRESET: connection lost'),
+      );
+
+      await vi.advanceTimersByTimeAsync(250);
+      controller.abort();
+      const result = await pending;
+
+      expect(result.success).toBe(false);
+      expect(result.errorMessage).toContain('interrupted');
+      expect(result.structured).toMatchObject({
+        toolName: 'TestTool',
+        pipelineFailure: 'interrupted',
+      });
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses the execution watchdog for retry attempts that never settle', async () => {
+    vi.useFakeTimers();
+    try {
+      const execute = vi.fn(() => new Promise<ToolResult>(() => {}));
+      const tool = mockTool({
+        name: 'RetrySlowTool',
+        maxRetries: 1,
+        defaultTimeoutMs: 10,
+        _executeWithEvents: execute,
+      });
+
+      const pending = ToolPipeline.retry(
+        tool,
+        {},
+        ctx(),
+        makeError('ECONNRESET: connection lost'),
+      );
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(100);
+      const result = await pending;
+
+      expect(result.success).toBe(false);
+      expect(result.errorMessage).toContain('timed out');
+      expect(result.toolCallId).toContain('RetrySlowTool-retry-1');
+      expect(result.structured).toMatchObject({
+        toolName: 'RetrySlowTool',
+        pipelineFailure: 'timeout',
+        timeoutMs: 100,
+      });
+      expect(execute).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does NOT retry user-visible errors like ENOENT', async () => {
     const tool = mockTool({
       maxRetries: 2,

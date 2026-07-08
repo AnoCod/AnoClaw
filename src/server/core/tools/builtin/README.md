@@ -167,6 +167,16 @@ Fast file pattern matching using glob patterns.
 | `pattern` | string | ✓ | Glob pattern (e.g., `**/*.ts`) |
 | `path` | string | | Search directory (default: workspace) |
 | `max_results` | number | | Max matching files to return (default 200, max 1000) |
+| `include_hidden` | boolean | | Include hidden files/directories (default false) |
+| `include_node_modules` | boolean | | Include `node_modules` directories (default false) |
+| `exclude` | string[] | | Glob patterns to exclude relative to the search path |
+| `timeout_ms` | number | | Max scan time (default 15000ms, max 60000ms) |
+| `max_output_chars` | number | | Max output characters (default/max 25000) |
+
+**Behavior notes:**
+- Invalid numeric/boolean/list parameters fail fast instead of being silently clamped.
+- Results include structured metadata for match counts, scanned entries, skipped paths, truncation, timeout, and output limits.
+- Hidden paths and `node_modules` are skipped by default to keep broad searches fast and relevant.
 
 ---
 

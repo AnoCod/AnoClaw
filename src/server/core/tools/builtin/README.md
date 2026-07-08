@@ -272,15 +272,16 @@ Fetches content from a URL, converts HTML/JSON/text to readable text, and return
 |---|---|---|---|
 | `url` | string | ✓ | URL to fetch (HTTP upgraded to HTTPS) |
 | `prompt` | string | | Optional focus prompt; returned excerpts prioritize matching terms |
-| `max_content_chars` | number | | Max content chars returned, default 15000, max 80000 |
-| `timeout_ms` | number | | Total fetch timeout, default 60000, max 90000 |
-| `retry_attempts` | number | | Network attempts, default 2, max 3 |
+| `max_content_chars` | integer | | Max content chars returned, default 15000, max 80000 |
+| `timeout_ms` | integer | | Total fetch timeout, default 60000, max 90000 |
+| `retry_attempts` | integer | | Network attempts, default 2, max 3 |
 | `use_cache` | boolean | | Use cached fetched text when available, default true |
 
 **Behavior notes:**
 - Applies the output character cap before returning content, rather than relying only on pipeline truncation.
 - Returns structured status for `ok`, `cached`, `http_error`, `timeout`, `aborted`, and `failed`.
-- User interrupts cancel active fetches and retry backoff.
+- Unknown parameters and fractional numeric bounds are rejected before any network work starts.
+- User interrupts cancel active fetches and retry backoff; timeout handling returns even if the fetch layer ignores abort.
 - SSRF protection checks literal IPs and DNS lookup results for IPv4 and IPv6 private/internal ranges.
 
 ---
@@ -301,13 +302,14 @@ Searches the web and returns results formatted as search blocks. Supports bounde
 | `query` | string | ✓ | Search query (2-500 chars after trimming) |
 | `allowed_domains` | string[] | | Only include these domains or their subdomains |
 | `blocked_domains` | string[] | | Exclude these domains or their subdomains |
-| `max_results` | number | | Max results returned, default 10, max 10 |
-| `timeout_ms` | number | | Total search timeout, default 15000, max 60000 |
+| `max_results` | integer | | Max results returned, default 10, max 10 |
+| `timeout_ms` | integer | | Total search timeout, default 15000, max 60000 |
 
 **Behavior notes:**
 - Tries DuckDuckGo Lite, DuckDuckGo HTML, then Bing within one total timeout budget.
 - Failed searches return structured backend attempts instead of hanging or hiding the failure reason.
-- User interrupts cancel in-flight network work and return a clear cancelled result.
+- Unknown parameters and fractional numeric bounds are rejected before any network work starts.
+- User interrupts cancel in-flight network work and return a clear cancelled result; timeout handling returns even if the fetch layer ignores abort.
 - DuckDuckGo redirect URLs are decoded before filtering and returning results.
 
 ---

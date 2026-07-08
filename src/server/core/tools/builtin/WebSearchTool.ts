@@ -16,6 +16,7 @@ const DEFAULT_TIMEOUT_MS = 15000;
 const MIN_TIMEOUT_MS = 1000;
 const MAX_TIMEOUT_MS = 60000;
 const MIN_BACKEND_TIMEOUT_MS = 500;
+const PARAM_KEYS = ['query', 'allowed_domains', 'blocked_domains', 'max_results', 'timeout_ms'];
 
 type SearchResult = { title: string; url: string; snippet: string };
 type BackendStatus = 'ok' | 'http_error' | 'no_results' | 'timeout' | 'aborted' | 'network_error' | 'skipped';
@@ -52,6 +53,7 @@ async function fetchWithTimeout(
   let timeout: ReturnType<typeof setTimeout> | null = null;
   let timedOut = false;
   let removeExternalAbort: (() => void) | null = null;
+  let settled = false;
 
   const finish = (attempt: Omit<FetchAttempt, 'backend' | 'durationMs' | 'timeoutMs'>): FetchAttempt => ({
     backend,
@@ -60,42 +62,60 @@ async function fetchWithTimeout(
     ...attempt,
   });
 
-  try {
-    if (extSignal?.aborted) return finish({ status: 'aborted', error: 'Search cancelled before request started' });
+  return await new Promise<FetchAttempt>((resolve) => {
+    const settle = (attempt: Omit<FetchAttempt, 'backend' | 'durationMs' | 'timeoutMs'>) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      removeExternalAbort?.();
+      resolve(finish(attempt));
+    };
+
+    if (extSignal?.aborted) {
+      settle({ status: 'aborted', error: 'Search cancelled before request started' });
+      return;
+    }
 
     timeout = setTimeout(() => {
       timedOut = true;
       ctrl.abort();
+      settle({ status: 'timeout', error: `Timed out after ${timeoutMs}ms` });
     }, timeoutMs);
 
     if (extSignal) {
-      const onAbort = () => ctrl.abort();
+      const onAbort = () => {
+        ctrl.abort();
+        settle({ status: 'aborted', error: 'Search cancelled by user' });
+      };
       extSignal.addEventListener('abort', onAbort, { once: true });
       removeExternalAbort = () => extSignal.removeEventListener('abort', onAbort);
     }
 
-    const resp = await webFetch(url, { signal: ctrl.signal });
-    if (!resp.ok) {
-      return finish({
-        status: 'http_error',
-        statusCode: resp.status,
-        statusText: resp.statusText,
-        error: `HTTP ${resp.status} ${resp.statusText}`,
+    webFetch(url, { signal: ctrl.signal })
+      .then((resp) => {
+        if (!resp.ok) {
+          settle({
+            status: 'http_error',
+            statusCode: resp.status,
+            statusText: resp.statusText,
+            error: `HTTP ${resp.status} ${resp.statusText}`,
+          });
+          return;
+        }
+        settle({ status: 'ok', response: resp });
+      })
+      .catch((err: unknown) => {
+        if (extSignal?.aborted) {
+          settle({ status: 'aborted', error: 'Search cancelled by user' });
+          return;
+        }
+        if (timedOut || (err instanceof DOMException && err.name === 'AbortError')) {
+          settle({ status: 'timeout', error: `Timed out after ${timeoutMs}ms` });
+          return;
+        }
+        settle({ status: 'network_error', error: errorMessage(err) });
       });
-    }
-    return finish({ status: 'ok', response: resp });
-  } catch (err: unknown) {
-    if (extSignal?.aborted) {
-      return finish({ status: 'aborted', error: 'Search cancelled by user' });
-    }
-    if (timedOut || (err instanceof DOMException && err.name === 'AbortError')) {
-      return finish({ status: 'timeout', error: `Timed out after ${timeoutMs}ms` });
-    }
-    return finish({ status: 'network_error', error: errorMessage(err) });
-  } finally {
-    if (timeout) clearTimeout(timeout);
-    removeExternalAbort?.();
-  }
+  });
 }
 
 async function readResponseTextWithTimeout(
@@ -203,6 +223,7 @@ export class WebSearchTool extends Tool {
         timeout_ms: { type: 'integer', minimum: MIN_TIMEOUT_MS, maximum: MAX_TIMEOUT_MS, description: `Total search timeout in milliseconds. Default ${DEFAULT_TIMEOUT_MS}, max ${MAX_TIMEOUT_MS}.` },
       },
       required: ['query'],
+      additionalProperties: false,
     };
   }
 
@@ -215,6 +236,9 @@ export class WebSearchTool extends Tool {
   maxRetries(): number { return 0; }
 
   async execute(params: Record<string, unknown>, ctx: ExecutionContext): Promise<ToolResult> {
+    const unexpectedParam = findUnexpectedParam(params, PARAM_KEYS);
+    if (unexpectedParam) return this.makeError(`Unexpected parameter: "${unexpectedParam}"`);
+
     const queryResult = normalizeQuery(params.query);
     if (queryResult.error) return this.makeError(queryResult.error);
     const query = queryResult.value as string;
@@ -476,10 +500,10 @@ function normalizeInteger(
 ): { value: number; error?: undefined } | { value?: undefined; error: string } {
   if (value === undefined || value === null) return { value: defaultValue };
   if (typeof value !== 'number' || !Number.isFinite(value)) return { error: `${name} must be a finite number` };
-  const integer = Math.trunc(value);
-  if (integer < min) return { error: `${name} must be at least ${min}` };
-  if (integer > max) return { error: `${name} must be ${max} or less` };
-  return { value: integer };
+  if (!Number.isInteger(value)) return { error: `${name} must be an integer` };
+  if (value < min) return { error: `${name} must be at least ${min}` };
+  if (value > max) return { error: `${name} must be ${max} or less` };
+  return { value };
 }
 
 function normalizeDomains(value: unknown, name: string): { value: string[]; error?: undefined } | { value?: undefined; error: string } {
@@ -554,4 +578,9 @@ function summarizeAttempts(attempts: BackendAttempt[]): string {
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function findUnexpectedParam(params: Record<string, unknown>, allowed: string[]): string | null {
+  const allowedSet = new Set(allowed);
+  return Object.keys(params).find(key => !allowedSet.has(key)) ?? null;
 }

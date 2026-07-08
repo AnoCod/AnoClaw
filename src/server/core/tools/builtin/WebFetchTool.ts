@@ -19,6 +19,7 @@ const MAX_RETRY_ATTEMPTS = 3;
 const MAX_PROMPT_CHARS = 1000;
 const MAX_CACHE_CONTENT_CHARS = 200000;
 const DNS_TIMEOUT_MS = 5000;
+const PARAM_KEYS = ['url', 'prompt', 'max_content_chars', 'timeout_ms', 'retry_attempts', 'use_cache'];
 
 /** Cache TTL in milliseconds (15 minutes). */
 const CACHE_TTL_MS = 15 * 60 * 1000;
@@ -135,6 +136,7 @@ export class WebFetchTool extends Tool {
         },
       },
       required: ['url'],
+      additionalProperties: false,
     };
   }
 
@@ -175,6 +177,8 @@ export class WebFetchTool extends Tool {
     ctx: ExecutionContext,
   ): Promise<ToolResult> {
     const startedAt = Date.now();
+    const unexpectedParam = findUnexpectedParam(params, PARAM_KEYS);
+    if (unexpectedParam) return this.makeError(`Unexpected parameter: "${unexpectedParam}"`);
 
     const urlResult = normalizeUrl(params.url);
     if (urlResult.error) return this.makeError(urlResult.error);
@@ -408,7 +412,7 @@ async function fetchWithRetry(
       if (opts.signal.aborted) {
         throw new DOMException('Aborted', 'AbortError');
       }
-      const response = await webFetch(url, opts);
+      const response = await webFetchWithAbort(url, opts.signal);
       attempts.push({ attempt, status: 'ok', durationMs: Date.now() - startedAt });
       return { response, attempts };
     } catch (err: unknown) {
@@ -448,6 +452,30 @@ async function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
       resolve();
     }, ms);
     signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+function webFetchWithAbort(
+  url: string,
+  signal: AbortSignal,
+): Promise<Awaited<ReturnType<typeof webFetch>>> {
+  if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', onAbort);
+      fn();
+    };
+    const onAbort = () => finish(() => reject(new DOMException('Aborted', 'AbortError')));
+
+    signal.addEventListener('abort', onAbort, { once: true });
+    webFetch(url, { signal }).then(
+      response => finish(() => resolve(response)),
+      err => finish(() => reject(err)),
+    );
   });
 }
 
@@ -673,10 +701,10 @@ function normalizeInteger(
 ): { value: number; error?: undefined } | { value?: undefined; error: string } {
   if (value === undefined || value === null) return { value: defaultValue };
   if (typeof value !== 'number' || !Number.isFinite(value)) return { error: `${name} must be a finite number` };
-  const integer = Math.trunc(value);
-  if (integer < min) return { error: `${name} must be at least ${min}` };
-  if (integer > max) return { error: `${name} must be ${max} or less` };
-  return { value: integer };
+  if (!Number.isInteger(value)) return { error: `${name} must be an integer` };
+  if (value < min) return { error: `${name} must be at least ${min}` };
+  if (value > max) return { error: `${name} must be ${max} or less` };
+  return { value };
 }
 
 function normalizeBoolean(
@@ -863,4 +891,9 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function findUnexpectedParam(params: Record<string, unknown>, allowed: string[]): string | null {
+  const allowedSet = new Set(allowed);
+  return Object.keys(params).find(key => !allowedSet.has(key)) ?? null;
 }

@@ -55,6 +55,16 @@ describe('native tool parameter schemas', () => {
       allowed_domains: ['   '],
     });
     expect(emptyDomain?.errorMessage).toContain('allowed_domains[0]');
+
+    expect(ToolPipeline.validateParams(new WebSearchTool(), {
+      query: 'release notes',
+      timeout_ms: 1000.5,
+    })?.errorMessage).toContain('expected integer');
+
+    expect(ToolPipeline.validateParams(new WebSearchTool(), {
+      query: 'release notes',
+      unused: true,
+    })?.errorMessage).toContain('Unexpected parameter');
   });
 
   it('exposes WebFetch timeout, retry, prompt, and output bounds', () => {
@@ -77,6 +87,16 @@ describe('native tool parameter schemas', () => {
       url: 'https://example.com',
       prompt: 'x'.repeat(1001),
     })?.errorMessage).toContain('expected at most 1000');
+
+    expect(ToolPipeline.validateParams(tool, {
+      url: 'https://example.com',
+      timeout_ms: 1000.5,
+    })?.errorMessage).toContain('expected integer');
+
+    expect(ToolPipeline.validateParams(tool, {
+      url: 'https://example.com',
+      typo: true,
+    })?.errorMessage).toContain('Unexpected parameter');
   });
 
   it('exposes Bash command and numeric execution bounds', () => {

@@ -111,6 +111,28 @@ describe('WebSearchTool', () => {
     });
   });
 
+  it('returns on timeout even when the backend ignores abort', async () => {
+    vi.useFakeTimers();
+    webFetchMock.mockImplementation(() => new Promise(() => {}));
+
+    const pending = new WebSearchTool().execute({ query: 'ignored abort search', timeout_ms: 1000 }, ctx);
+    await vi.advanceTimersByTimeAsync(1000);
+    const result = await pending;
+
+    expect(result.success).toBe(false);
+    expect(result.errorMessage).toContain('timed out');
+    expect(webFetchMock).toHaveBeenCalledTimes(1);
+    expect(result.structured).toMatchObject({
+      query: 'ignored abort search',
+      status: 'timeout',
+      timeoutMs: 1000,
+      backendAttempts: [
+        expect.objectContaining({ backend: 'DuckDuckGo Lite', status: 'timeout' }),
+        expect.objectContaining({ backend: 'DuckDuckGo HTML', status: 'skipped' }),
+      ],
+    });
+  });
+
   it('times out when a backend response body never finishes', async () => {
     vi.useFakeTimers();
     webFetchMock.mockResolvedValue({
@@ -170,6 +192,14 @@ describe('WebSearchTool', () => {
     const badQuery = await tool.execute({ query: '  ' }, ctx);
     expect(badQuery.success).toBe(false);
     expect(badQuery.errorMessage).toContain('query must be at least');
+
+    const fractionalLimit = await tool.execute({ query: 'valid query', max_results: 2.5 }, ctx);
+    expect(fractionalLimit.success).toBe(false);
+    expect(fractionalLimit.errorMessage).toContain('max_results must be an integer');
+
+    const unexpectedParam = await tool.execute({ query: 'valid query', unused: true }, ctx);
+    expect(unexpectedParam.success).toBe(false);
+    expect(unexpectedParam.errorMessage).toContain('Unexpected parameter: "unused"');
 
     expect(webFetchMock).not.toHaveBeenCalled();
   });

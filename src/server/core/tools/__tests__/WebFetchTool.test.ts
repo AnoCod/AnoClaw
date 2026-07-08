@@ -133,6 +133,31 @@ describe('WebFetchTool', () => {
     });
   });
 
+  it('returns a timeout failure when the fetch layer ignores abort', async () => {
+    vi.useFakeTimers();
+    webFetchMock.mockImplementation(() => new Promise(() => {}));
+
+    const pending = new WebFetchTool().execute({
+      url: 'https://ignored-abort-fetch.test/page',
+      timeout_ms: 1000,
+      retry_attempts: 3,
+      use_cache: false,
+    }, ctx);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    const result = await pending;
+
+    expect(result.success).toBe(false);
+    expect(result.errorMessage).toContain('timed out after 1000ms');
+    expect(webFetchMock).toHaveBeenCalledTimes(1);
+    expect(result.structured).toMatchObject({
+      url: 'https://ignored-abort-fetch.test/page',
+      status: 'timeout',
+      timeoutMs: 1000,
+      attempts: [expect.objectContaining({ attempt: 1, status: 'aborted' })],
+    });
+  });
+
   it('returns a timeout failure when the response body never finishes', async () => {
     vi.useFakeTimers();
     webFetchMock.mockResolvedValue({
@@ -210,6 +235,14 @@ describe('WebFetchTool', () => {
     const badCache = await tool.execute({ url: 'https://valid.test/', use_cache: 'yes' }, ctx);
     expect(badCache.success).toBe(false);
     expect(badCache.errorMessage).toContain('use_cache must be a boolean');
+
+    const fractionalTimeout = await tool.execute({ url: 'https://valid.test/', timeout_ms: 1000.5 }, ctx);
+    expect(fractionalTimeout.success).toBe(false);
+    expect(fractionalTimeout.errorMessage).toContain('timeout_ms must be an integer');
+
+    const unexpectedParam = await tool.execute({ url: 'https://valid.test/', unused: true }, ctx);
+    expect(unexpectedParam.success).toBe(false);
+    expect(unexpectedParam.errorMessage).toContain('Unexpected parameter: "unused"');
 
     expect(webFetchMock).not.toHaveBeenCalled();
   });

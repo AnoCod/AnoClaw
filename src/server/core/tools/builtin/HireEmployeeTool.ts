@@ -13,6 +13,15 @@ import * as path from 'path';
 import { createLogger } from '../../logger.js';
 import { writablePath } from '../../../infra/WritablePath.js';
 
+const MAX_NAME_CHARS = 120;
+const MAX_MODEL_CHARS = 200;
+const MAX_PROMPT_CHARS = 4000;
+const MAX_REASON_CHARS = 1000;
+const MAX_TEAM_NAME_CHARS = 120;
+const MAX_LIST_ITEMS = 80;
+const MAX_LIST_ITEM_CHARS = 200;
+const HIRE_ROLES = ['Manager', 'Member'] as const;
+
 export class HireEmployeeTool extends Tool {
 
   static category = 'Organization Management';
@@ -58,6 +67,9 @@ export class HireEmployeeTool extends Tool {
       properties: {
         name: {
           type: 'string',
+          minLength: 1,
+          maxLength: MAX_NAME_CHARS,
+          pattern: '\\S',
           description: 'Professional role-based display name. Use job titles like "Frontend Engineer", '
             + '"Security Auditor", "DevOps Lead". NOT generic "agent1" or "helper".',
         },
@@ -68,15 +80,22 @@ export class HireEmployeeTool extends Tool {
         },
         parentAgentId: {
           type: 'string',
+          minLength: 1,
+          maxLength: MAX_LIST_ITEM_CHARS,
+          pattern: '\\S',
           description: 'Your own agent ID - the new agent reports to you in the org tree',
         },
         model: {
           type: 'string',
+          maxLength: MAX_MODEL_CHARS,
           description: 'OPTIONAL. Leave blank to inherit your model. Only set this if the new agent '
             + 'needs a different model (e.g., cheaper model for simple tasks).',
         },
         agentPrompt: {
           type: 'string',
+          minLength: 1,
+          maxLength: MAX_PROMPT_CHARS,
+          pattern: '\\S',
           description: 'System prompt defining the agent\'s identity and behavior. Must include: '
             + '(1) Role definition - who they are, (2) Scope - what they can/cannot do, '
             + '(3) Quality expectations, (4) Escalation rules. Keep it 3-8 lines - overlong prompts confuse agents. '
@@ -85,12 +104,14 @@ export class HireEmployeeTool extends Tool {
         },
         teamName: {
           type: 'string',
+          maxLength: MAX_TEAM_NAME_CHARS,
           description: 'Team name for grouping. Defaults to your team. '
             + 'Use descriptive names: "Engineering", "QA", "Design".',
         },
         allowedTools: {
           type: 'array',
-          items: { type: 'string' },
+          maxItems: MAX_LIST_ITEMS,
+          items: { type: 'string', minLength: 1, maxLength: MAX_LIST_ITEM_CHARS, pattern: '\\S' },
           description: 'Tools the agent can use. Give ONLY what\'s needed for their job. '
             + 'Read-only roles: Read, Glob, Grep, WebFetch, WebSearch. '
             + 'Code roles: add Write, Edit, Bash. '
@@ -100,20 +121,26 @@ export class HireEmployeeTool extends Tool {
         },
         enabledSkills: {
           type: 'array',
-          items: { type: 'string' },
+          maxItems: MAX_LIST_ITEMS,
+          items: { type: 'string', minLength: 1, maxLength: MAX_LIST_ITEM_CHARS, pattern: '\\S' },
           description: 'Skill names to enable. Check available skills first. Leave empty if unsure.',
         },
         mcpServers: {
           type: 'array',
-          items: { type: 'string' },
+          maxItems: MAX_LIST_ITEMS,
+          items: { type: 'string', minLength: 1, maxLength: MAX_LIST_ITEM_CHARS, pattern: '\\S' },
           description: 'MCP server names for external API access. Leave empty unless the agent needs external services.',
         },
         reason: {
           type: 'string',
+          minLength: 1,
+          maxLength: MAX_REASON_CHARS,
+          pattern: '\\S',
           description: 'Business justification: what this agent will do and why they\'re needed',
         },
       },
       required: ['name', 'role', 'parentAgentId', 'agentPrompt', 'reason'],
+      additionalProperties: false,
     };
   }
 
@@ -129,12 +156,45 @@ export class HireEmployeeTool extends Tool {
     params: Record<string, unknown>,
     ctx: ExecutionContext,
   ): Promise<ToolResult> {
-    const name = params.name as string;
-    const roleStr = params.role as string;
-    const parentAgentId = params.parentAgentId as string;
-    const agentPrompt = params.agentPrompt as string;
-    const reason = params.reason as string;
-    const teamName = (params.teamName as string) || '';
+    const nameResult = normalizeString(params.name, 'name', MAX_NAME_CHARS);
+    if (nameResult.error) return this.makeError(nameResult.error);
+    const name = nameResult.value!;
+
+    const roleResult = normalizeEnum(params.role, 'role', HIRE_ROLES);
+    if (roleResult.error) return this.makeError(roleResult.error);
+    const roleStr = roleResult.value!;
+
+    const parentResult = normalizeString(params.parentAgentId, 'parentAgentId', MAX_LIST_ITEM_CHARS);
+    if (parentResult.error) return this.makeError(parentResult.error);
+    const parentAgentId = parentResult.value!;
+
+    const promptResult = normalizeString(params.agentPrompt, 'agentPrompt', MAX_PROMPT_CHARS);
+    if (promptResult.error) return this.makeError(promptResult.error);
+    const agentPrompt = promptResult.value!;
+
+    const reasonResult = normalizeString(params.reason, 'reason', MAX_REASON_CHARS);
+    if (reasonResult.error) return this.makeError(reasonResult.error);
+    const reason = reasonResult.value!;
+
+    const teamNameResult = normalizeOptionalString(params.teamName, 'teamName', MAX_TEAM_NAME_CHARS);
+    if (teamNameResult.error) return this.makeError(teamNameResult.error);
+    const teamName = teamNameResult.value ?? '';
+
+    const modelResult = normalizeOptionalString(params.model, 'model', MAX_MODEL_CHARS);
+    if (modelResult.error) return this.makeError(modelResult.error);
+
+    const allowedToolsResult = normalizeStringList(params.allowedTools, 'allowedTools', MAX_LIST_ITEMS, MAX_LIST_ITEM_CHARS);
+    if (allowedToolsResult.error) return this.makeError(allowedToolsResult.error);
+    const requestedAllowedTools = allowedToolsResult.value ?? [];
+
+    const enabledSkillsResult = normalizeStringList(params.enabledSkills, 'enabledSkills', MAX_LIST_ITEMS, MAX_LIST_ITEM_CHARS);
+    if (enabledSkillsResult.error) return this.makeError(enabledSkillsResult.error);
+    const enabledSkills = enabledSkillsResult.value ?? [];
+
+    const mcpServersResult = normalizeStringList(params.mcpServers, 'mcpServers', MAX_LIST_ITEMS, MAX_LIST_ITEM_CHARS);
+    if (mcpServersResult.error) return this.makeError(mcpServersResult.error);
+    const mcpServers = mcpServersResult.value ?? [];
+
     const registry = AgentRegistry.getInstance();
 
     // Validate parent exists
@@ -144,13 +204,11 @@ export class HireEmployeeTool extends Tool {
     }
 
     // Model: inherit from parent if not specified
-    const model = (params.model as string) || parent.modelName;
+    const model = modelResult.value || parent.modelName;
 
-    const allowedTools = (params.allowedTools as string[])?.length
-      ? (params.allowedTools as string[])
+    const allowedTools = requestedAllowedTools.length
+      ? requestedAllowedTools
       : [...parent.allowedTools()];
-    const enabledSkills = (params.enabledSkills as string[]) || [];
-    const mcpServers = (params.mcpServers as string[]) || [];
 
     if (!parent.isActive) {
       return this.makeError(`Parent agent '${parentAgentId}' is destroyed - cannot hire under it`);
@@ -247,6 +305,85 @@ export class HireEmployeeTool extends Tool {
         `Reason: ${reason}\n` +
         `Team: ${teamName || parent.teamName || '(none)'}` +
         inherited,
+      {
+        structured: {
+          agentId,
+          name,
+          role: orgRoleLabel,
+          parentAgentId,
+          teamName: teamName || parent.teamName || '',
+          allowedTools,
+          enabledSkills,
+          mcpServers,
+          inheritedModel: model === parent.modelName,
+        },
+      },
     );
   }
+}
+
+function normalizeString(
+  value: unknown,
+  field: string,
+  maxLength: number,
+): { value: string; error?: undefined } | { value?: undefined; error: string } {
+  if (typeof value !== 'string') return { error: `${field} must be a string` };
+  const trimmed = value.trim();
+  if (!trimmed) return { error: `${field} must not be empty` };
+  if (trimmed.length > maxLength) {
+    return { error: `${field} must be ${maxLength} characters or less` };
+  }
+  return { value: trimmed };
+}
+
+function normalizeOptionalString(
+  value: unknown,
+  field: string,
+  maxLength: number,
+): { value?: string; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: undefined };
+  if (typeof value !== 'string') return { error: `${field} must be a string` };
+  const trimmed = value.trim();
+  if (!trimmed) return { value: undefined };
+  if (trimmed.length > maxLength) {
+    return { error: `${field} must be ${maxLength} characters or less` };
+  }
+  return { value: trimmed };
+}
+
+function normalizeEnum<T extends readonly string[]>(
+  value: unknown,
+  field: string,
+  allowed: T,
+): { value: T[number]; error?: undefined } | { value?: undefined; error: string } {
+  if (typeof value !== 'string') return { error: `${field} must be a string` };
+  if (!allowed.includes(value)) return { error: `${field} must be one of: ${allowed.join(', ')}` };
+  return { value };
+}
+
+function normalizeStringList(
+  value: unknown,
+  field: string,
+  maxItems: number,
+  maxItemLength: number,
+): { value: string[]; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: [] };
+  if (!Array.isArray(value)) return { error: `${field} must be an array of strings` };
+  if (value.length > maxItems) return { error: `${field} must contain ${maxItems} items or fewer` };
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (let i = 0; i < value.length; i++) {
+    const item = value[i];
+    if (typeof item !== 'string') return { error: `${field}[${i}] must be a string` };
+    const trimmed = item.trim();
+    if (!trimmed) return { error: `${field}[${i}] must not be empty` };
+    if (trimmed.length > maxItemLength) {
+      return { error: `${field}[${i}] must be ${maxItemLength} characters or less` };
+    }
+    if (seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  }
+  return { value: normalized };
 }

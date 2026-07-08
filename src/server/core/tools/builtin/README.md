@@ -579,7 +579,8 @@ Removes a sub-agent from the org tree. Stops the agent if running.
 
 ### HireEmployeeTool — `HireEmployee`
 
-Creates a new employee agent with a specific role and adds it to the org hierarchy.
+Creates a durable employee agent with a specific role and adds it to the organization hierarchy.
+Use `SubAgentSpawn` for one-off temporary helpers.
 
 | Property | Value |
 |---|---|
@@ -589,9 +590,23 @@ Creates a new employee agent with a specific role and adds it to the org hierarc
 **Parameters:**
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | ✓ | Display name for the new agent |
-| `role` | string | ✓ | Agent role (`Manager`, `Member`, `SubAgent`) |
-| `description` | string | | Job description / responsibilities |
+| `name` | string | ✓ | Professional display name for the new agent |
+| `role` | string | ✓ | Durable org role (`Manager` or `Member`) |
+| `parentAgentId` | string | ✓ | Existing manager/MainAgent ID that the new agent reports to |
+| `agentPrompt` | string | ✓ | Concise system prompt defining identity, scope, quality bar, and escalation rules |
+| `reason` | string | ✓ | Business justification for creating a persistent employee |
+| `model` | string | | Optional model override; omitted values inherit the parent agent model |
+| `teamName` | string | | Optional team grouping; blank values inherit the parent team |
+| `allowedTools` | string[] | | Optional tool whitelist; omitted values inherit parent tools |
+| `enabledSkills` | string[] | | Optional skill whitelist |
+| `mcpServers` | string[] | | Optional MCP server names |
+
+**Reliability notes:**
+- `role` is limited to `Manager` and `Member`; Managers cannot create other Managers.
+- Strings are trimmed, bounded, and rejected if empty where required.
+- Tool, skill, and MCP server lists are bounded, trimmed, and deduplicated.
+- Invalid input fails before touching `AgentRegistry`, so malformed requests cannot create partial agents.
+- The result includes structured metadata: new `agentId`, role, parent, team, tool/skill/MCP lists, and whether the model was inherited.
 
 ---
 

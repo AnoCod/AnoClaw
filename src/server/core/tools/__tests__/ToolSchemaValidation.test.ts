@@ -9,6 +9,7 @@ import { EnterPlanModeTool } from '../builtin/EnterPlanModeTool.js';
 import { ExitPlanModeTool } from '../builtin/ExitPlanModeTool.js';
 import { GlobTool } from '../builtin/GlobTool.js';
 import { GrepTool } from '../builtin/GrepTool.js';
+import { HireEmployeeTool } from '../builtin/HireEmployeeTool.js';
 import { MemoryDeleteTool } from '../builtin/MemoryDeleteTool.js';
 import { MemoryRecallTool } from '../builtin/MemoryRecallTool.js';
 import { MemorySaveTool } from '../builtin/MemorySaveTool.js';
@@ -355,6 +356,47 @@ describe('native tool parameter schemas', () => {
       targetAgentId: 'member-1',
       content: 'Please check the current task status.',
       typo: true,
+    })?.errorMessage).toContain('Unexpected parameter');
+  });
+
+  it('exposes HireEmployee role, string, and list bounds', () => {
+    const tool = new HireEmployeeTool();
+
+    expect(ToolPipeline.validateParams(tool, {
+      name: 'QA Tester',
+      role: 'Member',
+      parentAgentId: 'main-agent',
+      agentPrompt: 'You test changes and report bugs.',
+      reason: 'The project needs durable QA coverage.',
+      allowedTools: ['Read', 'Grep'],
+      enabledSkills: ['code-review'],
+      mcpServers: [],
+    })).toBeNull();
+
+    expect(ToolPipeline.validateParams(tool, {
+      name: 'QA Tester',
+      role: 'SubAgent',
+      parentAgentId: 'main-agent',
+      agentPrompt: 'You test changes and report bugs.',
+      reason: 'The project needs durable QA coverage.',
+    })?.errorMessage).toContain('role');
+
+    expect(ToolPipeline.validateParams(tool, {
+      name: 'QA Tester',
+      role: 'Member',
+      parentAgentId: 'main-agent',
+      agentPrompt: 'You test changes and report bugs.',
+      reason: 'The project needs durable QA coverage.',
+      allowedTools: 'Read',
+    })?.errorMessage).toContain('allowedTools');
+
+    expect(ToolPipeline.validateParams(tool, {
+      name: 'QA Tester',
+      role: 'Member',
+      parentAgentId: 'main-agent',
+      agentPrompt: 'You test changes and report bugs.',
+      reason: 'The project needs durable QA coverage.',
+      extra: true,
     })?.errorMessage).toContain('Unexpected parameter');
   });
 

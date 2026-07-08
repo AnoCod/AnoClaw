@@ -19,6 +19,7 @@ export class ModeSelector {
   private dropdown: HTMLElement | null = null;
   private closeOnPointerDown: ((e: PointerEvent) => void) | null = null;
   private closeOnEscape: ((e: KeyboardEvent) => void) | null = null;
+  private ignoreNextButtonClick = false;
 
   constructor(initialMode: InputMode = 'auto', effortEnabled: boolean = true) {
     this.mode = initialMode;
@@ -61,9 +62,20 @@ export class ModeSelector {
     btn.setAttribute('aria-haspopup', 'menu');
     btn.setAttribute('aria-expanded', 'false');
     this._updateLabel(btn);
+    btn.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.ignoreNextButtonClick = true;
+      this._toggleDropdown();
+    });
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (this.ignoreNextButtonClick) {
+        this.ignoreNextButtonClick = false;
+        return;
+      }
       this._toggleDropdown();
     });
     return btn;
@@ -144,6 +156,7 @@ export class ModeSelector {
     const dd = document.createElement('div');
     dd.className = 'mode-dropdown';
     dd.setAttribute('role', 'menu');
+    dd.style.zIndex = '10002';
     dd.addEventListener('pointerdown', (e) => e.stopPropagation());
     dd.addEventListener('click', (e) => e.stopPropagation());
 
@@ -239,7 +252,15 @@ export class ModeSelector {
       Math.max(anchorRect.left, margin),
       Math.max(margin, window.innerWidth - dropdownRect.width - margin),
     );
-    const top = Math.max(margin, anchorRect.top - dropdownRect.height - gap);
+    const spaceAbove = anchorRect.top - margin;
+    const spaceBelow = window.innerHeight - anchorRect.bottom - margin;
+    const preferredTop = spaceAbove >= dropdownRect.height || spaceAbove >= spaceBelow
+      ? anchorRect.top - dropdownRect.height - gap
+      : anchorRect.bottom + gap;
+    const top = Math.min(
+      Math.max(preferredTop, margin),
+      Math.max(margin, window.innerHeight - dropdownRect.height - margin),
+    );
 
     this.dropdown.style.left = `${left}px`;
     this.dropdown.style.top = `${top}px`;

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 class FakeDomEvent {
   defaultPrevented = false;
   propagationStopped = false;
+  button = 0;
 
   constructor(
     readonly type: string,
@@ -175,6 +176,7 @@ async function createSelector() {
 }
 
 function openDropdown(selector: { element: FakeElement }): FakeElement {
+  selector.element.dispatchEvent(new FakeDomEvent('pointerdown', selector.element));
   selector.element.dispatchEvent(new FakeDomEvent('click', selector.element));
   const dropdown = fakeDocument.body.children.find((child) => child.classList.contains('mode-dropdown'));
   expect(dropdown).toBeTruthy();
@@ -198,6 +200,15 @@ afterEach(() => {
 });
 
 describe('ModeSelector', () => {
+  it('opens on pointerdown without the following click closing it', async () => {
+    const selector = await createSelector();
+
+    const dropdown = openDropdown(selector as unknown as { element: FakeElement });
+
+    expect(dropdown.classList.contains('mode-dropdown')).toBe(true);
+    expect(selector.element.getAttribute('aria-expanded')).toBe('true');
+  });
+
   it('changes mode when a menu option is pressed', async () => {
     const selector = await createSelector();
     const changes: string[] = [];

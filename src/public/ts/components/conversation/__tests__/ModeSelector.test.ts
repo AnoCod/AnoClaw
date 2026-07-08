@@ -187,7 +187,7 @@ beforeEach(() => {
   vi.resetModules();
   fakeDocument = new FakeDocument();
   vi.stubGlobal('document', fakeDocument);
-  vi.stubGlobal('window', { innerWidth: 1024 });
+  vi.stubGlobal('window', { innerWidth: 1024, innerHeight: 768 });
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -206,6 +206,7 @@ describe('ModeSelector', () => {
     const dropdown = openDropdown(selector as unknown as { element: FakeElement });
 
     expect(dropdown.classList.contains('mode-dropdown')).toBe(true);
+    expect(dropdown.style.position).toBe('fixed');
     expect(selector.element.getAttribute('aria-expanded')).toBe('true');
   });
 

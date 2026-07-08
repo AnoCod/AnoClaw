@@ -156,6 +156,7 @@ export class ModeSelector {
     const dd = document.createElement('div');
     dd.className = 'mode-dropdown';
     dd.setAttribute('role', 'menu');
+    dd.style.position = 'fixed';
     dd.style.zIndex = '10002';
     dd.addEventListener('pointerdown', (e) => e.stopPropagation());
     dd.addEventListener('click', (e) => e.stopPropagation());

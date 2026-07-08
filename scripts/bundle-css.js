@@ -21,7 +21,7 @@ const ordered = [
 
 let total = 0;
 const out = ordered.map(name => {
-  const content = readFileSync(join(CSS_DIR, name), 'utf-8');
+  const content = readFileSync(join(CSS_DIR, name), 'utf-8').replace(/^\uFEFF/, '');
   total += content.length;
   return `/* ${name} */\n${content}`;
 }).join('\n\n');

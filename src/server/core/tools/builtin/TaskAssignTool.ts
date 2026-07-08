@@ -47,10 +47,15 @@ export class TaskAssignTool extends Tool {
       properties: {
         targetAgentId: {
           type: 'string',
+          minLength: 1,
+          pattern: '\\S',
           description: 'ID of the subordinate agent to delegate the task to',
         },
         task: {
           type: 'string',
+          minLength: 1,
+          maxLength: 20000,
+          pattern: '\\S',
           description: 'The task description and instructions for the subordinate',
         },
         priority: {
@@ -60,6 +65,7 @@ export class TaskAssignTool extends Tool {
         },
       },
       required: ['targetAgentId', 'task'],
+      additionalProperties: false,
     };
   }
 

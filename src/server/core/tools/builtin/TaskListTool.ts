@@ -35,6 +35,7 @@ export class TaskListTool extends Tool {
       type: 'object',
       properties: {},
       required: [],
+      additionalProperties: false,
     };
   }
 

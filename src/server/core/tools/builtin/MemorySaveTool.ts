@@ -42,11 +42,12 @@ export class MemorySaveTool extends Tool {
       properties: {
         scope: { type: 'string', enum: ['personal', 'team', 'project', 'session_personal', 'session_team'], description: 'Scope of the memory. Use session_personal or session_team for session-scoped memories.' },
         type: { type: 'string', enum: ['user', 'feedback', 'project', 'reference'], description: 'Type of memory entry.' },
-        name: { type: 'string', description: 'Short descriptive name for the memory entry.' },
-        content: { type: 'string', description: 'Full content of the memory entry to save.' },
-        description: { type: 'string', description: 'Optional one-line summary used in memory indexes.' },
+        name: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'Short descriptive name for the memory entry.' },
+        content: { type: 'string', minLength: 1, maxLength: MAX_MEMORY_CONTENT_CHARS, pattern: '\\S', description: 'Full content of the memory entry to save.' },
+        description: { type: 'string', minLength: 1, maxLength: 500, pattern: '\\S', description: 'Optional one-line summary used in memory indexes.' },
       },
       required: ['scope', 'type', 'name', 'content'],
+      additionalProperties: false,
     };
   }
 

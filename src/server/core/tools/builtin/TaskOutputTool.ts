@@ -35,14 +35,19 @@ export class TaskOutputTool extends Tool {
       properties: {
         taskId: {
           type: 'string',
+          minLength: 1,
+          pattern: '\\S',
           description: 'The task ID or sub-session ID to retrieve output from',
         },
         task_id: {
           type: 'string',
+          minLength: 1,
+          pattern: '\\S',
           description: 'Alias for taskId. Kept for older prompts and integrations.',
         },
       },
       required: [],
+      additionalProperties: false,
     };
   }
 

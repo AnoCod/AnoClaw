@@ -36,12 +36,13 @@ export class MemoryRecallTool extends Tool {
     return {
       type: 'object',
       properties: {
-        id: { type: 'string', description: 'Index number (e.g. "3") from the Memory section, or memory name to recall.' },
+        id: { type: 'string', minLength: 1, pattern: '\\S', description: 'Index number (e.g. "3") from the Memory section, or memory name to recall.' },
         scope: { type: 'string', enum: ['agent', 'personal', 'team', 'session', 'all'], description: 'Scope to search. Default: all.' },
-        max_content_chars: { type: 'number', description: `Maximum full content characters to return per memory. Default: ${DEFAULT_CONTENT_LIMIT}, max: ${MAX_CONTENT_LIMIT}.` },
-        limit: { type: 'number', description: `Maximum named matches to return. Default: ${DEFAULT_MATCH_LIMIT}, max: ${MAX_MATCH_LIMIT}.` },
+        max_content_chars: { type: 'integer', minimum: 200, maximum: MAX_CONTENT_LIMIT, description: `Maximum full content characters to return per memory. Default: ${DEFAULT_CONTENT_LIMIT}, max: ${MAX_CONTENT_LIMIT}.` },
+        limit: { type: 'integer', minimum: 1, maximum: MAX_MATCH_LIMIT, description: `Maximum named matches to return. Default: ${DEFAULT_MATCH_LIMIT}, max: ${MAX_MATCH_LIMIT}.` },
       },
       required: ['id'],
+      additionalProperties: false,
     };
   }
 

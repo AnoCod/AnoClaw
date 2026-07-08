@@ -54,11 +54,15 @@ export class TodoWriteTool extends Tool {
       properties: {
         todos: {
           type: 'array',
+          maxItems: MAX_TODOS,
           items: {
             type: 'object',
             properties: {
               content: {
                 type: 'string',
+                minLength: 1,
+                maxLength: MAX_CONTENT_CHARS,
+                pattern: '\\S',
                 description: `The task description in imperative form (e.g. "Add dark mode toggle"). Max ${MAX_CONTENT_CHARS} chars.`,
               },
               status: {
@@ -68,15 +72,20 @@ export class TodoWriteTool extends Tool {
               },
               activeForm: {
                 type: 'string',
+                minLength: 1,
+                maxLength: MAX_ACTIVE_FORM_CHARS,
+                pattern: '\\S',
                 description: `Present continuous form for displaying during execution (e.g. "Adding dark mode toggle"). Max ${MAX_ACTIVE_FORM_CHARS} chars.`,
               },
             },
             required: ['content', 'status', 'activeForm'],
+            additionalProperties: false,
           },
           description: `The complete todo list (replaces any previous list). Max ${MAX_TODOS} items. Empty array clears the visible list.`,
         },
       },
       required: ['todos'],
+      additionalProperties: false,
     };
   }
 

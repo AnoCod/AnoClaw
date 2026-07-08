@@ -27,7 +27,7 @@ export class SkillListTool extends Tool {
   }
 
   parametersSchema(): Record<string, unknown> {
-    return { type: 'object', properties: {}, required: [] };
+    return { type: 'object', properties: {}, required: [], additionalProperties: false };
   }
 
   riskLevel(): RiskLevel { return RiskLevel.Safe; }

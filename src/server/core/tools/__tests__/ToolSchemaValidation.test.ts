@@ -1,12 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import { ToolPipeline } from '../ToolPipeline.js';
+import { ApiCallTool } from '../builtin/ApiCallTool.js';
 import { AskUserQuestionTool } from '../builtin/AskUserQuestionTool.js';
 import { BashTool } from '../builtin/BashTool.js';
 import { EditTool } from '../builtin/EditTool.js';
+import { EnterPlanModeTool } from '../builtin/EnterPlanModeTool.js';
 import { ExitPlanModeTool } from '../builtin/ExitPlanModeTool.js';
 import { GlobTool } from '../builtin/GlobTool.js';
 import { GrepTool } from '../builtin/GrepTool.js';
+import { MemoryDeleteTool } from '../builtin/MemoryDeleteTool.js';
+import { MemoryRecallTool } from '../builtin/MemoryRecallTool.js';
+import { MemorySaveTool } from '../builtin/MemorySaveTool.js';
+import { MemorySearchTool } from '../builtin/MemorySearchTool.js';
+import { PlanTool } from '../builtin/PlanTool.js';
 import { ReadTool } from '../builtin/ReadTool.js';
+import { SkillInspectTool } from '../builtin/SkillInspectTool.js';
+import { SkillListTool } from '../builtin/SkillListTool.js';
+import { SkillMatchingTool } from '../builtin/SkillMatchingTool.js';
+import { SkillTool } from '../builtin/SkillTool.js';
+import { SleepTool } from '../builtin/SleepTool.js';
+import { TaskAssignTool } from '../builtin/TaskAssignTool.js';
+import { TaskListTool } from '../builtin/TaskListTool.js';
+import { TaskOutputTool } from '../builtin/TaskOutputTool.js';
+import { TaskStopTool } from '../builtin/TaskStopTool.js';
+import { TodoWriteTool } from '../builtin/TodoWriteTool.js';
 import { WebFetchTool } from '../builtin/WebFetchTool.js';
 import { WebSearchTool } from '../builtin/WebSearchTool.js';
 import { WriteTool } from '../builtin/WriteTool.js';
@@ -167,5 +184,142 @@ describe('native tool parameter schemas', () => {
     expect(ToolPipeline.validateParams(new ExitPlanModeTool(), {
       allowedPrompts: [{ tool: 'Bash', prompt: '   ' }],
     })?.errorMessage).toContain('allowedPrompts[0].prompt');
+  });
+
+  it('exposes ApiCall request shaping and response bounds', () => {
+    const tool = new ApiCallTool();
+
+    expect(ToolPipeline.validateParams(tool, {
+      path: '/api/v1/items/:id',
+      params: { id: 'item-1' },
+      query: { tag: ['a', 'b'], active: true },
+      timeout_ms: 100,
+      max_response_chars: 500,
+    })).toBeNull();
+
+    expect(ToolPipeline.validateParams(tool, {
+      path: '/api/v1/items/:id',
+      params: { id: ['bad'] },
+    })?.errorMessage).toContain('params.id');
+
+    expect(ToolPipeline.validateParams(tool, {
+      path: '/api/v1/items/:id',
+      query: { nested: { nope: true } },
+    })?.errorMessage).toContain('query.nested');
+
+    expect(ToolPipeline.validateParams(tool, {
+      path: '/api/v1/items',
+      timeout_ms: 99,
+    })?.errorMessage).toContain('expected >= 100');
+  });
+
+  it('exposes todo and plan size/shape bounds', () => {
+    expect(ToolPipeline.validateParams(new TodoWriteTool(), {
+      todos: [
+        { content: 'Inspect state', status: 'completed', activeForm: 'Inspecting state' },
+        { content: 'Run tests', status: 'pending', activeForm: 'Running tests' },
+      ],
+    })).toBeNull();
+
+    expect(ToolPipeline.validateParams(new TodoWriteTool(), {
+      todos: [
+        { content: 'Inspect state', status: 'pending', activeForm: 'Inspecting state', extra: true },
+      ],
+    })?.errorMessage).toContain('todos[0].extra');
+
+    expect(ToolPipeline.validateParams(new PlanTool(), {
+      name: 'x'.repeat(61),
+      content: '## Step 1: Inspect',
+    })?.errorMessage).toContain('expected at most 60');
+  });
+
+  it('exposes memory tool bounds', () => {
+    expect(ToolPipeline.validateParams(new MemorySaveTool(), {
+      scope: 'team',
+      type: 'project',
+      name: 'build-rule',
+      content: 'Run verification before committing.',
+      description: 'Build rule',
+    })).toBeNull();
+
+    expect(ToolPipeline.validateParams(new MemorySaveTool(), {
+      scope: 'team',
+      type: 'project',
+      name: 'build-rule',
+      content: '',
+    })?.errorMessage).toContain('content');
+
+    expect(ToolPipeline.validateParams(new MemorySearchTool(), {
+      query: 'release',
+      limit: 51,
+    })?.errorMessage).toContain('expected <= 50');
+
+    expect(ToolPipeline.validateParams(new MemoryRecallTool(), {
+      id: '1',
+      max_content_chars: 199,
+    })?.errorMessage).toContain('expected >= 200');
+
+    expect(ToolPipeline.validateParams(new MemoryDeleteTool(), {
+      scope: 'personal',
+      name: '   ',
+    })?.errorMessage).toContain('Invalid format');
+  });
+
+  it('exposes skill tool bounds and rejects stray no-arg params', () => {
+    expect(ToolPipeline.validateParams(new SkillTool(), {
+      skill: 'code-review',
+      args: 'focused',
+    })).toBeNull();
+
+    expect(ToolPipeline.validateParams(new SkillInspectTool(), {
+      skill: '   ',
+    })?.errorMessage).toContain('Invalid format');
+
+    expect(ToolPipeline.validateParams(new SkillMatchingTool(), {
+      task: '',
+    })?.errorMessage).toContain('task');
+
+    expect(ToolPipeline.validateParams(new SkillListTool(), {
+      unused: true,
+    })?.errorMessage).toContain('Unexpected parameter');
+  });
+
+  it('exposes sleep and task coordination bounds', () => {
+    expect(ToolPipeline.validateParams(new SleepTool(), {
+      delaySeconds: 0.1,
+      reason: 'waiting for background task',
+    })).toBeNull();
+
+    expect(ToolPipeline.validateParams(new SleepTool(), {
+      delaySeconds: 301,
+    })?.errorMessage).toContain('expected <= 300');
+
+    expect(ToolPipeline.validateParams(new TaskAssignTool(), {
+      targetAgentId: 'member-1',
+      task: 'Inspect the native tool tests.',
+      priority: 'normal',
+    })).toBeNull();
+
+    expect(ToolPipeline.validateParams(new TaskAssignTool(), {
+      targetAgentId: 'member-1',
+      task: '   ',
+    })?.errorMessage).toContain('Invalid format');
+
+    expect(ToolPipeline.validateParams(new TaskOutputTool(), {
+      task_id: '   ',
+    })?.errorMessage).toContain('task_id');
+
+    expect(ToolPipeline.validateParams(new TaskStopTool(), {
+      taskId: 'task-1',
+      typo: true,
+    })?.errorMessage).toContain('typo');
+
+    expect(ToolPipeline.validateParams(new TaskListTool(), {
+      anything: true,
+    })?.errorMessage).toContain('Unexpected parameter');
+
+    expect(ToolPipeline.validateParams(new EnterPlanModeTool(), {
+      anything: true,
+    })?.errorMessage).toContain('Unexpected parameter');
   });
 });

@@ -30,9 +30,10 @@ export class SkillMatchingTool extends Tool {
     return {
       type: 'object',
       properties: {
-        task: { type: 'string', description: 'Short description of your current task - what you need to do.' },
+        task: { type: 'string', minLength: 1, maxLength: 1000, pattern: '\\S', description: 'Short description of your current task - what you need to do.' },
       },
       required: ['task'],
+      additionalProperties: false,
     };
   }
 

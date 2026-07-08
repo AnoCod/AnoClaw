@@ -29,10 +29,11 @@ export class SkillTool extends Tool {
     return {
       type: 'object',
       properties: {
-        skill: { type: 'string', description: 'Name of the skill to invoke (e.g., "code-review", "test-driven-development").' },
-        args: { type: 'string', description: 'Optional arguments to pass to the skill invocation.' },
+        skill: { type: 'string', minLength: 1, pattern: '\\S', description: 'Name of the skill to invoke (e.g., "code-review", "test-driven-development").' },
+        args: { type: 'string', maxLength: 2000, description: 'Optional arguments to pass to the skill invocation.' },
       },
       required: ['skill'],
+      additionalProperties: false,
     };
   }
 

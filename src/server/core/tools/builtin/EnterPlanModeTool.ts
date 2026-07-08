@@ -34,6 +34,7 @@ export class EnterPlanModeTool extends Tool {
       type: 'object',
       properties: {},
       required: [],
+      additionalProperties: false,
     };
   }
 

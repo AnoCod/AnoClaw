@@ -39,18 +39,24 @@ export class SleepTool extends Tool {
       properties: {
         delaySeconds: {
           type: 'number',
+          minimum: 0,
+          maximum: MAX_WAIT_MS / 1000,
           description: 'Number of seconds to wait (max 300 seconds / 5 minutes). Required when not using wait_for_task_id.',
         },
         reason: {
           type: 'string',
+          maxLength: 300,
           description: 'Why the agent is sleeping (shown in UI)',
         },
         wait_for_task_id: {
           type: 'string',
+          minLength: 1,
+          pattern: '\\S',
           description: 'Background task ID to wait for. When provided, Sleep subscribes to task completion and wakes instantly when the task finishes - no polling. Max wait 5 minutes, then times out. Use this instead of sleep-loop polling for background bash commands, installs, downloads, or builds.',
         },
       },
       required: [],
+      additionalProperties: false,
     };
   }
 

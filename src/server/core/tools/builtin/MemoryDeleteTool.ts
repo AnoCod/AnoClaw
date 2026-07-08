@@ -29,10 +29,11 @@ export class MemoryDeleteTool extends Tool {
       type: 'object',
       properties: {
         scope: { type: 'string', enum: ['personal', 'team', 'project', 'session_personal', 'session_team'], description: 'Scope to delete from.' },
-        name: { type: 'string', description: 'Name of the memory entry to delete (must match exactly).' },
+        name: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'Name of the memory entry to delete (must match exactly).' },
         dry_run: { type: 'boolean', description: 'Check whether the memory exists without deleting it. Default: false.' },
       },
       required: ['scope', 'name'],
+      additionalProperties: false,
     };
   }
 

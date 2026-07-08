@@ -322,9 +322,20 @@ export class ApiCallTool extends Tool {
       properties: {
         action: { type: 'string', enum: ['call', 'discover', 'tools'], description: 'Use "discover" to search API endpoints, "tools" to search available tools; default is "call".' },
         method: { type: 'string', enum: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'], description: 'HTTP method. Default: GET.' },
-        path:   { type: 'string', description: 'API path or path template, e.g. "/api/v1/agents/:id" or "/api/v1/search".' },
-        params: { type: 'object', description: 'Named path params used to replace :placeholders in path.' },
-        query:  { type: 'object', description: 'Query string object. Values are URL-encoded; arrays append repeated keys.' },
+        path:   { type: 'string', minLength: 1, maxLength: MAX_API_PATH_CHARS, pattern: '\\S', description: 'API path or path template, e.g. "/api/v1/agents/:id" or "/api/v1/search".' },
+        params: {
+          type: 'object',
+          additionalProperties: { type: ['string', 'number', 'boolean', 'null'] },
+          description: 'Named path params used to replace :placeholders in path.',
+        },
+        query:  {
+          type: 'object',
+          additionalProperties: {
+            type: ['string', 'number', 'boolean', 'array', 'null'],
+            items: { type: ['string', 'number', 'boolean'] },
+          },
+          description: 'Query string object. Values are URL-encoded; arrays append repeated keys.',
+        },
         body:   { type: 'object', description: 'JSON body for POST/PATCH/PUT/DELETE requests. Omit for GET.' },
         search: { type: 'string', description: 'Search text when action="discover" or action="tools".' },
         category: { type: 'string', description: 'Endpoint category filter when action="discover".' },
@@ -333,10 +344,11 @@ export class ApiCallTool extends Tool {
         risk: { type: 'string', enum: ['Safe', 'Low', 'Medium', 'High', 'Critical'], description: 'Tool risk filter when action="tools".' },
         readOnly: { type: 'boolean', description: 'Only return read-only tools when action="tools".' },
         detail: { type: 'boolean', description: 'Include full tool parameter schemas when action="tools".' },
-        limit: { type: 'number', description: 'Maximum endpoints/tools to return. Endpoint discover caps at 200; tool discover caps at 500.' },
-        timeout_ms: { type: 'number', description: `Timeout for the internal API call. Default ${DEFAULT_TIMEOUT_MS}, max ${MAX_TIMEOUT_MS}.` },
-        max_response_chars: { type: 'number', description: `Maximum response characters returned to the model before a JSON preview envelope is used. Default ${DEFAULT_MAX_RESPONSE_CHARS}, max ${MAX_RESPONSE_CHARS}.` },
+        limit: { type: 'integer', minimum: 1, maximum: 500, description: 'Maximum endpoints/tools to return. Endpoint discover caps at 200; tool discover caps at 500.' },
+        timeout_ms: { type: 'integer', minimum: 100, maximum: MAX_TIMEOUT_MS, description: `Timeout for the internal API call. Default ${DEFAULT_TIMEOUT_MS}, max ${MAX_TIMEOUT_MS}.` },
+        max_response_chars: { type: 'integer', minimum: 500, maximum: MAX_RESPONSE_CHARS, description: `Maximum response characters returned to the model before a JSON preview envelope is used. Default ${DEFAULT_MAX_RESPONSE_CHARS}, max ${MAX_RESPONSE_CHARS}.` },
       },
+      additionalProperties: false,
     };
   }
 

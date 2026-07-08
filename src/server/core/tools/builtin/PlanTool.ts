@@ -56,10 +56,16 @@ export class PlanTool extends Tool {
       properties: {
         name: {
           type: 'string',
+          minLength: 1,
+          maxLength: MAX_RAW_NAME_CHARS,
+          pattern: '\\S',
           description: 'Short descriptive name for the plan (used in filename: plan-{name}.md). Use kebab-case, max 40 chars.',
         },
         content: {
           type: 'string',
+          minLength: 1,
+          maxLength: MAX_CONTENT_CHARS,
+          pattern: '\\S',
           description: 'Full plan content in markdown. Include: goal, steps with checkboxes, files involved, decisions made. Each step should be specific and verifiable.',
         },
         overwrite: {
@@ -72,6 +78,7 @@ export class PlanTool extends Tool {
         },
       },
       required: ['name', 'content'],
+      additionalProperties: false,
     };
   }
 

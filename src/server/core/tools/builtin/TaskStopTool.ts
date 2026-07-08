@@ -33,14 +33,19 @@ export class TaskStopTool extends Tool {
       properties: {
         taskId: {
           type: 'string',
+          minLength: 1,
+          pattern: '\\S',
           description: 'The sub-session ID of the delegated task to stop',
         },
         task_id: {
           type: 'string',
+          minLength: 1,
+          pattern: '\\S',
           description: 'Alias for taskId. Kept for older prompts and integrations.',
         },
       },
       required: [],
+      additionalProperties: false,
     };
   }
 

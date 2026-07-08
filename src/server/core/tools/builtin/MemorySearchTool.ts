@@ -36,13 +36,14 @@ export class MemorySearchTool extends Tool {
     return {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Search query - keywords or phrases to find in memories. Supports fuzzy matching (typo-tolerant) and cross-language synonyms (e.g. "logging" matches "logging").' },
+        query: { type: 'string', minLength: 1, pattern: '\\S', description: 'Search query - keywords or phrases to find in memories. Supports fuzzy matching (typo-tolerant) and cross-language synonyms (e.g. "logging" matches "logging").' },
         scope: { type: 'string', enum: ['team', 'personal', 'session_personal', 'session_team', 'all'], description: 'Scope to search. Default: "all". session_personal/session_team search session-scoped.' },
         fuzzy: { type: 'boolean', description: 'Enable fuzzy/semantic matching with typo tolerance. Default: true (always on).' },
-        limit: { type: 'number', description: `Maximum memories to return. Default: ${DEFAULT_LIMIT}, max: ${MAX_LIMIT}.` },
-        max_snippet_chars: { type: 'number', description: `Maximum content preview characters per memory. Default: ${DEFAULT_SNIPPET_CHARS}, max: ${MAX_SNIPPET_CHARS}.` },
+        limit: { type: 'integer', minimum: 1, maximum: MAX_LIMIT, description: `Maximum memories to return. Default: ${DEFAULT_LIMIT}, max: ${MAX_LIMIT}.` },
+        max_snippet_chars: { type: 'integer', minimum: 40, maximum: MAX_SNIPPET_CHARS, description: `Maximum content preview characters per memory. Default: ${DEFAULT_SNIPPET_CHARS}, max: ${MAX_SNIPPET_CHARS}.` },
       },
       required: ['query'],
+      additionalProperties: false,
     };
   }
 

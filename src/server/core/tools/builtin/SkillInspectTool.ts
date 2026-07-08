@@ -33,10 +33,13 @@ export class SkillInspectTool extends Tool {
       properties: {
         skill: {
           type: 'string',
+          minLength: 1,
+          pattern: '\\S',
           description: 'Name of the skill to inspect (e.g., "code-review", "test-driven-development").',
         },
       },
       required: ['skill'],
+      additionalProperties: false,
     };
   }
 

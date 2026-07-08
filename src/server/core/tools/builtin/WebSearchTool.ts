@@ -35,6 +35,11 @@ interface FetchAttempt extends BackendAttempt {
   response?: Awaited<ReturnType<typeof webFetch>>;
 }
 
+interface TextReadAttempt {
+  text: string | null;
+  attempt: FetchAttempt;
+}
+
 /** Fetch with timeout and external abort signal. Keeps the reason for user-visible diagnostics. */
 async function fetchWithTimeout(
   backend: string,
@@ -91,6 +96,78 @@ async function fetchWithTimeout(
     if (timeout) clearTimeout(timeout);
     removeExternalAbort?.();
   }
+}
+
+async function readResponseTextWithTimeout(
+  response: Awaited<ReturnType<typeof webFetch>>,
+  attempt: FetchAttempt,
+  extSignal?: AbortSignal,
+): Promise<TextReadAttempt> {
+  const readStartedAt = Date.now();
+  const remainingMs = attempt.timeoutMs - attempt.durationMs;
+  if (extSignal?.aborted) {
+    return {
+      text: null,
+      attempt: {
+        ...attempt,
+        status: 'aborted',
+        error: 'Search cancelled by user',
+      },
+    };
+  }
+  if (remainingMs <= 0) {
+    return {
+      text: null,
+      attempt: {
+        ...attempt,
+        status: 'timeout',
+        error: `Timed out after ${attempt.timeoutMs}ms`,
+      },
+    };
+  }
+
+  return new Promise<TextReadAttempt>((resolve) => {
+    let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    let removeExternalAbort: (() => void) | null = null;
+
+    const finish = (
+      next: Pick<FetchAttempt, 'status'> & Partial<Omit<FetchAttempt, 'backend' | 'timeoutMs' | 'durationMs' | 'response'>>,
+      text: string | null = null,
+    ) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      removeExternalAbort?.();
+      resolve({
+        text,
+        attempt: {
+          ...attempt,
+          ...next,
+          durationMs: attempt.durationMs + (Date.now() - readStartedAt),
+        },
+      });
+    };
+
+    timeout = setTimeout(() => {
+      finish({ status: 'timeout', error: `Timed out after ${attempt.timeoutMs}ms` });
+    }, remainingMs);
+
+    if (extSignal) {
+      const onAbort = () => finish({ status: 'aborted', error: 'Search cancelled by user' });
+      extSignal.addEventListener('abort', onAbort, { once: true });
+      removeExternalAbort = () => extSignal.removeEventListener('abort', onAbort);
+    }
+
+    response.text()
+      .then((text) => finish({ status: 'ok' }, text))
+      .catch((err: unknown) => {
+        finish({
+          status: extSignal?.aborted ? 'aborted' : 'network_error',
+          error: extSignal?.aborted ? 'Search cancelled by user' : errorMessage(err),
+        });
+      });
+  });
 }
 
 export class WebSearchTool extends Tool {
@@ -276,8 +353,9 @@ export class WebSearchTool extends Tool {
   private async _tryDdgLite(encoded: string, timeoutMs: number, extSignal?: AbortSignal): Promise<{ results: SearchResult[] | null; attempt: BackendAttempt }> {
     const fetchAttempt = await fetchWithTimeout('DuckDuckGo Lite', `https://lite.duckduckgo.com/lite/?q=${encoded}`, timeoutMs, extSignal);
     if (fetchAttempt.status !== 'ok' || !fetchAttempt.response) return { results: null, attempt: stripResponse(fetchAttempt) };
-    const resp = fetchAttempt.response;
-    const html = await resp.text();
+    const bodyAttempt = await readResponseTextWithTimeout(fetchAttempt.response, fetchAttempt, extSignal);
+    if (bodyAttempt.text === null) return { results: null, attempt: stripResponse(bodyAttempt.attempt) };
+    const html = bodyAttempt.text;
     const results: SearchResult[] = [];
     const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
     let m;
@@ -296,7 +374,7 @@ export class WebSearchTool extends Tool {
     return {
       results: results.length > 0 ? results : null,
       attempt: {
-        ...stripResponse(fetchAttempt),
+        ...stripResponse(bodyAttempt.attempt),
         status: results.length > 0 ? 'ok' : 'no_results',
         resultCount: results.length,
       },
@@ -307,8 +385,9 @@ export class WebSearchTool extends Tool {
   private async _tryDdgHtml(encoded: string, timeoutMs: number, extSignal?: AbortSignal): Promise<{ results: SearchResult[] | null; attempt: BackendAttempt }> {
     const fetchAttempt = await fetchWithTimeout('DuckDuckGo HTML', `https://html.duckduckgo.com/html/?q=${encoded}`, timeoutMs, extSignal);
     if (fetchAttempt.status !== 'ok' || !fetchAttempt.response) return { results: null, attempt: stripResponse(fetchAttempt) };
-    const resp = fetchAttempt.response;
-    const html = await resp.text();
+    const bodyAttempt = await readResponseTextWithTimeout(fetchAttempt.response, fetchAttempt, extSignal);
+    if (bodyAttempt.text === null) return { results: null, attempt: stripResponse(bodyAttempt.attempt) };
+    const html = bodyAttempt.text;
     const results: SearchResult[] = [];
     const linkG = /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/gi;
     const links: Array<{ url: string; title: string }> = [];
@@ -330,7 +409,7 @@ export class WebSearchTool extends Tool {
     return {
       results: results.length > 0 ? results : null,
       attempt: {
-        ...stripResponse(fetchAttempt),
+        ...stripResponse(bodyAttempt.attempt),
         status: results.length > 0 ? 'ok' : 'no_results',
         resultCount: results.length,
       },
@@ -341,8 +420,9 @@ export class WebSearchTool extends Tool {
   private async _tryBing(encoded: string, timeoutMs: number, extSignal?: AbortSignal): Promise<{ results: SearchResult[] | null; attempt: BackendAttempt }> {
     const fetchAttempt = await fetchWithTimeout('Bing', `https://www.bing.com/search?q=${encoded}&count=${MAX_PARSE_RESULTS}`, timeoutMs, extSignal);
     if (fetchAttempt.status !== 'ok' || !fetchAttempt.response) return { results: null, attempt: stripResponse(fetchAttempt) };
-    const resp = fetchAttempt.response;
-    const html = await resp.text();
+    const bodyAttempt = await readResponseTextWithTimeout(fetchAttempt.response, fetchAttempt, extSignal);
+    if (bodyAttempt.text === null) return { results: null, attempt: stripResponse(bodyAttempt.attempt) };
+    const html = bodyAttempt.text;
 
     // Bing structure: <li class="b_algo"> ... <a href="...">title</a> ... text ... </li>
     const results: SearchResult[] = [];
@@ -361,7 +441,7 @@ export class WebSearchTool extends Tool {
     return {
       results: results.length > 0 ? results : null,
       attempt: {
-        ...stripResponse(fetchAttempt),
+        ...stripResponse(bodyAttempt.attempt),
         status: results.length > 0 ? 'ok' : 'no_results',
         resultCount: results.length,
       },

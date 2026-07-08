@@ -259,6 +259,7 @@ export class WebFetchTool extends Tool {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let removeExternalAbort: (() => void) | null = null;
     const controller = new AbortController();
+    let attempts: FetchAttempt[] = [];
 
     try {
       timeoutId = setTimeout(() => {
@@ -277,7 +278,9 @@ export class WebFetchTool extends Tool {
         }
       }
 
-      const { response, attempts } = await fetchWithRetry(url.href, { signal: controller.signal }, retryAttempts);
+      const fetchResult = await fetchWithRetry(url.href, { signal: controller.signal }, retryAttempts);
+      const response = fetchResult.response;
+      attempts = fetchResult.attempts;
 
       if (!response.ok) {
         return this.makeError(`HTTP ${response.status} ${response.statusText} for ${url.href}`, {
@@ -298,7 +301,7 @@ export class WebFetchTool extends Tool {
       }
 
       const contentType = (response.headers.get('content-type') || '').toLowerCase();
-      const text = await responseToReadableText(response, contentType);
+      const text = await responseToReadableText(response, contentType, controller.signal);
       const sourceChars = text.length;
       const cacheText = text.length > MAX_CACHE_CONTENT_CHARS ? text.slice(0, MAX_CACHE_CONTENT_CHARS) : text;
 
@@ -345,7 +348,7 @@ export class WebFetchTool extends Tool {
         },
       });
     } catch (err: unknown) {
-      const attempts = err instanceof FetchAttemptError ? err.attempts : [];
+      attempts = err instanceof FetchAttemptError ? err.attempts : attempts;
       const status: FetchStatus = ctx.signal?.aborted ? 'aborted' : timedOut ? 'timeout' : 'failed';
       const errMsg = errorMessage(err instanceof FetchAttemptError && err.causeError ? err.causeError : err);
       const message = status === 'aborted'
@@ -451,20 +454,42 @@ async function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
 async function responseToReadableText(
   response: Awaited<ReturnType<typeof webFetch>>,
   contentType: string,
+  signal: AbortSignal,
 ): Promise<string> {
   if (contentType.includes('text/html') || contentType.includes('application/xhtml')) {
-    return stripHtml(await response.text());
+    return stripHtml(await raceAbort(response.text(), signal));
   }
 
   if (contentType.includes('application/json') || contentType.includes('+json')) {
     try {
-      return JSON.stringify(await response.json(), null, 2);
+      return JSON.stringify(await raceAbort(response.json(), signal), null, 2);
     } catch {
-      return await response.text();
+      return await raceAbort(response.text(), signal);
     }
   }
 
-  return await response.text();
+  return await raceAbort(response.text(), signal);
+}
+
+async function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+
+  return await new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', onAbort);
+      fn();
+    };
+    const onAbort = () => finish(() => reject(new DOMException('Aborted', 'AbortError')));
+
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => finish(() => resolve(value)),
+      (err) => finish(() => reject(err)),
+    );
+  });
 }
 
 interface RenderInput {

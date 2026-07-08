@@ -111,6 +111,35 @@ describe('WebSearchTool', () => {
     });
   });
 
+  it('times out when a backend response body never finishes', async () => {
+    vi.useFakeTimers();
+    webFetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: { get: vi.fn(() => 'text/html') },
+      text: vi.fn(() => new Promise<string>(() => {})),
+      json: vi.fn(),
+    });
+
+    const pending = new WebSearchTool().execute({ query: 'slow body search', timeout_ms: 1000 }, ctx);
+    await vi.advanceTimersByTimeAsync(1000);
+    const result = await pending;
+
+    expect(result.success).toBe(false);
+    expect(result.errorMessage).toContain('timed out');
+    expect(webFetchMock).toHaveBeenCalledTimes(1);
+    expect(result.structured).toMatchObject({
+      query: 'slow body search',
+      status: 'timeout',
+      timeoutMs: 1000,
+      backendAttempts: [
+        expect.objectContaining({ backend: 'DuckDuckGo Lite', status: 'timeout' }),
+        expect.objectContaining({ backend: 'DuckDuckGo HTML', status: 'skipped' }),
+      ],
+    });
+  });
+
   it('reports user cancellation without starting network work', async () => {
     const controller = new AbortController();
     controller.abort();

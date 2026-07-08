@@ -133,6 +133,38 @@ describe('WebFetchTool', () => {
     });
   });
 
+  it('returns a timeout failure when the response body never finishes', async () => {
+    vi.useFakeTimers();
+    webFetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: { get: vi.fn(() => 'text/plain') },
+      text: vi.fn(() => new Promise<string>(() => {})),
+      json: vi.fn(),
+    });
+
+    const pending = new WebFetchTool().execute({
+      url: 'https://timeout-body.test/page',
+      timeout_ms: 1000,
+      retry_attempts: 1,
+      use_cache: false,
+    }, ctx);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    const result = await pending;
+
+    expect(result.success).toBe(false);
+    expect(result.errorMessage).toContain('timed out after 1000ms');
+    expect(webFetchMock).toHaveBeenCalledTimes(1);
+    expect(result.structured).toMatchObject({
+      url: 'https://timeout-body.test/page',
+      status: 'timeout',
+      timeoutMs: 1000,
+      attempts: [expect.objectContaining({ attempt: 1, status: 'ok' })],
+    });
+  });
+
   it('blocks hostnames that resolve to private or loopback addresses before fetching', async () => {
     dnsLookupMock.mockResolvedValue([{ address: '::1', family: 6 }]);
 

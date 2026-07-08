@@ -3,6 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { BashTool } from '../builtin/BashTool.js';
+import { TaskOutputTool } from '../builtin/TaskOutputTool.js';
+import { TaskStopTool } from '../builtin/TaskStopTool.js';
 import { BackgroundTaskManager, type BackgroundTaskResultSnapshot } from '../../agent/supervision/BackgroundTaskManager.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
 
@@ -201,6 +203,41 @@ describe('BashTool', () => {
     expect(recent.error).toContain('before fail');
     expect(recent.error).toContain('[stderr]');
     expect(recent.error).toContain('bad stderr');
+  });
+
+  it('preserves partial background output when TaskStop kills a bash task', async () => {
+    const workspace = await makeWorkspace();
+
+    const result = await new BashTool().execute(
+      {
+        command: nodeCommand("process.stdout.write('partial stdout before stop\\n'); process.stderr.write('partial stderr before stop\\n'); setInterval(() => {}, 1000)"),
+        description: 'Run stoppable background task',
+        cwd: os.tmpdir(),
+        run_in_background: true,
+      },
+      ctx(workspace),
+    );
+
+    expect(result.success).toBe(true);
+    const taskId = (result.structured as { taskId: string }).taskId;
+    await new Promise(resolve => setTimeout(resolve, 150));
+
+    const stopResult = await new TaskStopTool().execute({ taskId }, ctx(workspace));
+
+    expect(stopResult.success).toBe(true);
+    expect(stopResult.structured).toMatchObject({
+      taskId,
+      status: 'killed',
+      killedProcess: true,
+      finalized: true,
+    });
+
+    const outputResult = await new TaskOutputTool().execute({ taskId }, ctx(workspace));
+    expect(outputResult.success).toBe(false);
+    expect(outputResult.errorMessage).toContain('Background process was stopped by user request');
+    expect(outputResult.errorMessage).toContain('partial stdout before stop');
+    expect(outputResult.errorMessage).toContain('[stderr]');
+    expect(outputResult.errorMessage).toContain('partial stderr before stop');
   });
 
   it('blocks expanded destructive command patterns without confirmation', async () => {

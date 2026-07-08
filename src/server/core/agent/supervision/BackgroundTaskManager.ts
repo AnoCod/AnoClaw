@@ -193,12 +193,12 @@ export class BackgroundTaskManager extends EventEmitter {
   }
 
   /** Kill a running task (e.g. user stop). */
-  kill(taskId: string): boolean {
+  kill(taskId: string, error = 'Task killed'): boolean {
     const task = this._tasks.get(taskId);
     if (!task || task.status !== 'running') return false;
     task.status = 'killed';
     task.durationMs = Date.now() - task.startedAt;
-    task.error = 'Task killed';
+    task.error = error.slice(0, 2000);
     this._emitUpdate(task);
     this._rememberResult(task, 'killed');
 

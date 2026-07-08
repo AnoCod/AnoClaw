@@ -44,6 +44,7 @@ const backgroundProcesses = new Map<string, {
   command: string;
   sessionId: string;
   watchdog: ReturnType<typeof setTimeout>;
+  stop: () => boolean;
 }>();
 
 /** Destructive command patterns that require user confirmation. */
@@ -270,10 +271,11 @@ export class BashTool extends Tool {
         const outputCapture = createOutputCapture();
         let timedOut = false;
         let ttlExpired = false;
+        let stoppedByUser = false;
         let settled = false;
         let backgroundTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
 
-        const finishBackgroundTask = (status: 'completed' | 'failed', code: number | null, signal: NodeJS.Signals | null) => {
+        const finishBackgroundTask = (status: 'completed' | 'failed' | 'killed', code: number | null, signal: NodeJS.Signals | null) => {
           if (settled) return;
           settled = true;
           if (backgroundTimeoutTimer) clearTimeout(backgroundTimeoutTimer);
@@ -285,6 +287,7 @@ export class BashTool extends Tool {
             command,
             exitCode: code,
             signal,
+            stoppedByUser,
             timedOut,
             timeout,
             ttlExpired,
@@ -296,6 +299,8 @@ export class BashTool extends Tool {
               const log = createLogger('anochat.tool');
               log.warn('Failed to complete bg task', { bgTaskId, error: (err as Error).message });
             });
+          } else if (status === 'killed') {
+            bgManager.kill(bgTaskId, content);
           } else {
             bgManager.fail(bgTaskId, content, durationMs).catch(err => {
               const log = createLogger('anochat.tool');
@@ -323,11 +328,24 @@ export class BashTool extends Tool {
         watchdog.unref?.();
 
         backgroundProcesses.set(bgKey, {
-          child, startedAt: startTime, command, sessionId: ctx.sessionId, watchdog,
+          child,
+          startedAt: startTime,
+          command,
+          sessionId: ctx.sessionId,
+          watchdog,
+          stop: () => {
+            if (settled) return false;
+            stoppedByUser = true;
+            terminateChildProcess(child);
+            setTimeout(() => forceKillProcessTree(child.pid), COMMAND_KILL_GRACE_MS).unref?.();
+            return true;
+          },
         });
 
         child.on('exit', (code, signal) => {
-          if (code === 0 && !signal && !timedOut && !ttlExpired) {
+          if (stoppedByUser) {
+            finishBackgroundTask('killed', code, signal);
+          } else if (code === 0 && !signal && !timedOut && !ttlExpired) {
             finishBackgroundTask('completed', code, signal);
           } else {
             finishBackgroundTask('failed', code, signal);
@@ -579,6 +597,7 @@ function formatBackgroundTaskResult({
   command,
   exitCode,
   signal,
+  stoppedByUser,
   timedOut,
   timeout,
   ttlExpired,
@@ -588,13 +607,16 @@ function formatBackgroundTaskResult({
   command: string;
   exitCode: number | null;
   signal: NodeJS.Signals | null;
+  stoppedByUser: boolean;
   timedOut: boolean;
   timeout: number;
   ttlExpired: boolean;
   output: OutputCapture;
   outputLimit: number;
 }): string {
-  const statusLine = ttlExpired
+  const statusLine = stoppedByUser
+    ? 'Background process was stopped by user request.'
+    : ttlExpired
     ? `Background process exceeded ${formatMs(BG_TTL_MS)} TTL and was killed.`
     : timedOut
       ? `Background process timed out after ${formatMs(timeout)}.`
@@ -790,11 +812,7 @@ function formatMs(ms: number): string {
 function killBgProcess(key: string): boolean {
   const entry = backgroundProcesses.get(key);
   if (!entry) return false;
-  try {
-    terminateChildProcess(entry.child);
-  } catch { /* ignore */ }
-  clearBgProcess(key);
-  return true;
+  return entry.stop();
 }
 
 /** Remove from registry and clear watchdog timer. */

@@ -86,7 +86,7 @@ export class TaskStopTool extends Tool {
     );
   }
 
-  private _stopBackgroundTask(taskId: string): ToolResult {
+  private async _stopBackgroundTask(taskId: string): Promise<ToolResult> {
     const bgManager = BackgroundTaskManager.getInstance();
     const task = bgManager.getTask(taskId);
 
@@ -116,6 +116,26 @@ export class TaskStopTool extends Tool {
       killedProcess = BashTool.killBackgroundProcessByPid(task.pid);
     }
 
+    if (killedProcess) {
+      const finalized = await waitForRecentBackgroundResult(bgManager, taskId, 1000);
+      return this.makeResult(
+        `Background task '${taskId}' has been stopped.` +
+        ' Partial output, if any, is available via TaskOutput.' +
+        ' Process was terminated.',
+        {
+          structured: {
+            taskId,
+            status: finalized?.status ?? 'stopping',
+            type: task.type,
+            summary: task.summary,
+            pid: task.pid,
+            killedProcess,
+            finalized: Boolean(finalized),
+          },
+        },
+      );
+    }
+
     const killedTask = bgManager.kill(taskId);
     if (!killedTask) {
       return this.makeError(
@@ -141,6 +161,20 @@ export class TaskStopTool extends Tool {
       },
     );
   }
+}
+
+async function waitForRecentBackgroundResult(
+  bgManager: BackgroundTaskManager,
+  taskId: string,
+  timeoutMs: number,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const recent = bgManager.getRecentTaskResult(taskId);
+    if (recent) return recent;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  return bgManager.getRecentTaskResult(taskId);
 }
 
 function normalizeTaskId(params: Record<string, unknown>): string | null {

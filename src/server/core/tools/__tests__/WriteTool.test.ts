@@ -156,6 +156,39 @@ describe('WriteTool', () => {
     await expect(stat(file)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('rejects non-boolean safety flags instead of silently writing', async () => {
+    const workspace = await makeWorkspace();
+    const existing = path.join(workspace, 'existing.txt');
+    await writeFile(existing, 'original\n');
+
+    const badCreateOnly = await new WriteTool().execute(
+      {
+        file_path: existing,
+        content: 'replacement\n',
+        create_only: 'true',
+      },
+      ctx(workspace),
+    );
+
+    expect(badCreateOnly.success).toBe(false);
+    expect(badCreateOnly.errorMessage).toContain('create_only must be a boolean');
+    await expect(readFile(existing, 'utf-8')).resolves.toBe('original\n');
+
+    const dryRunTarget = path.join(workspace, 'dry-run-string.txt');
+    const badDryRun = await new WriteTool().execute(
+      {
+        file_path: dryRunTarget,
+        content: 'should not exist\n',
+        dry_run: 'true',
+      },
+      ctx(workspace),
+    );
+
+    expect(badDryRun.success).toBe(false);
+    expect(badDryRun.errorMessage).toContain('dry_run must be a boolean');
+    await expect(stat(dryRunTarget)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('refuses to write to an existing directory path', async () => {
     const workspace = await makeWorkspace();
     const dir = path.join(workspace, 'target-dir');

@@ -95,9 +95,14 @@ export class WriteTool extends Tool {
   ): Promise<ToolResult> {
     const filePath = params.file_path as string;
     const content = params.content;
-    const createOnly = params.create_only === true;
-    const dryRun = params.dry_run === true;
     const expectedSha256 = normalizeExpectedSha256(params.expected_sha256);
+    const createOnlyResult = normalizeBoolean(params.create_only, 'create_only', false);
+    if (createOnlyResult.error) return this.makeError(createOnlyResult.error);
+    const createOnly = createOnlyResult.value!;
+
+    const dryRunResult = normalizeBoolean(params.dry_run, 'dry_run', false);
+    if (dryRunResult.error) return this.makeError(dryRunResult.error);
+    const dryRun = dryRunResult.value!;
 
     if (!filePath || typeof filePath !== 'string') {
       return this.makeError('file_path is required');
@@ -263,6 +268,16 @@ function normalizeExpectedSha256(value: unknown): string | undefined | null {
   if (typeof value !== 'string') return null;
   const normalized = value.trim().toLowerCase();
   return SHA256_HEX_RE.test(normalized) ? normalized : null;
+}
+
+function normalizeBoolean(
+  value: unknown,
+  name: string,
+  defaultValue: boolean,
+): { value: boolean; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: defaultValue };
+  if (typeof value !== 'boolean') return { error: `${name} must be a boolean` };
+  return { value };
 }
 
 function sha256(data: Buffer): string {

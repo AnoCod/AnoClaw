@@ -19,6 +19,7 @@ import { SkillListTool } from '../builtin/SkillListTool.js';
 import { SkillMatchingTool } from '../builtin/SkillMatchingTool.js';
 import { SkillTool } from '../builtin/SkillTool.js';
 import { SleepTool } from '../builtin/SleepTool.js';
+import { SubAgentSpawnTool } from '../builtin/SubAgentSpawnTool.js';
 import { TaskAssignTool } from '../builtin/TaskAssignTool.js';
 import { TaskListTool } from '../builtin/TaskListTool.js';
 import { TaskOutputTool } from '../builtin/TaskOutputTool.js';
@@ -326,6 +327,39 @@ describe('native tool parameter schemas', () => {
 
     expect(ToolPipeline.validateParams(new EnterPlanModeTool(), {
       anything: true,
+    })?.errorMessage).toContain('Unexpected parameter');
+  });
+
+  it('exposes SubAgentSpawn enum, string, and boolean bounds', () => {
+    const tool = new SubAgentSpawnTool();
+
+    expect(ToolPipeline.validateParams(tool, {
+      description: 'Inspect a focused subsystem',
+      prompt: 'Review the relevant files and report findings.',
+      subagent_type: 'Explore',
+      model: 'sonnet',
+      persist: false,
+      run_in_background: true,
+    })).toBeNull();
+
+    expect(ToolPipeline.validateParams(tool, {
+      description: 'Inspect a focused subsystem',
+      prompt: 'Review the relevant files and report findings.',
+      subagent_type: 'Worker',
+    })?.errorMessage).toContain('subagent_type');
+
+    expect(ToolPipeline.validateParams(tool, {
+      description: 'Inspect a focused subsystem',
+      prompt: 'Review the relevant files and report findings.',
+      subagent_type: 'Explore',
+      run_in_background: 'false',
+    })?.errorMessage).toContain('run_in_background');
+
+    expect(ToolPipeline.validateParams(tool, {
+      description: 'Inspect a focused subsystem',
+      prompt: 'Review the relevant files and report findings.',
+      subagent_type: 'Explore',
+      extra: true,
     })?.errorMessage).toContain('Unexpected parameter');
   });
 });

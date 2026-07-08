@@ -543,7 +543,15 @@ Spawns a new sub-agent to handle a delegated task. The sub-agent inherits contex
 |---|---|---|---|
 | `description` | string | ✓ | Short description for logging and UI |
 | `prompt` | string | ✓ | Full task instructions for the sub-agent |
-| `subagent_type` | string | | Specialized agent type |
+| `subagent_type` | string | ✓ | Specialized agent type: `Explore`, `Plan`, or `general-purpose` |
+| `model` | string | | `haiku` or `sonnet`; defaults to `sonnet` |
+| `persist` | boolean | | Keep the transcript/session for later inspection; defaults to `false` |
+| `run_in_background` | boolean | | Register a tracked background sub-agent task and return immediately |
+
+**Reliability notes:**
+- `description`, `prompt`, `subagent_type`, `model`, `persist`, and `run_in_background` are validated before any SubAgent runtime is touched.
+- Background runs are registered in `BackgroundTaskManager`, return a `Task ID`, and complete or fail through the unified `<task-notification>` path.
+- Failed background SubAgents are recorded as failed tasks instead of being reported as completed delegations.
 
 ---
 

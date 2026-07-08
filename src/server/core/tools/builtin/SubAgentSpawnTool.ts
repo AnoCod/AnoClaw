@@ -9,8 +9,11 @@ import { AgentRuntime } from '../../agent/AgentRuntime.js';
 import type { SubAgentConfig } from '../../../../shared/types/agent.js';
 import { createLogger } from '../../logger.js';
 import { TypedEventBus } from '../../events/TypedEventBus.js';
-import { MessageRole } from '../../../../shared/types/session.js';
-import type { Message } from '../../../../shared/types/session.js';
+import { BackgroundTaskManager } from '../../agent/supervision/BackgroundTaskManager.js';
+
+const SUBAGENT_TYPES = ['Explore', 'Plan', 'general-purpose'] as const;
+
+const SUBAGENT_MODELS = ['haiku', 'sonnet'] as const;
 
 export class SubAgentSpawnTool extends Tool {
 
@@ -50,20 +53,25 @@ export class SubAgentSpawnTool extends Tool {
       properties: {
         description: {
           type: 'string',
+          minLength: 1,
+          maxLength: 200,
+          pattern: '\\S',
           description: 'Short description of what this SubAgent should accomplish (used for logging and UI)',
         },
         prompt: {
           type: 'string',
+          minLength: 1,
+          pattern: '\\S',
           description: 'Full task prompt / instructions for the SubAgent to execute',
         },
         subagent_type: {
           type: 'string',
-          enum: ['Explore', 'Plan', 'general-purpose'],
+          enum: [...SUBAGENT_TYPES],
           description: 'Type of SubAgent. "Explore" for codebase investigation, "Plan" for design work, "general-purpose" for open-ended tasks.',
         },
         model: {
           type: 'string',
-          enum: ['haiku', 'sonnet'],
+          enum: [...SUBAGENT_MODELS],
           description: 'Model to use for the SubAgent. "haiku" is faster/cheaper, "sonnet" is more capable. Defaults to "sonnet".',
         },
         persist: {
@@ -76,6 +84,7 @@ export class SubAgentSpawnTool extends Tool {
         },
       },
       required: ['description', 'prompt', 'subagent_type'],
+      additionalProperties: false,
     };
   }
 
@@ -95,12 +104,29 @@ export class SubAgentSpawnTool extends Tool {
     params: Record<string, unknown>,
     ctx: ExecutionContext,
   ): Promise<ToolResult> {
-    const description = params.description as string;
-    const prompt = params.prompt as string;
-    const subagentType = params.subagent_type as 'Explore' | 'Plan' | 'general-purpose';
-    const model = (params.model as 'haiku' | 'sonnet') || 'sonnet';
-    const persist = (params.persist as boolean) || false;
-    const runInBackground = (params.run_in_background as boolean) || false;
+    const descriptionResult = normalizeString(params.description, 'description', 200);
+    if (descriptionResult.error) return this.makeError(descriptionResult.error);
+    const description = descriptionResult.value!;
+
+    const promptResult = normalizeString(params.prompt, 'prompt');
+    if (promptResult.error) return this.makeError(promptResult.error);
+    const prompt = promptResult.value!;
+
+    const subagentTypeResult = normalizeEnum(params.subagent_type, 'subagent_type', SUBAGENT_TYPES);
+    if (subagentTypeResult.error) return this.makeError(subagentTypeResult.error);
+    const subagentType = subagentTypeResult.value!;
+
+    const modelResult = normalizeEnum(params.model, 'model', SUBAGENT_MODELS, 'sonnet');
+    if (modelResult.error) return this.makeError(modelResult.error);
+    const model = modelResult.value!;
+
+    const persistResult = normalizeBoolean(params.persist, 'persist', false);
+    if (persistResult.error) return this.makeError(persistResult.error);
+    const persist = persistResult.value!;
+
+    const backgroundResult = normalizeBoolean(params.run_in_background, 'run_in_background', false);
+    if (backgroundResult.error) return this.makeError(backgroundResult.error);
+    const runInBackground = backgroundResult.value!;
 
     const logger = createLogger('anochat.tools');
     logger.debug('SubAgentSpawn execute', { type: subagentType, model, background: runInBackground, sid: ctx.sessionId, aid: ctx.agentId });
@@ -118,12 +144,35 @@ export class SubAgentSpawnTool extends Tool {
 
     if (runInBackground) {
       // Fire-and-forget: start the SubAgent asynchronously.
-      // When complete, emit the result via TypedEventBus to the parent session
-      // and inject a system message so the main agent becomes aware.
+      // BackgroundTaskManager delivers completion/failure notifications and
+      // lets AgentLoop wait eventfully instead of hanging or polling blindly.
       const startedAt = Date.now();
+      const bgManager = BackgroundTaskManager.getInstance();
+      const taskId = bgManager.register({
+        type: 'subagent',
+        parentSessionId: ctx.sessionId,
+        parentAgentId: ctx.agentId,
+        summary: description.slice(0, 80),
+      });
+
       runtime.spawnSubAgent(subAgentConfig, ctx.agentId, ctx.sessionId).then(async (result) => {
         const durationMs = Date.now() - startedAt;
         const subSessionId = (result.structured as any)?.subSessionId || `subagent-${Date.now()}`;
+
+        if (!result.success) {
+          const errorMessage = result.errorMessage || result.content || 'SubAgent execution failed with no error message';
+          logger.error('Background SubAgent returned failure', { type: subagentType, error: errorMessage.slice(0, 200), sid: ctx.sessionId, taskId });
+          TypedEventBus.emit('delegation:error', {
+            parentSessionId: ctx.sessionId,
+            subSessionId,
+            subAgentId: `SubAgent-${subagentType}`,
+            taskSummary: description.slice(0, 60),
+            elapsedMs: durationMs,
+          });
+          await finishBackgroundFailure(bgManager, taskId, errorMessage, durationMs, logger);
+          return;
+        }
+
         TypedEventBus.emit('delegation:completed', {
           parentSessionId: ctx.sessionId,
           subSessionId,
@@ -132,30 +181,11 @@ export class SubAgentSpawnTool extends Tool {
           turnCount: 0,
           elapsedMs: durationMs,
         });
-
-        // Inject system notification into parent session so the agent becomes aware
-        try {
-          const { SessionManager } = await import('../../session/SessionManager.js');
-          const sm = SessionManager.getInstance();
-          const resultSummary = (result.content || '').slice(0, 500);
-          const sysMsg: Message = {
-            id: `sys-bg-${Date.now()}`,
-            sessionId: ctx.sessionId,
-            role: MessageRole.System,
-            content: `[System notification] Background task completed in ${(durationMs / 1000).toFixed(1)}s: "${description}"\n\nResult summary: ${resultSummary || '(no output)'}\n\nUse TaskList to review all task statuses.`,
-            tokenCount: 0,
-            compressed: false,
-            timestamp: new Date().toISOString(),
-            agentId: ctx.agentId,
-          };
-          await sm.appendMessage(ctx.sessionId, sysMsg);
-        } catch (sysErr) {
-          logger.warn('Failed to inject background completion message', { sid: ctx.sessionId, error: (sysErr as Error).message });
-        }
+        await finishBackgroundSuccess(bgManager, taskId, result.content || '(no output)', durationMs, logger);
       }).catch((err) => {
         const errMsg = err instanceof Error ? err.message : String(err);
         const durationMs = Date.now() - startedAt;
-        logger.error('Background SubAgent failed', { type: subagentType, error: errMsg, sid: ctx.sessionId });
+        logger.error('Background SubAgent failed', { type: subagentType, error: errMsg, sid: ctx.sessionId, taskId });
         TypedEventBus.emit('delegation:error', {
           parentSessionId: ctx.sessionId,
           subSessionId: `subagent-err-${Date.now()}`,
@@ -163,13 +193,18 @@ export class SubAgentSpawnTool extends Tool {
           taskSummary: description.slice(0, 60),
           elapsedMs: durationMs,
         });
+        finishBackgroundFailure(bgManager, taskId, errMsg, durationMs, logger).catch((failErr) => {
+          logger.warn('Failed to record background SubAgent failure', { taskId, error: (failErr as Error).message });
+        });
       });
 
       return this.makeResult(
         `SubAgent spawned in background: ${description}\n` +
+        `Task ID: ${taskId}\n` +
         `Type: ${subagentType}\n` +
         `Model: ${model}\n` +
-        'The result will be delivered when complete via system notification.',
+        `The result will be delivered when complete via <task-notification>. Use TaskOutput with task_id="${taskId}" to inspect it later.`,
+        { structured: { taskId, background: true } },
       );
     }
 
@@ -183,5 +218,78 @@ export class SubAgentSpawnTool extends Tool {
         result.errorMessage ?? 'SubAgent execution failed with no error message',
       );
     }
+  }
+}
+
+function normalizeString(
+  value: unknown,
+  field: string,
+  maxLength?: number,
+): { value: string; error?: undefined } | { value?: undefined; error: string } {
+  if (typeof value !== 'string') return { error: `${field} must be a string` };
+  const trimmed = value.trim();
+  if (!trimmed) return { error: `${field} must not be empty` };
+  if (maxLength !== undefined && trimmed.length > maxLength) {
+    return { error: `${field} must be ${maxLength} characters or less` };
+  }
+  return { value: trimmed };
+}
+
+function normalizeBoolean(
+  value: unknown,
+  field: string,
+  fallback: boolean,
+): { value: boolean; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: fallback };
+  if (typeof value !== 'boolean') return { error: `${field} must be a boolean` };
+  return { value };
+}
+
+function normalizeEnum<T extends readonly string[]>(
+  value: unknown,
+  field: string,
+  allowed: T,
+  fallback?: T[number],
+): { value: T[number]; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) {
+    if (fallback !== undefined) return { value: fallback };
+    return { error: `${field} is required` };
+  }
+  if (typeof value !== 'string') return { error: `${field} must be a string` };
+  if (!allowed.includes(value)) {
+    return { error: `${field} must be one of: ${allowed.join(', ')}` };
+  }
+  return { value };
+}
+
+async function finishBackgroundSuccess(
+  bgManager: BackgroundTaskManager,
+  taskId: string,
+  content: string,
+  durationMs: number,
+  logger: ReturnType<typeof createLogger>,
+): Promise<void> {
+  try {
+    if (bgManager.hasTask(taskId)) {
+      await bgManager.complete(taskId, { content, turnCount: 0, durationMs });
+    }
+  } catch (err) {
+    logger.warn('Failed to record background SubAgent completion', { taskId, error: (err as Error).message });
+  }
+}
+
+async function finishBackgroundFailure(
+  bgManager: BackgroundTaskManager,
+  taskId: string,
+  errorMessage: string,
+  durationMs: number,
+  logger: ReturnType<typeof createLogger>,
+): Promise<void> {
+  try {
+    if (bgManager.hasTask(taskId)) {
+      await bgManager.fail(taskId, errorMessage, durationMs);
+    }
+  } catch (err) {
+    logger.warn('Failed to record background SubAgent failure', { taskId, error: (err as Error).message });
   }
 }

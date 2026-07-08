@@ -143,12 +143,18 @@ describe('native tool parameter schemas', () => {
       limit: 1,
       tail: undefined,
       max_chars: 100,
+      timeout_ms: 1000,
     })).toBeNull();
 
     expect(ToolPipeline.validateParams(tool, {
       file_path: 'src/index.ts',
       tail: 5001,
     })?.errorMessage).toContain('expected <= 5000');
+
+    expect(ToolPipeline.validateParams(tool, {
+      file_path: 'src/index.ts',
+      timeout_ms: 999,
+    })?.errorMessage).toContain('expected >= 1000');
   });
 
   it('exposes write and edit safety hash formats', () => {

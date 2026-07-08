@@ -20,9 +20,23 @@ const MIN_OUTPUT_CHARS = 100;
 const MAX_TAIL_LINES = 5000;
 const MAX_LIMIT_LINES = 10000;
 const MAX_DIRECTORY_ENTRIES = 500;
+const DEFAULT_READ_TIMEOUT_MS = 15000;
+const MIN_READ_TIMEOUT_MS = 1000;
+const MAX_READ_TIMEOUT_MS = 60000;
 const BINARY_SAMPLE_BYTES = 4096;
 const DEFAULT_PDF_MAX_PAGES = 10;
 const MAX_PDF_SELECTED_PAGES = 50;
+
+type ReadFileLike = (
+  filePath: string,
+  options?: BufferEncoding | { encoding?: BufferEncoding; signal?: AbortSignal },
+) => Promise<string | Buffer>;
+
+let readFileForTests: ReadFileLike | undefined;
+
+export function setReadToolReadFileForTests(readFile?: ReadFileLike): void {
+  readFileForTests = readFile;
+}
 
 export class ReadTool extends Tool {
 
@@ -43,6 +57,7 @@ export class ReadTool extends Tool {
       'Read only relevant files and avoid rereading unchanged content in the same turn.',
       'For large files, use offset and limit to inspect the relevant region.',
       'For PDFs, use pages such as "1-3,5" to extract specific page text.',
+      'Use timeout_ms for slow filesystems, large directories, or PDF extraction.',
     ].join('\n');
   }
 
@@ -93,6 +108,13 @@ export class ReadTool extends Tool {
           maximum: MAX_OUTPUT_CHARS,
           description:
             `Maximum characters returned by this tool. Default ${MAX_OUTPUT_CHARS}, min ${MIN_OUTPUT_CHARS}, max ${MAX_OUTPUT_CHARS}.`,
+        },
+        timeout_ms: {
+          type: 'integer',
+          minimum: MIN_READ_TIMEOUT_MS,
+          maximum: MAX_READ_TIMEOUT_MS,
+          description:
+            `Maximum read time in milliseconds. Default ${DEFAULT_READ_TIMEOUT_MS}, min ${MIN_READ_TIMEOUT_MS}, max ${MAX_READ_TIMEOUT_MS}.`,
         },
       },
       required: ['file_path'],
@@ -149,6 +171,10 @@ export class ReadTool extends Tool {
     if (maxCharsResult.error) return this.makeError(maxCharsResult.error);
     const maxChars = maxCharsResult.value as number;
 
+    const timeoutResult = normalizeInteger(params.timeout_ms, 'timeout_ms', DEFAULT_READ_TIMEOUT_MS, MIN_READ_TIMEOUT_MS, MAX_READ_TIMEOUT_MS);
+    if (timeoutResult.error) return this.makeError(timeoutResult.error);
+    const timeoutMs = timeoutResult.value as number;
+
     if (!filePath || typeof filePath !== 'string') {
       return this.makeError('file_path is required');
     }
@@ -158,6 +184,7 @@ export class ReadTool extends Tool {
     }
 
     const startedAt = Date.now();
+    const budget = createReadBudget(ctx.signal, timeoutMs);
 
     try {
       const baseDir = ctx.workspace || process.cwd();
@@ -168,8 +195,9 @@ export class ReadTool extends Tool {
       // Check if the path exists and is not a directory
       let stat: Awaited<ReturnType<typeof fs.stat>>;
       try {
-        stat = await fs.stat(resolved);
+        stat = await budget.race(fs.stat(resolved), 'checking file metadata');
       } catch (err: unknown) {
+        if (isReadAbortError(err)) throw err;
         const errMsg = (err as NodeJS.ErrnoException)?.code === 'ENOENT'
           ? `File not found: ${filePath}`
           : `Cannot access file: ${filePath} - ${(err as Error).message}`;
@@ -177,13 +205,14 @@ export class ReadTool extends Tool {
       }
 
       if (stat.isDirectory()) {
-        const listing = await listDirectory(resolved, ctx.signal);
+        const listing = await listDirectory(resolved, budget);
         return this.makeResult(listing.content, {
           startedAt,
           wasTruncated: listing.wasTruncated,
           structured: {
             path: resolved,
             kind: 'directory',
+            timeoutMs,
             entries: listing.entries,
             shownEntries: listing.shownEntries,
             truncatedByEntries: listing.wasTruncated,
@@ -191,21 +220,20 @@ export class ReadTool extends Tool {
         });
       }
 
-      if (ctx.signal?.aborted) {
-        return this.makeError('Read cancelled by user before file read started', { startedAt });
-      }
+      budget.throwIfAborted('before file read started');
 
       // Handle different file types
       const ext = path.extname(resolved).toLowerCase();
 
       if (ext === '.pdf') {
-        const pdf = await readPdfText(resolved, pages, maxChars, ctx.signal);
+        const pdf = await readPdfText(resolved, pages, maxChars, budget);
         return this.makeResult(pdf.content, {
           startedAt,
           wasTruncated: pdf.wasTruncated,
           structured: {
             path: resolved,
             kind: 'pdf',
+            timeoutMs,
             sizeBytes: stat.size,
             pageCount: pdf.pageCount,
             selectedPages: pdf.selectedPages,
@@ -224,6 +252,7 @@ export class ReadTool extends Tool {
             structured: {
               path: resolved,
               kind: 'image',
+              timeoutMs,
               sizeBytes: stat.size,
               extension: ext,
             },
@@ -231,7 +260,7 @@ export class ReadTool extends Tool {
         );
       }
 
-      if (await looksBinary(resolved)) {
+      if (await looksBinary(resolved, budget)) {
         return this.makeResult(
           `[Binary file: ${path.basename(resolved)}]\nSize: ${formatBytes(stat.size)}\nPath: ${resolved}`,
           {
@@ -239,6 +268,7 @@ export class ReadTool extends Tool {
             structured: {
               path: resolved,
               kind: 'binary',
+              timeoutMs,
               sizeBytes: stat.size,
               extension: ext,
             },
@@ -247,7 +277,7 @@ export class ReadTool extends Tool {
       }
 
       if (tail !== undefined) {
-        const range = await readTextTail(resolved, tail, maxChars, lineNumbers, ctx.signal);
+        const range = await readTextTail(resolved, tail, maxChars, lineNumbers, budget);
         return this.makeResult(range.content, {
           startedAt,
           wasTruncated: range.wasTruncated,
@@ -255,6 +285,7 @@ export class ReadTool extends Tool {
             path: resolved,
             kind: 'text',
             mode: 'tail',
+            timeoutMs,
             sizeBytes: stat.size,
             lineStart: range.lineStart,
             lineEnd: range.lineEnd,
@@ -279,7 +310,7 @@ export class ReadTool extends Tool {
       }
 
       if (offset !== undefined || limit !== undefined) {
-        const range = await readTextLineRange(resolved, offset, limit, maxChars, lineNumbers, ctx.signal);
+        const range = await readTextLineRange(resolved, offset, limit, maxChars, lineNumbers, budget);
         return this.makeResult(range.content, {
           startedAt,
           wasTruncated: range.wasTruncated,
@@ -287,6 +318,7 @@ export class ReadTool extends Tool {
             path: resolved,
             kind: 'text',
             mode: 'range',
+            timeoutMs,
             sizeBytes: stat.size,
             lineStart: range.lineStart,
             lineEnd: range.lineEnd,
@@ -302,8 +334,13 @@ export class ReadTool extends Tool {
       // Read as text
       let content: string;
       try {
-        content = await fs.readFile(resolved, 'utf-8');
-      } catch {
+        const rawContent = await budget.race(
+          readFile(resolved, { encoding: 'utf-8', signal: budget.signal }),
+          'reading text file',
+        );
+        content = typeof rawContent === 'string' ? rawContent : rawContent.toString('utf-8');
+      } catch (err: unknown) {
+        if (isReadAbortError(err)) throw err;
         // Binary file fallback
         return this.makeResult(
           `[Binary file: ${path.basename(resolved)}]\nSize: ${formatBytes(stat.size)}`,
@@ -312,6 +349,7 @@ export class ReadTool extends Tool {
             structured: {
               path: resolved,
               kind: 'binary',
+              timeoutMs,
               sizeBytes: stat.size,
               extension: ext,
             },
@@ -331,6 +369,7 @@ export class ReadTool extends Tool {
           path: resolved,
           kind: 'text',
           mode: 'full',
+          timeoutMs,
           sizeBytes: stat.size,
           lineNumbers,
           maxChars,
@@ -341,7 +380,21 @@ export class ReadTool extends Tool {
       });
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      return this.makeError(errMsg);
+      return this.makeError(errMsg, {
+        startedAt,
+        finishedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+        structured: isReadAbortError(err)
+          ? {
+              status: err.status,
+              operation: err.operation,
+              timeoutMs: err.timeoutMs,
+              filePath,
+            }
+          : undefined,
+      });
+    } finally {
+      budget.cleanup();
     }
   }
 
@@ -426,12 +479,111 @@ function addLineNumbers(lines: string[], startLine: number): string {
   return lines.map((line, index) => `${String(startLine + index).padStart(width, ' ')}| ${line}`).join('\n');
 }
 
+function readFile(
+  filePath: string,
+  options?: BufferEncoding | { encoding?: BufferEncoding; signal?: AbortSignal },
+): Promise<string | Buffer> {
+  const fn = readFileForTests ?? (fs.readFile as unknown as ReadFileLike);
+  return fn(filePath, options);
+}
+
+type ReadAbortStatus = 'timeout' | 'cancelled';
+
+class ReadAbortError extends Error {
+  constructor(
+    readonly status: ReadAbortStatus,
+    readonly operation: string,
+    readonly timeoutMs: number,
+  ) {
+    super(status === 'timeout'
+      ? `Read timed out after ${timeoutMs}ms during ${operation}. Narrow the file/range or increase timeout_ms.`
+      : 'Read cancelled by user');
+    this.name = 'ReadAbortError';
+  }
+}
+
+function isReadAbortError(err: unknown): err is ReadAbortError {
+  return err instanceof ReadAbortError;
+}
+
+interface ReadBudget {
+  signal: AbortSignal;
+  timeoutMs: number;
+  race<T>(promise: Promise<T>, operation: string): Promise<T>;
+  throwIfAborted(operation: string): void;
+  abortError(operation: string): ReadAbortError;
+  cleanup(): void;
+}
+
+function createReadBudget(parentSignal: AbortSignal | undefined, timeoutMs: number): ReadBudget {
+  const controller = new AbortController();
+  let status: ReadAbortStatus | null = null;
+
+  const abortAs = (nextStatus: ReadAbortStatus) => {
+    if (controller.signal.aborted) return;
+    status = nextStatus;
+    controller.abort();
+  };
+
+  const timeoutId = setTimeout(() => abortAs('timeout'), timeoutMs);
+  timeoutId.unref?.();
+
+  const onParentAbort = () => abortAs('cancelled');
+  if (parentSignal?.aborted) {
+    abortAs('cancelled');
+  } else {
+    parentSignal?.addEventListener('abort', onParentAbort, { once: true });
+  }
+
+  const abortError = (operation: string) =>
+    new ReadAbortError(status ?? 'cancelled', operation, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    timeoutMs,
+    race<T>(promise: Promise<T>, operation: string): Promise<T> {
+      if (controller.signal.aborted) return Promise.reject(abortError(operation));
+      return new Promise<T>((resolve, reject) => {
+        let settled = false;
+        const onAbort = () => {
+          if (settled) return;
+          settled = true;
+          reject(abortError(operation));
+        };
+        controller.signal.addEventListener('abort', onAbort, { once: true });
+        promise.then(
+          value => {
+            if (settled) return;
+            settled = true;
+            controller.signal.removeEventListener('abort', onAbort);
+            resolve(value);
+          },
+          err => {
+            if (settled) return;
+            settled = true;
+            controller.signal.removeEventListener('abort', onAbort);
+            reject(controller.signal.aborted ? abortError(operation) : err);
+          },
+        );
+      });
+    },
+    throwIfAborted(operation: string): void {
+      if (controller.signal.aborted) throw abortError(operation);
+    },
+    abortError,
+    cleanup(): void {
+      clearTimeout(timeoutId);
+      parentSignal?.removeEventListener('abort', onParentAbort);
+    },
+  };
+}
+
 async function listDirectory(
   dirPath: string,
-  signal?: AbortSignal,
+  budget: ReadBudget,
 ): Promise<{ content: string; wasTruncated: boolean; entries: number; shownEntries: number }> {
-  if (signal?.aborted) throw new Error('Read cancelled by user');
-  const entries = await fs.readdir(dirPath, { withFileTypes: true });
+  budget.throwIfAborted('listing directory');
+  const entries = await budget.race(fs.readdir(dirPath, { withFileTypes: true }), 'listing directory');
   entries.sort((a, b) => {
     if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
     return a.name.localeCompare(b.name);
@@ -445,15 +597,16 @@ async function listDirectory(
   ];
 
   for (const entry of visible) {
-    if (signal?.aborted) throw new Error('Read cancelled by user');
+    budget.throwIfAborted('listing directory entries');
     const fullPath = path.join(dirPath, entry.name);
     let size = '';
     let modified = '';
     try {
-      const stat = await fs.stat(fullPath);
+      const stat = await budget.race(fs.stat(fullPath), `reading directory metadata for ${entry.name}`);
       size = entry.isDirectory() ? '<DIR>' : formatBytes(stat.size);
       modified = stat.mtime.toISOString();
-    } catch {
+    } catch (err: unknown) {
+      if (isReadAbortError(err)) throw err;
       size = '?';
     }
     const suffix = entry.isDirectory() ? '/' : '';
@@ -472,11 +625,15 @@ async function listDirectory(
   };
 }
 
-async function looksBinary(filePath: string): Promise<boolean> {
-  const handle = await fs.open(filePath, 'r');
+async function looksBinary(filePath: string, budget: ReadBudget): Promise<boolean> {
+  budget.throwIfAborted('sampling file bytes');
+  const handle = await budget.race(fs.open(filePath, 'r'), 'opening file for binary sampling');
   try {
     const buffer = Buffer.alloc(BINARY_SAMPLE_BYTES);
-    const { bytesRead } = await handle.read(buffer, 0, BINARY_SAMPLE_BYTES, 0);
+    const { bytesRead } = await budget.race(
+      handle.read(buffer, 0, BINARY_SAMPLE_BYTES, 0),
+      'sampling file bytes',
+    );
     if (bytesRead === 0) return false;
     const sample = buffer.subarray(0, bytesRead);
     if (sample.includes(0)) return true;
@@ -486,7 +643,7 @@ async function looksBinary(filePath: string): Promise<boolean> {
     }
     return suspicious / sample.length > 0.3;
   } finally {
-    await handle.close();
+    await handle.close().catch(() => undefined);
   }
 }
 
@@ -507,8 +664,9 @@ async function readTextLineRange(
   limit: number | undefined,
   maxChars: number,
   lineNumbers: boolean,
-  signal?: AbortSignal,
+  budget: ReadBudget,
 ): Promise<TextRangeResult> {
+  const operation = 'streaming requested line range';
   const startLine = offset ?? 1;
   const maxLines = limit;
   const endLine = maxLines === undefined ? Number.POSITIVE_INFINITY : startLine + maxLines - 1;
@@ -522,14 +680,14 @@ async function readTextLineRange(
   const rl = createInterface({ input: stream, crlfDelay: Infinity });
   const abort = () => {
     rl.close();
-    stream.destroy(new Error('Read cancelled by user'));
+    stream.destroy(budget.abortError(operation));
   };
 
-  if (signal?.aborted) abort();
-  signal?.addEventListener('abort', abort, { once: true });
+  if (budget.signal.aborted) abort();
+  budget.signal.addEventListener('abort', abort, { once: true });
   try {
     for await (const line of rl) {
-      if (signal?.aborted) throw new Error('Read cancelled by user');
+      budget.throwIfAborted(operation);
       currentLine++;
       if (currentLine < startLine) continue;
       if (currentLine > endLine) {
@@ -544,7 +702,7 @@ async function readTextLineRange(
       }
     }
   } finally {
-    signal?.removeEventListener('abort', abort);
+    budget.signal.removeEventListener('abort', abort);
     rl.close();
     stream.destroy();
   }
@@ -568,8 +726,9 @@ async function readTextTail(
   tail: number,
   maxChars: number,
   lineNumbers: boolean,
-  signal?: AbortSignal,
+  budget: ReadBudget,
 ): Promise<TextRangeResult> {
+  const operation = 'streaming file tail';
   const ring: Array<{ lineNumber: number; text: string }> = [];
   let currentLine = 0;
 
@@ -577,20 +736,20 @@ async function readTextTail(
   const rl = createInterface({ input: stream, crlfDelay: Infinity });
   const abort = () => {
     rl.close();
-    stream.destroy(new Error('Read cancelled by user'));
+    stream.destroy(budget.abortError(operation));
   };
 
-  if (signal?.aborted) abort();
-  signal?.addEventListener('abort', abort, { once: true });
+  if (budget.signal.aborted) abort();
+  budget.signal.addEventListener('abort', abort, { once: true });
   try {
     for await (const line of rl) {
-      if (signal?.aborted) throw new Error('Read cancelled by user');
+      budget.throwIfAborted(operation);
       currentLine++;
       ring.push({ lineNumber: currentLine, text: line });
       if (ring.length > tail) ring.shift();
     }
   } finally {
-    signal?.removeEventListener('abort', abort);
+    budget.signal.removeEventListener('abort', abort);
     rl.close();
     stream.destroy();
   }
@@ -625,18 +784,24 @@ async function readPdfText(
   filePath: string,
   pagesSpec?: string,
   maxChars = MAX_OUTPUT_CHARS,
-  signal?: AbortSignal,
+  budget?: ReadBudget,
 ): Promise<PdfReadResult> {
-  if (signal?.aborted) throw new Error('Read cancelled by user');
+  budget?.throwIfAborted('loading PDF dependencies');
   const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const buffer = await fs.readFile(filePath);
+  const rawBuffer = budget
+    ? await budget.race(readFile(filePath), 'reading PDF bytes')
+    : await readFile(filePath);
+  const buffer = Buffer.isBuffer(rawBuffer) ? rawBuffer : Buffer.from(rawBuffer);
   const loadingTask = (getDocument as any)({
     data: new Uint8Array(buffer),
     disableWorker: true,
     useSystemFonts: true,
   });
-  const pdf = await loadingTask.promise;
+  let pdf: any | undefined;
   try {
+    pdf = budget
+      ? await budget.race(loadingTask.promise, 'loading PDF document')
+      : await loadingTask.promise;
     const selectedPages = selectPdfPages({
       spec: pagesSpec,
       pageCount: pdf.numPages,
@@ -655,9 +820,13 @@ async function readPdfText(
     let totalChars = 0;
     let truncatedByChars = false;
     for (const pageNumber of selectedPages) {
-      if (signal?.aborted) throw new Error('Read cancelled by user');
-      const page = await pdf.getPage(pageNumber);
-      const content = await page.getTextContent();
+      budget?.throwIfAborted(`extracting PDF page ${pageNumber}`);
+      const page = budget
+        ? await budget.race(pdf.getPage(pageNumber), `loading PDF page ${pageNumber}`)
+        : await pdf.getPage(pageNumber);
+      const content = budget
+        ? await budget.race(page.getTextContent(), `extracting PDF page ${pageNumber}`)
+        : await page.getTextContent();
       const text = textContentToString(content);
       const pageBlock = [`--- Page ${pageNumber} ---`, text || '(no extractable text on this page)', ''].join('\n');
       const remaining = maxChars - totalChars;
@@ -689,7 +858,15 @@ async function readPdfText(
       truncatedByChars,
     };
   } finally {
-    await pdf.destroy();
+    if (pdf) {
+      await pdf.destroy();
+    } else if (typeof loadingTask.destroy === 'function') {
+      try {
+        await Promise.resolve(loadingTask.destroy());
+      } catch {
+        // Best-effort cleanup after load failures or timeouts.
+      }
+    }
   }
 }
 

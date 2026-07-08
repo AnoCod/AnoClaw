@@ -1,8 +1,8 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { ReadTool } from '../builtin/ReadTool.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ReadTool, setReadToolReadFileForTests } from '../builtin/ReadTool.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
 
 let tempDirs: string[] = [];
@@ -24,6 +24,8 @@ async function makeWorkspace(): Promise<string> {
 }
 
 afterEach(async () => {
+  vi.useRealTimers();
+  setReadToolReadFileForTests();
   const dirs = tempDirs;
   tempDirs = [];
   await Promise.all(dirs.map(dir => rm(dir, { recursive: true, force: true })));
@@ -177,6 +179,37 @@ describe('ReadTool', () => {
     expect(result.success).toBe(true);
     expect(result.content).toContain('[Binary file: blob.bin]');
     expect(result.content).toContain(file);
+  });
+
+  it('times out full text reads with structured feedback', async () => {
+    const workspace = await makeWorkspace();
+    const file = path.join(workspace, 'slow.txt');
+    await writeFile(file, 'slow content');
+    let markReadStarted!: () => void;
+    const readStarted = new Promise<void>((resolve) => { markReadStarted = resolve; });
+    setReadToolReadFileForTests(() => {
+      markReadStarted();
+      return new Promise<string>(() => {});
+    });
+    vi.useFakeTimers();
+
+    const pending = new ReadTool().execute(
+      { file_path: file, timeout_ms: 1000 },
+      ctx(workspace),
+    );
+
+    await readStarted;
+    await vi.advanceTimersByTimeAsync(1000);
+    const result = await pending;
+
+    expect(result.success).toBe(false);
+    expect(result.errorMessage).toContain('Read timed out after 1000ms during reading text file');
+    expect(result.structured).toMatchObject({
+      status: 'timeout',
+      operation: 'reading text file',
+      timeoutMs: 1000,
+      filePath: file,
+    });
   });
 
   it('extracts selected PDF pages via the pages parameter', async () => {

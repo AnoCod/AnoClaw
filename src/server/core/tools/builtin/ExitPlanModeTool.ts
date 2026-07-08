@@ -34,6 +34,7 @@ export class ExitPlanModeTool extends Tool {
       properties: {
         allowedPrompts: {
           type: 'array',
+          maxItems: MAX_ALLOWED_PROMPTS,
           items: {
             type: 'object',
             properties: {
@@ -43,6 +44,9 @@ export class ExitPlanModeTool extends Tool {
               },
               prompt: {
                 type: 'string',
+                minLength: 1,
+                maxLength: MAX_ALLOWED_PROMPT_CHARS,
+                pattern: '\\S',
               },
             },
             required: ['tool', 'prompt'],

@@ -56,6 +56,7 @@ export class GrepTool extends Tool {
       properties: {
         pattern: {
           type: 'string',
+          minLength: 1,
           description: 'The regular expression pattern to search for in file contents',
         },
         path: {
@@ -85,15 +86,21 @@ export class GrepTool extends Tool {
             ' "count" shows match counts.',
         },
         '-A': {
-          type: 'number',
+          type: 'integer',
+          minimum: 0,
+          maximum: 100,
           description: 'Number of lines to show after each match (rg -A).',
         },
         '-B': {
-          type: 'number',
+          type: 'integer',
+          minimum: 0,
+          maximum: 100,
           description: 'Number of lines to show before each match (rg -B).',
         },
         '-C': {
-          type: 'number',
+          type: 'integer',
+          minimum: 0,
+          maximum: 100,
           description: 'Number of lines to show before and after each match (rg -C).',
         },
         '-i': {
@@ -109,7 +116,9 @@ export class GrepTool extends Tool {
           description: 'File type to search (rg --type). Common types: js, py, rust, go, java, etc.',
         },
         head_limit: {
-          type: 'number',
+          type: 'integer',
+          minimum: 0,
+          maximum: MAX_HEAD_LIMIT,
           description:
             `Limit output to first N lines/entries. Defaults to ${DEFAULT_HEAD_LIMIT}. Pass 0 for unlimited. Maximum ${MAX_HEAD_LIMIT}.`,
         },
@@ -118,11 +127,15 @@ export class GrepTool extends Tool {
           description: 'Enable multiline mode where . matches newlines (rg -U --multiline-dotall). Default: false.',
         },
         timeout_ms: {
-          type: 'number',
+          type: 'integer',
+          minimum: 1000,
+          maximum: MAX_RG_TIMEOUT_MS,
           description: `Ripgrep execution timeout in milliseconds. Default ${DEFAULT_RG_TIMEOUT_MS}, maximum ${MAX_RG_TIMEOUT_MS}.`,
         },
         max_output_chars: {
-          type: 'number',
+          type: 'integer',
+          minimum: MIN_OUTPUT_CHARS,
+          maximum: MAX_OUTPUT_CHARS,
           description: `Maximum output characters returned by this tool. Default ${MAX_OUTPUT_CHARS}, min ${MIN_OUTPUT_CHARS}, max ${MAX_OUTPUT_CHARS}.`,
         },
       },

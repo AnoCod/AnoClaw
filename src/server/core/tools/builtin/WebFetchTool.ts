@@ -101,23 +101,32 @@ export class WebFetchTool extends Tool {
       properties: {
         url: {
           type: 'string',
+          minLength: 1,
+          pattern: '\\S',
           description: 'The URL to fetch content from',
           format: 'uri',
         },
         prompt: {
           type: 'string',
+          maxLength: MAX_PROMPT_CHARS,
           description: `Optional prompt describing what information to extract or focus on (max ${MAX_PROMPT_CHARS} chars)`,
         },
         max_content_chars: {
-          type: 'number',
+          type: 'integer',
+          minimum: MIN_MAX_CONTENT_CHARS,
+          maximum: MAX_MAX_CONTENT_CHARS,
           description: `Maximum content characters returned. Default ${DEFAULT_MAX_CONTENT_CHARS}, max ${MAX_MAX_CONTENT_CHARS}.`,
         },
         timeout_ms: {
-          type: 'number',
+          type: 'integer',
+          minimum: MIN_TIMEOUT_MS,
+          maximum: MAX_TIMEOUT_MS,
           description: `Total fetch timeout in milliseconds. Default ${DEFAULT_TIMEOUT_MS}, max ${MAX_TIMEOUT_MS}.`,
         },
         retry_attempts: {
-          type: 'number',
+          type: 'integer',
+          minimum: 1,
+          maximum: MAX_RETRY_ATTEMPTS,
           description: `Number of network attempts. Default ${DEFAULT_RETRY_ATTEMPTS}, max ${MAX_RETRY_ATTEMPTS}.`,
         },
         use_cache: {

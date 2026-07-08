@@ -46,6 +46,8 @@ export class WriteTool extends Tool {
       properties: {
         file_path: {
           type: 'string',
+          minLength: 1,
+          pattern: '\\S',
           description:
             'The absolute path to the file to write (must be absolute, not relative)',
         },
@@ -59,6 +61,7 @@ export class WriteTool extends Tool {
         },
         expected_sha256: {
           type: 'string',
+          pattern: '^[a-fA-F0-9]{64}$',
           description: 'Optional SHA-256 hash of the current file. Fails if the existing file has changed since it was read.',
         },
         dry_run: {

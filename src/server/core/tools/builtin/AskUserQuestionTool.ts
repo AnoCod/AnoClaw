@@ -45,20 +45,28 @@ export class AskUserQuestionTool extends Tool {
       properties: {
         questions: {
           type: 'array',
+          minItems: 1,
+          maxItems: 4,
           items: {
             type: 'object',
             properties: {
               question: {
                 type: 'string',
+                minLength: 1,
+                pattern: '\\S',
                 description: 'The question to ask the user',
               },
               header: {
                 type: 'string',
+                minLength: 1,
+                maxLength: 12,
+                pattern: '\\S',
                 description: 'Short label for the question (max 12 characters)',
               },
               options: {
                 type: 'array',
-                items: { type: 'string' },
+                maxItems: 4,
+                items: { type: 'string', minLength: 1, pattern: '\\S' },
                 description: 'Multiple-choice options. If empty or omitted, free-text input is used.',
               },
               multiSelect: {

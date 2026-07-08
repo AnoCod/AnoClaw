@@ -119,11 +119,11 @@ export class WebSearchTool extends Tool {
     return {
       type: 'object',
       properties: {
-        query: { type: 'string', description: `The search query to use (${MIN_QUERY_CHARS}-${MAX_QUERY_CHARS} chars after trimming)` },
-        allowed_domains: { type: 'array', items: { type: 'string' }, description: 'Only include results from these domains or their subdomains' },
-        blocked_domains: { type: 'array', items: { type: 'string' }, description: 'Never include results from these domains or their subdomains' },
-        max_results: { type: 'number', description: `Maximum results to return. Default ${DEFAULT_RESULTS}, max ${MAX_RESULTS}.` },
-        timeout_ms: { type: 'number', description: `Total search timeout in milliseconds. Default ${DEFAULT_TIMEOUT_MS}, max ${MAX_TIMEOUT_MS}.` },
+        query: { type: 'string', minLength: MIN_QUERY_CHARS, maxLength: MAX_QUERY_CHARS, pattern: '\\S', description: `The search query to use (${MIN_QUERY_CHARS}-${MAX_QUERY_CHARS} chars after trimming)` },
+        allowed_domains: { type: 'array', items: { type: 'string', minLength: 1, pattern: '\\S' }, description: 'Only include results from these domains or their subdomains' },
+        blocked_domains: { type: 'array', items: { type: 'string', minLength: 1, pattern: '\\S' }, description: 'Never include results from these domains or their subdomains' },
+        max_results: { type: 'integer', minimum: 1, maximum: MAX_RESULTS, description: `Maximum results to return. Default ${DEFAULT_RESULTS}, max ${MAX_RESULTS}.` },
+        timeout_ms: { type: 'integer', minimum: MIN_TIMEOUT_MS, maximum: MAX_TIMEOUT_MS, description: `Total search timeout in milliseconds. Default ${DEFAULT_TIMEOUT_MS}, max ${MAX_TIMEOUT_MS}.` },
       },
       required: ['query'],
     };

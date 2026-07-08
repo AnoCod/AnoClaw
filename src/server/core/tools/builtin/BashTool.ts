@@ -127,14 +127,20 @@ export class BashTool extends Tool {
       properties: {
         command: {
           type: 'string',
+          minLength: 1,
+          pattern: '\\S',
           description: 'The command to execute',
         },
         description: {
           type: 'string',
+          minLength: 1,
+          maxLength: 200,
           description: 'Clear, concise description of what this command does in active voice (5-10 words)',
         },
         timeout: {
-          type: 'number',
+          type: 'integer',
+          minimum: 100,
+          maximum: MAX_TIMEOUT_MS,
           description: `Optional timeout in milliseconds (max ${MAX_TIMEOUT_MS}). Default: ${DEFAULT_TIMEOUT_MS}.`,
         },
         cwd: {
@@ -142,7 +148,9 @@ export class BashTool extends Tool {
           description: 'Optional working directory. Relative paths are resolved from the workspace.',
         },
         max_output_chars: {
-          type: 'number',
+          type: 'integer',
+          minimum: 100,
+          maximum: MAX_CONFIGURABLE_OUTPUT_CHARS,
           description: `Optional output limit in characters (max ${MAX_CONFIGURABLE_OUTPUT_CHARS}). Default: ${MAX_OUTPUT_CHARS}.`,
         },
         run_in_background: {

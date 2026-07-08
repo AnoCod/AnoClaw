@@ -79,6 +79,7 @@ interface JsonSchemaNode {
   maxLength?: number;
   minItems?: number;
   maxItems?: number;
+  pattern?: string;
   additionalProperties?: boolean | JsonSchemaNode;
 }
 
@@ -476,6 +477,15 @@ function validateJsonSchemaNode(schema: JsonSchemaNode, value: unknown, pathName
     }
     if (typeof schema.maxLength === 'number' && value.length > schema.maxLength) {
       return `Invalid length for parameter "${formatParamPath(pathName)}": expected at most ${schema.maxLength} characters, got ${value.length}`;
+    }
+    if (typeof schema.pattern === 'string') {
+      try {
+        if (!new RegExp(schema.pattern).test(value)) {
+          return `Invalid format for parameter "${formatParamPath(pathName)}": value does not match required pattern`;
+        }
+      } catch {
+        // Ignore malformed local schemas so one bad declaration cannot break tool use.
+      }
     }
   }
 

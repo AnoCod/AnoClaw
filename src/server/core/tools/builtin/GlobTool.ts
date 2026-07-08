@@ -66,6 +66,8 @@ export class GlobTool extends Tool {
       properties: {
         pattern: {
           type: 'string',
+          minLength: 1,
+          pattern: '\\S',
           description: 'The glob pattern to match files against',
         },
         path: {
@@ -77,7 +79,9 @@ export class GlobTool extends Tool {
             ' DO NOT enter "undefined" or "null" - simply omit it for the default behavior.',
         },
         max_results: {
-          type: 'number',
+          type: 'integer',
+          minimum: 1,
+          maximum: MAX_RESULTS_CAP,
           description: `Maximum matching files to return. Default ${MAX_RESULTS}, minimum 1, maximum ${MAX_RESULTS_CAP}.`,
         },
         include_hidden: {
@@ -90,15 +94,19 @@ export class GlobTool extends Tool {
         },
         exclude: {
           type: 'array',
-          items: { type: 'string' },
+          items: { type: 'string', minLength: 1, pattern: '\\S' },
           description: 'Glob patterns to exclude from the search, relative to the search path.',
         },
         timeout_ms: {
-          type: 'number',
+          type: 'integer',
+          minimum: 1000,
+          maximum: MAX_TIMEOUT_MS,
           description: `Maximum scan time in milliseconds. Default ${DEFAULT_TIMEOUT_MS}, maximum ${MAX_TIMEOUT_MS}.`,
         },
         max_output_chars: {
-          type: 'number',
+          type: 'integer',
+          minimum: MIN_OUTPUT_CHARS,
+          maximum: MAX_OUTPUT_CHARS,
           description: `Maximum output characters returned by this tool. Default ${MAX_OUTPUT_CHARS}, min ${MIN_OUTPUT_CHARS}, max ${MAX_OUTPUT_CHARS}.`,
         },
       },

@@ -233,6 +233,24 @@ describe('ToolPipeline.validateParams', () => {
     expect(r).not.toBeNull();
     expect(r!.errorMessage).toContain('Unexpected parameter: "surprise"');
   });
+
+  it('validates string patterns when schemas declare them', () => {
+    const tool = mockTool({
+      parametersSchema: {
+        type: 'object',
+        properties: {
+          hash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+        },
+        required: ['hash'],
+      },
+    });
+
+    const r = ToolPipeline.validateParams(tool, { hash: 'not-a-sha' });
+
+    expect(r).not.toBeNull();
+    expect(r!.errorMessage).toContain('Invalid format');
+    expect(ToolPipeline.validateParams(tool, { hash: 'a'.repeat(64) })).toBeNull();
+  });
 });
 
 // ── Stage 1: securityCheck ──

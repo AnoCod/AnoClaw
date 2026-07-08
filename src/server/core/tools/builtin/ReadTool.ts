@@ -52,16 +52,21 @@ export class ReadTool extends Tool {
       properties: {
         file_path: {
           type: 'string',
+          minLength: 1,
+          pattern: '\\S',
           description:
             'The absolute path to the file to read (must be absolute, not relative)',
         },
         offset: {
-          type: 'number',
+          type: 'integer',
+          minimum: 1,
           description:
             'The line number to start reading from. Only provide if the file is too large to read at once.',
         },
         limit: {
-          type: 'number',
+          type: 'integer',
+          minimum: 1,
+          maximum: MAX_LIMIT_LINES,
           description:
             'The number of lines to read. Only provide if the file is too large to read at once.',
         },
@@ -71,7 +76,9 @@ export class ReadTool extends Tool {
             'Page range for PDF files (e.g., "1-5", "3", "10-20"). Defaults to the first pages.',
         },
         tail: {
-          type: 'number',
+          type: 'integer',
+          minimum: 1,
+          maximum: MAX_TAIL_LINES,
           description:
             `Read the last N lines of a text file. Useful for logs. Max ${MAX_TAIL_LINES}. Cannot be combined with offset/limit.`,
         },
@@ -81,7 +88,9 @@ export class ReadTool extends Tool {
             'Prefix returned text lines with 1-based line numbers for precise references. Default false.',
         },
         max_chars: {
-          type: 'number',
+          type: 'integer',
+          minimum: MIN_OUTPUT_CHARS,
+          maximum: MAX_OUTPUT_CHARS,
           description:
             `Maximum characters returned by this tool. Default ${MAX_OUTPUT_CHARS}, min ${MIN_OUTPUT_CHARS}, max ${MAX_OUTPUT_CHARS}.`,
         },

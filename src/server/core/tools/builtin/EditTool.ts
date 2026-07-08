@@ -50,11 +50,14 @@ export class EditTool extends Tool {
       properties: {
         file_path: {
           type: 'string',
+          minLength: 1,
+          pattern: '\\S',
           description:
             'The absolute path to the file to modify (must be absolute, not relative)',
         },
         old_string: {
           type: 'string',
+          minLength: 1,
           description: 'The text to replace',
         },
         new_string: {
@@ -67,11 +70,13 @@ export class EditTool extends Tool {
           description: 'Replace all occurrences of old_string (default false)',
         },
         expected_replacements: {
-          type: 'number',
+          type: 'integer',
+          minimum: 1,
           description: 'Optional safety check: fail unless the edit would replace exactly this many occurrences.',
         },
         expected_sha256: {
           type: 'string',
+          pattern: '^[a-fA-F0-9]{64}$',
           description: 'Optional SHA-256 hash of the current file. Fails if the file changed since it was read.',
         },
         dry_run: {

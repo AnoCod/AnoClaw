@@ -22,6 +22,7 @@ import { SkillListTool } from '../builtin/SkillListTool.js';
 import { SkillMatchingTool } from '../builtin/SkillMatchingTool.js';
 import { SkillTool } from '../builtin/SkillTool.js';
 import { SleepTool } from '../builtin/SleepTool.js';
+import { SubAgentDeleteTool } from '../builtin/SubAgentDeleteTool.js';
 import { SubAgentSpawnTool } from '../builtin/SubAgentSpawnTool.js';
 import { TaskAssignTool } from '../builtin/TaskAssignTool.js';
 import { TaskListTool } from '../builtin/TaskListTool.js';
@@ -370,6 +371,17 @@ describe('native tool parameter schemas', () => {
     expect(ToolPipeline.validateParams(new TaskListTool(), {
       anything: true,
     })?.errorMessage).toContain('Unexpected parameter');
+
+    expect(ToolPipeline.validateParams(new SubAgentDeleteTool(), {
+      agentId: 'subagent-1',
+      dry_run: true,
+      reason: 'cleanup',
+    })).toBeNull();
+
+    expect(ToolPipeline.validateParams(new SubAgentDeleteTool(), {
+      agentId: 'subagent-1',
+      dry_run: 'yes',
+    })?.errorMessage).toContain('dry_run');
 
     expect(ToolPipeline.validateParams(new EnterPlanModeTool(), {
       anything: true,

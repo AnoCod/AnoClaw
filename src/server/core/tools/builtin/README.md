@@ -29,7 +29,7 @@
 | `TaskStopTool.ts` | `TaskStop` | Task Delegation | Medium | SubAgent |
 | `AgentMessageTool.ts` | `AgentMessage` | Task Delegation | Medium | SubAgent |
 | `SubAgentSpawnTool.ts` | `SubAgentSpawn` | Task Delegation | Medium | Member |
-| `SubAgentDeleteTool.ts` | `SubAgentDelete` | Task Delegation | Medium | SubAgent |
+| `SubAgentDeleteTool.ts` | `SubAgentDelete` | Task Delegation | Low | SubAgent |
 | `HireEmployeeTool.ts` | `HireEmployee` | Organization Management | High | Manager |
 | `ListEmployeesTool.ts` | `ListEmployees` | Organization Management | Safe | SubAgent |
 | `UpdateOrgTool.ts` | `UpdateOrg` | Organization Management | Medium | Manager |
@@ -586,7 +586,7 @@ Spawns a new sub-agent to handle a delegated task. The sub-agent inherits contex
 
 ### SubAgentDeleteTool — `SubAgentDelete`
 
-Removes a sub-agent from the org tree. Stops the agent if running.
+Destroys and unregisters a live temporary SubAgent. Durable Managers/Members cannot be deleted with this tool, and persisted transcripts are preserved for audit.
 
 | Property | Value |
 |---|---|
@@ -595,7 +595,15 @@ Removes a sub-agent from the org tree. Stops the agent if running.
 **Parameters:**
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `agent_id` | string | ✓ | ID of the sub-agent to delete |
+| `agentId` | string | ✓ | ID of the SubAgent to delete |
+| `dry_run` | boolean | | Preview the delete without mutating the registry; defaults to `false` |
+| `reason` | string | | Optional short audit/debug reason; max 500 chars |
+
+**Reliability notes:**
+- Inputs are trimmed and bounded; unexpected parameters are rejected.
+- Non-SubAgent roles are refused with structured `wrong_role` feedback and are not unregistered.
+- Destroyed stale SubAgent entries are cleaned idempotently from the registry.
+- Results include structured `status`, `deleted`, `unregistered`, and `sessionAction`; transcripts are preserved rather than hard-deleted.
 
 ---
 

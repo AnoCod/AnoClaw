@@ -9,6 +9,10 @@ import { AgentRuntime } from '../../agent/AgentRuntime.js';
 import { AgentRegistry } from '../../agent/AgentRegistry.js';
 import { createLogger } from '../../logger.js';
 
+const MAX_TARGET_AGENT_ID_CHARS = 200;
+const MAX_TASK_CHARS = 20000;
+const TASK_PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
+
 export class TaskAssignTool extends Tool {
 
   static category = 'Task Delegation';
@@ -48,13 +52,14 @@ export class TaskAssignTool extends Tool {
         targetAgentId: {
           type: 'string',
           minLength: 1,
+          maxLength: MAX_TARGET_AGENT_ID_CHARS,
           pattern: '\\S',
           description: 'ID of the subordinate agent to delegate the task to',
         },
         task: {
           type: 'string',
           minLength: 1,
-          maxLength: 20000,
+          maxLength: MAX_TASK_CHARS,
           pattern: '\\S',
           description: 'The task description and instructions for the subordinate',
         },
@@ -85,9 +90,17 @@ export class TaskAssignTool extends Tool {
     params: Record<string, unknown>,
     ctx: ExecutionContext,
   ): Promise<ToolResult> {
-    const targetAgentId = params.targetAgentId as string;
-    const task = params.task as string;
-    const priority = (params.priority as string) || 'normal';
+    const targetResult = normalizeString(params.targetAgentId, 'targetAgentId', MAX_TARGET_AGENT_ID_CHARS);
+    if (targetResult.error) return this.makeError(targetResult.error);
+    const targetAgentId = targetResult.value!;
+
+    const taskResult = normalizeString(params.task, 'task', MAX_TASK_CHARS);
+    if (taskResult.error) return this.makeError(taskResult.error);
+    const task = taskResult.value!;
+
+    const priorityResult = normalizeEnum(params.priority, 'priority', TASK_PRIORITIES, 'normal');
+    if (priorityResult.error) return this.makeError(priorityResult.error);
+    const priority = priorityResult.value!;
 
     const logger = createLogger('anochat.tools');
     logger.debug('TaskAssign executed', { targetAgentId, taskPreview: task.slice(0, 60), sid: ctx.sessionId, aid: ctx.agentId });
@@ -99,13 +112,11 @@ export class TaskAssignTool extends Tool {
     if (!target) {
       return this.makeError(`Target agent '${targetAgentId}' not found in registry`);
     }
-    // Check the target's report chain includes the caller - means caller is an ancestor
-    const chain = registry.reportChain(target.id);
-    if (!chain.includes(ctx.agentId) && target.parentAgentId !== ctx.agentId) {
+    if (target.parentAgentId !== ctx.agentId) {
       logger.warn('TaskAssign validation failed - not a subordinate', { targetAgentId, callerAid: ctx.agentId });
       return this.makeError(
         `Cannot assign task to '${targetAgentId}': ` +
-        'tasks can only be delegated to subordinates (down the org tree).',
+        'tasks can only be assigned to direct subordinates (immediate children).',
       );
     }
 
@@ -123,6 +134,48 @@ export class TaskAssignTool extends Tool {
       `Priority: ${priority}\n` +
       `${result.content}\n\n` +
       'The system will notify you when the task completes.',
+      {
+        structured: {
+          ...(isRecord(result.structured) ? result.structured : {}),
+          targetAgentId,
+          parentSessionId: ctx.sessionId,
+          parentAgentId: ctx.agentId,
+          priority,
+          taskPreview: task.slice(0, 120),
+        },
+      },
     );
   }
+}
+
+function normalizeString(
+  value: unknown,
+  field: string,
+  maxLength: number,
+): { value: string; error?: undefined } | { value?: undefined; error: string } {
+  if (typeof value !== 'string') return { error: `${field} must be a string` };
+  const trimmed = value.trim();
+  if (!trimmed) return { error: `${field} must not be empty` };
+  if (trimmed.length > maxLength) {
+    return { error: `${field} must be ${maxLength} characters or less` };
+  }
+  return { value: trimmed };
+}
+
+function normalizeEnum<T extends readonly string[]>(
+  value: unknown,
+  field: string,
+  allowed: T,
+  fallback: T[number],
+): { value: T[number]; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: fallback };
+  if (typeof value !== 'string') return { error: `${field} must be a string` };
+  const trimmed = value.trim();
+  if (!trimmed) return { value: fallback };
+  if (!allowed.includes(trimmed)) return { error: `${field} must be one of: ${allowed.join(', ')}` };
+  return { value: trimmed };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }

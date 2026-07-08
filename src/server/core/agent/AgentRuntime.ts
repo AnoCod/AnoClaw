@@ -848,6 +848,17 @@ export class AgentRuntime extends EventEmitter {
         success: true,
         content: `Task injected into existing session for '${actualAgentId}' (${subSessionId}).\n` +
           `The agent is currently working -- your task will be picked up on its next turn.`,
+        structured: {
+          status: 'queued',
+          type: 'subagent',
+          subSessionId,
+          targetAgentId: actualAgentId,
+          parentSessionId,
+          parentAgentId,
+          priority,
+          background: false,
+          activeSession: true,
+        },
         tokensUsed: 0,
         startedAt,
         finishedAt: Date.now(),
@@ -992,8 +1003,20 @@ export class AgentRuntime extends EventEmitter {
       toolCallId: `delegate-${actualAgentId}`,
       success: true,
       content: `Task dispatched to '${actualAgentId}' (session: ${subSessionId}).\n` +
+        `Task ID: ${taskId}\n` +
         `The agent will work on it independently.\n` +
         `Use TaskList to monitor progress, AgentMessage to communicate, or TaskOutput to get the final result when complete.`,
+      structured: {
+        taskId,
+        status: 'running',
+        type: 'subagent',
+        subSessionId,
+        targetAgentId: actualAgentId,
+        parentSessionId,
+        parentAgentId,
+        priority,
+        background: true,
+      },
       tokensUsed: 0,
       startedAt,
       finishedAt: Date.now(),

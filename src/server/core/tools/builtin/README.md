@@ -442,7 +442,7 @@ Creates and manages a normalized structured task list for the current session. T
 
 ### TaskAssignTool — `TaskAssign`
 
-Assigns a task to a subordinate agent in the org hierarchy.
+Assigns a tracked task to a direct subordinate agent in the org hierarchy.
 
 | Property | Value |
 |---|---|
@@ -452,9 +452,14 @@ Assigns a task to a subordinate agent in the org hierarchy.
 **Parameters:**
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `to` | string | ✓ | Target agent name or ID |
-| `message` | string | ✓ | Task description or instruction |
-| `summary` | string | | Short summary for UI display |
+| `targetAgentId` | string | ✓ | Direct subordinate agent ID |
+| `task` | string | ✓ | Task description, scope, acceptance criteria, and verification requirements |
+| `priority` | string | | `low`, `normal`, `high`, or `urgent`; defaults to `normal` |
+
+**Reliability notes:**
+- Inputs are trimmed, bounded, and validated before registry/runtime dispatch.
+- Tasks can only be assigned to immediate child agents; cross-tree or grandchild delegation is rejected before runtime dispatch.
+- Successful background delegation returns structured metadata including `taskId` (`bt-*`), `subSessionId`, priority, and target agent. Use that `taskId` with `TaskOutput` or `TaskStop`.
 
 ---
 

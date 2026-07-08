@@ -314,6 +314,17 @@ describe('native tool parameter schemas', () => {
       task: '   ',
     })?.errorMessage).toContain('Invalid format');
 
+    expect(ToolPipeline.validateParams(new TaskAssignTool(), {
+      targetAgentId: 'member-1',
+      task: 'Inspect the native tool tests.',
+      priority: 'later',
+    })?.errorMessage).toContain('priority');
+
+    expect(ToolPipeline.validateParams(new TaskAssignTool(), {
+      targetAgentId: 'x'.repeat(201),
+      task: 'Inspect the native tool tests.',
+    })?.errorMessage).toContain('targetAgentId');
+
     expect(ToolPipeline.validateParams(new TaskOutputTool(), {
       task_id: '   ',
     })?.errorMessage).toContain('task_id');

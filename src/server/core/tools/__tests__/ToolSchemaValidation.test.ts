@@ -10,6 +10,7 @@ import { ExitPlanModeTool } from '../builtin/ExitPlanModeTool.js';
 import { GlobTool } from '../builtin/GlobTool.js';
 import { GrepTool } from '../builtin/GrepTool.js';
 import { HireEmployeeTool } from '../builtin/HireEmployeeTool.js';
+import { ListEmployeesTool } from '../builtin/ListEmployeesTool.js';
 import { MemoryDeleteTool } from '../builtin/MemoryDeleteTool.js';
 import { MemoryRecallTool } from '../builtin/MemoryRecallTool.js';
 import { MemorySaveTool } from '../builtin/MemorySaveTool.js';
@@ -303,6 +304,12 @@ describe('native tool parameter schemas', () => {
 
     expect(ToolPipeline.validateParams(new SkillListTool(), {
       unused: true,
+    })?.errorMessage).toContain('Unexpected parameter');
+
+    expect(ToolPipeline.validateParams(new ListEmployeesTool(), {})).toBeNull();
+
+    expect(ToolPipeline.validateParams(new ListEmployeesTool(), {
+      verbose: true,
     })?.errorMessage).toContain('Unexpected parameter');
   });
 

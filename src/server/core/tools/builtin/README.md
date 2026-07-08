@@ -629,13 +629,19 @@ Use `SubAgentSpawn` for one-off temporary helpers.
 
 ### ListEmployeesTool — `ListEmployees`
 
-Lists all employees in the organization hierarchy.
+Lists all employees in the organization hierarchy with structured health metadata.
 
 | Property | Value |
 |---|---|
 | Risk | `Safe` |
 
 **Parameters:** None (empty object).
+
+**Reliability notes:**
+- Rejects unexpected parameters through the shared schema pipeline and at execution time.
+- Traverses from the MainAgent with cycle protection, so corrupted reporting chains are reported instead of recursing forever.
+- Reports orphaned or unreachable agents separately when their parent chain does not connect to the MainAgent.
+- Includes structured metadata for totals, active/destroyed counts, root agent, all agents, orphaned agents, cycle IDs, and org health status.
 
 ---
 

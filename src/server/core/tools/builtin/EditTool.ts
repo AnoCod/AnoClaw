@@ -14,6 +14,15 @@ import { atomicWriteFile, resolvePath } from './FileUtils.js';
 const SHA256_HEX_RE = /^[a-f0-9]{64}$/i;
 const BINARY_SAMPLE_BYTES = 4096;
 const MAX_DIAGNOSTIC_MATCHES = 5;
+const PARAM_KEYS = [
+  'file_path',
+  'old_string',
+  'new_string',
+  'replace_all',
+  'expected_replacements',
+  'expected_sha256',
+  'dry_run',
+];
 
 export class EditTool extends Tool {
 
@@ -85,6 +94,7 @@ export class EditTool extends Tool {
         },
       },
       required: ['file_path', 'old_string', 'new_string'],
+      additionalProperties: false,
     };
   }
 
@@ -104,9 +114,12 @@ export class EditTool extends Tool {
     params: Record<string, unknown>,
     ctx: ExecutionContext,
   ): Promise<ToolResult> {
-    const filePathResult = normalizeString(params.file_path, 'file_path', { allowEmpty: false });
+    const unexpectedParam = findUnexpectedParam(params, PARAM_KEYS);
+    if (unexpectedParam) return this.makeError(`Unexpected parameter: "${unexpectedParam}"`);
+
+    const filePathResult = normalizeRequiredString(params.file_path, 'file_path');
     if (filePathResult.error) return this.makeError(filePathResult.error);
-    const filePath = filePathResult.value!;
+    const filePath = filePathResult.value as string;
 
     const oldStringResult = normalizeString(params.old_string, 'old_string', { allowEmpty: false });
     if (oldStringResult.error) return this.makeError(oldStringResult.error);
@@ -372,6 +385,16 @@ function normalizeBoolean(
   return { value };
 }
 
+function normalizeRequiredString(
+  value: unknown,
+  name: string,
+): { value: string; error?: undefined } | { value?: undefined; error: string } {
+  if (typeof value !== 'string') return { error: `${name} is required` };
+  const normalized = value.trim();
+  if (!normalized) return { error: `${name} must not be empty` };
+  return { value: normalized };
+}
+
 function normalizeOptionalPositiveInteger(
   value: unknown,
   name: string,
@@ -492,4 +515,9 @@ function summarizeOccurrences(
     searchStart = index + needle.length;
   }
   return { firstLine, lastLine, sampledLines };
+}
+
+function findUnexpectedParam(params: Record<string, unknown>, allowed: string[]): string | null {
+  const allowedSet = new Set(allowed);
+  return Object.keys(params).find(key => !allowedSet.has(key)) ?? null;
 }

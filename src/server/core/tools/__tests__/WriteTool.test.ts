@@ -187,6 +187,31 @@ describe('WriteTool', () => {
     expect(badDryRun.success).toBe(false);
     expect(badDryRun.errorMessage).toContain('dry_run must be a boolean');
     await expect(stat(dryRunTarget)).rejects.toMatchObject({ code: 'ENOENT' });
+
+    const blankPath = await new WriteTool().execute(
+      {
+        file_path: '   ',
+        content: 'should not be written\n',
+      },
+      ctx(workspace),
+    );
+
+    expect(blankPath.success).toBe(false);
+    expect(blankPath.errorMessage).toContain('file_path must not be empty');
+
+    const unexpectedTarget = path.join(workspace, 'unexpected.txt');
+    const unexpectedParam = await new WriteTool().execute(
+      {
+        file_path: unexpectedTarget,
+        content: 'should not exist\n',
+        encoding: 'utf16le',
+      },
+      ctx(workspace),
+    );
+
+    expect(unexpectedParam.success).toBe(false);
+    expect(unexpectedParam.errorMessage).toContain('Unexpected parameter: "encoding"');
+    await expect(stat(unexpectedTarget)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('refuses to write to an existing directory path', async () => {

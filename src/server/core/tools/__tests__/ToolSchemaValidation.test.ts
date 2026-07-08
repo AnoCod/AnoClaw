@@ -207,6 +207,17 @@ describe('native tool parameter schemas', () => {
     });
     expect(badWrite?.errorMessage).toContain('Invalid format');
 
+    expect(ToolPipeline.validateParams(new WriteTool(), {
+      file_path: '   ',
+      content: 'hello',
+    })?.errorMessage).toContain('Invalid format');
+
+    expect(ToolPipeline.validateParams(new WriteTool(), {
+      file_path: 'out.txt',
+      content: 'hello',
+      encoding: 'utf16le',
+    })?.errorMessage).toContain('Unexpected parameter');
+
     const badEdit = ToolPipeline.validateParams(new EditTool(), {
       file_path: 'out.txt',
       old_string: 'hello',
@@ -214,6 +225,19 @@ describe('native tool parameter schemas', () => {
       expected_replacements: 0,
     });
     expect(badEdit?.errorMessage).toContain('expected >= 1');
+
+    expect(ToolPipeline.validateParams(new EditTool(), {
+      file_path: '   ',
+      old_string: 'hello',
+      new_string: 'world',
+    })?.errorMessage).toContain('Invalid format');
+
+    expect(ToolPipeline.validateParams(new EditTool(), {
+      file_path: 'out.txt',
+      old_string: 'hello',
+      new_string: 'world',
+      mode: 'append',
+    })?.errorMessage).toContain('Unexpected parameter');
   });
 
   it('exposes nested planning and user-question bounds', () => {

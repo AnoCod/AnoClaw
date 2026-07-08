@@ -113,6 +113,30 @@ describe('EditTool', () => {
     );
     expect(badNewString.success).toBe(false);
     expect(badNewString.errorMessage).toContain('new_string must be a string');
+
+    const blankPath = await tool.execute(
+      {
+        file_path: '   ',
+        old_string: 'needle',
+        new_string: 'thread',
+      },
+      ctx(workspace),
+    );
+    expect(blankPath.success).toBe(false);
+    expect(blankPath.errorMessage).toContain('file_path must not be empty');
+
+    const unexpectedParam = await tool.execute(
+      {
+        file_path: file,
+        old_string: 'needle',
+        new_string: 'thread',
+        mode: 'append',
+      },
+      ctx(workspace),
+    );
+    expect(unexpectedParam.success).toBe(false);
+    expect(unexpectedParam.errorMessage).toContain('Unexpected parameter: "mode"');
+
     await expect(readFile(file, 'utf-8')).resolves.toBe('needle\nneedle\n');
   });
 

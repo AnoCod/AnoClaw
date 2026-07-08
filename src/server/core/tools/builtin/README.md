@@ -128,6 +128,7 @@ Writes UTF-8 text content to a file. Creates parent directories when needed. Req
 | `dry_run` | boolean | No | Validate the write without changing the filesystem |
 
 **Behavior notes:**
+- Unknown parameters and blank `file_path` values are rejected before filesystem writes.
 - Refuses to write to directory paths, content containing NUL bytes, or existing binary files.
 - Returns structured metadata including created/overwritten/noOp/dryRun, byte counts, and SHA-256 hashes.
 - Skips the filesystem write when the existing file already matches the requested content.
@@ -155,7 +156,7 @@ Performs exact string replacements in files. Requires reading the file first. Pr
 | `dry_run` | boolean | | Validate and report replacement metadata without writing |
 
 **Behavior notes:**
-- Invalid string/boolean/number/hash parameters fail fast instead of being coerced.
+- Unknown parameters, blank `file_path`, and invalid string/boolean/number/hash parameters fail fast instead of being coerced.
 - `new_string` may be empty for deletion edits; `old_string` must be non-empty.
 - Successful and failed validations include structured metadata such as hashes, byte counts, sampled line numbers, and replacement counts.
 

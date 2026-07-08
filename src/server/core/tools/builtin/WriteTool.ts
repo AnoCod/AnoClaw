@@ -13,6 +13,7 @@ import { atomicWriteFile, resolvePath } from './FileUtils.js';
 
 const SHA256_HEX_RE = /^[a-f0-9]{64}$/i;
 const BINARY_SAMPLE_BYTES = 4096;
+const PARAM_KEYS = ['file_path', 'content', 'create_only', 'expected_sha256', 'dry_run'];
 
 export class WriteTool extends Tool {
 
@@ -70,6 +71,7 @@ export class WriteTool extends Tool {
         },
       },
       required: ['file_path', 'content'],
+      additionalProperties: false,
     };
   }
 
@@ -93,7 +95,13 @@ export class WriteTool extends Tool {
     params: Record<string, unknown>,
     ctx: ExecutionContext,
   ): Promise<ToolResult> {
-    const filePath = params.file_path as string;
+    const unexpectedParam = findUnexpectedParam(params, PARAM_KEYS);
+    if (unexpectedParam) return this.makeError(`Unexpected parameter: "${unexpectedParam}"`);
+
+    const filePathResult = normalizeRequiredString(params.file_path, 'file_path');
+    if (filePathResult.error) return this.makeError(filePathResult.error);
+    const filePath = filePathResult.value as string;
+
     const content = params.content;
     const expectedSha256 = normalizeExpectedSha256(params.expected_sha256);
     const createOnlyResult = normalizeBoolean(params.create_only, 'create_only', false);
@@ -104,9 +112,6 @@ export class WriteTool extends Tool {
     if (dryRunResult.error) return this.makeError(dryRunResult.error);
     const dryRun = dryRunResult.value!;
 
-    if (!filePath || typeof filePath !== 'string') {
-      return this.makeError('file_path is required');
-    }
     if (content === undefined || content === null) {
       return this.makeError('content is required');
     }
@@ -280,6 +285,16 @@ function normalizeBoolean(
   return { value };
 }
 
+function normalizeRequiredString(
+  value: unknown,
+  name: string,
+): { value: string; error?: undefined } | { value?: undefined; error: string } {
+  if (typeof value !== 'string') return { error: `${name} is required` };
+  const normalized = value.trim();
+  if (!normalized) return { error: `${name} must not be empty` };
+  return { value: normalized };
+}
+
 function sha256(data: Buffer): string {
   return createHash('sha256').update(data).digest('hex');
 }
@@ -293,4 +308,9 @@ function looksBinary(data: Buffer): boolean {
     if (byte < 7 || (byte > 14 && byte < 32)) suspicious++;
   }
   return suspicious / sample.length > 0.3;
+}
+
+function findUnexpectedParam(params: Record<string, unknown>, allowed: string[]): string | null {
+  const allowedSet = new Set(allowed);
+  return Object.keys(params).find(key => !allowedSet.has(key)) ?? null;
 }

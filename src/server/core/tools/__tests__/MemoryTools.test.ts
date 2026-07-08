@@ -63,15 +63,68 @@ describe('Memory tools', () => {
     expect(result.content).toContain('truncated');
     const structured = result.structured as {
       count: number;
+      fuzzy: boolean;
       returned: number;
       entries: Array<{ name: string; snippet: string }>;
     };
     expect(structured.count).toBe(2);
+    expect(structured.fuzzy).toBe(true);
     expect(structured.returned).toBe(1);
     expect(structured.entries).toEqual([
       expect.objectContaining({ name: 'first-memory' }),
     ]);
     expect(structured.entries[0].snippet.length).toBeLessThanOrEqual(80);
+  });
+
+  it('memory_search validates typed controls instead of silently coercing them', async () => {
+    setMemoryManager({
+      searchAllScopes: async () => [entry('unused', 'unused')],
+    });
+    const tool = new MemorySearchTool();
+
+    const badFuzzy = await tool.execute({ query: 'memory', fuzzy: 'false' }, ctx);
+    expect(badFuzzy.success).toBe(false);
+    expect(badFuzzy.errorMessage).toContain('fuzzy must be a boolean');
+
+    const badLimit = await tool.execute({ query: 'memory', limit: 1.5 }, ctx);
+    expect(badLimit.success).toBe(false);
+    expect(badLimit.errorMessage).toContain('limit must be an integer');
+
+    const badSnippet = await tool.execute({ query: 'memory', max_snippet_chars: 80.25 }, ctx);
+    expect(badSnippet.success).toBe(false);
+    expect(badSnippet.errorMessage).toContain('max_snippet_chars must be an integer');
+
+    const badScopeType = await tool.execute({ query: 'memory', scope: 42 }, ctx);
+    expect(badScopeType.success).toBe(false);
+    expect(badScopeType.errorMessage).toContain('scope must be a string');
+
+    const badScopeValue = await tool.execute({ query: 'memory', scope: 'global' }, ctx);
+    expect(badScopeValue.success).toBe(false);
+    expect(badScopeValue.errorMessage).toContain('scope must be one of');
+  });
+
+  it('memory_search forwards explicit fuzzy=false for scoped searches', async () => {
+    const calls: Array<{ scope: MemoryScope; query: string; fuzzy?: boolean }> = [];
+    setMemoryManager({
+      search: async (_agentId: string, scope: MemoryScope, query: string, _sessionId?: string, _subScope?: string, fuzzy?: boolean) => {
+        calls.push({ scope, query, fuzzy });
+        return [entry('exact-policy', 'Exact match only.', MemoryScope.Team)];
+      },
+    });
+
+    const result = await new MemorySearchTool().execute({
+      query: 'policy',
+      scope: 'team',
+      fuzzy: false,
+    }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(calls).toEqual([{ scope: MemoryScope.Team, query: 'policy', fuzzy: false }]);
+    expect(result.structured).toMatchObject({
+      scope: 'team',
+      fuzzy: false,
+      returned: 1,
+    });
   });
 
   it('memory_recall searches by name without loading all memories first', async () => {
@@ -190,5 +243,25 @@ describe('Memory tools', () => {
       status: 'found',
       dryRun: true,
     });
+  });
+
+  it('memory_delete rejects non-boolean dry_run without deleting', async () => {
+    let removeCalled = false;
+    setMemoryManager({
+      remove: async () => {
+        removeCalled = true;
+        return true;
+      },
+    });
+
+    const result = await new MemoryDeleteTool().execute({
+      scope: 'personal',
+      name: 'build-policy',
+      dry_run: 'true',
+    }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.errorMessage).toContain('dry_run must be a boolean');
+    expect(removeCalled).toBe(false);
   });
 });

@@ -55,18 +55,21 @@ export class MemorySearchTool extends Tool {
     const queryResult = normalizeString(params.query, 'query');
     if (queryResult.error) return this.makeError(queryResult.error);
     const query = queryResult.value!;
-    const scope = (params.scope as string) || 'all';
-    const fuzzy = params.fuzzy !== false; // default true
+
+    const scopeResult = normalizeEnum(params.scope, 'scope', ['team', 'personal', 'session_personal', 'session_team', 'all'] as const, 'all');
+    if (scopeResult.error) return this.makeError(scopeResult.error);
+    const scope = scopeResult.value!;
+
+    const fuzzyResult = normalizeBoolean(params.fuzzy, 'fuzzy', true);
+    if (fuzzyResult.error) return this.makeError(fuzzyResult.error);
+    const fuzzy = fuzzyResult.value!;
+
     const limitResult = normalizeInteger(params.limit, 'limit', DEFAULT_LIMIT, 1, MAX_LIMIT);
     if (limitResult.error) return this.makeError(limitResult.error);
     const snippetResult = normalizeInteger(params.max_snippet_chars, 'max_snippet_chars', DEFAULT_SNIPPET_CHARS, 40, MAX_SNIPPET_CHARS);
     if (snippetResult.error) return this.makeError(snippetResult.error);
     const limit = limitResult.value!;
     const maxSnippetChars = snippetResult.value!;
-
-    if (!['team', 'personal', 'session_personal', 'session_team', 'all'].includes(scope)) {
-      return this.makeError(`Invalid memory scope "${scope}". Expected one of: team, personal, session_personal, session_team, all.`);
-    }
 
     try {
       const mm = MemoryManager.getInstance();
@@ -85,7 +88,7 @@ export class MemorySearchTool extends Tool {
 
       if (entries.length === 0) {
         return this.makeResult(`No memories found for query "${query}" in ${scope} scope.`, {
-          structured: { query, scope, count: 0, returned: 0, limit, entries: [] },
+          structured: { query, scope, fuzzy, count: 0, returned: 0, limit, entries: [] },
         });
       }
 
@@ -104,6 +107,7 @@ export class MemorySearchTool extends Tool {
         structured: {
           query,
           scope,
+          fuzzy,
           count: entries.length,
           returned: returnedEntries.length,
           limit,
@@ -141,11 +145,35 @@ function normalizeInteger(
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return { error: `${field} must be a finite number` };
   }
-  const normalized = Math.floor(value);
-  if (normalized < min || normalized > max) {
+  if (!Number.isInteger(value)) {
+    return { error: `${field} must be an integer` };
+  }
+  if (value < min || value > max) {
     return { error: `${field} must be between ${min} and ${max}` };
   }
-  return { value: normalized };
+  return { value };
+}
+
+function normalizeBoolean(
+  value: unknown,
+  field: string,
+  fallback: boolean,
+): { value: boolean; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: fallback };
+  if (typeof value !== 'boolean') return { error: `${field} must be a boolean` };
+  return { value };
+}
+
+function normalizeEnum<T extends readonly string[]>(
+  value: unknown,
+  field: string,
+  allowed: T,
+  fallback: T[number],
+): { value: T[number]; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: fallback };
+  if (typeof value !== 'string') return { error: `${field} must be a string` };
+  if (!allowed.includes(value)) return { error: `${field} must be one of: ${allowed.join(', ')}` };
+  return { value };
 }
 
 function truncate(value: string, limit: number): string {

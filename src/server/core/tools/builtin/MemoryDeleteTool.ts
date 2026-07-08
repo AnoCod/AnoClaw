@@ -44,10 +44,12 @@ export class MemoryDeleteTool extends Tool {
     if (scopeResult.error) return this.makeError(scopeResult.error);
     const nameResult = normalizeString(params.name, 'name');
     if (nameResult.error) return this.makeError(nameResult.error);
+    const dryRunResult = normalizeBoolean(params.dry_run, 'dry_run', false);
+    if (dryRunResult.error) return this.makeError(dryRunResult.error);
 
     const scope = scopeResult.value!;
     const name = nameResult.value!;
-    const dryRun = params.dry_run === true;
+    const dryRun = dryRunResult.value!;
 
     try {
       const mm = MemoryManager.getInstance();
@@ -108,5 +110,15 @@ function normalizeEnum(
 ): { value: string; error?: undefined } | { value?: undefined; error: string } {
   if (typeof value !== 'string') return { error: `${field} must be a string` };
   if (!allowed.includes(value)) return { error: `${field} must be one of: ${allowed.join(', ')}` };
+  return { value };
+}
+
+function normalizeBoolean(
+  value: unknown,
+  field: string,
+  fallback: boolean,
+): { value: boolean; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: fallback };
+  if (typeof value !== 'boolean') return { error: `${field} must be a boolean` };
   return { value };
 }

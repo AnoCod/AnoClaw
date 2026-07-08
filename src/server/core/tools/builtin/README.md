@@ -650,6 +650,10 @@ Searches saved memories with bounded snippets and structured results.
 | `limit` | number | | Max results returned, default 10, max 50 |
 | `max_snippet_chars` | number | | Max preview chars per memory, default 200, max 1000 |
 
+**Behavior notes:**
+- `scope`, `fuzzy`, `limit`, and `max_snippet_chars` are strictly typed; ambiguous strings or non-integer limits fail fast instead of being coerced.
+- Structured results include the effective `fuzzy` setting, total matches, returned count, and truncated snippets.
+
 ---
 
 ### MemoryDeleteTool — `memory_delete`
@@ -666,6 +670,9 @@ Deletes a memory entry by exact name, or checks existence with `dry_run`.
 | `scope` | string | ✓ | `personal`, `team`, `project`, `session_personal`, `session_team` |
 | `name` | string | ✓ | Exact memory entry name |
 | `dry_run` | boolean | | Check existence without deleting |
+
+**Behavior notes:**
+- `dry_run` must be a boolean; string values are rejected before any delete lookup or removal.
 
 ---
 

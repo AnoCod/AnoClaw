@@ -7,7 +7,14 @@ import { Tool } from '../Tool.js';
 import type { ToolResult } from '../../../../shared/types/tool.js';
 import { RiskLevel, InterruptBehavior } from '../../../../shared/types/tool.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
-import { ToolPipeline } from '../ToolPipeline.js';
+import { ToolPipeline, type AllowedPrompt } from '../ToolPipeline.js';
+
+const MAX_ALLOWED_PROMPTS = 20;
+const MAX_ALLOWED_PROMPT_CHARS = 4000;
+
+type AllowedPromptValidation =
+  | { ok: true; prompts: AllowedPrompt[] }
+  | { ok: false; error: string };
 
 export class ExitPlanModeTool extends Tool {
 
@@ -40,7 +47,7 @@ export class ExitPlanModeTool extends Tool {
             },
             required: ['tool', 'prompt'],
           },
-          description: 'Optional list of Bash prompts that should be auto-approved during implementation.',
+          description: 'Optional list of exact Bash commands that should be auto-approved during implementation.',
         },
       },
       required: [],
@@ -67,26 +74,76 @@ export class ExitPlanModeTool extends Tool {
     params: Record<string, unknown>,
     ctx: ExecutionContext,
   ): Promise<ToolResult> {
-    ToolPipeline.exitPlanMode(ctx.sessionId);
-    const allowedPrompts = params.allowedPrompts as
-      | Array<{ tool: string; prompt: string }>
-      | undefined;
-
-    if (allowedPrompts && allowedPrompts.length > 0) {
-      ToolPipeline.setAllowedPrompts(ctx.sessionId, allowedPrompts);
+    const normalized = normalizeAllowedPrompts(params.allowedPrompts);
+    if (!normalized.ok) {
+      ToolPipeline.setAllowedPrompts(ctx.sessionId, []);
+      return this.makeError(normalized.error);
     }
+
+    ToolPipeline.exitPlanMode(ctx.sessionId);
+    ToolPipeline.setAllowedPrompts(ctx.sessionId, normalized.prompts);
 
     let result = 'Exiting plan mode. Returning to normal execution mode.' +
       '\nDestructive tools (Write, Edit, Bash) are now allowed.' +
       '\nProceed with implementation according to the plan.';
 
-    if (allowedPrompts && allowedPrompts.length > 0) {
-      const prompts = allowedPrompts
+    if (normalized.prompts.length > 0) {
+      const prompts = normalized.prompts
         .map((p) => `  - ${p.tool}: ${p.prompt}`)
         .join('\n');
-      result += `\n\nAuto-approved prompts:\n${prompts}`;
+      result += `\n\nAuto-approved exact prompts:\n${prompts}`;
     }
 
-    return this.makeResult(result);
+    return this.makeResult(result, {
+      structured: {
+        allowedPromptCount: normalized.prompts.length,
+        allowedTools: [...new Set(normalized.prompts.map((p) => p.tool))],
+      },
+    });
   }
+}
+
+function normalizeAllowedPrompts(value: unknown): AllowedPromptValidation {
+  if (value === undefined || value === null) {
+    return { ok: true, prompts: [] };
+  }
+
+  if (!Array.isArray(value)) {
+    return { ok: false, error: 'allowedPrompts must be an array when provided.' };
+  }
+
+  if (value.length > MAX_ALLOWED_PROMPTS) {
+    return { ok: false, error: `allowedPrompts may include at most ${MAX_ALLOWED_PROMPTS} entries.` };
+  }
+
+  const prompts: AllowedPrompt[] = [];
+  for (let index = 0; index < value.length; index++) {
+    const entry = value[index];
+    const prefix = `allowedPrompts[${index}]`;
+
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      return { ok: false, error: `${prefix} must be an object.` };
+    }
+
+    const raw = entry as Record<string, unknown>;
+    if (raw.tool !== 'Bash') {
+      return { ok: false, error: `${prefix}.tool must be "Bash".` };
+    }
+
+    if (typeof raw.prompt !== 'string') {
+      return { ok: false, error: `${prefix}.prompt must be a string.` };
+    }
+
+    const prompt = raw.prompt.trim();
+    if (prompt.length === 0) {
+      return { ok: false, error: `${prefix}.prompt must not be empty.` };
+    }
+    if (prompt.length > MAX_ALLOWED_PROMPT_CHARS) {
+      return { ok: false, error: `${prefix}.prompt must be ${MAX_ALLOWED_PROMPT_CHARS} characters or less.` };
+    }
+
+    prompts.push({ tool: 'Bash', prompt });
+  }
+
+  return { ok: true, prompts };
 }

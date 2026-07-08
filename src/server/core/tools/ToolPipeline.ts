@@ -62,6 +62,11 @@ export interface PipelineStages {
   normalizeOutput(result: ToolResult, tool: Tool): ToolResult;
 }
 
+export interface AllowedPrompt {
+  tool: string;
+  prompt: string;
+}
+
 // ══════════════════════════════════════════════════════════════
 
 /**
@@ -72,13 +77,28 @@ export class ToolPipeline {
   /** Plan mode state — when active, only read-only tools are allowed. */
   private static _planModeSessions: Set<string> = new Set();
   /** Allowed prompts per session (set by ExitPlanMode, cleared by EnterPlanMode). */
-  private static _allowedPrompts: Map<string, Array<{ tool: string; prompt: string }>> = new Map();
+  private static _allowedPrompts: Map<string, AllowedPrompt[]> = new Map();
 
   static enterPlanMode(sessionId: string = '__global__'): void { ToolPipeline._planModeSessions.add(sessionId); ToolPipeline._allowedPrompts.delete(sessionId); }
   static exitPlanMode(sessionId: string = '__global__'): void { ToolPipeline._planModeSessions.delete(sessionId); }
   static isPlanMode(sessionId: string = '__global__'): boolean { return ToolPipeline._planModeSessions.has(sessionId); }
-  static setAllowedPrompts(sessionId: string, prompts: Array<{ tool: string; prompt: string }>): void { ToolPipeline._allowedPrompts.set(sessionId, prompts); }
-  static getAllowedPrompts(sessionId: string): Array<{ tool: string; prompt: string }> { return ToolPipeline._allowedPrompts.get(sessionId) || []; }
+  static setAllowedPrompts(sessionId: string, prompts: AllowedPrompt[]): void {
+    const normalized = prompts
+      .map((entry) => ({
+        tool: entry.tool,
+        prompt: normalizePromptText(entry.prompt),
+      }))
+      .filter((entry): entry is AllowedPrompt => entry.prompt !== null);
+
+    if (normalized.length > 0) {
+      ToolPipeline._allowedPrompts.set(sessionId, normalized);
+    } else {
+      ToolPipeline._allowedPrompts.delete(sessionId);
+    }
+  }
+  static getAllowedPrompts(sessionId: string): AllowedPrompt[] {
+    return [...(ToolPipeline._allowedPrompts.get(sessionId) || [])];
+  }
 
   /** Run the complete pipeline and return the final ToolResult. */
   static async run(
@@ -166,15 +186,13 @@ export class ToolPipeline {
     params: Record<string, unknown>,
     ctx: ExecutionContext,
   ): ToolResult | null {
-    // Allowed prompts (from ExitPlanMode) bypass all security checks —
-    // the user explicitly approved these tool actions during plan review.
+    // Allowed prompts (from ExitPlanMode) bypass the confirmation prompt only
+    // when the concrete tool action exactly matches what the user approved.
     const allowed = ToolPipeline._allowedPrompts.get(ctx.sessionId);
-    if (allowed && allowed.some(e => e.tool === tool.name())) {
-      return null;
-    }
+    const hasApprovedPrompt = allowed ? matchesAllowedPrompt(tool, params, allowed) : false;
 
     // Delegate to the tool's own requiresConfirmation() — single source of truth
-    if (tool.requiresConfirmation(ctx)) {
+    if (!hasApprovedPrompt && tool.requiresConfirmation(ctx)) {
       return makeError(
         `Tool "${tool.name()}" requires user confirmation (risk: ${tool.riskLevel()}).`,
         { toolCallId: '' },
@@ -430,4 +448,33 @@ function makePipelineFailure(
       ...(timeoutMs ? { timeoutMs } : {}),
     },
   });
+}
+
+function matchesAllowedPrompt(
+  tool: Tool,
+  params: Record<string, unknown>,
+  allowedPrompts: AllowedPrompt[],
+): boolean {
+  const toolName = tool.name();
+  const actionPrompt = extractActionPrompt(toolName, params);
+  if (!actionPrompt) return false;
+
+  return allowedPrompts.some((entry) => (
+    entry.tool === toolName &&
+    normalizePromptText(entry.prompt) === actionPrompt
+  ));
+}
+
+function extractActionPrompt(toolName: string, params: Record<string, unknown>): string | null {
+  if (toolName === 'Bash') {
+    return normalizePromptText(params.command);
+  }
+
+  return null;
+}
+
+function normalizePromptText(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }

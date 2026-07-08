@@ -140,6 +140,104 @@ describe('ToolPipeline.securityCheck', () => {
     expect(ToolPipeline.securityCheck(tool, {}, ctx({ userConfirmed: false }))).toBeNull();
   });
 
+  it('allows an exact Bash command approved while exiting plan mode', () => {
+    const sessionId = 'allowed-bash-exact-session';
+    ToolPipeline.setAllowedPrompts(sessionId, [{ tool: 'Bash', prompt: 'npm test' }]);
+    const tool = mockTool({
+      name: 'Bash',
+      isReadOnly: false,
+      riskLevel: RiskLevel.High,
+      requiresConfirmation: true,
+    });
+
+    const r = ToolPipeline.securityCheck(
+      tool,
+      { command: 'npm test' },
+      ctx({ sessionId, userConfirmed: false }),
+    );
+
+    expect(r).toBeNull();
+  });
+
+  it('does not treat an approved Bash command as approval for every Bash command', () => {
+    const sessionId = 'allowed-bash-mismatch-session';
+    ToolPipeline.setAllowedPrompts(sessionId, [{ tool: 'Bash', prompt: 'npm test' }]);
+    const tool = mockTool({
+      name: 'Bash',
+      isReadOnly: false,
+      riskLevel: RiskLevel.High,
+      requiresConfirmation: true,
+    });
+
+    const r = ToolPipeline.securityCheck(
+      tool,
+      { command: 'git push' },
+      ctx({ sessionId, userConfirmed: false }),
+    );
+
+    expect(r).not.toBeNull();
+    expect(r!.errorMessage).toContain('confirmation');
+  });
+
+  it('keeps approved Bash commands scoped to the session that approved them', () => {
+    ToolPipeline.setAllowedPrompts('allowed-bash-session-a', [{ tool: 'Bash', prompt: 'npm test' }]);
+    const tool = mockTool({
+      name: 'Bash',
+      isReadOnly: false,
+      riskLevel: RiskLevel.High,
+      requiresConfirmation: true,
+    });
+
+    const r = ToolPipeline.securityCheck(
+      tool,
+      { command: 'npm test' },
+      ctx({ sessionId: 'allowed-bash-session-b', userConfirmed: false }),
+    );
+
+    expect(r).not.toBeNull();
+    expect(r!.errorMessage).toContain('confirmation');
+  });
+
+  it('normalizes whitespace before matching approved Bash commands', () => {
+    const sessionId = 'allowed-bash-whitespace-session';
+    ToolPipeline.setAllowedPrompts(sessionId, [{ tool: 'Bash', prompt: '  npm test  ' }]);
+    const tool = mockTool({
+      name: 'Bash',
+      isReadOnly: false,
+      riskLevel: RiskLevel.High,
+      requiresConfirmation: true,
+    });
+
+    const r = ToolPipeline.securityCheck(
+      tool,
+      { command: 'npm test' },
+      ctx({ sessionId, userConfirmed: false }),
+    );
+
+    expect(r).toBeNull();
+    expect(ToolPipeline.getAllowedPrompts(sessionId)).toEqual([{ tool: 'Bash', prompt: 'npm test' }]);
+  });
+
+  it('does not let approved Bash commands bypass read-only mode', () => {
+    const sessionId = 'allowed-bash-read-only-session';
+    ToolPipeline.setAllowedPrompts(sessionId, [{ tool: 'Bash', prompt: 'npm test' }]);
+    const tool = mockTool({
+      name: 'Bash',
+      isReadOnly: false,
+      riskLevel: RiskLevel.High,
+      requiresConfirmation: true,
+    });
+
+    const r = ToolPipeline.securityCheck(
+      tool,
+      { command: 'npm test' },
+      ctx({ sessionId, mode: 'read_only', userConfirmed: false }),
+    );
+
+    expect(r).not.toBeNull();
+    expect(r!.errorMessage).toContain('read_only');
+  });
+
   it('blocks non-read-only tools in read_only mode', () => {
     const tool = mockTool({ isReadOnly: false });
     const r = ToolPipeline.securityCheck(tool, {}, ctx({ mode: 'read_only' }));

@@ -376,14 +376,22 @@ Enters plan mode where the agent acts as a software architect. In plan mode, the
 
 ### ExitPlanModeTool — `ExitPlanMode`
 
-Exits plan mode and returns to normal execution. The agent resumes full tool access.
+Exits plan mode and returns to normal execution. The agent resumes full tool access and may include exact Bash commands the user already approved during plan review.
 
 | Property | Value |
 |---|---|
 | Risk | `Safe` |
 | shouldDefer | `true` |
 
-**Parameters:** None (empty object).
+**Parameters:**
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `allowedPrompts` | array | No | Optional exact Bash commands to auto-approve after plan mode, as `{ tool: "Bash", prompt: "command" }` entries |
+
+**Behavior notes:**
+- Approved prompts are matched against the concrete Bash `command` after trimming whitespace; approving one Bash command only skips confirmation for that command and does not bypass read-only or plan-mode restrictions.
+- Invalid nested prompt entries fail fast before leaving plan mode.
+- Calling without `allowedPrompts` clears any stale approved prompts for the session.
 
 ---
 

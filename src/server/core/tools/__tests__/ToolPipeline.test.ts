@@ -692,6 +692,54 @@ describe('ToolPipeline.retry error classification', () => {
   });
 });
 
+describe('ToolPipeline.run tool call IDs', () => {
+  it('preserves the run toolCallId on schema validation failures', async () => {
+    const execute = vi.fn().mockResolvedValue(makeResult('unexpected'));
+    const tool = mockTool({
+      parametersSchema: {
+        type: 'object',
+        required: ['query'],
+        properties: { query: { type: 'string' } },
+      },
+      _executeWithEvents: execute,
+    });
+
+    const result = await ToolPipeline.run(tool, {}, ctx(), 'tc-schema-failure');
+
+    expect(result.success).toBe(false);
+    expect(result.toolCallId).toBe('tc-schema-failure');
+    expect(result.errorMessage).toContain('query');
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('preserves the run toolCallId on security short-circuits', async () => {
+    const execute = vi.fn().mockResolvedValue(makeResult('unexpected'));
+    const tool = mockTool({
+      isReadOnly: false,
+      _executeWithEvents: execute,
+    });
+
+    const result = await ToolPipeline.run(tool, {}, ctx({ mode: 'read_only' }), 'tc-security-block');
+
+    expect(result.success).toBe(false);
+    expect(result.toolCallId).toBe('tc-security-block');
+    expect(result.errorMessage).toContain('read_only');
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('returns the run toolCallId even when a tool result carries an internal id', async () => {
+    const tool = mockTool({
+      _executeWithEvents: vi.fn().mockResolvedValue(makeResult('ok', { toolCallId: 'internal-tool-id' })),
+    });
+
+    const result = await ToolPipeline.run(tool, {}, ctx(), 'tc-success');
+
+    expect(result.success).toBe(true);
+    expect(result.content).toBe('ok');
+    expect(result.toolCallId).toBe('tc-success');
+  });
+});
+
 // ── Stage 4: normalizeOutput ──
 
 describe('ToolPipeline.normalizeOutput', () => {

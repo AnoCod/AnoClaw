@@ -44,6 +44,11 @@ const USER_VISIBLE_PATTERNS = [
   /invalid|bad request|malformed/i,
 ];
 
+function withToolCallId(result: ToolResult, toolCallId: string): ToolResult {
+  if (result.toolCallId === toolCallId) return result;
+  return { ...result, toolCallId };
+}
+
 // ══════════════════════════════════════════════════════════════
 
 /** Five-stage execution pipeline interfaces. Each stage can short-circuit with a ToolResult. */
@@ -126,11 +131,11 @@ export class ToolPipeline {
 
     // ── Stage 0: Schema Validation ──
     const validationError = ToolPipeline.validateParams(tool, params);
-    if (validationError) return validationError;
+    if (validationError) return ToolPipeline.normalizeOutput(withToolCallId(validationError, toolCallId), tool);
 
     // ── Stage 1: Security Check ──
     const securityBlock = ToolPipeline.securityCheck(tool, params, ctx);
-    if (securityBlock) return securityBlock;
+    if (securityBlock) return ToolPipeline.normalizeOutput(withToolCallId(securityBlock, toolCallId), tool);
 
     // ── Stage 2: Execute ──
     let result = await ToolPipeline.execute(tool, params, ctx, toolCallId);
@@ -141,7 +146,7 @@ export class ToolPipeline {
     }
 
     // ── Stage 4: Output/Error Normalization ──
-    return ToolPipeline.normalizeOutput(result, tool);
+    return ToolPipeline.normalizeOutput(withToolCallId(result, toolCallId), tool);
   }
 
   // ══════════════════════════════════════════════════════════

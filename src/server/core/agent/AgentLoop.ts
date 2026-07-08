@@ -782,7 +782,7 @@ export class AgentLoop {
             mode: this._toolExecutionMode(),
             callerRole: agent.role,
             signal: signal,
-          });
+          }, tc.id);
         } catch (err) {
           result = { success: false, content: '', errorMessage: `Tool crash: ${(err as Error).message}` };
         }

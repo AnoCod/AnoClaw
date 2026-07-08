@@ -17,6 +17,7 @@ type OutputMode = 'content' | 'files_with_matches' | 'count';
 
 /** Maximum total output characters. */
 const MAX_OUTPUT_CHARS = 25000;
+const MIN_OUTPUT_CHARS = 100;
 const DEFAULT_HEAD_LIMIT = 250;
 const MAX_HEAD_LIMIT = 5000;
 const DEFAULT_RG_TIMEOUT_MS = 15000;
@@ -46,7 +47,7 @@ export class GrepTool extends Tool {
       '- Pattern syntax uses ripgrep (not grep) - literal braces need escaping: use `interface\\{\\}` to find `interface{}` in Go code\n' +
       '- Use literal=true for exact text searches so special regex characters are not interpreted\n' +
       '- Files with matches output mode is fastest for broad searches\n' +
-      '- Output limit: 25,000 characters max. Use head_limit parameter for narrower results. Beyond the limit, output is head/tail truncated.';
+      '- Output limit: 25,000 characters max. Use head_limit or max_output_chars for narrower results. Invalid numeric/boolean parameters fail fast instead of being silently corrected.';
   }
 
   parametersSchema(): Record<string, unknown> {
@@ -120,6 +121,10 @@ export class GrepTool extends Tool {
           type: 'number',
           description: `Ripgrep execution timeout in milliseconds. Default ${DEFAULT_RG_TIMEOUT_MS}, maximum ${MAX_RG_TIMEOUT_MS}.`,
         },
+        max_output_chars: {
+          type: 'number',
+          description: `Maximum output characters returned by this tool. Default ${MAX_OUTPUT_CHARS}, min ${MIN_OUTPUT_CHARS}, max ${MAX_OUTPUT_CHARS}.`,
+        },
       },
       required: ['pattern'],
     };
@@ -157,17 +162,50 @@ export class GrepTool extends Tool {
     const searchPath = (params.path as string) || ctx.workspace;
     const globFilter = params.glob as string | undefined;
     const outputMode = normalizeOutputMode(params.output_mode as string | undefined);
-    const after = clampNonNegativeInt(params['-A'] as number | undefined);
-    const before = clampNonNegativeInt(params['-B'] as number | undefined);
-    const contextLines = clampNonNegativeInt(params['-C'] as number | undefined);
-    const caseInsensitive = (params['-i'] as boolean) ?? false;
-    const showLineNumbers = (params['-n'] as boolean) ?? true;
+    const afterResult = normalizeInteger(params['-A'], '-A', 0, 0, 100);
+    if (afterResult.error) return this.makeError(afterResult.error);
+    const after = afterResult.value as number;
+
+    const beforeResult = normalizeInteger(params['-B'], '-B', 0, 0, 100);
+    if (beforeResult.error) return this.makeError(beforeResult.error);
+    const before = beforeResult.value as number;
+
+    const contextResult = normalizeInteger(params['-C'], '-C', 0, 0, 100);
+    if (contextResult.error) return this.makeError(contextResult.error);
+    const contextLines = contextResult.value as number;
+
+    const caseInsensitiveResult = normalizeBoolean(params['-i'], '-i', false);
+    if (caseInsensitiveResult.error) return this.makeError(caseInsensitiveResult.error);
+    const caseInsensitive = caseInsensitiveResult.value as boolean;
+
+    const showLineNumbersResult = normalizeBoolean(params['-n'], '-n', true);
+    if (showLineNumbersResult.error) return this.makeError(showLineNumbersResult.error);
+    const showLineNumbers = showLineNumbersResult.value as boolean;
+
     const fileType = params.type as string | undefined;
-    const headLimit = clampHeadLimit(params.head_limit as number | undefined);
-    const multiline = (params.multiline as boolean) ?? false;
-    const literal = (params.literal as boolean) ?? false;
-    const includeHidden = (params.include_hidden as boolean) ?? false;
-    const timeoutMs = clampTimeout(params.timeout_ms as number | undefined);
+    const headLimitResult = normalizeInteger(params.head_limit, 'head_limit', DEFAULT_HEAD_LIMIT, 0, MAX_HEAD_LIMIT);
+    if (headLimitResult.error) return this.makeError(headLimitResult.error);
+    const headLimit = headLimitResult.value as number;
+
+    const multilineResult = normalizeBoolean(params.multiline, 'multiline', false);
+    if (multilineResult.error) return this.makeError(multilineResult.error);
+    const multiline = multilineResult.value as boolean;
+
+    const literalResult = normalizeBoolean(params.literal, 'literal', false);
+    if (literalResult.error) return this.makeError(literalResult.error);
+    const literal = literalResult.value as boolean;
+
+    const includeHiddenResult = normalizeBoolean(params.include_hidden, 'include_hidden', false);
+    if (includeHiddenResult.error) return this.makeError(includeHiddenResult.error);
+    const includeHidden = includeHiddenResult.value as boolean;
+
+    const timeoutResult = normalizeInteger(params.timeout_ms, 'timeout_ms', DEFAULT_RG_TIMEOUT_MS, 1000, MAX_RG_TIMEOUT_MS);
+    if (timeoutResult.error) return this.makeError(timeoutResult.error);
+    const timeoutMs = timeoutResult.value as number;
+
+    const maxOutputResult = normalizeInteger(params.max_output_chars, 'max_output_chars', MAX_OUTPUT_CHARS, MIN_OUTPUT_CHARS, MAX_OUTPUT_CHARS);
+    if (maxOutputResult.error) return this.makeError(maxOutputResult.error);
+    const maxOutputChars = maxOutputResult.value as number;
 
     if (!pattern || typeof pattern !== 'string') {
       return this.makeError('pattern is required');
@@ -201,6 +239,8 @@ export class GrepTool extends Tool {
       // Try ripgrep first, fall back to manual search
       let output: string;
       let wasTruncated = false;
+      let backend: 'ripgrep' | 'manual' = 'ripgrep';
+      let notes: string[] = [];
       const rgResult = await tryRipgrep(pattern, resolved, {
         glob: globFilter,
         after, before, context: contextLines,
@@ -221,6 +261,7 @@ export class GrepTool extends Tool {
           },
         });
       } else {
+        backend = 'manual';
         const manualResult = await manualGrep(resolved, pattern, {
           glob: globFilter,
           caseInsensitive, headLimit, outputMode, literal, includeHidden, multiline,
@@ -236,6 +277,7 @@ export class GrepTool extends Tool {
         }
         output = manualResult.output;
         wasTruncated = manualResult.wasTruncated;
+        notes = manualResult.notes;
         if (manualResult.notes.length > 0) {
           output = output.trimEnd() + `\n(${manualResult.notes.join(' ')})`;
         }
@@ -244,9 +286,32 @@ export class GrepTool extends Tool {
       // Trim and let pipeline normalize via outputLimit: 25000
       let trimmed = output.trim();
       if (!trimmed) trimmed = '(no matches)';
-      wasTruncated = wasTruncated || trimmed.length > MAX_OUTPUT_CHARS;
+      const charLimited = applyCharLimit(trimmed, maxOutputChars);
+      trimmed = charLimited.output;
+      wasTruncated = wasTruncated || charLimited.wasTruncated;
 
-      return this.makeResult(trimmed, { startedAt, wasTruncated });
+      return this.makeResult(trimmed, {
+        startedAt,
+        wasTruncated,
+        structured: {
+          backend,
+          pattern,
+          path: resolved,
+          outputMode,
+          literal,
+          includeHidden,
+          glob: globFilter,
+          type: fileType,
+          headLimit,
+          maxOutputChars,
+          timeoutMs,
+          multiline,
+          resultLines: trimmed === '(no matches)' ? 0 : trimmed.split(/\r?\n/).length,
+          truncatedByChars: charLimited.wasTruncated,
+          wasTruncated,
+          notes,
+        },
+      });
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       return this.makeError(`Grep failed: ${errMsg}`);
@@ -745,20 +810,29 @@ function normalizeOutputMode(value: string | undefined): OutputMode | null {
   return null;
 }
 
-function clampNonNegativeInt(value: number | undefined): number {
-  if (!Number.isFinite(value) || !value || value < 0) return 0;
-  return Math.floor(value);
+function normalizeInteger(
+  value: unknown,
+  name: string,
+  defaultValue: number,
+  min: number,
+  max: number,
+): { value: number; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: defaultValue };
+  if (typeof value !== 'number' || !Number.isFinite(value)) return { error: `${name} must be a finite number` };
+  const integer = Math.trunc(value);
+  if (integer < min) return { error: `${name} must be at least ${min}` };
+  if (integer > max) return { error: `${name} must be ${max} or less` };
+  return { value: integer };
 }
 
-function clampHeadLimit(value: number | undefined): number {
-  if (value === 0) return 0;
-  if (!Number.isFinite(value) || !value || value < 0) return DEFAULT_HEAD_LIMIT;
-  return Math.min(MAX_HEAD_LIMIT, Math.floor(value));
-}
-
-function clampTimeout(value: number | undefined): number {
-  if (!Number.isFinite(value) || !value || value <= 0) return DEFAULT_RG_TIMEOUT_MS;
-  return Math.min(MAX_RG_TIMEOUT_MS, Math.max(1000, Math.floor(value)));
+function normalizeBoolean(
+  value: unknown,
+  name: string,
+  defaultValue: boolean,
+): { value: boolean; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: defaultValue };
+  if (typeof value !== 'boolean') return { error: `${name} must be a boolean` };
+  return { value };
 }
 
 function applyHeadLimit(output: string, headLimit: number): { output: string; wasTruncated: boolean } {
@@ -768,6 +842,14 @@ function applyHeadLimit(output: string, headLimit: number): { output: string; wa
   if (lines.length <= headLimit) return { output: lines.join('\n'), wasTruncated: false };
   return {
     output: lines.slice(0, headLimit).join('\n') + `\n... [${lines.length - headLimit} more results]`,
+    wasTruncated: true,
+  };
+}
+
+function applyCharLimit(output: string, maxChars: number): { output: string; wasTruncated: boolean } {
+  if (output.length <= maxChars) return { output, wasTruncated: false };
+  return {
+    output: `${output.slice(0, maxChars).trimEnd()}\n... [Grep output truncated at ${maxChars} characters]`,
     wasTruncated: true,
   };
 }

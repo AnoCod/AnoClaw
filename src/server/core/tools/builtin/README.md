@@ -196,6 +196,12 @@ Powerful regex search built on ripgrep. Supports full regex, file type filtering
 | `head_limit` | number | | Max output entries (default 250) |
 | `multiline` | boolean | | Enable multiline matching |
 | `timeout_ms` | number | | Ripgrep timeout (default 15000, max 60000) |
+| `max_output_chars` | number | | Max characters returned by the tool, default/max 25000 |
+
+**Behavior notes:**
+- Numeric and boolean parameters are validated strictly; invalid values fail fast.
+- Results include structured metadata for backend, output mode, filters, truncation, timeout, and line count.
+- `max_output_chars` truncates inside the tool before pipeline normalization.
 
 ---
 

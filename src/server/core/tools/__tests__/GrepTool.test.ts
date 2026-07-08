@@ -86,6 +86,63 @@ describe('GrepTool', () => {
     expect(result.errorMessage).toMatch(/regex|pattern|parse/i);
   });
 
+  it('rejects invalid numeric and boolean parameters instead of silently clamping', async () => {
+    const workspace = await makeWorkspace();
+    await writeFile(path.join(workspace, 'sample.txt'), 'needle');
+    const tool = new GrepTool();
+
+    const badContext = await tool.execute(
+      { pattern: 'needle', path: workspace, '-A': -1 },
+      ctx(workspace),
+    );
+    expect(badContext.success).toBe(false);
+    expect(badContext.errorMessage).toContain('-A must be at least 0');
+
+    const badBoolean = await tool.execute(
+      { pattern: 'needle', path: workspace, literal: 'true' },
+      ctx(workspace),
+    );
+    expect(badBoolean.success).toBe(false);
+    expect(badBoolean.errorMessage).toContain('literal must be a boolean');
+
+    const badLimit = await tool.execute(
+      { pattern: 'needle', path: workspace, head_limit: 999999 },
+      ctx(workspace),
+    );
+    expect(badLimit.success).toBe(false);
+    expect(badLimit.errorMessage).toContain('head_limit must be 5000 or less');
+  });
+
+  it('applies max_output_chars inside the tool and reports structured metadata', async () => {
+    const workspace = await makeWorkspace();
+    const file = path.join(workspace, 'long.txt');
+    await writeFile(file, Array.from({ length: 20 }, (_unused, index) => `needle ${index} ${'x'.repeat(40)}`).join('\n'));
+
+    const result = await new GrepTool().execute(
+      {
+        pattern: 'needle',
+        path: workspace,
+        output_mode: 'content',
+        literal: true,
+        max_output_chars: 140,
+        head_limit: 0,
+      },
+      ctx(workspace),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.wasTruncated).toBe(true);
+    expect(result.content).toContain('Grep output truncated at 140 characters');
+    expect(result.content).not.toContain('needle 19');
+    expect(result.structured).toMatchObject({
+      outputMode: 'content',
+      literal: true,
+      maxOutputChars: 140,
+      truncatedByChars: true,
+      wasTruncated: true,
+    });
+  });
+
   it('reports cancellation immediately when the execution signal is already aborted', async () => {
     const workspace = await makeWorkspace();
     await mkdir(path.join(workspace, 'src'));

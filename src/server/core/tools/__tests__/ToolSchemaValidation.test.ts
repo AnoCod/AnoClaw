@@ -346,6 +346,19 @@ describe('native tool parameter schemas', () => {
     })?.errorMessage).toContain('targetAgentId');
 
     expect(ToolPipeline.validateParams(new TaskOutputTool(), {
+      task_id: 'task-1',
+      max_chars: 200,
+      include_history: true,
+      include_tool_messages: false,
+      tail_messages: 1,
+    })).toBeNull();
+
+    expect(ToolPipeline.validateParams(new TaskOutputTool(), {
+      task_id: 'task-1',
+      max_chars: 199,
+    })?.errorMessage).toContain('expected >= 200');
+
+    expect(ToolPipeline.validateParams(new TaskOutputTool(), {
       task_id: '   ',
     })?.errorMessage).toContain('task_id');
 

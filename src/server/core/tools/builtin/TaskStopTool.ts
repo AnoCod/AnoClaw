@@ -73,6 +73,14 @@ export class TaskStopTool extends Tool {
       return this.makeResult(
         `No active task found for session '${taskId}'. ` +
         'The task may have already completed or was not started yet.',
+        {
+          structured: {
+            taskId,
+            status: 'not_running',
+            type: 'session',
+            interrupted: false,
+          },
+        },
       );
     }
 
@@ -83,6 +91,15 @@ export class TaskStopTool extends Tool {
       `Task '${taskId}' has been stopped. ` +
       'The subordinate agent\'s loop has been interrupted. ' +
       'Any partial results may have been saved to the transcript.',
+      {
+        structured: {
+          taskId,
+          status: 'stopped',
+          type: 'session',
+          interrupted: true,
+          reason: InterruptReason.ParentStop,
+        },
+      },
     );
   }
 

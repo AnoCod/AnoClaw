@@ -502,10 +502,16 @@ Retrieves output or status from a delegated sub-session or `bt-*` background tas
 |---|---|---|---|
 | `taskId` | string | No | Task ID or sub-session ID to retrieve |
 | `task_id` | string | No | Alias for `taskId` |
+| `max_chars` | integer | No | Maximum output characters to return; default `4000`, max `50000` |
+| `include_history` | boolean | No | Include delegated session transcript/output excerpts; default `true` |
+| `include_tool_messages` | boolean | No | Include tool messages in delegated session output; default `true` |
+| `tail_messages` | integer | No | Maximum assistant/tool messages to include from the end of a delegated session; default `50`, max `100` |
 
 **Behavior notes:**
 - For `bt-*` IDs, returns active status or a recent completed/failed/killed result.
 - Failed, killed, unknown, or expired `bt-*` task lookups return failed tool results with structured status.
+- Long background or delegated-session outputs are bounded by `max_chars` and report `wasTruncated`, original size, returned size, and omitted message counts in structured metadata.
+- When both `taskId` and `task_id` are provided, they must resolve to the same trimmed ID.
 
 ---
 
@@ -526,6 +532,7 @@ Stops a running delegated sub-session or `bt-*` background task.
 **Behavior notes:**
 - For `bt-*` Bash tasks, attempts to terminate the local process tree before marking the task killed.
 - Already completed/failed/killed tasks return a clear failure result instead of pretending a stop happened.
+- Delegated session stops return structured status for both interrupted and already-not-running sessions.
 
 ---
 

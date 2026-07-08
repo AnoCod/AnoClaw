@@ -1,8 +1,14 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as fsp from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { TaskListTool } from '../builtin/TaskListTool.js';
 import { TaskOutputTool } from '../builtin/TaskOutputTool.js';
 import { TaskStopTool } from '../builtin/TaskStopTool.js';
 import { BackgroundTaskManager } from '../../agent/supervision/BackgroundTaskManager.js';
+import { SessionManager } from '../../session/SessionManager.js';
+import { SessionStore } from '../../session/SessionStore.js';
+import { MessageRole } from '../../../../shared/types/session.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
 
 const ctx: ExecutionContext = {
@@ -22,8 +28,25 @@ function registerBackgroundTask(): string {
   });
 }
 
-afterEach(() => {
+let tmpDir = '';
+let sessionManager: SessionManager;
+
+beforeEach(async () => {
+  tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'anoclaw-task-tools-'));
+  (SessionManager as any)._instance = undefined;
+  (SessionStore as any)._instance = undefined;
   BackgroundTaskManager.resetInstance();
+  sessionManager = SessionManager.getInstance();
+  await sessionManager.initialize(path.join(tmpDir, 'sessions'));
+});
+
+afterEach(async () => {
+  BackgroundTaskManager.resetInstance();
+  (SessionManager as any)._instance = undefined;
+  (SessionStore as any)._instance = undefined;
+  if (tmpDir && path.basename(tmpDir).startsWith('anoclaw-task-tools-')) {
+    await fsp.rm(tmpDir, { recursive: true, force: true });
+  }
 });
 
 describe('Task management tools', () => {
@@ -75,6 +98,30 @@ describe('Task management tools', () => {
     expect(result.structured).toMatchObject({
       taskId,
       status: 'completed',
+      active: false,
+      recent: true,
+    });
+  });
+
+  it('TaskOutput bounds long recent bt task output with structured truncation metadata', async () => {
+    const bgm = BackgroundTaskManager.getInstance();
+    const taskId = registerBackgroundTask();
+    await bgm.complete(taskId, {
+      content: `start-${'x'.repeat(500)}-end`,
+      durationMs: 42,
+    });
+
+    const result = await new TaskOutputTool().execute({ taskId, max_chars: 200 }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('chars truncated');
+    expect(result.content).toContain('start-');
+    expect(result.content).toContain('-end');
+    expect(result.structured).toMatchObject({
+      taskId,
+      status: 'completed',
+      maxChars: 200,
+      wasTruncated: true,
       active: false,
       recent: true,
     });
@@ -135,4 +182,110 @@ describe('Task management tools', () => {
       recent: true,
     });
   });
+
+  it('TaskOutput returns bounded archived session output with tail and tool-message controls', async () => {
+    const parent = await sessionManager.createMainSession(ctx.agentId, 'Parent task session', tmpDir);
+    const child = await sessionManager.createSubSession(parent.id, 'child-agent', 'Child task');
+    await appendTestMessage(child.id, MessageRole.Assistant, `first-${'a'.repeat(260)}`);
+    await appendToolCallMessage(child.id, `tool-${'b'.repeat(260)}`);
+    await appendTestMessage(child.id, MessageRole.Assistant, `final-${'c'.repeat(260)}-done`);
+    await sessionManager.archiveSession(child.id);
+
+    const result = await new TaskOutputTool().execute({
+      taskId: child.id,
+      max_chars: 220,
+      include_tool_messages: false,
+      tail_messages: 1,
+    }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('completed');
+    expect(result.content).toContain('final-');
+    expect(result.content).toContain('-done');
+    expect(result.content).not.toContain('tool-');
+    expect(result.structured).toMatchObject({
+      taskId: child.id,
+      status: 'completed',
+      agentId: 'child-agent',
+      outputMessageCount: 2,
+      returnedMessageCount: 1,
+      omittedMessages: 1,
+      includeToolMessages: false,
+      maxChars: 220,
+      wasTruncated: true,
+    });
+  });
+
+  it('TaskOutput rejects conflicting taskId aliases before lookup', async () => {
+    const result = await new TaskOutputTool().execute({
+      taskId: 'task-a',
+      task_id: 'task-b',
+    }, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.errorMessage).toContain('taskId and task_id must refer to the same task');
+  });
+
+  it('TaskStop returns structured feedback when a delegated session is not running', async () => {
+    const result = await new TaskStopTool().execute({ taskId: 'session-without-controller' }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.structured).toMatchObject({
+      taskId: 'session-without-controller',
+      status: 'not_running',
+      type: 'session',
+      interrupted: false,
+    });
+  });
 });
+
+async function appendTestMessage(
+  sessionId: string,
+  role: MessageRole,
+  content: string,
+): Promise<void> {
+  await sessionManager.appendMessage(sessionId, {
+    id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    sessionId,
+    role,
+    content,
+    tokenCount: 0,
+    compressed: false,
+    timestamp: new Date().toISOString(),
+  }, { notify: false });
+}
+
+async function appendToolCallMessage(
+  sessionId: string,
+  resultContent: string,
+): Promise<void> {
+  const now = Date.now();
+  await sessionManager.appendMessage(sessionId, {
+    id: `tool-call-${now}`,
+    sessionId,
+    role: MessageRole.Assistant,
+    content: '(tool calls)',
+    toolCalls: [
+      {
+        id: `tc-${now}`,
+        toolName: 'Read',
+        params: { file_path: 'src/index.ts' },
+      },
+    ],
+    toolResults: [
+      {
+        toolCallId: `tc-${now}`,
+        success: true,
+        content: resultContent,
+        tokensUsed: 0,
+        startedAt: now,
+        finishedAt: now,
+        durationMs: 0,
+        wasTruncated: false,
+      },
+    ],
+    tokenCount: 0,
+    compressed: false,
+    timestamp: new Date(now).toISOString(),
+  }, { notify: false });
+}

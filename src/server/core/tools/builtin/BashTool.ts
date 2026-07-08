@@ -256,7 +256,8 @@ export class BashTool extends Tool {
 
         const child = exec(wrappedCmd, {
           cwd,
-          timeout: params.timeout === undefined ? 0 : timeout,
+          timeout: 0,
+          maxBuffer: MAX_CAPTURE_CHARS,
           windowsHide: true,
           shell,
         } as ExecOptions);
@@ -266,43 +267,82 @@ export class BashTool extends Tool {
         if (bgTask) bgTask.pid = child.pid;
 
         const bgKey = `${ctx.sessionId}:${startTime}`;
+        const outputCapture = createOutputCapture();
+        let timedOut = false;
+        let ttlExpired = false;
+        let settled = false;
+        let backgroundTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+
+        const finishBackgroundTask = (status: 'completed' | 'failed', code: number | null, signal: NodeJS.Signals | null) => {
+          if (settled) return;
+          settled = true;
+          if (backgroundTimeoutTimer) clearTimeout(backgroundTimeoutTimer);
+          clearBgProcess(bgKey);
+          if (!bgManager.hasTask(bgTaskId)) return;
+
+          const durationMs = Date.now() - startTime;
+          const content = formatBackgroundTaskResult({
+            command,
+            exitCode: code,
+            signal,
+            timedOut,
+            timeout,
+            ttlExpired,
+            output: outputCapture,
+            outputLimit,
+          });
+          if (status === 'completed') {
+            bgManager.complete(bgTaskId, { content, durationMs }).catch(err => {
+              const log = createLogger('anochat.tool');
+              log.warn('Failed to complete bg task', { bgTaskId, error: (err as Error).message });
+            });
+          } else {
+            bgManager.fail(bgTaskId, content, durationMs).catch(err => {
+              const log = createLogger('anochat.tool');
+              log.warn('Failed to fail bg task', { bgTaskId, error: (err as Error).message });
+            });
+          }
+        };
+
+        child.stdout?.on('data', (chunk: Buffer | string) => outputCapture.append('stdout', chunk));
+        child.stderr?.on('data', (chunk: Buffer | string) => outputCapture.append('stderr', chunk));
+
+        if (params.timeout !== undefined) {
+          backgroundTimeoutTimer = setTimeout(() => {
+            timedOut = true;
+            terminateChildProcess(child);
+          }, timeout);
+          backgroundTimeoutTimer.unref?.();
+        }
+
         const watchdog = setTimeout(() => {
-          killBgProcess(bgKey);
+          ttlExpired = true;
+          terminateChildProcess(child);
+          forceKillProcessTree(child.pid);
         }, BG_TTL_MS);
+        watchdog.unref?.();
 
         backgroundProcesses.set(bgKey, {
           child, startedAt: startTime, command, sessionId: ctx.sessionId, watchdog,
         });
 
-        child.on('exit', (code) => {
-          clearBgProcess(bgKey);
-          const durationMs = Date.now() - startTime;
-          if (code === 0) {
-            bgManager.complete(bgTaskId, { content: `Background process exited with code 0.`, durationMs }).catch(err => {
-              const log = createLogger('anochat.tool');
-              log.warn('Failed to complete bg task', { bgTaskId, error: (err as Error).message });
-            });
+        child.on('exit', (code, signal) => {
+          if (code === 0 && !signal && !timedOut && !ttlExpired) {
+            finishBackgroundTask('completed', code, signal);
           } else {
-            bgManager.fail(bgTaskId, `Background process exited with code ${code}`, durationMs).catch(err => {
-              const log = createLogger('anochat.tool');
-              log.warn('Failed to fail bg task', { bgTaskId, error: (err as Error).message });
-            });
+            finishBackgroundTask('failed', code, signal);
           }
         });
 
         // Handle process errors
         child.on('error', (err: Error) => {
-          clearBgProcess(bgKey);
-          const durationMs = Date.now() - startTime;
-          bgManager.fail(bgTaskId, err.message, durationMs).catch(err2 => {
-            const log = createLogger('anochat.tool');
-            log.warn('Failed to fail bg task on error', { bgTaskId, error: (err2 as Error).message });
-          });
+          outputCapture.append('stderr', err.message);
+          finishBackgroundTask('failed', 1, null);
         });
 
         return this.makeResult(
           `Background task started.\nTask ID: ${bgTaskId}\nPID: ${child.pid || 'unknown'}\nCommand: ${command.slice(0, 100)}\n\nTo wait for completion, use the Sleep tool with wait_for_task_id="${bgTaskId}". You will also receive a <task-notification> when this task completes or fails.`,
-          { startedAt, structured: { taskId: bgTaskId, backgroundKey: bgKey, pid: child.pid, cwd } },
+          { startedAt, structured: { taskId: bgTaskId, backgroundKey: bgKey, pid: child.pid, cwd, outputLimit } },
         );
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
@@ -504,6 +544,74 @@ function formatCommandOutput(stdout: string, stderr: string, limit: number): { o
   if (stderrTrimmed) sections.push(`[stderr]\n${stderrTrimmed}`);
   const combined = sections.join('\n');
   return truncateMiddle(combined, limit);
+}
+
+interface OutputCapture {
+  stdout: string;
+  stderr: string;
+  overflow: boolean;
+  append(target: 'stdout' | 'stderr', chunk: Buffer | string): void;
+}
+
+function createOutputCapture(): OutputCapture {
+  return {
+    stdout: '',
+    stderr: '',
+    overflow: false,
+    append(target: 'stdout' | 'stderr', chunk: Buffer | string): void {
+      if (this.overflow) return;
+      const text = chunk.toString();
+      const currentLength = this.stdout.length + this.stderr.length;
+      const remaining = MAX_CAPTURE_CHARS - currentLength;
+      if (remaining <= 0) {
+        this.overflow = true;
+        return;
+      }
+      const accepted = text.length > remaining ? text.slice(0, remaining) : text;
+      if (target === 'stdout') this.stdout += accepted;
+      else this.stderr += accepted;
+      if (text.length > remaining) this.overflow = true;
+    },
+  };
+}
+
+function formatBackgroundTaskResult({
+  command,
+  exitCode,
+  signal,
+  timedOut,
+  timeout,
+  ttlExpired,
+  output,
+  outputLimit,
+}: {
+  command: string;
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  timedOut: boolean;
+  timeout: number;
+  ttlExpired: boolean;
+  output: OutputCapture;
+  outputLimit: number;
+}): string {
+  const statusLine = ttlExpired
+    ? `Background process exceeded ${formatMs(BG_TTL_MS)} TTL and was killed.`
+    : timedOut
+      ? `Background process timed out after ${formatMs(timeout)}.`
+      : signal
+        ? `Background process exited after signal ${signal}.`
+        : `Background process exited with code ${exitCode ?? 'unknown'}.`;
+  const formatted = formatCommandOutput(output.stdout, output.stderr, outputLimit);
+  const lines = [statusLine, `Command: ${command.slice(0, 160)}`];
+  if (formatted.output) {
+    lines.push('', formatted.output);
+  } else {
+    lines.push('', '(no output)');
+  }
+  if (output.overflow) {
+    lines.push('', `... [background output capture stopped after ${MAX_CAPTURE_CHARS} characters]`);
+  }
+  return lines.join('\n');
 }
 
 function truncateMiddle(value: string, limit: number): { output: string; wasTruncated: boolean } {

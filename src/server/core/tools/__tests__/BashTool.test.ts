@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { BashTool } from '../builtin/BashTool.js';
+import { BackgroundTaskManager, type BackgroundTaskResultSnapshot } from '../../agent/supervision/BackgroundTaskManager.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
 
 let tempDirs: string[] = [];
@@ -24,6 +25,8 @@ async function makeWorkspace(): Promise<string> {
 }
 
 afterEach(async () => {
+  BashTool.cleanupSession('bash-session');
+  BackgroundTaskManager.resetInstance();
   const dirs = tempDirs;
   tempDirs = [];
   await Promise.all(dirs.map(dir => rm(dir, { recursive: true, force: true })));
@@ -156,6 +159,50 @@ describe('BashTool', () => {
     });
   });
 
+  it('captures background stdout for later task output retrieval', async () => {
+    const workspace = await makeWorkspace();
+
+    const result = await new BashTool().execute(
+      {
+        command: nodeCommand("process.stdout.write('background ok')"),
+        description: 'Run background output',
+        run_in_background: true,
+      },
+      ctx(workspace),
+    );
+
+    expect(result.success).toBe(true);
+    const taskId = (result.structured as { taskId: string }).taskId;
+    const recent = await waitForRecentTaskResult(taskId);
+
+    expect(recent.status).toBe('completed');
+    expect(recent.content).toContain('Background process exited with code 0');
+    expect(recent.content).toContain('background ok');
+  });
+
+  it('captures background stderr for later failure diagnostics', async () => {
+    const workspace = await makeWorkspace();
+
+    const result = await new BashTool().execute(
+      {
+        command: nodeCommand("process.stdout.write('before fail'); process.stderr.write('bad stderr'); process.exit(7)"),
+        description: 'Run background failure',
+        run_in_background: true,
+      },
+      ctx(workspace),
+    );
+
+    expect(result.success).toBe(true);
+    const taskId = (result.structured as { taskId: string }).taskId;
+    const recent = await waitForRecentTaskResult(taskId);
+
+    expect(recent.status).toBe('failed');
+    expect(recent.error).toContain('Background process exited with code 7');
+    expect(recent.error).toContain('before fail');
+    expect(recent.error).toContain('[stderr]');
+    expect(recent.error).toContain('bad stderr');
+  });
+
   it('blocks expanded destructive command patterns without confirmation', async () => {
     const workspace = await makeWorkspace();
 
@@ -178,4 +225,15 @@ describe('BashTool', () => {
 function nodeCommand(script: string): string {
   const nodePath = process.execPath.replace(/\\/g, '/');
   return `"${nodePath}" -e ${JSON.stringify(script)}`;
+}
+
+async function waitForRecentTaskResult(taskId: string): Promise<BackgroundTaskResultSnapshot> {
+  const manager = BackgroundTaskManager.getInstance();
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    const recent = manager.getRecentTaskResult(taskId);
+    if (recent) return recent;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for background task result: ${taskId}`);
 }

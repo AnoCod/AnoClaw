@@ -400,7 +400,7 @@ Exits plan mode and returns to normal execution. The agent resumes full tool acc
 
 ### AskUserQuestionTool — `AskUserQuestion`
 
-Asks the user a question and waits for a response. Pauses the agent loop until the user answers.
+Asks the user one or more clarifying questions and waits for a response. Pauses the agent loop until the user answers or interrupts.
 
 | Property | Value |
 |---|---|
@@ -412,8 +412,20 @@ Asks the user a question and waits for a response. Pauses the agent loop until t
 **Parameters:**
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `question` | string | ✓ | The question to ask the user |
-| `options` | string[] | | Multiple-choice options |
+| `questions` | array | ✓ | 1-4 question objects: `{ question, header, options?, multiSelect? }` |
+
+**Question object:**
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `question` | string | ✓ | The actual question; max 1000 chars |
+| `header` | string | ✓ | Short label; max 12 chars |
+| `options` | string[] | | Up to 4 short option labels; omitted or empty means free-text input |
+| `multiSelect` | boolean | | Only valid when options are present |
+
+**Reliability notes:**
+- Questions and options are trimmed before display; duplicate options are removed.
+- Malformed entries fail before the conversation enters the user-wait state.
+- The result includes structured `askUserStatus`, normalized questions, session ID, agent ID, and question count.
 
 ---
 

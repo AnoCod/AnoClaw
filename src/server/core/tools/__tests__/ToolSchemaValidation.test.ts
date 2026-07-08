@@ -190,6 +190,18 @@ describe('native tool parameter schemas', () => {
       ],
     })?.errorMessage).toContain('questions[0].header');
 
+    expect(ToolPipeline.validateParams(new AskUserQuestionTool(), {
+      questions: [
+        { question: 'One?', header: 'One', options: ['A'], typo: true },
+      ],
+    })?.errorMessage).toContain('questions[0].typo');
+
+    expect(ToolPipeline.validateParams(new AskUserQuestionTool(), {
+      questions: [
+        { question: 'One?', header: 'One', options: ['A'], multiSelect: 'yes' },
+      ],
+    })?.errorMessage).toContain('questions[0].multiSelect');
+
     expect(ToolPipeline.validateParams(new ExitPlanModeTool(), {
       allowedPrompts: [{ tool: 'Bash', prompt: '   ' }],
     })?.errorMessage).toContain('allowedPrompts[0].prompt');

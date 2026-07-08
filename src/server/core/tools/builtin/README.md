@@ -133,7 +133,7 @@ Writes UTF-8 text content to a file. Creates parent directories when needed. Req
 
 ### EditTool — `Edit`
 
-Performs exact string replacements in files. Requires reading the file first. Provides replacement-count checks, dry-run validation, line-ending normalization, and diagnostics for ambiguous matches.
+Performs exact string replacements in files. Requires reading the file first. Provides replacement-count checks, stale-file hash checks, dry-run validation, line-ending normalization, and diagnostics for ambiguous matches.
 
 | Property | Value |
 |---|---|
@@ -148,7 +148,13 @@ Performs exact string replacements in files. Requires reading the file first. Pr
 | `new_string` | string | ✓ | Replacement text |
 | `replace_all` | boolean | | Replace all occurrences (default false) |
 | `expected_replacements` | number | | Fail unless exactly this many replacements would be made |
+| `expected_sha256` | string | | Fail if the current file hash differs from the hash read earlier |
 | `dry_run` | boolean | | Validate and report replacement metadata without writing |
+
+**Behavior notes:**
+- Invalid string/boolean/number/hash parameters fail fast instead of being coerced.
+- `new_string` may be empty for deletion edits; `old_string` must be non-empty.
+- Successful and failed validations include structured metadata such as hashes, byte counts, sampled line numbers, and replacement counts.
 
 ---
 

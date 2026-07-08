@@ -4,12 +4,14 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { createHash } from 'crypto';
 import { Tool } from '../Tool.js';
 import type { ToolResult } from '../../../../shared/types/tool.js';
 import { RiskLevel, InterruptBehavior } from '../../../../shared/types/tool.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
 import { atomicWriteFile, resolvePath } from './FileUtils.js';
 
+const SHA256_HEX_RE = /^[a-f0-9]{64}$/i;
 const BINARY_SAMPLE_BYTES = 4096;
 const MAX_DIAGNOSTIC_MATCHES = 5;
 
@@ -27,7 +29,7 @@ export class EditTool extends Tool {
       ' The edit will FAIL if old_string is not unique in the file.' +
       ' Either provide a larger string with more surrounding context to make it unique.' +
       ' Use replace_all to replace every occurrence of old_string.' +
-      ' Supports expected_replacements for safety checks and dry_run for previewing edits.';
+      ' Supports expected_replacements, expected_sha256, and dry_run for safety checks.';
   }
 
   prompt(): string {
@@ -38,6 +40,7 @@ export class EditTool extends Tool {
       '- Match existing code style exactly - consistency over your preference\n' +
       '- Touch ONLY lines relevant to the change - do not fix adjacent formatting\n' +
       '- Use expected_replacements when replacing repeated text to guard against accidental broad edits\n' +
+      '- Use expected_sha256 after reading a file to guard against stale edits\n' +
       '- Use dry_run=true to validate a risky replacement before writing';
   }
 
@@ -67,6 +70,10 @@ export class EditTool extends Tool {
           type: 'number',
           description: 'Optional safety check: fail unless the edit would replace exactly this many occurrences.',
         },
+        expected_sha256: {
+          type: 'string',
+          description: 'Optional SHA-256 hash of the current file. Fails if the file changed since it was read.',
+        },
         dry_run: {
           type: 'boolean',
           description: 'Preview the edit and validation result without writing the file.',
@@ -92,24 +99,40 @@ export class EditTool extends Tool {
     params: Record<string, unknown>,
     ctx: ExecutionContext,
   ): Promise<ToolResult> {
-    const filePath = params.file_path as string;
-    const oldString = (params.old_string ?? '') as string;
-    const newString = (params.new_string ?? '') as string;
-    const replaceAll = (params.replace_all as boolean) ?? false;
-    const expectedReplacements = normalizeExpectedReplacements(params.expected_replacements as number | undefined);
-    const dryRun = (params.dry_run as boolean) ?? false;
+    const filePathResult = normalizeString(params.file_path, 'file_path', { allowEmpty: false });
+    if (filePathResult.error) return this.makeError(filePathResult.error);
+    const filePath = filePathResult.value!;
 
-    if (!filePath || typeof filePath !== 'string') {
-      return this.makeError('file_path is required');
+    const oldStringResult = normalizeString(params.old_string, 'old_string', { allowEmpty: false });
+    if (oldStringResult.error) return this.makeError(oldStringResult.error);
+    const oldString = oldStringResult.value!;
+
+    const newStringResult = normalizeString(params.new_string, 'new_string', { allowEmpty: true });
+    if (newStringResult.error) return this.makeError(newStringResult.error);
+    const newString = newStringResult.value!;
+
+    const replaceAllResult = normalizeBoolean(params.replace_all, 'replace_all', false);
+    if (replaceAllResult.error) return this.makeError(replaceAllResult.error);
+    const replaceAll = replaceAllResult.value!;
+
+    const expectedReplacementsResult = normalizeOptionalPositiveInteger(params.expected_replacements, 'expected_replacements');
+    if (expectedReplacementsResult.error) return this.makeError(expectedReplacementsResult.error);
+    const expectedReplacements = expectedReplacementsResult.value;
+
+    const dryRunResult = normalizeBoolean(params.dry_run, 'dry_run', false);
+    if (dryRunResult.error) return this.makeError(dryRunResult.error);
+    const dryRun = dryRunResult.value!;
+
+    const expectedSha256 = normalizeExpectedSha256(params.expected_sha256);
+    if (expectedSha256 === null) {
+      return this.makeError('expected_sha256 must be a 64-character SHA-256 hex string');
     }
-    if (!oldString) {
-      return this.makeError('old_string is required');
-    }
+
     if (oldString === newString) {
       return this.makeError('old_string and new_string must be different');
     }
-    if (expectedReplacements !== undefined && expectedReplacements < 1) {
-      return this.makeError('expected_replacements must be a positive integer');
+    if (oldString.includes('\u0000') || newString.includes('\u0000')) {
+      return this.makeError('Edit supports UTF-8 text only; NUL content is not supported');
     }
 
     const startedAt = Date.now();
@@ -132,19 +155,45 @@ export class EditTool extends Tool {
       if (stat.isDirectory()) {
         return this.makeError(`Cannot edit directory: ${filePath}`);
       }
-      if (await looksBinary(resolved)) {
-        return this.makeError(`Refusing to edit binary file: ${filePath}`);
-      }
 
       // Read existing content
+      let originalBuffer: Buffer;
       let original: string;
       try {
-        original = await fs.readFile(resolved, 'utf-8');
+        originalBuffer = await fs.readFile(resolved);
+        if (looksBinary(originalBuffer)) {
+          return this.makeError(`Refusing to edit binary file: ${filePath}`, {
+            startedAt,
+            structured: {
+              filePath: resolved,
+              previousBytes: stat.size,
+              previousSha256: sha256(originalBuffer),
+            },
+          });
+        }
+        original = originalBuffer.toString('utf-8');
       } catch (err: unknown) {
         if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
           return this.makeError(`File not found: ${filePath}`);
         }
         throw err;
+      }
+
+      const previousSha256 = sha256(originalBuffer);
+      if (expectedSha256 && previousSha256 !== expectedSha256) {
+        return this.makeError(
+          `Edit refused: current file SHA-256 does not match expected_sha256 for ${resolved}. ` +
+          `Expected ${expectedSha256}, found ${previousSha256}. Re-read the file before editing.`,
+          {
+            startedAt,
+            structured: {
+              filePath: resolved,
+              expectedSha256,
+              previousSha256,
+              previousBytes: stat.size,
+            },
+          },
+        );
       }
 
       const lineEnding = detectDominantLineEnding(original);
@@ -162,8 +211,17 @@ export class EditTool extends Tool {
 
       const occurrenceCount = countOccurrences(original, effectiveOld);
       if (occurrenceCount === 0) {
-        return this.makeError(createNotFoundMessage(original, oldString));
+        return this.makeError(createNotFoundMessage(original, oldString), {
+          startedAt,
+          structured: {
+            filePath: resolved,
+            occurrences: 0,
+            previousSha256,
+            previousBytes: stat.size,
+          },
+        });
       }
+      const occurrenceSummary = summarizeOccurrences(original, effectiveOld);
 
       // For non-replace_all, ensure uniqueness
       if (!replaceAll && occurrenceCount > 1) {
@@ -171,6 +229,16 @@ export class EditTool extends Tool {
           `old_string is not unique in the file. Found ${occurrenceCount} occurrences. ` +
           `Use replace_all: true to replace all, or provide a larger string with more surrounding context.\n` +
           formatOccurrenceDiagnostics(original, effectiveOld),
+          {
+            startedAt,
+            structured: {
+              filePath: resolved,
+              occurrences: occurrenceCount,
+              sampledLines: occurrenceSummary.sampledLines,
+              previousSha256,
+              previousBytes: stat.size,
+            },
+          },
         );
       }
 
@@ -180,6 +248,18 @@ export class EditTool extends Tool {
           `Replacement count mismatch: expected ${expectedReplacements}, would replace ${replacementCount}. ` +
           `No changes were written.\n` +
           formatOccurrenceDiagnostics(original, effectiveOld),
+          {
+            startedAt,
+            structured: {
+              filePath: resolved,
+              expectedReplacements,
+              replacements: replacementCount,
+              occurrences: occurrenceCount,
+              sampledLines: occurrenceSummary.sampledLines,
+              previousSha256,
+              previousBytes: stat.size,
+            },
+          },
         );
       }
 
@@ -199,6 +279,9 @@ export class EditTool extends Tool {
       }
 
       const charDelta = result.length - original.length;
+      const bytes = Buffer.byteLength(result, 'utf-8');
+      const resultSha256 = sha256(Buffer.from(result, 'utf-8'));
+      const noOp = result === original;
       const previewPrefix = dryRun ? 'Dry run succeeded' : 'Successfully edited';
       return this.makeResult(
         `${previewPrefix} ${resolved}: ` +
@@ -209,9 +292,20 @@ export class EditTool extends Tool {
         {
           startedAt,
           structured: {
+            filePath: resolved,
             replacements: replacementCount,
+            replaceAll,
             dryRun,
+            noOp,
             charDelta,
+            previousBytes: stat.size,
+            bytes,
+            previousSha256,
+            sha256: resultSha256,
+            expectedSha256,
+            firstLine: occurrenceSummary.firstLine,
+            lastLine: occurrenceSummary.lastLine,
+            sampledLines: occurrenceSummary.sampledLines,
             lineEndingsAdjusted,
           },
         },
@@ -252,28 +346,58 @@ function countOccurrences(haystack: string, needle: string): number {
   return count;
 }
 
-function normalizeExpectedReplacements(value: number | undefined): number | undefined {
-  if (value === undefined) return undefined;
-  if (!Number.isFinite(value)) return 0;
-  return Math.floor(value);
+function normalizeString(
+  value: unknown,
+  name: string,
+  opts: { allowEmpty: boolean },
+): { value: string; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { error: `${name} is required` };
+  if (typeof value !== 'string') return { error: `${name} must be a string` };
+  if (!opts.allowEmpty && value.length === 0) return { error: `${name} is required` };
+  return { value };
 }
 
-async function looksBinary(filePath: string): Promise<boolean> {
-  const handle = await fs.open(filePath, 'r');
-  try {
-    const buffer = Buffer.alloc(BINARY_SAMPLE_BYTES);
-    const { bytesRead } = await handle.read(buffer, 0, BINARY_SAMPLE_BYTES, 0);
-    if (bytesRead === 0) return false;
-    const sample = buffer.subarray(0, bytesRead);
-    if (sample.includes(0)) return true;
-    let suspicious = 0;
-    for (const byte of sample) {
-      if (byte < 7 || (byte > 14 && byte < 32)) suspicious++;
-    }
-    return suspicious / sample.length > 0.3;
-  } finally {
-    await handle.close();
+function normalizeBoolean(
+  value: unknown,
+  name: string,
+  defaultValue: boolean,
+): { value: boolean; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: defaultValue };
+  if (typeof value !== 'boolean') return { error: `${name} must be a boolean` };
+  return { value };
+}
+
+function normalizeOptionalPositiveInteger(
+  value: unknown,
+  name: string,
+): { value?: number; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: undefined };
+  if (typeof value !== 'number' || !Number.isFinite(value)) return { error: `${name} must be a finite number` };
+  if (!Number.isInteger(value)) return { error: `${name} must be an integer` };
+  if (value < 1) return { error: `${name} must be a positive integer` };
+  return { value };
+}
+
+function normalizeExpectedSha256(value: unknown): string | undefined | null {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  return SHA256_HEX_RE.test(normalized) ? normalized : null;
+}
+
+function sha256(data: Buffer): string {
+  return createHash('sha256').update(data).digest('hex');
+}
+
+function looksBinary(data: Buffer): boolean {
+  const sample = data.subarray(0, Math.min(BINARY_SAMPLE_BYTES, data.length));
+  if (sample.length === 0) return false;
+  if (sample.includes(0)) return true;
+  let suspicious = 0;
+  for (const byte of sample) {
+    if (byte < 7 || (byte > 14 && byte < 32)) suspicious++;
   }
+  return suspicious / sample.length > 0.3;
 }
 
 function detectDominantLineEnding(content: string): '\n' | '\r\n' {
@@ -343,4 +467,24 @@ function formatOccurrenceDiagnostics(content: string, needle: string): string {
     searchStart = index + needle.length;
   }
   return diagnostics.length > 0 ? diagnostics.join('\n') : '(no line diagnostics available)';
+}
+
+function summarizeOccurrences(
+  content: string,
+  needle: string,
+): { firstLine: number; lastLine: number; sampledLines: number[] } {
+  const sampledLines: number[] = [];
+  let searchStart = 0;
+  let firstLine = 0;
+  let lastLine = 0;
+  while (true) {
+    const index = content.indexOf(needle, searchStart);
+    if (index === -1) break;
+    const lineNumber = content.slice(0, index).split(/\r\n|\r|\n/).length;
+    if (firstLine === 0) firstLine = lineNumber;
+    lastLine = lineNumber;
+    if (sampledLines.length < MAX_DIAGNOSTIC_MATCHES) sampledLines.push(lineNumber);
+    searchStart = index + needle.length;
+  }
+  return { firstLine, lastLine, sampledLines };
 }

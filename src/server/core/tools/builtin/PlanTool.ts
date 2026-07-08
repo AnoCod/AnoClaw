@@ -8,8 +8,13 @@ import { Tool } from '../Tool.js';
 import type { ToolResult } from '../../../../shared/types/tool.js';
 import { RiskLevel, InterruptBehavior } from '../../../../shared/types/tool.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
-import * as fs from 'fs';
+import * as fs from 'fs/promises';
 import * as path from 'path';
+import { atomicWriteFile } from './FileUtils.js';
+
+const MAX_RAW_NAME_CHARS = 60;
+const MAX_SAFE_NAME_CHARS = 40;
+const MAX_CONTENT_CHARS = 50000;
 
 export class PlanTool extends Tool {
   static category = 'Planning & Communication';
@@ -20,7 +25,7 @@ export class PlanTool extends Tool {
   }
 
   description(): string {
-    return 'Write a structured plan to a plan-{name}.md file in the workspace, then execute each step. The plan file is a concrete artifact - after writing, read it back and follow it step by step, checking off items as you go.';
+    return 'Write a structured plan to a plan-{name}.md file in the workspace, then execute each step. Supports dry_run and overwrite controls so existing plans are not silently replaced.';
   }
 
   prompt(): string {
@@ -40,7 +45,8 @@ export class PlanTool extends Tool {
       '2. The tool writes `plan-{name}.md` to the workspace and returns the path\n' +
       '3. Read the plan file to confirm it\n' +
       '4. Execute each step in order, using TodoWrite to track within each step\n' +
-      '5. After finishing all steps, report completion\n\n' +
+      '5. Update or overwrite an existing plan only when intentionally continuing the same plan\n' +
+      '6. After finishing all steps, report completion\n\n' +
       '**Plan file format:** Use markdown with clear step headers (`## Step 1: ...`), file paths in backticks, and checkboxes for tracking.';
   }
 
@@ -56,13 +62,21 @@ export class PlanTool extends Tool {
           type: 'string',
           description: 'Full plan content in markdown. Include: goal, steps with checkboxes, files involved, decisions made. Each step should be specific and verifiable.',
         },
+        overwrite: {
+          type: 'boolean',
+          description: 'Allow replacing an existing plan file with the same sanitized name. Default false.',
+        },
+        dry_run: {
+          type: 'boolean',
+          description: 'Validate and preview the plan file path/metadata without writing.',
+        },
       },
       required: ['name', 'content'],
     };
   }
 
   riskLevel(): RiskLevel {
-    return RiskLevel.Safe;
+    return RiskLevel.Low;
   }
 
   isReadOnly(): boolean {
@@ -74,24 +88,37 @@ export class PlanTool extends Tool {
   }
 
   interruptBehavior(): InterruptBehavior {
-    return InterruptBehavior.Cancel;
+    return InterruptBehavior.Block;
   }
 
   async execute(
     params: Record<string, unknown>,
     ctx: ExecutionContext,
   ): Promise<ToolResult> {
-    const rawName = (params.name as string || '').trim();
-    const content = (params.content as string || '').trim();
+    const nameResult = normalizeString(params.name, 'name', { allowEmpty: false });
+    if (nameResult.error) return this.makeError(nameResult.error);
+    const rawName = nameResult.value!.trim();
 
-    if (!rawName) {
-      return this.makeError('Plan "name" is required.');
+    const contentResult = normalizeString(params.content, 'content', { allowEmpty: false });
+    if (contentResult.error) return this.makeError(contentResult.error);
+    const content = contentResult.value!.trim();
+
+    const overwriteResult = normalizeBoolean(params.overwrite, 'overwrite', false);
+    if (overwriteResult.error) return this.makeError(overwriteResult.error);
+    const overwrite = overwriteResult.value!;
+
+    const dryRunResult = normalizeBoolean(params.dry_run, 'dry_run', false);
+    if (dryRunResult.error) return this.makeError(dryRunResult.error);
+    const dryRun = dryRunResult.value!;
+
+    if (rawName.length > MAX_RAW_NAME_CHARS) {
+      return this.makeError(`Plan name too long (max ${MAX_RAW_NAME_CHARS} chars).`);
     }
-    if (!content) {
-      return this.makeError('Plan "content" is required.');
+    if (content.length > MAX_CONTENT_CHARS) {
+      return this.makeError(`Plan content too long (max ${MAX_CONTENT_CHARS} chars). Split the work into smaller plans.`);
     }
-    if (rawName.length > 60) {
-      return this.makeError('Plan name too long (max 60 chars).');
+    if (content.includes('\u0000')) {
+      return this.makeError('Plan content must be UTF-8 text; NUL content is not supported.');
     }
 
     // Sanitize name for filename: lowercase, replace non-alphanum with dash, collapse dashes
@@ -99,7 +126,7 @@ export class PlanTool extends Tool {
       .toLowerCase()
       .replace(/[^a-z0-9一-鿿]+/g, '-')
       .replace(/^-+|-+$/g, '')
-      .slice(0, 40);
+      .slice(0, MAX_SAFE_NAME_CHARS);
 
     if (!safeName) {
       return this.makeError('Plan name must contain at least one letter, digit, or Chinese character.');
@@ -108,6 +135,7 @@ export class PlanTool extends Tool {
     const workspace = ctx.workspace || process.cwd();
     const filename = `plan-${safeName}.md`;
     const filePath = path.join(workspace, filename);
+    const startedAt = Date.now();
 
     // Build the plan file with a header
     const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
@@ -119,22 +147,107 @@ export class PlanTool extends Tool {
       '',
       content,
     ].join('\n');
+    const bytes = Buffer.byteLength(fullContent, 'utf-8');
+    const metadata = {
+      planFile: filename,
+      planPath: filePath,
+      rawName,
+      safeName,
+      dryRun,
+      overwrite,
+      contentChars: content.length,
+      totalChars: fullContent.length,
+      bytes,
+      lineCount: fullContent.split(/\r?\n/).length,
+      checkboxCount: countCheckboxes(content),
+      stepHeadingCount: countStepHeadings(content),
+    };
 
     try {
-      fs.mkdirSync(workspace, { recursive: true });
-      fs.writeFileSync(filePath, fullContent, 'utf-8');
+      if (ctx.signal?.aborted) {
+        return this.makeError('Plan cancelled by user before file validation started', { startedAt });
+      }
+      await fs.mkdir(workspace, { recursive: true });
+      const existing = await statIfExists(filePath);
+      if (existing && !overwrite) {
+        return this.makeError(
+          `Plan file already exists: ${filename}. Use overwrite=true to replace it intentionally.`,
+          {
+            startedAt,
+            structured: {
+              ...metadata,
+              existed: true,
+              previousBytes: existing.size,
+            },
+          },
+        );
+      }
+      if (!dryRun) {
+        await atomicWriteFile(filePath, fullContent, 'utf-8');
+      }
+      const existed = Boolean(existing);
+      const resultPrefix = dryRun
+        ? 'Dry run succeeded'
+        : existed
+          ? 'Plan file overwritten'
+          : 'Plan file written';
+      return this.makeResult(
+        `${resultPrefix}: ${filename}\n\n` +
+        `Path: ${filePath}\n\n` +
+        'Next steps:\n' +
+        '1. Read the plan file to confirm it\n' +
+        '2. Execute each step in order, using TodoWrite for within-step tracking\n' +
+        '3. Update the plan file (via Edit) to check off completed steps',
+        {
+          startedAt,
+          structured: {
+            ...metadata,
+            existed,
+            previousBytes: existing?.size,
+          },
+        },
+      );
     } catch (err) {
-      return this.makeError(`Failed to write plan file: ${(err as Error).message}`);
+      return this.makeError(`Failed to write plan file: ${(err as Error).message}`, { startedAt });
     }
-
-    return this.makeResult(
-      `Plan file written: ${filename}\n\n` +
-      `Path: ${filePath}\n\n` +
-      'Next steps:\n' +
-      '1. Read the plan file to confirm it\n' +
-      '2. Execute each step in order, using TodoWrite for within-step tracking\n' +
-      '3. Update the plan file (via Edit) to check off completed steps',
-      { structured: { planFile: filename, planPath: filePath } },
-    );
   }
+}
+
+function normalizeString(
+  value: unknown,
+  name: string,
+  opts: { allowEmpty: boolean },
+): { value: string; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { error: `Plan "${name}" is required.` };
+  if (typeof value !== 'string') return { error: `Plan "${name}" must be a string.` };
+  if (!opts.allowEmpty && value.trim().length === 0) return { error: `Plan "${name}" is required.` };
+  return { value };
+}
+
+function normalizeBoolean(
+  value: unknown,
+  name: string,
+  defaultValue: boolean,
+): { value: boolean; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: defaultValue };
+  if (typeof value !== 'boolean') return { error: `Plan "${name}" must be a boolean.` };
+  return { value };
+}
+
+async function statIfExists(filePath: string): Promise<{ size: number } | null> {
+  try {
+    const stat = await fs.stat(filePath);
+    return { size: stat.size };
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
+    throw err;
+  }
+}
+
+function countCheckboxes(content: string): number {
+  return (content.match(/^\s*[-*]\s+\[[ xX]\]/gm) || []).length;
+}
+
+function countStepHeadings(content: string): number {
+  return (content.match(/^#{2,6}\s+step\b/gim) || []).length;
 }

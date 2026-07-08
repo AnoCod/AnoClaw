@@ -1,6 +1,6 @@
 # Built-in Tools — `src/server/core/tools/builtin/`
 
-34 built-in tools organized into 8 categories. Tools are auto-registered by `ToolRegistrar` scanning this directory at startup — simply place a new `.ts` file here and rebuild.
+36 built-in tools organized into 8 categories. Tools are auto-registered by `ToolRegistrar` scanning this directory at startup — simply place a new `.ts` file here and rebuild.
 
 ---
 
@@ -18,6 +18,7 @@
 | `WebFetchTool.ts` | `WebFetch` | Search & Web | Low | SubAgent |
 | `WebSearchTool.ts` | `WebSearch` | Search & Web | Low | SubAgent |
 | `SleepTool.ts` | `Sleep` | Planning & Communication | Safe | SubAgent |
+| `PlanTool.ts` | `Plan` | Planning & Communication | Low | SubAgent |
 | `EnterPlanModeTool.ts` | `EnterPlanMode` | Planning & Communication | Safe | SubAgent |
 | `ExitPlanModeTool.ts` | `ExitPlanMode` | Planning & Communication | Safe | SubAgent |
 | `AskUserQuestionTool.ts` | `AskUserQuestion` | Planning & Communication | Safe | MainAgent |
@@ -308,7 +309,7 @@ Searches the web and returns results formatted as search blocks. Supports bounde
 
 ---
 
-## 3. Planning & Communication (5 tools)
+## 3. Planning & Communication (6 tools)
 
 ### SleepTool — `Sleep`
 
@@ -331,6 +332,32 @@ Pauses execution for a specified duration, or waits for a background task to fin
 - Requires either `delaySeconds` or `wait_for_task_id`.
 - Waiting for a background task wakes on completion/failure and also recognizes recently completed tasks.
 - Unknown, failed, killed, timed-out, or interrupted waits return failed tool results with structured task status.
+
+---
+
+### PlanTool — `Plan`
+
+Writes a concrete markdown plan file in the workspace, with dry-run validation and explicit overwrite protection.
+
+| Property | Value |
+|---|---|
+| Risk | `Low` |
+| Is read-only | No |
+| shouldDefer | `true` |
+| InterruptBehavior | `Block` |
+
+**Parameters:**
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | ✓ | Short plan name used for `plan-{name}.md` |
+| `content` | string | ✓ | Full markdown plan content |
+| `overwrite` | boolean | | Replace an existing plan with the same sanitized name (default false) |
+| `dry_run` | boolean | | Validate and preview metadata without writing |
+
+**Behavior notes:**
+- Invalid string/boolean parameters fail fast instead of being coerced.
+- Existing plan files are not overwritten unless `overwrite=true`.
+- Results include structured metadata for sanitized name, path, byte count, line count, checkbox count, and step heading count.
 
 ---
 

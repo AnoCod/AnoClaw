@@ -223,7 +223,7 @@ Powerful regex search built on ripgrep. Supports full regex, file type filtering
 
 ### NotebookEditTool — `NotebookEdit`
 
-Edits Jupyter notebook cells (`.ipynb` files). Supports replace, insert, and delete modes.
+Edits Jupyter notebook cells (`.ipynb` files). Supports replace, insert, delete, dry-run validation, and stale-file hash checks.
 
 | Property | Value |
 |---|---|
@@ -234,10 +234,19 @@ Edits Jupyter notebook cells (`.ipynb` files). Supports replace, insert, and del
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `notebook_path` | string | ✓ | Absolute path to the notebook |
-| `new_source` | string | ✓ | New cell content |
-| `cell_id` | string | | Cell ID (required for replace/delete) |
+| `new_source` | string | | New cell content (required for replace/insert) |
+| `cell_id` | string | | Target cell ID |
+| `cell_number` | number | | 0-indexed target cell number |
 | `edit_mode` | string | | `replace` (default), `insert`, or `delete` |
 | `cell_type` | string | | `code` or `markdown` |
+| `expected_sha256` | string | | Fail if the current notebook hash differs from the hash read earlier |
+| `dry_run` | boolean | | Validate and report notebook edit metadata without writing |
+
+**Behavior notes:**
+- Invalid string/boolean/number/enum/hash parameters fail fast instead of being coerced.
+- `cell_id` and `cell_number` are mutually exclusive; missing explicit targets fail instead of falling back to a different cell.
+- Existing string-array `source` cells keep their array representation after replacement.
+- Results include structured metadata for operation, cell index/ID/type, cell counts, byte counts, and hashes.
 
 ---
 

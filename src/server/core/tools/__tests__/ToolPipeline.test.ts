@@ -707,7 +707,33 @@ describe('ToolPipeline.normalizeOutput', () => {
     const long = 'x'.repeat(5000);
     const r = ToolPipeline.normalizeOutput(makeResult(long), tool);
     expect(r.content.length).toBeLessThan(long.length);
+    expect(r.content.length).toBeLessThanOrEqual(100);
     expect(r.content).toContain('chars truncated');
+    expect(r.wasTruncated).toBe(true);
+  });
+
+  it('truncates oversized failure messages', () => {
+    const tool = mockTool({ outputLimit: 120 });
+    const r = ToolPipeline.normalizeOutput(makeError(`Command failed:\n${'x'.repeat(5000)}`), tool);
+
+    expect(r.success).toBe(false);
+    expect(r.errorMessage?.length).toBeLessThanOrEqual(120);
+    expect(r.errorMessage).toContain('chars truncated');
+    expect(r.wasTruncated).toBe(true);
+  });
+
+  it('normalizes failed run results after retry classification', async () => {
+    const tool = mockTool({
+      outputLimit: 120,
+      maxRetries: 0,
+      _executeWithEvents: vi.fn().mockResolvedValue(makeError(`fatal output:\n${'x'.repeat(5000)}`)),
+    });
+
+    const r = await ToolPipeline.run(tool, {}, ctx(), 'tc-large-error');
+
+    expect(r.success).toBe(false);
+    expect(r.errorMessage?.length).toBeLessThanOrEqual(120);
+    expect(r.errorMessage).toContain('chars truncated');
     expect(r.wasTruncated).toBe(true);
   });
 

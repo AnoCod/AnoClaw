@@ -56,7 +56,7 @@ export interface PipelineStages {
   execute(tool: Tool, params: Record<string, unknown>, ctx: ExecutionContext): Promise<ToolResult>;
   /** Stage 3: Classify error and retry if appropriate */
   retry(tool: Tool, params: Record<string, unknown>, ctx: ExecutionContext, originalResult: ToolResult): Promise<ToolResult>;
-  /** Stage 4: Normalize output size (truncate if oversized).
+  /** Stage 4: Normalize output/error size (truncate if oversized).
    * Tools that self-truncate (Bash, Read, Grep) do so before pipeline sees
    * the result, so their outputLimit() values are upper bounds, not additive. */
   normalizeOutput(result: ToolResult, tool: Tool): ToolResult;
@@ -140,12 +140,8 @@ export class ToolPipeline {
       result = await ToolPipeline.retry(tool, params, ctx, result);
     }
 
-    // ── Stage 4: Output Normalization ──
-    if (result.success) {
-      result = ToolPipeline.normalizeOutput(result, tool);
-    }
-
-    return result;
+    // ── Stage 4: Output/Error Normalization ──
+    return ToolPipeline.normalizeOutput(result, tool);
   }
 
   // ══════════════════════════════════════════════════════════
@@ -415,27 +411,73 @@ export class ToolPipeline {
   }
 
   static normalizeOutput(result: ToolResult, tool: Tool): ToolResult {
-    const content = result.content || '';
-    if (!content) return result;
+    const limit = normalizeOutputLimit(tool.outputLimit?.());
+    let content = result.content || '';
+    let errorMessage = result.errorMessage;
+    let wasTruncated = result.wasTruncated || false;
 
-    const limit = tool.outputLimit?.() ?? DEFAULT_OUTPUT_CHARS;
-    if (content.length <= limit) return result;
+    if (content.length > limit) {
+      content = truncateMiddle(content, limit);
+      wasTruncated = true;
+    }
+    if (typeof errorMessage === 'string' && errorMessage.length > limit) {
+      errorMessage = truncateMiddle(errorMessage, limit);
+      wasTruncated = true;
+    }
 
-    const head = content.slice(0, TRUNCATE_HEAD_TAIL);
-    const tail = content.slice(-TRUNCATE_HEAD_TAIL);
-    const omitted = content.length - TRUNCATE_HEAD_TAIL * 2;
+    if (content === (result.content || '') && errorMessage === result.errorMessage && wasTruncated === result.wasTruncated) {
+      return result;
+    }
 
     return {
       ...result,
-      content: `${head}\n\n... [${omitted} chars truncated] ...\n\n${tail}`,
-      wasTruncated: true,
+      content,
+      errorMessage,
+      tokensUsed: result.success ? Math.ceil(content.length / 4) : result.tokensUsed,
+      wasTruncated,
     };
   }
+}
+
+function normalizeOutputLimit(value: number | undefined): number {
+  if (!Number.isFinite(value) || !value || value <= 0) return DEFAULT_OUTPUT_CHARS;
+  return Math.max(20, Math.floor(value));
 }
 
 function normalizeTimeoutMs(value: number | undefined): number {
   if (!Number.isFinite(value) || !value || value <= 0) return 30_000;
   return Math.max(100, Math.floor(value));
+}
+
+function truncateMiddle(value: string, limit: number): string {
+  if (value.length <= limit) return value;
+  if (limit <= 23) return `${value.slice(0, Math.max(0, limit - 3))}...`;
+
+  let marker = '\n\n... [truncated] ...\n\n';
+  let headChars = 0;
+  let tailChars = 0;
+
+  for (let i = 0; i < 3; i++) {
+    const budget = Math.max(0, limit - marker.length);
+    headChars = Math.ceil(budget / 2);
+    tailChars = budget - headChars;
+    const omitted = Math.max(0, value.length - headChars - tailChars);
+    const preciseMarker = `\n\n... [${omitted} chars truncated] ...\n\n`;
+    if (preciseMarker.length === marker.length) {
+      marker = preciseMarker;
+      break;
+    }
+    marker = preciseMarker;
+  }
+
+  if (marker.length > limit) {
+    marker = '\n\n... [truncated] ...\n\n';
+    const budget = Math.max(0, limit - marker.length);
+    headChars = Math.ceil(budget / 2);
+    tailChars = budget - headChars;
+  }
+
+  return `${value.slice(0, headChars)}${marker}${tailChars > 0 ? value.slice(-tailChars) : ''}`;
 }
 
 function formatMs(ms: number): string {

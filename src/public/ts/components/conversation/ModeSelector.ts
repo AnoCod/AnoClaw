@@ -17,6 +17,8 @@ export class ModeSelector {
   private effortEnabled: boolean;
   private goal: GoalState | null = null;
   private dropdown: HTMLElement | null = null;
+  private closeOnPointerDown: ((e: PointerEvent) => void) | null = null;
+  private closeOnEscape: ((e: KeyboardEvent) => void) | null = null;
 
   constructor(initialMode: InputMode = 'auto', effortEnabled: boolean = true) {
     this.mode = initialMode;
@@ -54,9 +56,13 @@ export class ModeSelector {
 
   private _buildButton(): HTMLButtonElement {
     const btn = document.createElement('button');
+    btn.type = 'button';
     btn.className = 'cinema-tool-btn';
+    btn.setAttribute('aria-haspopup', 'menu');
+    btn.setAttribute('aria-expanded', 'false');
     this._updateLabel(btn);
     btn.addEventListener('click', (e) => {
+      e.preventDefault();
       e.stopPropagation();
       this._toggleDropdown();
     });
@@ -96,41 +102,50 @@ export class ModeSelector {
     this.dropdown = this._buildDropdown();
     document.body.appendChild(this.dropdown);
     this._positionDropdown();
+    this.element.setAttribute('aria-expanded', 'true');
 
-    // Close on outside click (use capture to beat stopped propagation).
-    // setTimeout avoids the click that opened the dropdown from closing it.
-    const closeOnClick = (e: MouseEvent) => {
-      if (!this.dropdown) return;
-      if (!this.dropdown.contains(e.target as Node) && e.target !== this.element) {
+    this.closeOnPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (!target || !this.dropdown) return;
+      if (!this.dropdown.contains(target) && !this.element.contains(target)) {
         this._closeDropdown();
-        document.removeEventListener('click', closeOnClick, true);
-        document.removeEventListener('keydown', closeOnEscape, true);
       }
     };
-    // Close on Escape key
-    const closeOnEscape = (e: KeyboardEvent) => {
+
+    this.closeOnEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        e.preventDefault();
         this._closeDropdown();
-        document.removeEventListener('click', closeOnClick, true);
-        document.removeEventListener('keydown', closeOnEscape, true);
+        this.element.focus();
       }
     };
-    setTimeout(() => {
-      document.addEventListener('click', closeOnClick, { capture: true });
-      document.addEventListener('keydown', closeOnEscape, { capture: true });
-    }, 0);
+
+    document.addEventListener('pointerdown', this.closeOnPointerDown, true);
+    document.addEventListener('keydown', this.closeOnEscape, true);
   }
 
   private _closeDropdown(): void {
+    if (this.closeOnPointerDown) {
+      document.removeEventListener('pointerdown', this.closeOnPointerDown, true);
+      this.closeOnPointerDown = null;
+    }
+    if (this.closeOnEscape) {
+      document.removeEventListener('keydown', this.closeOnEscape, true);
+      this.closeOnEscape = null;
+    }
     if (this.dropdown) {
       this.dropdown.remove();
       this.dropdown = null;
     }
+    this.element.setAttribute('aria-expanded', 'false');
   }
 
   private _buildDropdown(): HTMLElement {
     const dd = document.createElement('div');
     dd.className = 'mode-dropdown';
+    dd.setAttribute('role', 'menu');
+    dd.addEventListener('pointerdown', (e) => e.stopPropagation());
+    dd.addEventListener('click', (e) => e.stopPropagation());
 
     const modes: { mode: InputMode; label: string; desc: string }[] = [
       { mode: 'auto-edit', label: 'Auto Edit', desc: 'All tools run freely. No confirmation pop-ups.' },
@@ -141,7 +156,10 @@ export class ModeSelector {
 
     for (const m of modes) {
       const item = document.createElement('button');
+      item.type = 'button';
       item.className = 'mode-dropdown-item' + (m.mode === this.mode ? ' active' : '');
+      item.setAttribute('role', 'menuitemradio');
+      item.setAttribute('aria-checked', String(m.mode === this.mode));
 
       const radio = document.createElement('span');
       radio.className = 'mode-radio' + (m.mode === this.mode ? ' active' : '');
@@ -165,10 +183,16 @@ export class ModeSelector {
       item.appendChild(radio);
       item.appendChild(textCol);
 
-      item.addEventListener('click', () => {
+      const chooseMode = (e: Event) => {
+        e.preventDefault();
+        e.stopPropagation();
         this.setMode(m.mode);
         this._closeDropdown();
         ClientLogger.ui.debug('Input mode changed', { mode: m.mode });
+      };
+      item.addEventListener('pointerdown', chooseMode);
+      item.addEventListener('click', (e) => {
+        if (this.dropdown?.contains(item)) chooseMode(e);
       });
       dd.appendChild(item);
     }

@@ -27,6 +27,7 @@ import { TaskListTool } from '../builtin/TaskListTool.js';
 import { TaskOutputTool } from '../builtin/TaskOutputTool.js';
 import { TaskStopTool } from '../builtin/TaskStopTool.js';
 import { TodoWriteTool } from '../builtin/TodoWriteTool.js';
+import { UpdateOrgTool } from '../builtin/UpdateOrgTool.js';
 import { WebFetchTool } from '../builtin/WebFetchTool.js';
 import { WebSearchTool } from '../builtin/WebSearchTool.js';
 import { WriteTool } from '../builtin/WriteTool.js';
@@ -419,6 +420,31 @@ describe('native tool parameter schemas', () => {
       parentAgentId: 'main-agent',
       agentPrompt: 'You test changes and report bugs.',
       reason: 'The project needs durable QA coverage.',
+      extra: true,
+    })?.errorMessage).toContain('Unexpected parameter');
+  });
+
+  it('exposes UpdateOrg identifier bounds and rejects stray params', () => {
+    const tool = new UpdateOrgTool();
+
+    expect(ToolPipeline.validateParams(tool, {
+      agentId: 'member-1',
+      newParentId: 'manager-2',
+    })).toBeNull();
+
+    expect(ToolPipeline.validateParams(tool, {
+      agentId: '   ',
+      newParentId: 'manager-2',
+    })?.errorMessage).toContain('agentId');
+
+    expect(ToolPipeline.validateParams(tool, {
+      agentId: 'member-1',
+      newParentId: 'x'.repeat(201),
+    })?.errorMessage).toContain('newParentId');
+
+    expect(ToolPipeline.validateParams(tool, {
+      agentId: 'member-1',
+      newParentId: 'manager-2',
       extra: true,
     })?.errorMessage).toContain('Unexpected parameter');
   });

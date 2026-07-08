@@ -641,7 +641,7 @@ Lists all employees in the organization hierarchy.
 
 ### UpdateOrgTool — `UpdateOrg`
 
-Updates the organization structure — move agents, change roles, reassign relationships.
+Reassigns an agent to a different active manager in the organization tree.
 
 | Property | Value |
 |---|---|
@@ -651,9 +651,16 @@ Updates the organization structure — move agents, change roles, reassign relat
 **Parameters:**
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `action` | string | ✓ | Update action type |
-| `agent_id` | string | ✓ | Target agent |
-| `changes` | object | ✓ | Fields to update |
+| `agentId` | string | ✓ | Agent ID or exact agent name to move |
+| `newParentId` | string | ✓ | New parent agent ID or exact name; must be an active MainAgent or Manager |
+
+**Reliability notes:**
+- Inputs are trimmed, bounded, and rejected before registry access if malformed.
+- The MainAgent cannot be moved.
+- The new parent must exist, be active, and be able to manage subordinates.
+- Self-parenting, no-op moves, and circular reporting chains are detected explicitly.
+- Persistence failures roll back the in-memory parent/level change and return structured failure metadata.
+- Successful results include structured old/new parent IDs, names, levels, and status.
 
 ---
 

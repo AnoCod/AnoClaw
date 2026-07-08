@@ -182,6 +182,21 @@ describe('native tool parameter schemas', () => {
       file_path: 'src/index.ts',
       timeout_ms: 999,
     })?.errorMessage).toContain('expected >= 1000');
+
+    expect(ToolPipeline.validateParams(tool, {
+      file_path: 'src/index.ts',
+      offset: 1.5,
+    })?.errorMessage).toContain('expected integer');
+
+    expect(ToolPipeline.validateParams(tool, {
+      file_path: 'src/index.ts',
+      pages: 'all',
+    })?.errorMessage).toContain('Invalid format');
+
+    expect(ToolPipeline.validateParams(tool, {
+      file_path: 'src/index.ts',
+      encoding: 'utf16le',
+    })?.errorMessage).toContain('Unexpected parameter');
   });
 
   it('exposes write and edit safety hash formats', () => {

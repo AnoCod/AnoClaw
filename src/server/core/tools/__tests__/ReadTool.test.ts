@@ -141,6 +141,22 @@ describe('ReadTool', () => {
     const badLineNumbers = await tool.execute({ file_path: file, line_numbers: 'yes' }, ctx(workspace));
     expect(badLineNumbers.success).toBe(false);
     expect(badLineNumbers.errorMessage).toContain('line_numbers must be a boolean');
+
+    const fractionalOffset = await tool.execute({ file_path: file, offset: 1.5 }, ctx(workspace));
+    expect(fractionalOffset.success).toBe(false);
+    expect(fractionalOffset.errorMessage).toContain('offset must be an integer');
+
+    const fractionalMaxChars = await tool.execute({ file_path: file, max_chars: 120.5 }, ctx(workspace));
+    expect(fractionalMaxChars.success).toBe(false);
+    expect(fractionalMaxChars.errorMessage).toContain('max_chars must be an integer');
+
+    const badPages = await tool.execute({ file_path: file, pages: 'all' }, ctx(workspace));
+    expect(badPages.success).toBe(false);
+    expect(badPages.errorMessage).toContain('pages must be a comma-separated list');
+
+    const unexpectedParam = await tool.execute({ file_path: file, encoding: 'utf16le' }, ctx(workspace));
+    expect(unexpectedParam.success).toBe(false);
+    expect(unexpectedParam.errorMessage).toContain('Unexpected parameter: "encoding"');
   });
 
   it('rejects full reads of very large text files with actionable guidance', async () => {

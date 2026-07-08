@@ -26,6 +26,8 @@ const MAX_READ_TIMEOUT_MS = 60000;
 const BINARY_SAMPLE_BYTES = 4096;
 const DEFAULT_PDF_MAX_PAGES = 10;
 const MAX_PDF_SELECTED_PAGES = 50;
+const MAX_PAGES_SPEC_CHARS = 200;
+const PARAM_KEYS = ['file_path', 'offset', 'limit', 'pages', 'tail', 'line_numbers', 'max_chars', 'timeout_ms'];
 
 type ReadFileLike = (
   filePath: string,
@@ -87,6 +89,8 @@ export class ReadTool extends Tool {
         },
         pages: {
           type: 'string',
+          maxLength: MAX_PAGES_SPEC_CHARS,
+          pattern: '^\\s*\\d+\\s*(?:-\\s*\\d+)?(?:\\s*,\\s*\\d+\\s*(?:-\\s*\\d+)?)*\\s*$',
           description:
             'Page range for PDF files (e.g., "1-5", "3", "10-20"). Defaults to the first pages.',
         },
@@ -118,6 +122,7 @@ export class ReadTool extends Tool {
         },
       },
       required: ['file_path'],
+      additionalProperties: false,
     };
   }
 
@@ -149,8 +154,17 @@ export class ReadTool extends Tool {
     params: Record<string, unknown>,
     ctx: ExecutionContext,
   ): Promise<ToolResult> {
-    const filePath = params.file_path as string;
-    const pages = params.pages as string | undefined;
+    const unexpectedParam = findUnexpectedParam(params, PARAM_KEYS);
+    if (unexpectedParam) return this.makeError(`Unexpected parameter: "${unexpectedParam}"`);
+
+    const filePathResult = normalizeRequiredString(params.file_path, 'file_path');
+    if (filePathResult.error) return this.makeError(filePathResult.error);
+    const filePath = filePathResult.value as string;
+
+    const pagesResult = normalizePagesSpec(params.pages);
+    if (pagesResult.error) return this.makeError(pagesResult.error);
+    const pages = pagesResult.value;
+
     const offsetResult = normalizeOptionalInteger(params.offset, 'offset', 1, Number.MAX_SAFE_INTEGER);
     if (offsetResult.error) return this.makeError(offsetResult.error);
     const offset = offsetResult.value;
@@ -174,10 +188,6 @@ export class ReadTool extends Tool {
     const timeoutResult = normalizeInteger(params.timeout_ms, 'timeout_ms', DEFAULT_READ_TIMEOUT_MS, MIN_READ_TIMEOUT_MS, MAX_READ_TIMEOUT_MS);
     if (timeoutResult.error) return this.makeError(timeoutResult.error);
     const timeoutMs = timeoutResult.value as number;
-
-    if (!filePath || typeof filePath !== 'string') {
-      return this.makeError('file_path is required');
-    }
 
     if (tail !== undefined && (offset !== undefined || limit !== undefined)) {
       return this.makeError('tail cannot be combined with offset or limit');
@@ -435,10 +445,10 @@ function normalizeInteger(
 ): { value: number; error?: undefined } | { value?: undefined; error: string } {
   if (value === undefined || value === null) return { value: defaultValue };
   if (typeof value !== 'number' || !Number.isFinite(value)) return { error: `${name} must be a finite number` };
-  const integer = Math.trunc(value);
-  if (integer < min) return { error: `${name} must be at least ${min}` };
-  if (integer > max) return { error: `${name} must be ${max} or less` };
-  return { value: integer };
+  if (!Number.isInteger(value)) return { error: `${name} must be an integer` };
+  if (value < min) return { error: `${name} must be at least ${min}` };
+  if (value > max) return { error: `${name} must be ${max} or less` };
+  return { value };
 }
 
 function normalizeOptionalInteger(
@@ -449,10 +459,36 @@ function normalizeOptionalInteger(
 ): { value?: number; error?: undefined } | { value?: undefined; error: string } {
   if (value === undefined || value === null) return { value: undefined };
   if (typeof value !== 'number' || !Number.isFinite(value)) return { error: `${name} must be a finite number` };
-  const integer = Math.trunc(value);
-  if (integer < min) return { error: `${name} must be at least ${min}` };
-  if (integer > max) return { error: `${name} must be ${max} or less` };
-  return { value: integer };
+  if (!Number.isInteger(value)) return { error: `${name} must be an integer` };
+  if (value < min) return { error: `${name} must be at least ${min}` };
+  if (value > max) return { error: `${name} must be ${max} or less` };
+  return { value };
+}
+
+function normalizeRequiredString(
+  value: unknown,
+  name: string,
+): { value: string; error?: undefined } | { value?: undefined; error: string } {
+  if (typeof value !== 'string') return { error: `${name} is required` };
+  const normalized = value.trim();
+  if (!normalized) return { error: `${name} must not be empty` };
+  return { value: normalized };
+}
+
+function normalizePagesSpec(
+  value: unknown,
+): { value?: string; error?: undefined } | { value?: undefined; error: string } {
+  if (value === undefined || value === null) return { value: undefined };
+  if (typeof value !== 'string') return { error: 'pages must be a string' };
+  const normalized = value.trim();
+  if (!normalized) return { value: undefined };
+  if (normalized.length > MAX_PAGES_SPEC_CHARS) {
+    return { error: `pages must be ${MAX_PAGES_SPEC_CHARS} characters or less` };
+  }
+  if (!/^\d+\s*(?:-\s*\d+)?(?:\s*,\s*\d+\s*(?:-\s*\d+)?)*$/.test(normalized)) {
+    return { error: 'pages must be a comma-separated list of page numbers or ranges like "1-3,5"' };
+  }
+  return { value: normalized };
 }
 
 function normalizeBoolean(
@@ -927,4 +963,9 @@ function clampPositiveInt(value: number | undefined, fallback: number): number {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.floor(value)));
+}
+
+function findUnexpectedParam(params: Record<string, unknown>, allowed: string[]): string | null {
+  const allowedSet = new Set(allowed);
+  return Object.keys(params).find(key => !allowedSet.has(key)) ?? null;
 }

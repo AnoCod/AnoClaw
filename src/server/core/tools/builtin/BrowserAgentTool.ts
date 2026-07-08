@@ -10,6 +10,15 @@ import type { ExecutionContext } from '../../../../shared/types/session.js';
 // BrowserViewManager lives in the Electron main process, accessible via dynamic import.
 let _bvm: any = null;
 const _viewBySession = new Map<string, string>();
+const DEFAULT_WAIT_MS = 1000;
+const MIN_WAIT_MS = 1;
+const MAX_WAIT_MS = 30000;
+const DEFAULT_SCROLL_AMOUNT = 500;
+const MIN_SCROLL_AMOUNT = -50000;
+const MAX_SCROLL_AMOUNT = 50000;
+const DEFAULT_INSPECT_ITEMS = 80;
+const DEFAULT_FIND_ITEMS = 30;
+const MAX_INSPECT_ITEMS = 200;
 
 export const BROWSER_ACTIONS = [
   'navigate',
@@ -62,10 +71,39 @@ function previewValue(value: unknown, max = 140): string | undefined {
   return text.length > max ? text.slice(0, max - 1) + '...' : text;
 }
 
-function asPositiveInt(value: unknown, fallback: number, max: number): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-  return Math.min(max, Math.floor(parsed));
+function asBoundedInt(value: unknown, fallback: number, min: number, max: number, name: string): number {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isInteger(value)) {
+    throw new Error(`${name} must be an integer`);
+  }
+  if (value < min || value > max) {
+    throw new Error(`${name} must be between ${min} and ${max}`);
+  }
+  return value;
+}
+
+export function normalizeBrowserWaitMs(value: unknown): number {
+  return asBoundedInt(value, DEFAULT_WAIT_MS, MIN_WAIT_MS, MAX_WAIT_MS, 'wait_ms');
+}
+
+async function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) throw new Error('Browser action cancelled by user');
+  await new Promise<void>((resolve, reject) => {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const cleanup = () => {
+      if (timeout) clearTimeout(timeout);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(new Error('Browser action cancelled by user'));
+    };
+    timeout = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 function browserJsonScript(source: string): string {
@@ -319,9 +357,9 @@ export class BrowserAgentTool extends Tool {
         key:        { type: 'string',  description: 'Keyboard key for press, e.g. "Enter", "Tab", "Escape", "ArrowDown", or "a".' },
         event_type: { type: 'string',  description: 'DOM event type for dispatch_event. Examples: click, input, change, submit, keydown, keyup.' },
         include_screenshot: { type: 'boolean', description: 'When action="inspect", append a page screenshot after the DOM snapshot.' },
-        max_items:  { type: 'number', description: 'Max elements returned by inspect/find. Default 80 for inspect, 30 for find.' },
-        scroll_amount: { type: 'number', description: 'Pixels to scroll. Default 500.' },
-        wait_ms:    { type: 'number', description: 'Milliseconds. Default 1000.' },
+        max_items:  { type: 'integer', minimum: 1, maximum: MAX_INSPECT_ITEMS, description: `Max elements returned by inspect/find. Default ${DEFAULT_INSPECT_ITEMS} for inspect, ${DEFAULT_FIND_ITEMS} for find. Max ${MAX_INSPECT_ITEMS}.` },
+        scroll_amount: { type: 'integer', minimum: MIN_SCROLL_AMOUNT, maximum: MAX_SCROLL_AMOUNT, description: `Pixels to scroll. Default ${DEFAULT_SCROLL_AMOUNT}. Range ${MIN_SCROLL_AMOUNT} to ${MAX_SCROLL_AMOUNT}.` },
+        wait_ms:    { type: 'integer', minimum: MIN_WAIT_MS, maximum: MAX_WAIT_MS, description: `Milliseconds to wait. Default ${DEFAULT_WAIT_MS}, max ${MAX_WAIT_MS}.` },
       },
       required: ['action'],
     };
@@ -336,14 +374,17 @@ export class BrowserAgentTool extends Tool {
   async execute(params: Record<string, unknown>, ctx: ExecutionContext): Promise<ToolResult> {
     const t0 = Date.now();
     try {
-      const result = await this._run(params.action as string, params, ctx.sessionId);
+      const result = await this._run(params.action as string, params, ctx.sessionId, ctx.signal);
       return this.makeResult(result, { startedAt: t0, finishedAt: Date.now() });
     } catch (e: any) {
       return this.makeError(e.message || String(e), { startedAt: t0 });
     }
   }
 
-  private async _run(action: string, p: Record<string, unknown>, sessionId: string): Promise<string> {
+  private async _run(action: string, p: Record<string, unknown>, sessionId: string, signal?: AbortSignal): Promise<string> {
+    if (signal?.aborted) {
+      throw new Error('Browser action cancelled by user');
+    }
     if (!process.versions.electron) {
       throw new Error('Browser control is only available in the Electron desktop app, not in CLI mode.');
     }
@@ -447,7 +488,7 @@ export class BrowserAgentTool extends Tool {
 
         case 'inspect': {
           const sel = p.selector as string | undefined;
-          const maxItems = asPositiveInt(p.max_items, 80, 200);
+          const maxItems = asBoundedInt(p.max_items, DEFAULT_INSPECT_ITEMS, 1, MAX_INSPECT_ITEMS, 'max_items');
           const snapshot = await bvm.execJs(viewId, buildDomSnapshotScript(sel, maxItems));
           result = JSON.stringify(snapshot, null, 2).substring(0, 30000);
           if (p.include_screenshot === true) {
@@ -460,7 +501,7 @@ export class BrowserAgentTool extends Tool {
         case 'find': {
           const text = p.value as string;
           if (!text) throw new Error('value required: text to find');
-          const maxItems = asPositiveInt(p.max_items, 30, 100);
+          const maxItems = asBoundedInt(p.max_items, DEFAULT_FIND_ITEMS, 1, MAX_INSPECT_ITEMS, 'max_items');
           const matches = await bvm.execJs(viewId, buildFindElementsScript(text, maxItems));
           result = JSON.stringify(matches, null, 2).substring(0, 20000);
           break;
@@ -573,7 +614,7 @@ export class BrowserAgentTool extends Tool {
         }
 
         case 'scroll': {
-          const amt = (p.scroll_amount as number) || 500;
+          const amt = asBoundedInt(p.scroll_amount, DEFAULT_SCROLL_AMOUNT, MIN_SCROLL_AMOUNT, MAX_SCROLL_AMOUNT, 'scroll_amount');
           await bvm.execJs(viewId, `window.scrollBy(0,${amt})`);
           result = `Scrolled ${amt > 0 ? 'down' : 'up'} ${Math.abs(amt)}px`;
           break;
@@ -595,14 +636,14 @@ export class BrowserAgentTool extends Tool {
           break;
 
         case 'wait': {
-          const ms = (p.wait_ms as number) || 1000;
+          const ms = normalizeBrowserWaitMs(p.wait_ms);
           const sel = p.selector as string;
           if (sel) {
-            await bvm.waitForSelector(viewId, sel, Math.max(ms, 30000));
+            await bvm.waitForSelector(viewId, sel, ms);
             result = `"${sel}" appeared.`;
             break;
           }
-          await new Promise(r => setTimeout(r, ms));
+          await abortableDelay(ms, signal);
           result = `Waited ${ms}ms`;
           break;
         }

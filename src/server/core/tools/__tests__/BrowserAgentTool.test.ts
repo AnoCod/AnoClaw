@@ -4,6 +4,7 @@ import {
   BrowserAgentTool,
   buildDomSnapshotScript,
   buildFindElementsScript,
+  normalizeBrowserWaitMs,
 } from '../builtin/BrowserAgentTool.js';
 
 describe('BrowserAgentTool', () => {
@@ -15,7 +16,9 @@ describe('BrowserAgentTool', () => {
         selector: { description: string };
         event_type: { type: string };
         key: { type: string };
-        max_items: { type: string };
+        max_items: { type: string; minimum: number; maximum: number };
+        scroll_amount: { type: string; minimum: number; maximum: number };
+        wait_ms: { type: string; minimum: number; maximum: number };
       };
     };
 
@@ -31,7 +34,9 @@ describe('BrowserAgentTool', () => {
     expect(schema.properties.selector.description).toContain('inspect');
     expect(schema.properties.event_type.type).toBe('string');
     expect(schema.properties.key.type).toBe('string');
-    expect(schema.properties.max_items.type).toBe('number');
+    expect(schema.properties.max_items).toMatchObject({ type: 'integer', minimum: 1, maximum: 200 });
+    expect(schema.properties.scroll_amount).toMatchObject({ type: 'integer', minimum: -50000, maximum: 50000 });
+    expect(schema.properties.wait_ms).toMatchObject({ type: 'integer', minimum: 1, maximum: 30000 });
   });
 
   it('teaches agents to inspect and find elements before guessing selectors', () => {
@@ -60,5 +65,15 @@ describe('BrowserAgentTool', () => {
     expect(script).toContain('const maxItems = 100');
     expect(script).toContain('matches');
     expect(script).toContain('selectorFor');
+  });
+
+  it('normalizes browser wait durations to the declared bounded range', () => {
+    expect(normalizeBrowserWaitMs(undefined)).toBe(1000);
+    expect(normalizeBrowserWaitMs(1)).toBe(1);
+    expect(normalizeBrowserWaitMs(30000)).toBe(30000);
+    expect(() => normalizeBrowserWaitMs(0)).toThrow('wait_ms must be between 1 and 30000');
+    expect(() => normalizeBrowserWaitMs(30001)).toThrow('wait_ms must be between 1 and 30000');
+    expect(() => normalizeBrowserWaitMs(1.5)).toThrow('wait_ms must be an integer');
+    expect(() => normalizeBrowserWaitMs('1000')).toThrow('wait_ms must be an integer');
   });
 });

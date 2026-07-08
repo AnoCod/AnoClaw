@@ -42,7 +42,7 @@
 | `SkillInspectTool.ts` | `SkillInspect` | Memory & Skills | Safe | SubAgent |
 | `BrowserAgentTool.ts` | `Browser` | Browser | Medium | SubAgent |
 | `ApiCallTool.ts` | `ApiCall` | System | High | SubAgent |
-| `RestartServerTool.ts` | `RestartServer` | System | High | SubAgent |
+| `RestartServerTool.ts` | `RestartServer` | System | Critical | SubAgent |
 
 ---
 
@@ -872,14 +872,25 @@ Makes bounded internal API calls to AnoClaw endpoints, with endpoint/tool discov
 
 ### RestartServerTool — `RestartServer`
 
-Restarts the AnoClaw server process. Requires user confirmation due to destructive nature.
+Restarts the AnoClaw desktop process with a checkpoint so the current session can resume safely. Requires user confirmation due to destructive nature.
 
 | Property | Value |
 |---|---|
-| Risk | `High` |
+| Risk | `Critical` |
 | InterruptBehavior | `Block` |
 
-**Parameters:** None (empty object).
+**Parameters:**
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `resumeMessage` | string | ✓ | Message to restore context after restart; max 2000 chars |
+| `dry_run` | boolean | | Validate and preview the checkpoint without writing it or restarting |
+| `delay_ms` | integer | | Delay before relaunch after result flush; default `100`, max `10000` |
+
+**Reliability notes:**
+- Inputs are trimmed and bounded; unexpected parameters are rejected.
+- Checkpoints are written atomically to `data/restart-checkpoint.json`.
+- Non-Electron runtimes fail with structured `unsupported_runtime` feedback instead of exiting the process.
+- Results include structured `restartId`, checkpoint path, delay, task ID, and scheduled status.
 
 ---
 

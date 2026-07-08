@@ -17,6 +17,7 @@ import { MemorySaveTool } from '../builtin/MemorySaveTool.js';
 import { MemorySearchTool } from '../builtin/MemorySearchTool.js';
 import { PlanTool } from '../builtin/PlanTool.js';
 import { ReadTool } from '../builtin/ReadTool.js';
+import { RestartServerTool } from '../builtin/RestartServerTool.js';
 import { SkillInspectTool } from '../builtin/SkillInspectTool.js';
 import { SkillListTool } from '../builtin/SkillListTool.js';
 import { SkillMatchingTool } from '../builtin/SkillMatchingTool.js';
@@ -235,6 +236,30 @@ describe('native tool parameter schemas', () => {
       path: '/api/v1/items',
       timeout_ms: 99,
     })?.errorMessage).toContain('expected >= 100');
+  });
+
+  it('exposes RestartServer checkpoint and delay bounds', () => {
+    const tool = new RestartServerTool();
+
+    expect(ToolPipeline.validateParams(tool, {
+      resumeMessage: 'Continue after rebuilding the server.',
+      dry_run: true,
+      delay_ms: 0,
+    })).toBeNull();
+
+    expect(ToolPipeline.validateParams(tool, {
+      resumeMessage: 'Continue after rebuilding the server.',
+      delay_ms: 10001,
+    })?.errorMessage).toContain('expected <= 10000');
+
+    expect(ToolPipeline.validateParams(tool, {
+      resumeMessage: '   ',
+    })?.errorMessage).toContain('Invalid format');
+
+    expect(ToolPipeline.validateParams(tool, {
+      resumeMessage: 'Continue after rebuilding the server.',
+      typo: true,
+    })?.errorMessage).toContain('Unexpected parameter');
   });
 
   it('exposes todo and plan size/shape bounds', () => {

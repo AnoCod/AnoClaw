@@ -48,7 +48,7 @@ const USER_VISIBLE_PATTERNS = [
 
 /** Five-stage execution pipeline interfaces. Each stage can short-circuit with a ToolResult. */
 export interface PipelineStages {
-  /** Stage 0: Zod schema validation. Returns ToolResult if invalid (short-circuits). */
+  /** Stage 0: JSON schema validation. Returns ToolResult if invalid (short-circuits). */
   validateParams(tool: Tool, params: Record<string, unknown>): ToolResult | null;
   /** Stage 1: Security check (role, confirmation). Returns ToolResult if blocked. */
   securityCheck(tool: Tool, params: Record<string, unknown>, ctx: ExecutionContext): ToolResult | null;
@@ -65,6 +65,21 @@ export interface PipelineStages {
 export interface AllowedPrompt {
   tool: string;
   prompt: string;
+}
+
+interface JsonSchemaNode {
+  type?: string | string[];
+  properties?: Record<string, JsonSchemaNode>;
+  required?: string[];
+  items?: JsonSchemaNode;
+  enum?: unknown[];
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  minItems?: number;
+  maxItems?: number;
+  additionalProperties?: boolean | JsonSchemaNode;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -140,45 +155,11 @@ export class ToolPipeline {
     tool: Tool,
     params: Record<string, unknown>,
   ): ToolResult | null {
-    const schema = tool.parametersSchema() as Record<string, unknown> | undefined;
-    if (!schema || !schema.required || !schema.properties) return null;
+    const schema = tool.parametersSchema() as JsonSchemaNode | undefined;
+    if (!schema || (!schema.required && !schema.properties && !schema.type)) return null;
 
-    const required = schema.required as string[];
-    const properties = schema.properties as Record<string, Record<string, unknown>>;
-
-    // Check required fields
-    for (const field of required) {
-      if (!(field in params) || params[field] === undefined || params[field] === null) {
-        return makeError(`Missing required parameter: "${field}"`, { toolCallId: '' });
-      }
-    }
-
-    // Validate types and constraints
-    for (const [key, prop] of Object.entries(properties)) {
-      const value = params[key];
-      if (value === undefined || value === null) continue; // Skip optional missing fields
-
-      const expectedType = prop.type as string | undefined;
-      if (expectedType) {
-        const actualType = Array.isArray(value) ? 'array' : typeof value;
-        if (actualType !== expectedType) {
-          return makeError(
-            `Invalid type for parameter "${key}": expected ${expectedType}, got ${actualType}`,
-            { toolCallId: '' },
-          );
-        }
-      }
-
-      // Check enum constraints
-      if (prop.enum && Array.isArray(prop.enum) && !prop.enum.includes(value)) {
-        return makeError(
-          `Invalid value for parameter "${key}": "${String(value)}" not in [${prop.enum.join(', ')}]`,
-          { toolCallId: '' },
-        );
-      }
-    }
-
-    return null;
+    const validationError = validateJsonSchemaNode(schema, params, '');
+    return validationError ? makeError(validationError, { toolCallId: '' }) : null;
   }
 
   static securityCheck(
@@ -477,4 +458,129 @@ function normalizePromptText(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function validateJsonSchemaNode(schema: JsonSchemaNode, value: unknown, pathName: string): string | null {
+  const expectedTypes = normalizeExpectedTypes(schema.type);
+  if (expectedTypes.length > 0 && !expectedTypes.some((type) => matchesJsonType(value, type))) {
+    return `Invalid type for parameter "${formatParamPath(pathName)}": expected ${expectedTypes.join(' or ')}, got ${actualJsonType(value)}`;
+  }
+
+  if (schema.enum && Array.isArray(schema.enum) && !schema.enum.includes(value)) {
+    return `Invalid value for parameter "${formatParamPath(pathName)}": "${String(value)}" not in [${schema.enum.join(', ')}]`;
+  }
+
+  if (typeof value === 'string') {
+    if (typeof schema.minLength === 'number' && value.length < schema.minLength) {
+      return `Invalid length for parameter "${formatParamPath(pathName)}": expected at least ${schema.minLength} characters, got ${value.length}`;
+    }
+    if (typeof schema.maxLength === 'number' && value.length > schema.maxLength) {
+      return `Invalid length for parameter "${formatParamPath(pathName)}": expected at most ${schema.maxLength} characters, got ${value.length}`;
+    }
+  }
+
+  if (typeof value === 'number') {
+    if (typeof schema.minimum === 'number' && value < schema.minimum) {
+      return `Invalid value for parameter "${formatParamPath(pathName)}": expected >= ${schema.minimum}, got ${value}`;
+    }
+    if (typeof schema.maximum === 'number' && value > schema.maximum) {
+      return `Invalid value for parameter "${formatParamPath(pathName)}": expected <= ${schema.maximum}, got ${value}`;
+    }
+  }
+
+  if (Array.isArray(value)) {
+    if (typeof schema.minItems === 'number' && value.length < schema.minItems) {
+      return `Invalid item count for parameter "${formatParamPath(pathName)}": expected at least ${schema.minItems}, got ${value.length}`;
+    }
+    if (typeof schema.maxItems === 'number' && value.length > schema.maxItems) {
+      return `Invalid item count for parameter "${formatParamPath(pathName)}": expected at most ${schema.maxItems}, got ${value.length}`;
+    }
+    if (schema.items) {
+      for (let index = 0; index < value.length; index++) {
+        const itemError = validateJsonSchemaNode(schema.items, value[index], `${pathName}[${index}]`);
+        if (itemError) return itemError;
+      }
+    }
+  }
+
+  if (isJsonObject(value)) {
+    const properties = schema.properties || {};
+    const required = schema.required || [];
+
+    for (const field of required) {
+      if (!Object.prototype.hasOwnProperty.call(value, field) || value[field] === undefined || value[field] === null) {
+        return `Missing required parameter: "${joinParamPath(pathName, field)}"`;
+      }
+    }
+
+    for (const [key, propSchema] of Object.entries(properties)) {
+      const child = value[key];
+      if (child === undefined || child === null) continue;
+      const childError = validateJsonSchemaNode(propSchema, child, joinParamPath(pathName, key));
+      if (childError) return childError;
+    }
+
+    const additionalProperties = schema.additionalProperties;
+    if (additionalProperties === false) {
+      const allowed = new Set(Object.keys(properties));
+      for (const key of Object.keys(value)) {
+        if (!allowed.has(key)) {
+          return `Unexpected parameter: "${joinParamPath(pathName, key)}"`;
+        }
+      }
+    } else if (additionalProperties && typeof additionalProperties === 'object') {
+      for (const key of Object.keys(value)) {
+        if (Object.prototype.hasOwnProperty.call(properties, key)) continue;
+        const additionalError = validateJsonSchemaNode(additionalProperties, value[key], joinParamPath(pathName, key));
+        if (additionalError) return additionalError;
+      }
+    }
+  }
+
+  return null;
+}
+
+function normalizeExpectedTypes(type: string | string[] | undefined): string[] {
+  if (!type) return [];
+  return Array.isArray(type) ? type : [type];
+}
+
+function matchesJsonType(value: unknown, expectedType: string): boolean {
+  switch (expectedType) {
+    case 'array':
+      return Array.isArray(value);
+    case 'object':
+      return isJsonObject(value);
+    case 'integer':
+      return typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value);
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value);
+    case 'string':
+      return typeof value === 'string';
+    case 'boolean':
+      return typeof value === 'boolean';
+    case 'null':
+      return value === null;
+    default:
+      return true;
+  }
+}
+
+function actualJsonType(value: unknown): string {
+  if (Array.isArray(value)) return 'array';
+  if (value === null) return 'null';
+  if (typeof value === 'number' && !Number.isFinite(value)) return 'non-finite number';
+  return typeof value;
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function joinParamPath(parent: string, child: string): string {
+  return parent ? `${parent}.${child}` : child;
+}
+
+function formatParamPath(pathName: string): string {
+  return pathName || 'parameters';
 }

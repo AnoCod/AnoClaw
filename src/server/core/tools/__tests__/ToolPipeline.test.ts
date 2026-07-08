@@ -118,6 +118,121 @@ describe('ToolPipeline.validateParams', () => {
     expect(ToolPipeline.validateParams(tool, { items: 'not-array' })).not.toBeNull();
     expect(ToolPipeline.validateParams(tool, { items: [1, 2] })).toBeNull();
   });
+
+  it('validates required fields inside array object items', () => {
+    const tool = mockTool({
+      parametersSchema: {
+        type: 'object',
+        required: ['questions'],
+        properties: {
+          questions: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['question', 'header'],
+              properties: {
+                question: { type: 'string' },
+                header: { type: 'string' },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const r = ToolPipeline.validateParams(tool, { questions: [{ question: 'Proceed?' }] });
+
+    expect(r).not.toBeNull();
+    expect(r!.errorMessage).toContain('questions[0].header');
+  });
+
+  it('validates nested array item types', () => {
+    const tool = mockTool({
+      parametersSchema: {
+        type: 'object',
+        properties: {
+          questions: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                options: {
+                  type: 'array',
+                  items: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        required: [],
+      },
+    });
+
+    const r = ToolPipeline.validateParams(tool, {
+      questions: [{ options: ['yes', 2] }],
+    });
+
+    expect(r).not.toBeNull();
+    expect(r!.errorMessage).toContain('questions[0].options[1]');
+    expect(r!.errorMessage).toContain('expected string');
+  });
+
+  it('validates string length and numeric ranges when schemas declare them', () => {
+    const tool = mockTool({
+      parametersSchema: {
+        type: 'object',
+        properties: {
+          label: { type: 'string', minLength: 3, maxLength: 8 },
+          count: { type: 'number', minimum: 1, maximum: 5 },
+        },
+        required: ['label', 'count'],
+      },
+    });
+
+    const short = ToolPipeline.validateParams(tool, { label: 'ab', count: 3 });
+    expect(short).not.toBeNull();
+    expect(short!.errorMessage).toContain('at least 3');
+
+    const large = ToolPipeline.validateParams(tool, { label: 'valid', count: 6 });
+    expect(large).not.toBeNull();
+    expect(large!.errorMessage).toContain('expected <= 5');
+
+    expect(ToolPipeline.validateParams(tool, { label: 'valid', count: 5 })).toBeNull();
+  });
+
+  it('allows arbitrary object content when an object schema leaves properties open', () => {
+    const tool = mockTool({
+      parametersSchema: {
+        type: 'object',
+        properties: {
+          params: { type: 'object' },
+        },
+        required: ['params'],
+      },
+    });
+
+    expect(ToolPipeline.validateParams(tool, {
+      params: { id: 'agent-1', nested: { ok: true }, count: 2 },
+    })).toBeNull();
+  });
+
+  it('rejects unexpected object properties only when additionalProperties is false', () => {
+    const tool = mockTool({
+      parametersSchema: {
+        type: 'object',
+        properties: {
+          known: { type: 'string' },
+        },
+        additionalProperties: false,
+        required: ['known'],
+      },
+    });
+
+    const r = ToolPipeline.validateParams(tool, { known: 'ok', surprise: true });
+
+    expect(r).not.toBeNull();
+    expect(r!.errorMessage).toContain('Unexpected parameter: "surprise"');
+  });
 });
 
 // ── Stage 1: securityCheck ──

@@ -7,6 +7,7 @@ const CENTER = { x: 200, y: 200 };
 const ORBIT_RADIUS = 100;
 const HOVER_RADIUS = 105;
 const CLIP_LIMIT = 4000;
+const AUTO_CAPTURE_INTERVAL_MS = 850;
 
 const ICONS = {
   plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke-width="2" stroke-linecap="round"/></svg>',
@@ -30,7 +31,11 @@ const DEFAULT_STATE = {
 let currentState = { ...DEFAULT_STATE };
 let hoverActive = false;
 let panelOpen = false;
-let clipboardPoll = null;
+let statePoll = null;
+let baselineClipboard = null;
+let lastClipboardText = '';
+let capturedClipboardText = '';
+let capturePulseTimer = null;
 
 const els = {
   body: document.body,
@@ -45,6 +50,7 @@ const els = {
   quickSend: document.getElementById('quickSend'),
   clipRefresh: document.getElementById('clipRefresh'),
   clipPreview: document.getElementById('clipPreview'),
+  clipTitle: document.querySelector('.clip-head span'),
   recentList: document.getElementById('recentList'),
 };
 
@@ -130,15 +136,22 @@ function renderPanel() {
   const task = currentState.currentTask || {};
   const activeTitle = cleanText(currentState.activeTitle || task.title || 'Ready', 42);
   const clipboardText = cleanText(currentState.clipboardText || '', CLIP_LIMIT);
+  const selectionCaptured = Boolean(clipboardText && capturedClipboardText && clipboardText === capturedClipboardText);
 
   els.body.dataset.phase = phase;
+  els.body.classList.toggle('selection-captured', selectionCaptured);
   els.helperTitle.textContent = activeTitle;
   els.statusPill.textContent = phaseLabel(phase);
-  els.statusDetail.textContent = cleanText(task.detail || `${currentState.runningCount} running, ${currentState.waitingCount} waiting`, 70);
+  els.statusDetail.textContent = selectionCaptured
+    ? 'Selected text copied. Choose an action below.'
+    : cleanText(task.detail || `${currentState.runningCount} running, ${currentState.waitingCount} waiting`, 70);
   els.clipPreview.textContent = clipboardText
     ? clipboardText.slice(0, 190) + (clipboardText.length > 190 ? '...' : '')
     : 'Copy selected text to unlock actions.';
   els.panel.classList.toggle('has-clip', Boolean(clipboardText));
+  els.panel.classList.toggle('is-selection-captured', selectionCaptured);
+  if (els.clipTitle) els.clipTitle.textContent = selectionCaptured ? 'Selection captured' : 'Clipboard text';
+  els.quickInput.placeholder = clipboardText ? 'Ask about selected text...' : 'Ask quickly...';
 
   els.recentList.innerHTML = '';
   (currentState.recentSessions || []).slice(0, 3).forEach((session) => {
@@ -161,11 +174,25 @@ async function refreshState() {
   try {
     const next = await api?.floatingBallGetState?.();
     currentState = { ...DEFAULT_STATE, ...(next || {}) };
+    detectClipboardCapture(currentState.clipboardText || '');
     render();
   } catch {
     currentState = { ...currentState, connection: 'disconnected' };
     render();
   }
+}
+
+function detectClipboardCapture(rawText) {
+  const text = String(rawText || '').trim().slice(0, CLIP_LIMIT);
+  if (baselineClipboard === null) {
+    baselineClipboard = text;
+    lastClipboardText = text;
+    return;
+  }
+  if (!text || text === lastClipboardText) return;
+  lastClipboardText = text;
+  if (text === baselineClipboard) return;
+  showSelectionCapture(text);
 }
 
 function sendAction(action, data) {
@@ -190,6 +217,7 @@ function sendTextAction(kind) {
     text,
     question: cleanText(els.quickInput.value, 600),
   });
+  clearSelectionCapture(false);
 }
 
 function setHoverActive(active) {
@@ -199,20 +227,42 @@ function setHoverActive(active) {
   els.body.classList.toggle('hover', active);
 }
 
-function setPanelOpen(open) {
+function showSelectionCapture(text) {
+  capturedClipboardText = text;
+  els.body.classList.add('selection-captured');
+  els.body.classList.add('capture-pulse');
+  if (capturePulseTimer) clearTimeout(capturePulseTimer);
+  capturePulseTimer = setTimeout(() => {
+    els.body.classList.remove('capture-pulse');
+    capturePulseTimer = null;
+  }, 4200);
+  setPanelOpen(true, { focusInput: false });
+}
+
+function clearSelectionCapture(renderAfter = true) {
+  capturedClipboardText = '';
+  els.body.classList.remove('selection-captured', 'capture-pulse');
+  if (capturePulseTimer) {
+    clearTimeout(capturePulseTimer);
+    capturePulseTimer = null;
+  }
+  if (renderAfter) renderPanel();
+}
+
+function setPanelOpen(open, options = {}) {
   panelOpen = open;
   els.body.classList.toggle('panel-open', open);
   setHoverActive(false);
+  if (!open) clearSelectionCapture(false);
   if (open) {
     refreshState();
-    els.quickInput.focus();
-    if (!clipboardPoll) {
-      clipboardPoll = setInterval(refreshState, 1400);
-    }
-  } else if (clipboardPoll) {
-    clearInterval(clipboardPoll);
-    clipboardPoll = null;
+    if (options.focusInput !== false) els.quickInput.focus();
   }
+}
+
+function startStatePolling() {
+  if (statePoll) return;
+  statePoll = setInterval(refreshState, AUTO_CAPTURE_INTERVAL_MS);
 }
 
 document.addEventListener('mousemove', (event) => {
@@ -225,13 +275,13 @@ document.addEventListener('mouseleave', () => setHoverActive(false));
 
 els.ballButton?.addEventListener('click', (event) => {
   event.stopPropagation();
-  setPanelOpen(!panelOpen);
+  setPanelOpen(!panelOpen, { focusInput: !panelOpen });
 });
 
 els.ballButton?.addEventListener('contextmenu', (event) => {
   event.preventDefault();
   event.stopPropagation();
-  setPanelOpen(true);
+  setPanelOpen(true, { focusInput: true });
 });
 
 els.panelClose?.addEventListener('click', () => setPanelOpen(false));
@@ -252,7 +302,9 @@ document.querySelectorAll('[data-text-action]').forEach((button) => {
 
 api?.onFloatingBallStateChanged?.((state) => {
   currentState = { ...DEFAULT_STATE, ...(state || {}) };
+  detectClipboardCapture(currentState.clipboardText || '');
   render();
 });
 
 refreshState();
+startStatePolling();

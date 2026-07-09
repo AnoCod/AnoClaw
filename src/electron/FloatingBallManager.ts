@@ -15,6 +15,7 @@
 //   floating-ball-state:    status snapshot for the floating helper
 
 import * as path from 'path';
+import { execFile } from 'child_process';
 import { app, clipboard, screen, BrowserWindow as BwType, IpcMain } from 'electron';
 import { WindowManager } from './WindowManager.js';
 
@@ -42,6 +43,9 @@ export class FloatingBallManager {
   private _ipcMain: IpcMain | null = null;
   private _ipcInstalled = false;
   private _sessionProvider: (() => Promise<FloatingBallSession[]>) | null = null;
+  private _clipboardPoll: ReturnType<typeof setInterval> | null = null;
+  private _clipboardPollBusy = false;
+  private _nativeClipboardUnavailable = false;
   private _state: FloatingBallState = {
     activeSessionId: null,
     activeTitle: null,
@@ -123,6 +127,7 @@ export class FloatingBallManager {
     if (!this._ball || this._ball.isDestroyed?.()) {
       this._createBall();
     } else if (this._ball.isVisible()) {
+      this._startClipboardPolling();
       return; // Already visible
     }
     // At this point _ball is guaranteed non-null
@@ -148,6 +153,8 @@ export class FloatingBallManager {
     ball.setPosition(posX, posY);
     ball.show();
     ball.focus();
+    this._pushStateToBall();
+    this._startClipboardPolling();
   }
 
   /** Animate main window shrinking to a tiny square, then show ball. */
@@ -183,6 +190,7 @@ export class FloatingBallManager {
 
   /** Hide the ball window without destroying it. */
   hide(): void {
+    this._stopClipboardPolling();
     if (this._ball && !this._ball.isDestroyed?.()) this._ball.hide();
   }
 
@@ -193,6 +201,7 @@ export class FloatingBallManager {
 
   /** Close and null the ball window. */
   destroy(): void {
+    this._stopClipboardPolling();
     if (this._ball && !this._ball.isDestroyed?.()) this._ball.close();
     this._ball = null;
   }
@@ -208,11 +217,15 @@ export class FloatingBallManager {
       backgroundColor: '#00000000',
       webPreferences: {
         preload: path.join(app.getAppPath(), 'dist', 'electron', 'preload.cjs'),
-        backgroundThrottling: true,
+        backgroundThrottling: false,
       },
     });
 
     this._ball.loadURL(`http://localhost:${port}/floating-ball/index.html`);
+    this._ball.webContents.on('did-finish-load', () => {
+      this._pushStateToBall();
+      this._startClipboardPolling();
+    });
     this._ball.setIgnoreMouseEvents(false);
   }
 
@@ -227,12 +240,7 @@ export class FloatingBallManager {
       }
     }
 
-    let clipboardText = '';
-    try {
-      clipboardText = clipboard.readText().trim().slice(0, 4000);
-    } catch {
-      clipboardText = '';
-    }
+    const clipboardText = await this._readClipboardText();
 
     return {
       ...this._state,
@@ -241,14 +249,84 @@ export class FloatingBallManager {
     };
   }
 
+  private async _readClipboardText(): Promise<string> {
+    let electronText = '';
+    try {
+      electronText = clipboard.readText('clipboard').trim().slice(0, 4000);
+    } catch {
+      electronText = '';
+    }
+
+    if (process.platform !== 'win32' || this._nativeClipboardUnavailable) return electronText;
+
+    try {
+      const nativeText = await this._readWindowsClipboardText();
+      return nativeText.trim().slice(0, 4000) || electronText;
+    } catch {
+      this._nativeClipboardUnavailable = true;
+      return electronText;
+    }
+  }
+
+  private _readWindowsClipboardText(): Promise<string> {
+    const script = [
+      '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()',
+      '$text = Get-Clipboard -Raw -ErrorAction SilentlyContinue',
+      'if ($null -ne $text) { [Console]::Out.Write($text) }',
+    ].join('; ');
+    const args = ['-NoProfile', '-NonInteractive', '-Command', script];
+    const options = { windowsHide: true, timeout: 2200, maxBuffer: 512 * 1024, encoding: 'utf8' as BufferEncoding };
+
+    return new Promise((resolve, reject) => {
+      execFile('pwsh', args, options, (pwshErr, pwshStdout) => {
+        if (!pwshErr) {
+          resolve(pwshStdout || '');
+          return;
+        }
+        execFile('powershell.exe', args, options, (powershellErr, powershellStdout) => {
+          if (powershellErr) {
+            reject(powershellErr);
+            return;
+          }
+          resolve(powershellStdout || '');
+        });
+      });
+    });
+  }
+
   private _pushStateToBall(): void {
     if (!this._ball || this._ball.isDestroyed?.()) return;
     this._buildState()
       .then((state) => {
-        if (!this._ball || this._ball.isDestroyed?.()) return;
-        this._ball.webContents.send('floating-ball-state-changed', state);
+        this._sendStateToBall(state);
       })
       .catch(() => {});
+  }
+
+  private _sendStateToBall(state: FloatingBallState): void {
+    if (!this._ball || this._ball.isDestroyed?.()) return;
+    this._ball.webContents.send('floating-ball-state-changed', state);
+  }
+
+  private _startClipboardPolling(): void {
+    if (this._clipboardPoll) return;
+    this._clipboardPoll = setInterval(() => {
+      if (this._clipboardPollBusy) return;
+      this._clipboardPollBusy = true;
+      this._buildState()
+        .then((state) => this._sendStateToBall(state))
+        .catch(() => {})
+        .finally(() => {
+          this._clipboardPollBusy = false;
+        });
+    }, 1200);
+  }
+
+  private _stopClipboardPolling(): void {
+    if (!this._clipboardPoll) return;
+    clearInterval(this._clipboardPoll);
+    this._clipboardPoll = null;
+    this._clipboardPollBusy = false;
   }
 
   /** Handle satellite action: show main window and dispatch new-session / open-session event. */

@@ -95,11 +95,18 @@
 
 6. Selection Helper
 
-   FloatingBall 可以成为选中文本后的最短 AI 入口。第一版采用可靠的剪贴板通道：用户在任意应用里框选文本并复制，球体面板自动识别剪贴板文本，提供：
+   FloatingBall 可以成为选中文本后的最短 AI 入口。V2 采用可靠的剪贴板通道：用户在任意应用里框选文本并复制，主进程会在 FloatingBall 可见时检测剪贴板变化并主动推送给小窗。FloatingBall 会把启动时已有的剪贴板内容当作基线，只在检测到新复制的文本时主动展开小面板，并提供：
    - Translate：翻译成中文，保留代码、路径、专有名词。
    - Polish：按原语言润色，让文字更清晰专业。
    - Summarize：总结要点和下一步建议。
    - Ask Agent：把文本连同用户的一句话问题发给当前会话。
+
+   这个版本的交互原则：
+   - 不读取陈旧剪贴板来打扰用户。
+   - 只有新复制的文本触发 “Selection captured” 提示。
+   - 小面板明确展示将发送给 agent 的文本预览。
+   - 捕获状态会保留到用户关闭面板或点击文本动作，避免提示一闪而过。
+   - 发送前仍由用户点击 Translate / Polish / Summarize / Ask Agent。
 
    后续增强：
    - Workspace editor selection bridge：编辑器选区变化后直接同步到 FloatingBall。

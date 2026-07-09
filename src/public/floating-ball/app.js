@@ -53,6 +53,7 @@ const els = {
   panel: document.getElementById('helperPanel'),
   panelClose: document.getElementById('panelClose'),
   ballButton: document.getElementById('ballButton'),
+  ballStatus: document.getElementById('ballStatus'),
   helperTitle: document.getElementById('helperTitle'),
   statusPill: document.getElementById('statusPill'),
   statusDetail: document.getElementById('statusDetail'),
@@ -119,6 +120,30 @@ function goalBadgeText(status) {
     case 'active':
     default: return 'Goal';
   }
+}
+
+function statusCount(value) {
+  const count = Number(value || 0);
+  if (!Number.isFinite(count) || count <= 0) return '';
+  return count > 99 ? '99+' : String(count);
+}
+
+function ballStatusForState(state, phase) {
+  const goal = currentGoal(state);
+  if (state.waitingCount > 0 || goal?.status === 'blocked') {
+    const count = statusCount(state.waitingCount || 1);
+    return { text: count, kind: 'waiting', label: `${count} waiting` };
+  }
+  if (state.runningCount > 0) {
+    const count = statusCount(state.runningCount);
+    return { text: count, kind: 'running', label: `${count} running` };
+  }
+  if (goal?.status === 'active') return { text: 'G', kind: 'goal', label: 'Goal active' };
+  if (goal?.status === 'paused') return { text: 'II', kind: 'paused', label: 'Goal paused' };
+  if (phase === 'failed') return { text: '!', kind: 'failed', label: 'Recent task failed' };
+  if (phase === 'disconnected') return { text: '!', kind: 'failed', label: 'AnoClaw offline' };
+  if (phase === 'done') return { text: 'OK', kind: 'done', label: 'Recent task completed' };
+  return { text: '', kind: 'idle', label: 'AnoClaw ready' };
 }
 
 function freshNotice() {
@@ -211,6 +236,7 @@ function renderPanel() {
   els.body.dataset.phase = phase;
   els.body.dataset.noticeKind = notice?.kind || '';
   els.body.classList.toggle('selection-captured', selectionCaptured);
+  renderBallStatus(phase);
   els.helperTitle.textContent = activeTitle;
   els.statusPill.textContent = notice
     ? notice.kind === 'error' ? 'Error' : notice.kind === 'success' ? 'Sent' : 'Info'
@@ -240,6 +266,17 @@ function renderPanel() {
 
   renderActivityOrRecent();
   scheduleNoticeExpiry(notice);
+}
+
+function renderBallStatus(phase) {
+  if (!els.ballStatus) return;
+  const status = ballStatusForState(currentState, phase);
+  els.ballStatus.textContent = status.text;
+  els.ballStatus.dataset.kind = status.kind;
+  els.ballStatus.classList.toggle('is-visible', Boolean(status.text));
+  const title = `${status.label}. Click to open AnoClaw helper.`;
+  els.ballButton.title = title;
+  els.ballButton.setAttribute('aria-label', title);
 }
 
 function scheduleNoticeExpiry(notice) {

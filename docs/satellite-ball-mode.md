@@ -32,6 +32,12 @@
 
    球体中心显示一个小数字：运行中任务数或等待项数量。
 
+   V1 已落地：
+   - 球体外圈按 idle/running/waiting/goal/paused/done/failed/offline 切换颜色和动画。
+   - 球体右下角状态徽标优先显示等待数量，其次显示运行任务数。
+   - 无计数但有 goal 时显示 `G`，暂停 goal 时显示 `II`，失败/离线显示 `!`，最近完成显示 `OK`。
+   - 小球 hover title / aria-label 同步当前状态，让不展开面板也能知道 AnoClaw 是否在工作或等待。
+
 2. Action satellites
 
    hover 或单击展开 4-6 个卫星按钮。默认只显示有意义的项：

@@ -180,6 +180,48 @@ body.panel-open .icon {
   margin-top: 18px;
 }
 
+.ball-status {
+  position: absolute;
+  right: -3px;
+  bottom: 1px;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  border: 1px solid rgba(255,255,255,0.16);
+  border-radius: 999px;
+  color: #f5f8fa;
+  background: color-mix(in srgb, var(--phase-color) 34%, #111418);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.32);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 850;
+  line-height: 1;
+  letter-spacing: 0;
+  pointer-events: none;
+}
+
+.ball-status.is-visible {
+  display: flex;
+}
+
+.ball-status[data-kind="waiting"],
+.ball-status[data-kind="failed"] {
+  color: #151719;
+  background: var(--phase-color);
+}
+
+.ball-status[data-kind="paused"] {
+  color: #d6dde3;
+  background: #30353b;
+}
+
+body.panel-open .ball-status {
+  right: 0;
+  bottom: 3px;
+}
+
 .satellites {
   position: fixed;
   inset: 0;

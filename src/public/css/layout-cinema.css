@@ -625,6 +625,15 @@
 .topbar-cinema .topbar-page-name {
   color: var(--cinema-text-tertiary);
 }
+.topbar-cinema .topbar-page-group {
+  display: inline-flex;
+  align-items: center;
+  align-self: stretch;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-width: 0;
+  -webkit-app-region: no-drag;
+}
 .topbar-cinema .topbar-status {
   display: flex;
   align-items: center;

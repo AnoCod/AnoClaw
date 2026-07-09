@@ -133,6 +133,14 @@ html[data-theme="dark"] .topbar-cinema {
   letter-spacing: 0;
 }
 
+html[data-theme="dark"] .topbar-cinema .topbar-page-group {
+  align-self: stretch;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: min(36vw, 320px);
+}
+
 html[data-theme="dark"] .topbar-cinema .topbar-page-name {
   display: inline-flex;
   align-items: center;
@@ -154,7 +162,7 @@ html[data-theme="dark"] .topbar-cinema [data-slot="titlebar-right"] {
 
 html[data-theme="dark"] .topbar-cinema .topbar-status {
   gap: 8px;
-  margin-left: auto;
+  margin-left: 0;
 }
 
 html[data-theme="dark"] .connection-status-dot.connected,
@@ -2497,23 +2505,31 @@ html[data-theme="dark"] .topbar-cinema {
   overflow: hidden;
 }
 
+html[data-theme="dark"] .topbar-cinema .topbar-page-group {
+  gap: 8px;
+  overflow: hidden;
+}
+
 html[data-theme="dark"] .topbar-cinema [data-slot="titlebar-left"] {
   min-width: 0;
   flex: 1 1 auto;
   overflow: hidden;
+  margin-left: 0 !important;
 }
 
 html[data-theme="dark"] .topbar-cinema .topbar-status {
   flex: 0 0 auto;
-  gap: 6px;
-  margin-left: 8px;
+  gap: 0;
+  margin-left: 2px;
 }
 
 html[data-theme="dark"] .topbar-cinema .topbar-page-switcher {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 7px;
-  height: 28px;
+  height: 27px;
+  min-width: 68px;
   line-height: 1;
 }
 
@@ -2689,7 +2705,8 @@ html[data-theme="dark"] .topbar-cinema {
 
 html[data-theme="dark"] .topbar-cinema .topbar-page-name {
   position: relative;
-  min-width: 90px;
+  flex: 0 0 auto;
+  min-width: 118px;
   background: var(--comfy-shell-bg) !important;
   border-right-color: var(--comfy-border) !important;
   color: #ffffff;

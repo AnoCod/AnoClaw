@@ -1,5 +1,5 @@
 // AnoClaw Frontend — Cinema Title Bar
-// 28px top status bar: page name, connection dot, page switcher menu.
+// 28px top status bar: page name, page switcher menu, connection dot.
 // Replaces old titlebar + NavigationDock combination.
 
 import { WSConnectionState } from '../viewmodel/WSClient.js';
@@ -33,7 +33,7 @@ const SVG_WIN_RESTORE = `<svg width="10" height="10" viewBox="0 0 24 24" aria-hi
 const SVG_WIN_CLOSE = `<svg width="10" height="10" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>`;
 
 /**
- * Cinema topbar: page name label (left), [titlebar-left slot], status dot + PAGES dropdown (right),
+ * Cinema topbar: page name + PAGES dropdown (left), [titlebar-left slot], status dot,
  * [titlebar-right slot], and window control buttons (minimize/maximize/close).
  *
  * PAGES dropdown merges KERNEL_PAGES (sessions, agents, skills, memory, settings) with
@@ -114,15 +114,30 @@ export class TitleBar {
     const el = document.createElement('div');
     el.className = 'topbar-cinema';
 
+    const pageGroup = document.createElement('div');
+    pageGroup.className = 'topbar-page-group';
+
     const nameEl = document.createElement('span');
     nameEl.className = 'topbar-page-name';
     nameEl.textContent = 'SESSIONS';
-    el.appendChild(nameEl);
+    pageGroup.appendChild(nameEl);
+
+    const switcherBtn = document.createElement('button');
+    switcherBtn.className = 'topbar-page-switcher';
+    switcherBtn.setAttribute('aria-label', 'Open pages menu');
+    switcherBtn.innerHTML = '<span>Pages</span><span class="topbar-page-switcher-chevron" aria-hidden="true"></span>';
+    switcherBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this._togglePageSwitcher(switcherBtn);
+    });
+    pageGroup.appendChild(switcherBtn);
+
+    el.appendChild(pageGroup);
 
     // Slot: titlebar-left — after page name
     const leftSlot = document.createElement('div');
     leftSlot.setAttribute('data-slot', 'titlebar-left');
-    leftSlot.style.cssText = 'display:flex;align-items:center;gap:8px;margin-left:12px;-webkit-app-region:no-drag;';
+    leftSlot.style.cssText = 'display:flex;align-items:center;gap:8px;margin-left:8px;min-width:0;flex:1 1 auto;overflow:hidden;-webkit-app-region:no-drag;';
     el.appendChild(leftSlot);
     slotRegistry._onSlotReady('titlebar-left');
 
@@ -134,15 +149,6 @@ export class TitleBar {
     dot.title = 'No active session';
     statusGroup.appendChild(dot);
 
-    const switcherBtn = document.createElement('button');
-    switcherBtn.className = 'topbar-page-switcher';
-    switcherBtn.setAttribute('aria-label', 'Open pages menu');
-    switcherBtn.innerHTML = '<span>Pages</span><span class="topbar-page-switcher-chevron" aria-hidden="true"></span>';
-    switcherBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this._togglePageSwitcher(switcherBtn);
-    });
-    statusGroup.appendChild(switcherBtn);
     el.appendChild(statusGroup);
 
     // Slot: titlebar-right — before window controls

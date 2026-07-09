@@ -7,7 +7,7 @@
 import type { WsMessageHandler } from '../WsMessageRouter.js';
 import { WsMessageType } from '../../../../shared/types/ws-protocol.js';
 import { SessionManager } from '../../../core/session/SessionManager.js';
-import { normalizePermissionMode, permissionModeToUi } from '../../../core/agent/PermissionModePolicy.js';
+import { permissionModeToUi, resolveSessionPermissionMode } from '../../../core/agent/PermissionModePolicy.js';
 
 export const setSessionModeHandler: WsMessageHandler = async (ctx) => {
   const sessionManager = SessionManager.getInstance();
@@ -21,7 +21,7 @@ export const setSessionModeHandler: WsMessageHandler = async (ctx) => {
     return;
   }
 
-  const permissionMode = normalizePermissionMode(ctx.data.mode);
+  const permissionMode = resolveSessionPermissionMode(sessionManager, ctx.sessionId, ctx.data.mode);
   const effortMode = typeof ctx.data.effort === 'boolean'
     ? ctx.data.effort
     : session.metadata.effortMode !== false;

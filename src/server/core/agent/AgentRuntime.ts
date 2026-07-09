@@ -192,6 +192,10 @@ export class AgentRuntime extends EventEmitter {
     // Register heartbeat for this session
     SupervisionManager.getInstance().heartbeat(sessionId);
 
+    const sessionManager = SessionManager.getInstance();
+    const resolvedPermissionMode = resolveSessionPermissionMode(sessionManager, sessionId, options.permissionMode);
+    const resolvedEffort = resolveSessionEffort(sessionManager, sessionId, options.effort);
+
     // Build AgentLoop configuration from agent config
     const loopConfig: AgentLoopConfig = {
       agentId: agent.id,
@@ -199,8 +203,8 @@ export class AgentRuntime extends EventEmitter {
       maxTurns: agent.maxTurns,
       temperature: agent.temperature,
       contextWindow: agent.contextWindow,
-      permissionMode: options.permissionMode,
-      effort: options.effort,
+      permissionMode: resolvedPermissionMode,
+      effort: resolvedEffort,
       extraAllowedTools: taskResolutionExtraTools(taskResolution),
     };
 
@@ -231,7 +235,6 @@ export class AgentRuntime extends EventEmitter {
       runMemoryLifecycle(agentId, sessionId).catch(() => {});
 
       // Goal mode: keep advancing the active root-session goal after completion.
-      const sessionManager = SessionManager.getInstance();
       yield* this._runGoalMode(sessionId, sessionManager, loopConfig, signal);
 
     } catch (err) {

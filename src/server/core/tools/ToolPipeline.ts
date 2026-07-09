@@ -169,19 +169,6 @@ export class ToolPipeline {
     params: Record<string, unknown>,
     ctx: ExecutionContext,
   ): ToolResult | null {
-    // Allowed prompts (from ExitPlanMode) bypass the confirmation prompt only
-    // when the concrete tool action exactly matches what the user approved.
-    const allowed = ToolPipeline._allowedPrompts.get(ctx.sessionId);
-    const hasApprovedPrompt = allowed ? matchesAllowedPrompt(tool, params, allowed) : false;
-
-    // Delegate to the tool's own requiresConfirmation() — single source of truth
-    if (!hasApprovedPrompt && tool.requiresConfirmation(ctx)) {
-      return makeError(
-        `Tool "${tool.name()}" requires user confirmation (risk: ${tool.riskLevel()}).`,
-        { toolCallId: '' },
-      );
-    }
-
     const mode = ctx.mode;
 
     // Block non-read-only tools in read-only mode
@@ -203,6 +190,21 @@ export class ToolPipeline {
           { toolCallId: '' },
         );
       }
+    }
+
+    // Allowed prompts (from ExitPlanMode) bypass the confirmation prompt only
+    // when the concrete tool action exactly matches what the user approved.
+    const allowed = ToolPipeline._allowedPrompts.get(ctx.sessionId);
+    const hasApprovedPrompt = allowed ? matchesAllowedPrompt(tool, params, allowed) : false;
+    const hasAutoEditApproval = isAutoEditExecutionMode(mode);
+
+    // Delegate to the tool's own requiresConfirmation() unless the execution
+    // mode itself is an explicit Auto Edit grant.
+    if (!hasApprovedPrompt && !hasAutoEditApproval && tool.requiresConfirmation(ctx)) {
+      return makeError(
+        `Tool "${tool.name()}" requires user confirmation (risk: ${tool.riskLevel()}).`,
+        { toolCallId: '' },
+      );
     }
 
     // ── Workspace boundary check ──
@@ -518,6 +520,12 @@ function waitForRetryDelay(
     timeout = setTimeout(() => settle(null), delayMs);
     signal?.addEventListener('abort', onAbort, { once: true });
   });
+}
+
+function isAutoEditExecutionMode(mode: unknown): boolean {
+  if (typeof mode !== 'string') return false;
+  const key = mode.trim().toLowerCase().replace(/-/g, '_');
+  return key === 'auto_edit' || key === 'autoedit';
 }
 
 function makePipelineFailure(

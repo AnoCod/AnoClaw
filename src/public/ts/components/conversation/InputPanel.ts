@@ -74,6 +74,10 @@ export class InputPanel {
     convVM.on('goalChanged', (goal: unknown) => {
       this._goal = goal as GoalState | null;
       this._modeSelector.setGoal(this._goal as any);
+      if (this._goal?.status === 'active') {
+        this._currentMode = 'auto-edit';
+        this._modeSelector.setMode('auto-edit' as any, false);
+      }
       this._renderGoalCard();
     });
 
@@ -583,7 +587,7 @@ export class InputPanel {
     this._renderAttachments();
     if (this.onSend) {
       ClientLogger.ui.debug('Input send', { len: content.length, attachments: attachments.length });
-      this.onSend(content, this._currentMode, attachments);
+      this.onSend(content, this._effectiveSendMode(), attachments);
     }
   }
 
@@ -599,7 +603,7 @@ export class InputPanel {
       this._textarea.style.height = 'auto';
       this._slashPanel.close();
       if (this.onSend) {
-        this.onSend(INIT_PROTOCOL_PROMPT, this._currentMode, []);
+        this.onSend(INIT_PROTOCOL_PROMPT, this._effectiveSendMode(), []);
       }
       return true;
     }
@@ -619,6 +623,10 @@ export class InputPanel {
   }
   clear(): void { this._textarea.value = ''; this._textarea.style.height = 'auto'; }
   clearAttachments(): void { this._attachments = []; this._renderAttachments(); }
+
+  private _effectiveSendMode(): string {
+    return this._goal?.status === 'active' ? 'auto-edit' : this._currentMode;
+  }
 }
 
 

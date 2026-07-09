@@ -491,6 +491,21 @@ describe('ToolPipeline.securityCheck', () => {
     expect(ToolPipeline.securityCheck(tool, {}, ctx({ mode: 'auto_edit' }))).toBeNull();
   });
 
+  it('treats Auto-Edit mode as approval for high-risk tools', () => {
+    const tool = mockTool({
+      name: 'Bash',
+      isReadOnly: false,
+      riskLevel: RiskLevel.High,
+      requiresConfirmation: true,
+    });
+
+    expect(ToolPipeline.securityCheck(
+      tool,
+      { command: 'npm test' },
+      ctx({ mode: 'auto_edit', userConfirmed: false }),
+    )).toBeNull();
+  });
+
   it('treats PlanTool as file-changing in read_only mode', () => {
     const r = ToolPipeline.securityCheck(
       new PlanTool(),

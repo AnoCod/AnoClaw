@@ -31,7 +31,7 @@ export class ToolConfirmationQueue {
   }
 
   enqueue(request: ToolConfirmRequest): void {
-    if (this._autoApprover?.(request)) {
+    if (request.autoApprove === true || this._autoApprover?.(request)) {
       this._sendResponse(request.toolCallId, true);
       return;
     }

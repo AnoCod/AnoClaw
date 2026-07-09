@@ -3,9 +3,11 @@ import { registerChatHandlers } from '../ChatHandlers.js';
 import { WSMessageRouter } from '../../viewmodel/WSMessageRouter.js';
 import { ToastManager } from '../../ToastManager.js';
 import { slotRegistry } from '../../SlotRegistry.js';
+import { ToolConfirmationQueue } from '../../viewmodel/ToolConfirmationQueue.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
+  ToolConfirmationQueue.resetInstance();
 });
 
 describe('registerChatHandlers', () => {
@@ -70,5 +72,33 @@ describe('registerChatHandlers', () => {
     }, '*broadcast');
 
     expect(removeSpy).toHaveBeenCalledWith('cleanup-plugin');
+  });
+
+  it('forwards tool confirmations with the explicit backend session and auto-approve flag', () => {
+    const router = new WSMessageRouter();
+    const queue = ToolConfirmationQueue.getInstance();
+    const enqueueSpy = vi.spyOn(queue, 'enqueue').mockImplementation(() => {});
+
+    registerChatHandlers(
+      router,
+      { getAgent: vi.fn() } as any,
+      {} as any,
+    );
+
+    router.dispatch('tool_confirm_request', {
+      sessionId: 'goal-root-session',
+      toolCallId: 'tc-bash',
+      toolName: 'Bash',
+      displayName: 'Bash',
+      riskLevel: 'High',
+      params: { command: 'npm test' },
+      autoApprove: true,
+    }, 'routed-session');
+
+    expect(enqueueSpy).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'goal-root-session',
+      toolCallId: 'tc-bash',
+      autoApprove: true,
+    }));
   });
 });

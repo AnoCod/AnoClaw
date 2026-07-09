@@ -33,6 +33,32 @@ describe('ToolConfirmationQueue', () => {
     });
   });
 
+  it('auto-approves confirmations when the server already marked the request safe for goal mode', () => {
+    const queue = ToolConfirmationQueue.getInstance();
+    const send = vi.fn();
+    const showSpy = vi.spyOn(ToolConfirmDialog, 'show');
+
+    queue.setSender(send);
+    queue.setAutoApprover(() => false);
+
+    queue.enqueue({
+      sessionId: 'goal-session',
+      toolCallId: 'tc-auto-approved-bash',
+      toolName: 'Bash',
+      displayName: 'Bash',
+      riskLevel: 'High',
+      params: { command: 'npm test' },
+      autoApprove: true,
+    });
+
+    expect(showSpy).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledWith({
+      type: 'tool_confirm_response',
+      toolCallId: 'tc-auto-approved-bash',
+      approved: true,
+    });
+  });
+
   it('shows the normal dialog outside auto-approved goal sessions', async () => {
     const queue = ToolConfirmationQueue.getInstance();
     const send = vi.fn();

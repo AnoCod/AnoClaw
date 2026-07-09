@@ -197,6 +197,7 @@ export function registerChatHandlers(
     const d = ctx.data as {
       toolCallId: string; toolName: string; displayName: string;
       riskLevel: string; params: Record<string, unknown>;
+      sessionId?: string; autoApprove?: boolean;
     };
     ToolConfirmationQueue.getInstance().enqueue({
       toolCallId: d.toolCallId,
@@ -204,7 +205,8 @@ export function registerChatHandlers(
       displayName: d.displayName || d.toolName,
       riskLevel: d.riskLevel,
       params: d.params || {},
-      sessionId: ctx.sessionId,
+      sessionId: d.sessionId || ctx.sessionId,
+      autoApprove: d.autoApprove === true,
     });
   });
 }

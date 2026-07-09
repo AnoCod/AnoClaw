@@ -748,12 +748,14 @@ export class AgentLoop {
         toolNames.push(toolName);
 
         const tool = agentTools.find((t) => t.name() === toolName);
+        const permissionMode = this._permissionMode();
 
 
         let userRejected = false;
-        if (tool && this._needsConfirmation(tool, this._permissionMode())) {
+        if (tool && this._needsConfirmation(tool, permissionMode) && !this._autoApproveConfirmation(permissionMode)) {
           WsServer.getInstance().send(this.sessionId, {
             type: 'tool_confirm_request',
+            sessionId: this.sessionId,
             toolCallId: tc.id,
             toolName: tool.name(),
             displayName: tool.displayName?.() ?? tool.name(),
@@ -1030,6 +1032,15 @@ export class AgentLoop {
         return false;
       default:
         return risk === RiskLevel.High || risk === RiskLevel.Critical;
+    }
+  }
+
+  private _autoApproveConfirmation(mode: PermissionMode): boolean {
+    if (mode === 'AutoEdit') return true;
+    try {
+      return hasActiveSessionGoal(SessionManager.getInstance(), this.sessionId);
+    } catch {
+      return false;
     }
   }
 

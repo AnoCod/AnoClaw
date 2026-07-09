@@ -36,4 +36,32 @@ describe('AgentLoop permission mode', () => {
       getGoalSpy.mockRestore();
     }
   });
+
+  it('server-side auto-approves confirmation gates for active goal sessions', () => {
+    const loop = new AgentLoop({
+      agentId: 'agent-1',
+      sessionId: 'session-1',
+      maxTurns: 1,
+      temperature: 0,
+      contextWindow: 128000,
+      permissionMode: 'Auto',
+    });
+    const sessionManager = SessionManager.getInstance();
+    const getGoalSpy = vi.spyOn(sessionManager, 'getGoal').mockReturnValue({
+      objective: 'keep working',
+      status: 'active',
+      createdAt: '2026-07-09T00:00:00.000Z',
+      updatedAt: '2026-07-09T00:00:00.000Z',
+    });
+
+    try {
+      const autoApprove = (loop as unknown as {
+        _autoApproveConfirmation(mode: string): boolean;
+      })._autoApproveConfirmation('Auto');
+
+      expect(autoApprove).toBe(true);
+    } finally {
+      getGoalSpy.mockRestore();
+    }
+  });
 });

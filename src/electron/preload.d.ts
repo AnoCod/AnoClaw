@@ -190,6 +190,12 @@ interface FloatingBallActivityItem {
   timestamp: number;
 }
 
+interface FloatingBallHelperNotice {
+  kind: 'info' | 'success' | 'error';
+  text: string;
+  timestamp: number;
+}
+
 interface FloatingBallState {
   activeSessionId: string | null;
   activeTitle: string | null;
@@ -198,6 +204,7 @@ interface FloatingBallState {
   waitingCount: number;
   recentSessions: FloatingBallSession[];
   activityItems?: FloatingBallActivityItem[];
+  helperNotice?: FloatingBallHelperNotice | null;
   waitingInbox?: {
     count: number;
     sessionId: string | null;

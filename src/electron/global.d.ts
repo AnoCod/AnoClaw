@@ -13,6 +13,11 @@ type FloatingBallActivityItem = {
   status: 'completed' | 'failed';
   timestamp: number;
 };
+type FloatingBallHelperNotice = {
+  kind: 'info' | 'success' | 'error';
+  text: string;
+  timestamp: number;
+};
 type FloatingBallState = {
   activeSessionId: string | null;
   activeTitle: string | null;
@@ -21,6 +26,7 @@ type FloatingBallState = {
   waitingCount: number;
   recentSessions: FloatingBallSession[];
   activityItems?: FloatingBallActivityItem[];
+  helperNotice?: FloatingBallHelperNotice | null;
   waitingInbox?: {
     count: number;
     sessionId: string | null;

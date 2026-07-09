@@ -42,13 +42,24 @@ body[data-phase="disconnected"] {
   --phase-soft: rgba(255, 97, 97, 0.2);
 }
 
+body[data-notice-kind="success"] {
+  --phase-color: #59d499;
+  --phase-soft: rgba(89, 212, 153, 0.18);
+}
+
+body[data-notice-kind="error"] {
+  --phase-color: #ff6161;
+  --phase-soft: rgba(255, 97, 97, 0.2);
+}
+
 body.selection-captured {
   --phase-color: #59d499;
   --phase-soft: rgba(89, 212, 153, 0.2);
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -309,6 +320,43 @@ body.panel-open .helper-panel {
   white-space: nowrap;
 }
 
+.target-row {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.target-label {
+  color: #89939c;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.target-select {
+  min-width: 0;
+  width: 100%;
+  height: 28px;
+  padding: 0 27px 0 9px;
+  border: 1px solid rgba(255,255,255,0.11);
+  border-radius: 7px;
+  outline: none;
+  color: #dfe6eb;
+  background: #171a1e;
+  cursor: pointer;
+}
+
+.target-select:focus {
+  border-color: color-mix(in srgb, var(--phase-color) 52%, rgba(255,255,255,0.15));
+}
+
+.target-select:disabled {
+  color: #717b84;
+  cursor: default;
+}
+
 .quick-row {
   display: grid;
   grid-template-columns: 1fr 58px;
@@ -420,6 +468,10 @@ body.panel-open .helper-panel {
   background: #15181b;
 }
 
+.helper-panel:not(.is-selection-captured) .clip-card {
+  display: none;
+}
+
 .helper-panel.has-waiting .clip-card {
   margin-top: 8px;
 }
@@ -466,6 +518,10 @@ body.panel-open .helper-panel {
 
 .helper-panel.is-selection-captured .clip-head span {
   color: #8df0bd;
+}
+
+.helper-panel.is-selection-captured .action-grid {
+  display: none;
 }
 
 .clip-actions {

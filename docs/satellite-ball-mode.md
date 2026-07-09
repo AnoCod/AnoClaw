@@ -134,6 +134,12 @@
 
    面板内保留一行输入，适合在主窗口收起时快速发送短问题、继续指令或提醒。它不会变成完整聊天窗口，只负责把一句话送回当前/最近会话。
 
+   V1 已增强为上下文明确的快捷发送：
+   - 面板显示 `To` 目标选择器，默认指向等待项、活跃会话、当前任务或最近会话。
+   - Quick Ask、Continue、Text Action、Stop 可以在不展开主窗口的情况下把命令送到隐藏的主窗口上下文。
+   - Open、Waiting、Recent 仍会恢复主窗口，因为这些动作的目的就是回到具体上下文。
+   - 发送成功、停止、失败会通过 FloatingBall 状态栏给出短反馈，避免用户不知道点击后是否生效。
+
 ## Implementation Plan
 
 ### Phase 1: Make Current Ball Real
@@ -163,6 +169,11 @@ floating-ball-state -> {
     status: "completed" | "failed";
     timestamp: number;
   }>;
+  helperNotice?: {
+    kind: "info" | "success" | "error";
+    text: string;
+    timestamp: number;
+  };
   waitingInbox?: {
     count: number;
     sessionId: string | null;

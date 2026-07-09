@@ -28,6 +28,11 @@ type FloatingBallActivityItem = {
   status: 'completed' | 'failed';
   timestamp: number;
 };
+type FloatingBallHelperNotice = {
+  kind: 'info' | 'success' | 'error';
+  text: string;
+  timestamp: number;
+};
 type FloatingBallState = {
   activeSessionId: string | null;
   activeTitle: string | null;
@@ -36,6 +41,7 @@ type FloatingBallState = {
   waitingCount: number;
   recentSessions: FloatingBallSession[];
   activityItems?: FloatingBallActivityItem[];
+  helperNotice?: FloatingBallHelperNotice | null;
   waitingInbox?: {
     count: number;
     sessionId: string | null;
@@ -372,14 +378,23 @@ export class FloatingBallManager {
         showMain()?.webContents.send('floating-ball-open-session', data);
         break;
       }
-      case 'continue-current':
       case 'open-current':
-      case 'open-waiting':
+      case 'open-waiting': {
+        this.hide();
+        showMain()?.webContents.send('floating-ball-command', { action, data });
+        break;
+      }
+      case 'continue-current':
       case 'quick-ask':
       case 'text-action':
       case 'stop-current': {
-        this.hide();
-        showMain()?.webContents.send('floating-ball-command', { action, data });
+        const mainWin = WindowManager.getInstance().getMainWindow();
+        if (!mainWin) {
+          this.hide();
+          showMain()?.webContents.send('floating-ball-command', { action, data });
+          break;
+        }
+        mainWin.webContents.send('floating-ball-command', { action, data });
         break;
       }
     }

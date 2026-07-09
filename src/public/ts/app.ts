@@ -50,6 +50,8 @@ interface FloatingBallActivityItem {
   timestamp: number;
 }
 
+type FloatingBallNoticeKind = 'info' | 'success' | 'error';
+
 /**
  * Singleton App class — the frontend bootstrap.
  *
@@ -659,6 +661,7 @@ class App {
       api.onFloatingBallCommand((payload: { action?: string; data?: unknown }) => {
         this._handleFloatingBallCommand(payload).catch((err) => {
           ClientLogger.app.error('Floating ball command failed', { error: (err as Error).message });
+          this._pushFloatingBallNotice('error', (err as Error).message || 'FloatingBall action failed');
         });
       });
     }
@@ -843,22 +846,37 @@ class App {
         break;
       }
       case 'continue-current': {
-        await this._sendFloatingBallPrompt('继续当前任务，先用一句话说明你接下来会做什么，然后直接推进。');
+        const sessionId = await this._sendFloatingBallPrompt(
+          '继续当前任务，先用一句话说明你接下来会做什么，然后直接推进。',
+          data.sessionId || null,
+        );
+        if (sessionId) this._pushFloatingBallNotice('success', `Continuing ${this._floatingBallSessionTitle(sessionId)}`);
         break;
       }
       case 'stop-current': {
         const target = data.sessionId || this._sessionVM.activeSessionId;
-        if (target) await this._conversationVM.getAgent(target).stopGeneration();
+        if (target) {
+          await this._conversationVM.getAgent(target).stopGeneration();
+          this._pushFloatingBallNotice('success', `Stopped ${this._floatingBallSessionTitle(target)}`);
+        } else {
+          this._pushFloatingBallNotice('info', 'No active session to stop');
+        }
         break;
       }
       case 'quick-ask': {
         const question = (data.question || '').trim();
-        if (question) await this._sendFloatingBallPrompt(question);
+        if (question) {
+          const sessionId = await this._sendFloatingBallPrompt(question, data.sessionId || null);
+          if (sessionId) this._pushFloatingBallNotice('success', `Sent to ${this._floatingBallSessionTitle(sessionId)}`);
+        }
         break;
       }
       case 'text-action': {
         const prompt = this._buildTextActionPrompt(data.kind || 'ask', data.text || '', data.question || '');
-        if (prompt) await this._sendFloatingBallPrompt(prompt);
+        if (prompt) {
+          const sessionId = await this._sendFloatingBallPrompt(prompt, data.sessionId || null);
+          if (sessionId) this._pushFloatingBallNotice('success', `Text sent to ${this._floatingBallSessionTitle(sessionId)}`);
+        }
         break;
       }
     }
@@ -884,18 +902,38 @@ class App {
     }
   }
 
-  private async _sendFloatingBallPrompt(prompt: string): Promise<void> {
+  private _pushFloatingBallNotice(kind: FloatingBallNoticeKind, text: string): void {
+    const api = (window as any).electronAPI;
+    if (!api?.floatingBallUpdateState) return;
+    api.floatingBallUpdateState({
+      helperNotice: {
+        kind,
+        text: text.trim().slice(0, 140),
+        timestamp: Date.now(),
+      },
+    });
+  }
+
+  private _floatingBallSessionTitle(sessionId: string): string {
+    return (this._sessionVM.sessions.getById(sessionId)?.title || 'session').slice(0, 48);
+  }
+
+  private async _sendFloatingBallPrompt(prompt: string, preferredSessionId?: string | null): Promise<string | null> {
     const content = prompt.trim();
-    if (!content) return;
-    const sessionId = await this._ensureFloatingBallSession();
-    if (!sessionId) return;
+    if (!content) return null;
+    const sessionId = await this._ensureFloatingBallSession(preferredSessionId);
+    if (!sessionId) return null;
+    await this._sessionVM.ensureRunnableAgentForSession(sessionId);
+    if (!this._sseClient.connected) throw new Error('WebSocket is not connected. Please wait for reconnection or refresh the page.');
     this.navigateTo('sessions');
     this._sessionVM.selectSession(sessionId);
     const agent = this._conversationVM.getAgent(sessionId);
     await agent.sendMessage(content, this._conversationVM.permissionMode, this._conversationVM.effortMode, []);
+    return sessionId;
   }
 
-  private async _ensureFloatingBallSession(): Promise<string | null> {
+  private async _ensureFloatingBallSession(preferredSessionId?: string | null): Promise<string | null> {
+    if (preferredSessionId && this._sessionVM.sessions.getById(preferredSessionId)) return preferredSessionId;
     if (this._sessionVM.activeSessionId) return this._sessionVM.activeSessionId;
     const recent = [...this._sessionVM.sessions.all]
       .sort((a, b) => new Date(b.lastActiveAt || 0).getTime() - new Date(a.lastActiveAt || 0).getTime());

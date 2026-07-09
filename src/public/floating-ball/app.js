@@ -8,6 +8,7 @@ const ORBIT_RADIUS = 100;
 const HOVER_RADIUS = 105;
 const CLIP_LIMIT = 4000;
 const AUTO_CAPTURE_INTERVAL_MS = 850;
+const NOTICE_TTL_MS = 8000;
 
 const ICONS = {
   plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke-width="2" stroke-linecap="round"/></svg>',
@@ -25,6 +26,7 @@ const DEFAULT_STATE = {
   waitingCount: 0,
   recentSessions: [],
   activityItems: [],
+  helperNotice: null,
   waitingInbox: null,
   currentTask: null,
   clipboardText: '',
@@ -38,6 +40,9 @@ let baselineClipboard = null;
 let lastClipboardText = '';
 let capturedClipboardText = '';
 let capturePulseTimer = null;
+let noticeTimer = null;
+let selectedTargetSessionId = '';
+let targetOptionsSignature = '';
 
 const els = {
   body: document.body,
@@ -48,6 +53,7 @@ const els = {
   helperTitle: document.getElementById('helperTitle'),
   statusPill: document.getElementById('statusPill'),
   statusDetail: document.getElementById('statusDetail'),
+  quickTarget: document.getElementById('quickTarget'),
   quickInput: document.getElementById('quickInput'),
   quickSend: document.getElementById('quickSend'),
   clipRefresh: document.getElementById('clipRefresh'),
@@ -81,6 +87,12 @@ function phaseLabel(phase) {
     case 'disconnected': return 'Offline';
     default: return 'Ready';
   }
+}
+
+function freshNotice() {
+  const notice = currentState.helperNotice;
+  if (!notice?.text || !notice.timestamp) return null;
+  return Date.now() - Number(notice.timestamp) < NOTICE_TTL_MS ? notice : null;
 }
 
 function orbitalPosition(index, total) {
@@ -149,19 +161,26 @@ function renderPanel() {
   const phase = phaseForState(currentState);
   const task = currentState.currentTask || {};
   const waiting = currentState.waitingInbox || null;
+  const notice = freshNotice();
   const activeTitle = cleanText(currentState.activeTitle || task.title || 'Ready', 42);
   const clipboardText = cleanText(currentState.clipboardText || '', CLIP_LIMIT);
   const selectionCaptured = Boolean(clipboardText && capturedClipboardText && clipboardText === capturedClipboardText);
 
   els.body.dataset.phase = phase;
+  els.body.dataset.noticeKind = notice?.kind || '';
   els.body.classList.toggle('selection-captured', selectionCaptured);
   els.helperTitle.textContent = activeTitle;
-  els.statusPill.textContent = phaseLabel(phase);
-  els.statusDetail.textContent = selectionCaptured
+  els.statusPill.textContent = notice
+    ? notice.kind === 'error' ? 'Error' : notice.kind === 'success' ? 'Sent' : 'Info'
+    : phaseLabel(phase);
+  els.statusDetail.textContent = notice
+    ? cleanText(notice.text, 76)
+    : selectionCaptured
     ? 'Selected text copied. Choose an action below.'
     : waiting
       ? cleanText(waiting.title || task.detail || `${currentState.waitingCount} waiting`, 70)
     : cleanText(task.detail || `${currentState.runningCount} running, ${currentState.waitingCount} waiting`, 70);
+  renderTargetPicker();
   renderWaitingCard(waiting);
   els.clipPreview.textContent = clipboardText
     ? clipboardText.slice(0, 190) + (clipboardText.length > 190 ? '...' : '')
@@ -171,9 +190,75 @@ function renderPanel() {
   els.panel.classList.toggle('has-activity', Array.isArray(currentState.activityItems) && currentState.activityItems.length > 0);
   els.panel.classList.toggle('is-selection-captured', selectionCaptured);
   if (els.clipTitle) els.clipTitle.textContent = selectionCaptured ? 'Selection captured' : 'Clipboard text';
-  els.quickInput.placeholder = clipboardText ? 'Ask about selected text...' : 'Ask quickly...';
+  els.quickInput.placeholder = selectionCaptured ? 'Ask about selected text...' : 'Ask quickly...';
 
   renderActivityOrRecent();
+  scheduleNoticeExpiry(notice);
+}
+
+function scheduleNoticeExpiry(notice) {
+  if (noticeTimer) {
+    clearTimeout(noticeTimer);
+    noticeTimer = null;
+  }
+  if (!notice?.timestamp) return;
+  const remaining = NOTICE_TTL_MS - (Date.now() - Number(notice.timestamp));
+  if (remaining > 0) noticeTimer = setTimeout(renderPanel, remaining + 60);
+}
+
+function targetChoices() {
+  const choices = [];
+  const seen = new Set();
+  const add = (id, label, prefix) => {
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    choices.push({ id, label: `${prefix}: ${cleanText(label || 'Session', 44)}` });
+  };
+  add(currentState.waitingInbox?.sessionId, currentState.waitingInbox?.title || currentState.currentTask?.title, 'Waiting');
+  add(currentState.activeSessionId, currentState.activeTitle, 'Active');
+  add(currentState.currentTask?.sessionId, currentState.currentTask?.title, 'Task');
+  (currentState.recentSessions || []).slice(0, 5).forEach((session) => add(session.id, session.title, 'Recent'));
+  return choices;
+}
+
+function renderTargetPicker() {
+  if (!els.quickTarget) return;
+  const choices = targetChoices();
+  const previous = selectedTargetSessionId || els.quickTarget.value || '';
+  const fallback = choices[0]?.id || '';
+  const nextValue = choices.some((choice) => choice.id === previous) ? previous : fallback;
+  selectedTargetSessionId = nextValue;
+  const signature = choices.map((choice) => `${choice.id}:${choice.label}`).join('|');
+  if (!choices.length) {
+    if (targetOptionsSignature !== 'empty') {
+      els.quickTarget.innerHTML = '';
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'Auto: first session';
+      els.quickTarget.appendChild(option);
+      targetOptionsSignature = 'empty';
+    }
+    els.quickTarget.disabled = true;
+    return;
+  }
+  els.quickTarget.disabled = false;
+  if (targetOptionsSignature !== signature) {
+    els.quickTarget.innerHTML = '';
+    choices.forEach((choice) => {
+      const option = document.createElement('option');
+      option.value = choice.id;
+      option.textContent = choice.label;
+      option.title = choice.label;
+      els.quickTarget.appendChild(option);
+    });
+    targetOptionsSignature = signature;
+  }
+  els.quickTarget.value = nextValue;
+}
+
+function selectedTargetPayload(extra = {}) {
+  const sessionId = els.quickTarget?.value || selectedTargetSessionId || targetChoices()[0]?.id || '';
+  return sessionId ? { ...extra, sessionId } : { ...extra };
 }
 
 function renderWaitingCard(waiting) {
@@ -262,7 +347,7 @@ function sendAction(action, data) {
 function sendQuickAsk() {
   const question = cleanText(els.quickInput.value, 1000);
   if (!question) return;
-  sendAction('quick-ask', { question });
+  sendAction('quick-ask', selectedTargetPayload({ question }));
   els.quickInput.value = '';
 }
 
@@ -273,6 +358,7 @@ function sendTextAction(kind) {
     return;
   }
   sendAction('text-action', {
+    ...selectedTargetPayload(),
     kind,
     text,
     question: cleanText(els.quickInput.value, 600),
@@ -350,6 +436,9 @@ els.quickSend?.addEventListener('click', sendQuickAsk);
 els.quickInput?.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') sendQuickAsk();
 });
+els.quickTarget?.addEventListener('change', () => {
+  selectedTargetSessionId = els.quickTarget.value || '';
+});
 els.clipRefresh?.addEventListener('click', refreshState);
 els.waitingCard?.addEventListener('click', () => {
   const waiting = currentState.waitingInbox || {};
@@ -357,7 +446,7 @@ els.waitingCard?.addEventListener('click', () => {
 });
 
 document.querySelectorAll('[data-helper-action]').forEach((button) => {
-  button.addEventListener('click', () => sendAction(button.dataset.helperAction));
+  button.addEventListener('click', () => sendAction(button.dataset.helperAction, selectedTargetPayload()));
 });
 
 document.querySelectorAll('[data-text-action]').forEach((button) => {

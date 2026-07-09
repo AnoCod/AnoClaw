@@ -77,12 +77,22 @@ export class WorkspacePage implements Page {
   private _buildDOM(): void {
     const toolbar = document.createElement('div');
     toolbar.className = 'ws-toolbar';
+
+    const toolbarTitle = document.createElement('div');
+    toolbarTitle.className = 'ws-toolbar-title';
+    const toolbarKicker = document.createElement('span');
+    toolbarKicker.className = 'ws-toolbar-kicker';
+    toolbarKicker.textContent = 'Workspace';
+    toolbarTitle.appendChild(toolbarKicker);
+
     this._toolbarPath = document.createElement('span');
     this._toolbarPath.className = 'ws-toolbar-path';
     this._toolbarPath.textContent = 'No workspace';
-    toolbar.appendChild(this._toolbarPath);
+    toolbarTitle.appendChild(this._toolbarPath);
+    toolbar.appendChild(toolbarTitle);
+
     const switchBtn = document.createElement('button');
-    switchBtn.className = 'ws-toolbar-btn'; switchBtn.textContent = 'Switch...';
+    switchBtn.className = 'ws-toolbar-btn'; switchBtn.textContent = 'Switch';
     switchBtn.addEventListener('click', () => void this._switchWorkspace());
     toolbar.appendChild(switchBtn);
     this.container.appendChild(toolbar);
@@ -96,8 +106,9 @@ export class WorkspacePage implements Page {
     content.appendChild(this._treeGrip);
     this._wireTreeGrip();
     this._tabMount = document.createElement('div');
-    this._tabMount.style.cssText = 'flex:1;min-width:0;display:flex;overflow:hidden;';
+    this._tabMount.className = 'ws-tab-mount';
     content.appendChild(this._tabMount);
+    this._showWorkspaceIdle();
     this.container.appendChild(content);
   }
 
@@ -119,6 +130,7 @@ export class WorkspacePage implements Page {
     window.addEventListener('ws-workspace-download-complete', this._onWorkspaceDownloadComplete);
     const sid = App.getInstance().sessionVM?.activeSessionId || '';
     if (sid) { void this._loadWorkspaceForSession(sid); }
+    else { this._sessionId = ''; this._workspacePath = ''; this._toolbarPath.textContent = 'No workspace'; this._showWorkspaceIdle(); }
   }
 
   onExit(): void {
@@ -134,7 +146,14 @@ export class WorkspacePage implements Page {
 
   private async _onSessionSwitched(): Promise<void> {
     const newSid = App.getInstance().sessionVM?.activeSessionId || '';
-    if (!newSid || newSid === this._sessionId) return;
+    if (!newSid) {
+      this._sessionId = '';
+      this._workspacePath = '';
+      this._toolbarPath.textContent = 'No workspace';
+      this._showWorkspaceIdle();
+      return;
+    }
+    if (newSid === this._sessionId) return;
     await this._loadWorkspaceForSession(newSid);
   }
 
@@ -154,7 +173,7 @@ export class WorkspacePage implements Page {
       if (this._loadingSessionId !== sid) return;
       if (this._sessionId && this._currentGroup?.hasTabs) { this._tabCache.set(this._sessionId, this._currentGroup); }
       this._sessionId = sid; this._workspacePath = newPath;
-      this._toolbarPath.textContent = newPath || '(default workspace)';
+      this._toolbarPath.textContent = newPath || 'Default workspace';
       await this._fileTree.loadRoot(sid);
       if (this._currentGroup) { this._currentGroup.element.remove(); }
       const cached = this._tabCache.get(sid);
@@ -202,7 +221,7 @@ export class WorkspacePage implements Page {
     if (!result || !this._sessionId) return;
     try {
       await fetch(`/api/v1/sessions/${encodeURIComponent(this._sessionId)}/bind-workspace`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: result.path }) });
-      this._workspacePath = result.path; this._toolbarPath.textContent = result.path;
+      this._workspacePath = result.path; this._toolbarPath.textContent = result.path || 'Default workspace';
       this._tabCache.get(this._sessionId)?.dispose(); this._tabCache.delete(this._sessionId); this._currentGroup = null;
       this._tabMount.innerHTML = '';
       const fresh = new WorkspaceSplitContainer(); fresh.setSessionId(this._sessionId);
@@ -230,5 +249,16 @@ export class WorkspacePage implements Page {
     grip.addEventListener('mousedown', (e) => { dragging = true; startX = e.clientX; startW = tree.getBoundingClientRect().width; grip.style.background = 'var(--color-hairline-strong)'; document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'; e.preventDefault(); });
     window.addEventListener('mousemove', (e) => { if (!dragging) return; tree.style.width = Math.max(150, startW + e.clientX - startX) + 'px'; tree.style.flexShrink = '0'; });
     window.addEventListener('mouseup', () => { dragging = false; grip.style.background = ''; document.body.style.cursor = ''; document.body.style.userSelect = ''; });
+  }
+
+  private _showWorkspaceIdle(): void {
+    this._tabMount.innerHTML = `
+      <div class="ws-editor-empty ws-editor-empty--workspace">
+        <div class="ws-editor-empty-panel">
+          <div class="ws-editor-empty-mark"></div>
+          <div class="ws-editor-empty-title">No file open</div>
+          <div class="ws-editor-empty-meta">Workspace editor idle</div>
+        </div>
+      </div>`;
   }
 }

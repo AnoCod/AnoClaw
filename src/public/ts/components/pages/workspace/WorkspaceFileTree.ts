@@ -28,40 +28,38 @@ export class WorkspaceFileTree {
     // Header
     const header = document.createElement('div');
     header.className = 'ws-tree-header';
-    header.style.cssText = 'display:flex;align-items:center;gap:4px;padding:6px 8px;border-bottom:1px solid var(--color-hairline,#242728);flex-shrink:0;';
     const label = document.createElement('span');
     label.textContent = 'Files';
-    label.style.cssText = 'font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.4px;color:var(--color-text-secondary,#9c9c9d);flex:1;';
+    label.className = 'ws-tree-label';
     header.appendChild(label);
 
     // New File button
     const newFileBtn = document.createElement('button');
+    newFileBtn.className = 'ws-tree-action-btn';
     newFileBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>`;
     newFileBtn.title = 'New File';
-    newFileBtn.style.cssText = 'border:none;background:transparent;color:var(--color-text-tertiary,#6a6b6c);cursor:pointer;padding:2px 4px;border-radius:4px;display:flex;align-items:center;';
     newFileBtn.addEventListener('click', (e) => { e.stopPropagation(); void this._createFile('/'); });
     header.appendChild(newFileBtn);
 
     // New Folder button
     const newFolderBtn = document.createElement('button');
+    newFolderBtn.className = 'ws-tree-action-btn';
     newFolderBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>`;
     newFolderBtn.title = 'New Folder';
-    newFolderBtn.style.cssText = 'border:none;background:transparent;color:var(--color-text-tertiary,#6a6b6c);cursor:pointer;padding:2px 4px;border-radius:4px;display:flex;align-items:center;';
     newFolderBtn.addEventListener('click', (e) => { e.stopPropagation(); void this._createFolder('/'); });
     header.appendChild(newFolderBtn);
 
     this._refreshBtn = document.createElement('button');
-    this._refreshBtn.className = 'ws-tree-refresh-btn';
+    this._refreshBtn.className = 'ws-tree-refresh-btn ws-tree-action-btn';
     this._refreshBtn.innerHTML = _SVG_REFRESH;
     this._refreshBtn.title = 'Refresh file tree';
-    this._refreshBtn.style.cssText = 'border:none;background:transparent;color:var(--color-text-tertiary,#6a6b6c);cursor:pointer;padding:2px 4px;border-radius:4px;display:flex;align-items:center;';
     this._refreshBtn.addEventListener('click', () => { this.refreshAll(); });
     header.appendChild(this._refreshBtn);
     this.element.appendChild(header);
 
     // Scrollable tree body
     this._treeBody = document.createElement('div');
-    this._treeBody.style.cssText = 'overflow-y:auto;flex:1;min-height:0;';
+    this._treeBody.className = 'ws-tree-body';
     this._treeBody.tabIndex = 0; // make focusable for keyboard events
     this.element.appendChild(this._treeBody);
 
@@ -98,7 +96,7 @@ export class WorkspaceFileTree {
       this._fileCount = nodes.length;
       this._lastFileFingerprint = nodes.map((n: FileNode) => `${n.path}|${n.modifiedAt||''}|${n.isDirectory?'d':'f'}`).sort().join(',');
       if (nodes.length === 0) {
-        this._treeBody.innerHTML = '<div style="padding:20px;text-align:center;color:var(--color-text-tertiary,#6a6b6c);font-size:12px;">Empty folder<br><span style="font-size:10px;opacity:0.6;">Right-click or use + buttons above</span></div>';
+        this._treeBody.innerHTML = '<div class="ws-tree-empty"><span>Empty folder</span><small>No files in this workspace.</small></div>';
         return;
       }
       this._renderNodes(nodes, this._treeBody, 0);
@@ -125,7 +123,7 @@ export class WorkspaceFileTree {
         this._treeBody.innerHTML = '';
         this._nodeMap.clear();
         if (nodes.length === 0) {
-          this._treeBody.innerHTML = '<div style="padding:20px;text-align:center;color:var(--color-text-tertiary,#6a6b6c);font-size:12px;">Empty folder<br><span style="font-size:10px;opacity:0.6;">Right-click or use + buttons above</span></div>';
+          this._treeBody.innerHTML = '<div class="ws-tree-empty"><span>Empty folder</span><small>No files in this workspace.</small></div>';
           return;
         }
         this._renderNodes(nodes, this._treeBody, 0);

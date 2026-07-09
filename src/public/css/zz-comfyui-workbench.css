@@ -704,6 +704,69 @@ html[data-theme="dark"] .tool-result-card.is-error {
   --tool-accent: var(--comfy-coral) !important;
 }
 
+/* Workspace page: core ComfyUI-style IDE surface */
+html[data-theme="dark"] [data-page="workspace"].ws-page {
+  background:
+    linear-gradient(var(--comfy-canvas-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--comfy-canvas-grid) 1px, transparent 1px),
+    var(--comfy-canvas) !important;
+  background-size: 32px 32px, 32px 32px, auto !important;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-toolbar {
+  min-height: 52px;
+  padding: 8px 10px;
+  border-color: var(--comfy-charcoal-500) !important;
+  background: var(--comfy-menu-bg) !important;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-toolbar-kicker {
+  color: var(--comfy-text-muted);
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-toolbar-path {
+  color: var(--comfy-text-primary);
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-file-tree-pane {
+  border-color: var(--comfy-charcoal-500) !important;
+  background: rgba(18, 18, 19, 0.92) !important;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tree-header,
+html[data-theme="dark"] [data-page="workspace"] .ws-tab-bar {
+  border-color: var(--comfy-charcoal-500) !important;
+  background: var(--comfy-menu-bg) !important;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tree-action-btn {
+  min-height: 26px;
+  border-color: var(--comfy-charcoal-400) !important;
+  background: var(--comfy-menu-secondary-bg) !important;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tree-action-btn:hover,
+html[data-theme="dark"] [data-page="workspace"] .ws-tab-plus:hover {
+  border-color: var(--comfy-charcoal-200) !important;
+  background: var(--comfy-charcoal-600) !important;
+  color: var(--comfy-text-primary) !important;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tree-node.selected {
+  background: rgba(11, 140, 233, 0.16) !important;
+  color: var(--comfy-text-primary) !important;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-editor-empty-panel {
+  border-color: var(--comfy-charcoal-400);
+  background: rgba(18, 18, 19, 0.64);
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-editor-empty-mark::before,
+html[data-theme="dark"] [data-page="workspace"] .ws-editor-empty-mark::after {
+  background: var(--comfy-blue);
+}
+
 html[data-theme="dark"] .tool-result-header,
 html[data-theme="dark"] .tool-result-header:hover {
   border-bottom: 1px solid var(--comfy-charcoal-500) !important;

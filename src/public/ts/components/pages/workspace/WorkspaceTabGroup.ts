@@ -2889,10 +2889,14 @@ export class WorkspaceTabGroup {
 
   private _destroyContent(): void { this._destroyBrowserView(); if (this._editorHost && this._editorHost.parentElement) this._editorHost.remove(); this._contentArea.innerHTML = ''; this._contentArea.style.cssText = ''; this._contentArea.classList.remove('ws-preview-surface'); }
   private _showEmpty(): void {
-    this._contentArea.innerHTML = `<div class="ws-editor-empty" style="flex-direction:column;gap:4px;">
-      <div style="font-size:13px;margin-bottom:8px;">Open a file from the tree</div>
-      <div style="font-size:10px;opacity:0.5;">Ctrl+F Find &nbsp;|&nbsp; Ctrl+H Replace &nbsp;|&nbsp; Ctrl+G Go to Line &nbsp;|&nbsp; Ctrl+S Save</div>
-    </div>`;
+    this._contentArea.innerHTML = `
+      <div class="ws-editor-empty">
+        <div class="ws-editor-empty-panel">
+          <div class="ws-editor-empty-mark"></div>
+          <div class="ws-editor-empty-title">No file open</div>
+          <div class="ws-editor-empty-meta">Workspace editor idle</div>
+        </div>
+      </div>`;
   }
 
   dispose(): void {

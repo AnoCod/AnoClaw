@@ -6,6 +6,7 @@
 // rather than lazy-required, so this module has no hidden coupling to WindowManager.
 
 import { WebContentsView, BrowserWindow } from 'electron';
+import type { WebContents } from 'electron';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -155,7 +156,9 @@ export class BrowserViewManager {
     const view = new WebContentsView({
       webPreferences: { sandbox: false, nodeIntegration: false, contextIsolation: true },
     });
-    view.webContents.setWindowOpenHandler(({ url: popupUrl }: { url: string }) => {
+    const webContents = view.webContents;
+    const webContentsId = webContents.id;
+    webContents.setWindowOpenHandler(({ url: popupUrl }: { url: string }) => {
       this._handlePopup(viewId, popupUrl, view);
       return { action: 'deny' };
     });
@@ -170,31 +173,31 @@ export class BrowserViewManager {
       createdAt: Date.now(),
       sessionId: options.sessionId,
       workspacePath: options.workspacePath,
-      defaultUserAgent: view.webContents.getUserAgent?.() || '',
+      defaultUserAgent: webContents.getUserAgent?.() || '',
       consoleLogs: [],
       networkEvents: [],
       networkStarts: new Map(),
       securityEvents: [],
     });
-    this._webContentsToViewId.set(view.webContents.id, viewId);
-    this._ensureDownloadHook(view.webContents.session);
-    this._ensureNetworkHook(view.webContents.session);
-    this._ensurePermissionHook(view.webContents.session);
+    this._webContentsToViewId.set(webContentsId, viewId);
+    this._ensureDownloadHook(webContents.session);
+    this._ensureNetworkHook(webContents.session);
+    this._ensurePermissionHook(webContents.session);
 
     // Forward lifecycle events to renderer
-    view.webContents.on('did-start-loading', () => this._emit(viewId, 'loading-start'));
-    view.webContents.on('did-stop-loading', () => this._emit(viewId, 'loading-stop'));
-    view.webContents.on('did-finish-load', () => this._emit(viewId, 'load-finish'));
-    view.webContents.on('did-fail-load', (_e: any, errorCode: number, errorDescription: string, validatedURL: string) => {
+    webContents.on('did-start-loading', () => this._emit(viewId, 'loading-start'));
+    webContents.on('did-stop-loading', () => this._emit(viewId, 'loading-stop'));
+    webContents.on('did-finish-load', () => this._emit(viewId, 'load-finish'));
+    webContents.on('did-fail-load', (_e: any, errorCode: number, errorDescription: string, validatedURL: string) => {
       this._emit(viewId, 'load-error', { errorCode, errorDescription, validatedURL });
     });
-    view.webContents.on('page-title-updated', (_e: any, title: string) => {
+    webContents.on('page-title-updated', (_e: any, title: string) => {
       this._emit(viewId, 'title', { title });
     });
-    view.webContents.on('page-favicon-updated', (_e: any, favicons: string[]) => {
+    webContents.on('page-favicon-updated', (_e: any, favicons: string[]) => {
       this._emit(viewId, 'favicon', { favicons });
     });
-    view.webContents.on('will-navigate', (event: any, navUrl: string) => {
+    webContents.on('will-navigate', (event: any, navUrl: string) => {
       if (this._isExternalNavigation(navUrl)) {
         event.preventDefault();
         this._recordSecurityEvent(viewId, {
@@ -205,29 +208,35 @@ export class BrowserViewManager {
         });
       }
     });
-    view.webContents.on('did-navigate', () => this._emit(viewId, 'nav-state'));
-    view.webContents.on('did-navigate-in-page', () => this._emit(viewId, 'nav-state'));
-    (view.webContents as any).on('console-message', (...args: any[]) => this._recordConsoleMessage(viewId, args));
-    view.webContents.on('found-in-page', (_event: unknown, result: any) => this._emitFindResult(viewId, result));
-    view.webContents.on('destroyed', () => {
-      this._webContentsToViewId.delete(view.webContents.id);
+    webContents.on('did-navigate', () => this._emit(viewId, 'nav-state'));
+    webContents.on('did-navigate-in-page', () => this._emit(viewId, 'nav-state'));
+    (webContents as any).on('console-message', (...args: any[]) => this._recordConsoleMessage(viewId, args));
+    webContents.on('found-in-page', (_event: unknown, result: any) => this._emitFindResult(viewId, result));
+    webContents.on('destroyed', () => {
+      this._dropPendingPermissionsForView(viewId);
+      this._webContentsToViewId.delete(webContentsId);
       this._views.delete(viewId);
     });
 
-    view.webContents.loadURL(url);
+    webContents.loadURL(url);
     return viewId;
   }
 
   destroy(viewId: string): boolean {
     const entry = this._views.get(viewId);
     if (!entry) return false;
+    const webContents = this._safeWebContents(entry);
+    const webContentsId = webContents?.id;
+    this._dropPendingPermissionsForView(viewId);
+    this._views.delete(viewId);
+    if (typeof webContentsId === 'number') this._webContentsToViewId.delete(webContentsId);
     const mainWin = this._getMainWindow?.() ?? null;
     if (mainWin?.contentView) {
       try { mainWin.contentView.removeChildView(entry.view); } catch {}
     }
-    try { entry.view.webContents.close(); } catch {}
-    this._views.delete(viewId);
-    this._webContentsToViewId.delete(entry.view.webContents.id);
+    try {
+      if (webContents && !webContents.isDestroyed?.()) webContents.close();
+    } catch {}
     return true;
   }
 
@@ -435,7 +444,7 @@ export class BrowserViewManager {
 
   handleCertificateError(webContents: { id?: number } | null | undefined, url: string, error: string): boolean {
     const viewId = this._webContentsToViewId.get(Number(webContents?.id));
-    if (!viewId) return false;
+    if (!viewId || !this._views.has(viewId)) return false;
     this._recordSecurityEvent(viewId, {
       kind: 'certificate',
       decision: 'blocked',
@@ -480,6 +489,7 @@ export class BrowserViewManager {
 
 
   private _emit(viewId: string, type: string, extra?: Record<string, unknown>): void {
+    if (!this._views.has(viewId)) return;
     const mainWin = this._getMainWindow?.() ?? null;
     if (!mainWin || mainWin.isDestroyed()) return;
     mainWin.webContents.send('wv-state-change', { viewId, type, ...(this.getState(viewId) || {}), ...(extra || {}) });
@@ -515,18 +525,18 @@ export class BrowserViewManager {
   private _recordSecurityEvent(viewId: string, partial: Omit<BrowserSecurityEvent, 'viewId' | 'id' | 'timestamp'> & { id?: string }): string {
     const entry = this._views.get(viewId);
     const id = partial.id || `sec_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    if (!entry) return id;
     const event: BrowserSecurityEvent = { viewId, id, timestamp: Date.now(), ...partial };
-    if (entry) {
-      const idx = entry.securityEvents.findIndex(item => item.id === id);
-      if (idx >= 0) entry.securityEvents[idx] = event;
-      else entry.securityEvents.push(event);
-      if (entry.securityEvents.length > 120) entry.securityEvents.splice(0, entry.securityEvents.length - 120);
-    }
+    const idx = entry.securityEvents.findIndex(item => item.id === id);
+    if (idx >= 0) entry.securityEvents[idx] = event;
+    else entry.securityEvents.push(event);
+    if (entry.securityEvents.length > 120) entry.securityEvents.splice(0, entry.securityEvents.length - 120);
     this._emitSecurity(event);
     return id;
   }
 
   private _emitFindResult(viewId: string, result: any): void {
+    if (!this._views.has(viewId)) return;
     const event: BrowserFindResult = {
       viewId,
       requestId: Number(result?.requestId || 0),
@@ -657,18 +667,12 @@ export class BrowserViewManager {
     });
   }
 
-  private _emitDownload(event: BrowserDownloadEvent): void {
-    const mainWin = this._getMainWindow?.() ?? null;
-    if (!mainWin || mainWin.isDestroyed()) return;
-    mainWin.webContents.send('wv-download', event);
-  }
-
   private _ensurePermissionHook(session: object): void {
     if (this._permissionSessions.has(session)) return;
     this._permissionSessions.add(session);
     (session as any).setPermissionRequestHandler?.((webContents: any, permission: string, callback: (allowed: boolean) => void, details?: any) => {
       const viewId = this._webContentsToViewId.get(Number(webContents?.id));
-      if (!viewId) { callback(false); return; }
+      if (!viewId || !this._views.has(viewId)) { callback(false); return; }
       const url = String(details?.requestingUrl || details?.embeddingOrigin || this.getUrl(viewId) || '');
       const id = this._recordSecurityEvent(viewId, {
         kind: 'permission',
@@ -696,18 +700,21 @@ export class BrowserViewManager {
   }
 
   private _emitNetwork(event: BrowserNetworkEvent): void {
+    if (!this._views.has(event.viewId)) return;
     const mainWin = this._getMainWindow?.() ?? null;
     if (!mainWin || mainWin.isDestroyed()) return;
     mainWin.webContents.send('wv-network', event);
   }
 
   private _emitSecurity(event: BrowserSecurityEvent): void {
+    if (!this._views.has(event.viewId)) return;
     const mainWin = this._getMainWindow?.() ?? null;
     if (!mainWin || mainWin.isDestroyed()) return;
     mainWin.webContents.send('wv-security', event);
   }
 
   private _handlePopup(viewId: string, popupUrl: string, view: WebContentsView): void {
+    if (!this._views.has(viewId)) return;
     if (!popupUrl || popupUrl === 'about:blank') return;
     if (this._isExternalNavigation(popupUrl)) {
       this._recordSecurityEvent(viewId, {
@@ -724,7 +731,34 @@ export class BrowserViewManager {
       message: 'Popup opened in the current browser tab',
       url: popupUrl,
     });
-    view.webContents.loadURL(popupUrl);
+    try {
+      const webContents = view.webContents as WebContents | undefined;
+      if (webContents && !webContents.isDestroyed?.()) webContents.loadURL(popupUrl);
+    } catch {}
+  }
+
+  private _emitDownload(event: BrowserDownloadEvent): void {
+    if (!this._views.has(event.viewId)) return;
+    const mainWin = this._getMainWindow?.() ?? null;
+    if (!mainWin || mainWin.isDestroyed()) return;
+    mainWin.webContents.send('wv-download', event);
+  }
+
+  private _safeWebContents(entry: ViewEntry): WebContents | null {
+    try {
+      return (entry.view.webContents as WebContents | undefined) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private _dropPendingPermissionsForView(viewId: string): void {
+    for (const [id, pending] of [...this._pendingPermissions.entries()]) {
+      if (pending.viewId !== viewId) continue;
+      clearTimeout(pending.timer);
+      this._pendingPermissions.delete(id);
+      try { pending.callback(false); } catch {}
+    }
   }
 
   private _isExternalNavigation(url: string): boolean {

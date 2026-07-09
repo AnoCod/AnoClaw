@@ -5,6 +5,7 @@ This file provides guidance to AI coding assistants when working with code in th
 ## Codex Source of Truth
 
 AnoClaw is now developed with Codex. `AGENTS.md` is the canonical repository instruction file for AI coding work. Do not create or maintain Claude Code instruction files (`CLAUDE.md` / `CLAUDE.*.md`); migrate any still-useful guidance into this file or task-specific docs under `docs/`.
+`DESIGN.md` is retired and must not be recreated or maintained. Project, architecture, product, and design guidance belongs in `AGENTS.md` or focused docs under `docs/`.
 
 ## Project Overview
 
@@ -49,6 +50,7 @@ Always run `npm run build:all` if both changed. Path aliases `@shared/*`, `@serv
 ## Completion Workflow
 
 AnoClaw uses Git as the durable completion record. Do not write Obsidian/vault work logs for coding sessions.
+Treat removal of retired guidance files such as `DESIGN.md` as an intentional cleanup when it is part of the current task; do not restore them just to keep the worktree unchanged.
 
 After verified code, docs, config, or skill changes:
 1. Inspect `git status --short --branch` and review the relevant diff.

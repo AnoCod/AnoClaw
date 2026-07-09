@@ -8,6 +8,7 @@ description: Finish AnoClaw work by reviewing the diff, staging only intentional
 ## Overview
 
 Use Git as the project completion record. After meaningful AnoClaw changes are implemented and verified, commit the exact intended diff and push it to the configured remote.
+`DESIGN.md` is retired. Do not recreate it, keep notes in it, or treat its absence as a problem; durable guidance belongs in `AGENTS.md` or focused docs under `docs/`.
 
 ## Workflow
 
@@ -22,6 +23,7 @@ Use Git as the project completion record. After meaningful AnoClaw changes are i
 ## Rules
 
 - Never use Obsidian, vault notes, or local REST work logs as the completion record.
+- Do not use `DESIGN.md`; include its deletion when the current task is retiring legacy guidance.
 - Do not commit secrets, private config, local data, build caches, or unrelated edits.
 - Do not amend, rebase, force-push, or rewrite history unless the user explicitly asks.
 - If tests or builds fail, do not commit unless the user explicitly accepts the failing state.

@@ -4,10 +4,12 @@
    When theme.css variables change, update this file to match. */
 
 :root {
-  --color-accent: #ffffff;
-  --color-accent-hover: #e0e0e0;
-  --color-on-accent: #000000;
-  --color-primary-pressed: #e8e8e8;
+  --color-accent: #0b8ce9;
+  --color-accent-hover: #31b9f4;
+  --color-on-accent: #ffffff;
+  --color-primary: var(--color-accent);
+  --color-on-primary: var(--color-on-accent);
+  --color-primary-pressed: #31b9f4;
 
   --color-bg: #07080a;
   --color-surface: #0d0d0d;
@@ -197,10 +199,12 @@
 }
 
 [data-theme="light"] {
-  --color-accent: #111111;
-  --color-accent-hover: #333333;
+  --color-accent: #0b8ce9;
+  --color-accent-hover: #096fc0;
   --color-on-accent: #ffffff;
-  --color-primary-pressed: #e8e8e8;
+  --color-primary: var(--color-accent);
+  --color-on-primary: var(--color-on-accent);
+  --color-primary-pressed: #096fc0;
 
   --color-bg: #fafafa;
   --color-surface: #ffffff;
@@ -301,42 +305,62 @@
 }
 
 [data-accent="blue"] {
-  --color-accent: #0984E3;
+  --color-accent: #0b8ce9;
+  --color-accent-hover: #31b9f4;
   --color-on-accent: #ffffff;
-  --color-icon-active: #0984E3;
+  --color-primary: var(--color-accent);
+  --color-on-primary: var(--color-on-accent);
+  --color-primary-pressed: #31b9f4;
+  --color-icon-active: #0b8ce9;
 }
 [data-accent="green"] {
   --color-accent: #00B894;
   --color-on-accent: #ffffff;
+  --color-primary: var(--color-accent);
+  --color-on-primary: var(--color-on-accent);
   --color-icon-active: #00B894;
 }
 [data-accent="orange"] {
   --color-accent: #E17055;
   --color-on-accent: #ffffff;
+  --color-primary: var(--color-accent);
+  --color-on-primary: var(--color-on-accent);
   --color-icon-active: #E17055;
 }
 [data-accent="purple"] {
-  --color-accent: #57c1ff;
-  --color-on-accent: #000000;
-  --color-icon-active: #57c1ff;
+  --color-accent: #a78bfa;
+  --color-on-accent: #ffffff;
+  --color-primary: var(--color-accent);
+  --color-on-primary: var(--color-on-accent);
+  --color-icon-active: #a78bfa;
 }
 [data-theme="light"][data-accent="blue"] {
-  --color-accent: #0984E3;
+  --color-accent: #0b8ce9;
+  --color-accent-hover: #096fc0;
   --color-on-accent: #ffffff;
-  --color-icon-active: #0984E3;
+  --color-primary: var(--color-accent);
+  --color-on-primary: var(--color-on-accent);
+  --color-primary-pressed: #096fc0;
+  --color-icon-active: #0b8ce9;
 }
 [data-theme="light"][data-accent="green"] {
   --color-accent: #00B894;
   --color-on-accent: #ffffff;
+  --color-primary: var(--color-accent);
+  --color-on-primary: var(--color-on-accent);
   --color-icon-active: #00B894;
 }
 [data-theme="light"][data-accent="orange"] {
   --color-accent: #E17055;
   --color-on-accent: #ffffff;
+  --color-primary: var(--color-accent);
+  --color-on-primary: var(--color-on-accent);
   --color-icon-active: #E17055;
 }
 [data-theme="light"][data-accent="purple"] {
-  --color-accent: #0984E3;
+  --color-accent: #7c3aed;
   --color-on-accent: #ffffff;
-  --color-icon-active: #0984E3;
+  --color-primary: var(--color-accent);
+  --color-on-primary: var(--color-on-accent);
+  --color-icon-active: #7c3aed;
 }

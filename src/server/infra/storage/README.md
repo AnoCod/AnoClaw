@@ -47,7 +47,7 @@ logging:      { level: 'info', logDir: 'logs', maxFileBytes: 10MB, maxFiles: 10 
 rateLimit:    { perMinute: 100, enabled: true }
 workspace:    { root: 'company-workspace' }
 features:     { enableMCP: true, enableSSE: true, enableCache: true, enableDelegation: true, enableSkills: true }
-ui:           { lang: 'zh', theme: 'dark', accentColor: '#ffffff', showThinkCards: true, showToolCards: true, compactionThreshold: 70 }
+ui:           { lang: 'zh', theme: 'dark', accentColor: '#0b8ce9', showThinkCards: true, showToolCards: true, compactionThreshold: 70 }
 ```
 
 **Events:** `'changed'` (key, value) — emitted on every `set()` call.

@@ -1,13 +1,15 @@
-/* AnoClaw Theme — Raycast-faithful design token system */
+/* AnoClaw Theme — ComfyUI workbench design token system */
 
 :root {
-  /* ─── Accent — Raycast: white pill CTA is the sole brand action ─── */
-  --color-accent: #ffffff;
-  --color-accent-hover: #e0e0e0;
-  --color-on-accent: #000000;
-  --color-primary-pressed: #e8e8e8;
+  /* ─── Accent — ComfyUI blue for primary controls and focused affordances ─── */
+  --color-accent: #0b8ce9;
+  --color-accent-hover: #31b9f4;
+  --color-on-accent: #ffffff;
+  --color-primary: var(--color-accent);
+  --color-on-primary: var(--color-on-accent);
+  --color-primary-pressed: #31b9f4;
 
-  /* ─── Surface ladder — Raycast 4-step: canvas → surface → elevated → card ─── */
+  /* ─── Surface ladder — canvas → surface → elevated → card ─── */
   --color-bg: #07080a;
   --color-surface: #0d0d0d;
   --color-surface-elevated: #101111;
@@ -15,7 +17,7 @@
   --color-bubble-sent: #101111;
   --color-bubble-received: #0d0d0d;
 
-  /* ─── Text — Raycast ink/body/mute/ash/stone ladder ─── */
+  /* ─── Text ladder ─── */
   --color-text-primary: #f4f4f6;
   --color-text-secondary: #cdcdcd;
   --color-text-tertiary: #9c9c9d;
@@ -68,7 +70,7 @@
   --color-overlay-hover: rgba(255,255,255,0.06);
   --color-overlay-pressed: rgba(255,255,255,0.10);
 
-  /* ─── Spacing scale — Raycast aligned ─── */
+  /* ─── Spacing scale ─── */
   --space-xxs: 2px;
   --space-xs: 4px;
   --space-sm: 8px;
@@ -78,7 +80,7 @@
   --space-xxl: 32px;
   --space-section: 96px;
 
-  /* ─── Border radius scale — Raycast aligned ─── */
+  /* ─── Border radius scale ─── */
   --radius-none: 0px;
   --radius-xs: 4px;
   --radius-sm: 6px;
@@ -89,7 +91,7 @@
   /* Legacy alias — use --radius-md for new code */
   --radius: var(--radius-md);
 
-  /* ─── Typography scale — Raycast aligned ─── */
+  /* ─── Typography scale ─── */
   /* Font sizes */
   --font-size-display-xl: 64px;
   --font-size-display-lg: 56px;
@@ -124,7 +126,7 @@
   --letter-spacing-wider: 0.4px;
   --letter-spacing-widest: 0.5px;
 
-  /* ─── Typography — Inter with Raycast ss03 stylistic set ─── */
+  /* ─── Typography ─── */
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
 
@@ -228,12 +230,14 @@
   color-scheme: dark;
 }
 
-/* ─── Light theme — Raycast doesn't have one, so we derive: black accent, white canvas ─── */
+/* ─── Light theme — bright workbench canvas with the same blue action model ─── */
 [data-theme="light"] {
-  --color-accent: #111111;
-  --color-accent-hover: #333333;
+  --color-accent: #0b8ce9;
+  --color-accent-hover: #096fc0;
   --color-on-accent: #ffffff;
-  --color-primary-pressed: #e8e8e8;
+  --color-primary: var(--color-accent);
+  --color-on-primary: var(--color-on-accent);
+  --color-primary-pressed: #096fc0;
 
   --color-bg: #fafafa;
   --color-surface: #ffffff;
@@ -338,43 +342,63 @@
 
 /* ─── Accent color variants (synced with SettingsPage dropdown) ─── */
 [data-accent="blue"] {
-  --color-accent: #0984E3;
+  --color-accent: #0b8ce9;
+  --color-accent-hover: #31b9f4;
   --color-on-accent: #ffffff;
-  --color-icon-active: #0984E3;
+  --color-primary: var(--color-accent);
+  --color-on-primary: var(--color-on-accent);
+  --color-primary-pressed: #31b9f4;
+  --color-icon-active: #0b8ce9;
 }
 [data-accent="green"] {
   --color-accent: #00B894;
   --color-on-accent: #ffffff;
+  --color-primary: var(--color-accent);
+  --color-on-primary: var(--color-on-accent);
   --color-icon-active: #00B894;
 }
 [data-accent="orange"] {
   --color-accent: #E17055;
   --color-on-accent: #ffffff;
+  --color-primary: var(--color-accent);
+  --color-on-primary: var(--color-on-accent);
   --color-icon-active: #E17055;
 }
 [data-accent="purple"] {
-  --color-accent: #57c1ff;
-  --color-on-accent: #000000;
-  --color-icon-active: #57c1ff;
+  --color-accent: #a78bfa;
+  --color-on-accent: #ffffff;
+  --color-primary: var(--color-accent);
+  --color-on-primary: var(--color-on-accent);
+  --color-icon-active: #a78bfa;
 }
 
 [data-theme="light"][data-accent="blue"] {
-  --color-accent: #0984E3;
+  --color-accent: #0b8ce9;
+  --color-accent-hover: #096fc0;
   --color-on-accent: #ffffff;
-  --color-icon-active: #0984E3;
+  --color-primary: var(--color-accent);
+  --color-on-primary: var(--color-on-accent);
+  --color-primary-pressed: #096fc0;
+  --color-icon-active: #0b8ce9;
 }
 [data-theme="light"][data-accent="green"] {
   --color-accent: #00B894;
   --color-on-accent: #ffffff;
+  --color-primary: var(--color-accent);
+  --color-on-primary: var(--color-on-accent);
   --color-icon-active: #00B894;
 }
 [data-theme="light"][data-accent="orange"] {
   --color-accent: #E17055;
   --color-on-accent: #ffffff;
+  --color-primary: var(--color-accent);
+  --color-on-primary: var(--color-on-accent);
   --color-icon-active: #E17055;
 }
 [data-theme="light"][data-accent="purple"] {
-  --color-accent: #0984E3;
+  --color-accent: #7c3aed;
   --color-on-accent: #ffffff;
-  --color-icon-active: #0984E3;
+  --color-primary: var(--color-accent);
+  --color-on-primary: var(--color-on-accent);
+  --color-icon-active: #7c3aed;
 }

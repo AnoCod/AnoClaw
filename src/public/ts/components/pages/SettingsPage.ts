@@ -205,7 +205,7 @@ export class SettingsPage implements Page {
             <span id="compaction-val">${s.compactionThreshold}%</span>
           </div>
           <input type="range" name="compactionThreshold" min="30" max="90" value="${s.compactionThreshold}" step="5"
-            style="width:100%;accent-color:var(--color-primary, #ffffff);"
+            style="width:100%;accent-color:var(--color-primary, #0b8ce9);"
             oninput="document.getElementById('compaction-val').textContent=this.value+'%'">
         </div>
       </div>
@@ -297,11 +297,11 @@ export class SettingsPage implements Page {
 
     // ── Appearance: accent swatches ──
     const ACCENTS = [
+      { value: '#0b8ce9', label: t('settings.accent.blue') },
       { value: '#ff6161', label: t('settings.accent.red') },
-      { value: '#ffffff', label: t('settings.accent.white') },
-      { value: '#57c1ff', label: t('settings.accent.blue') },
       { value: '#59d499', label: t('settings.accent.green') },
       { value: '#ffc533', label: t('settings.accent.orange') },
+      { value: '#a78bfa', label: t('settings.accent.purple') },
     ];
 
     const accentSlot = form.querySelector('#appearance-accent');

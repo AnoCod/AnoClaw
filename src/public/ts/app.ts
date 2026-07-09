@@ -33,7 +33,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   showThinkCards: true,
   showToolCards: true,
   theme: 'dark',
-  accentColor: '#ffffff',
+  accentColor: '#0b8ce9',
   compactionThreshold: 70,
 };
 
@@ -334,13 +334,25 @@ class App {
   }
 
   private _normalizeSettings(settings: Partial<AppSettings>): AppSettings {
+    const accentColor = this._normalizeAccentColor((settings as { accentColor?: unknown }).accentColor);
     return {
       ...DEFAULT_SETTINGS,
       ...settings,
       lang: normalizeLocale((settings as { lang?: unknown }).lang),
       userMode: normalizeUserMode((settings as { userMode?: unknown }).userMode),
       theme: settings.theme === 'light' ? 'light' : 'dark',
+      accentColor,
     };
+  }
+
+  private _normalizeAccentColor(value: unknown): string {
+    if (typeof value !== 'string') return DEFAULT_SETTINGS.accentColor;
+    const normalized = value.trim();
+    if (!normalized) return DEFAULT_SETTINGS.accentColor;
+    if (normalized.toLowerCase() === '#ffffff') return DEFAULT_SETTINGS.accentColor;
+    if (normalized.toLowerCase() === '#0984e3') return DEFAULT_SETTINGS.accentColor;
+    if (normalized.toLowerCase() === '#57c1ff') return DEFAULT_SETTINGS.accentColor;
+    return normalized;
   }
 
   private _applyPreferences(): void {
@@ -381,17 +393,20 @@ class App {
 
   private _getAccentName(hex: string): string {
     const map: Record<string, string> = {
-      '#ffffff': 'white',
+      '#ffffff': 'blue',
       '#ff6161': 'red',
       '#da291c': 'red',
+      '#0b8ce9': 'blue',
       '#57c1ff': 'blue',
-      '#0984E3': 'blue',
+      '#0984e3': 'blue',
       '#59d499': 'green',
-      '#00B894': 'green',
+      '#00b894': 'green',
       '#ffc533': 'orange',
-      '#E17055': 'orange',
+      '#e17055': 'orange',
+      '#a78bfa': 'purple',
+      '#7c3aed': 'purple',
     };
-    return map[hex] || 'white';
+    return map[hex.trim().toLowerCase()] || 'blue';
   }
 
   /** Create #page-area + #sessions-panel inside #page-container, instantiate and register all kernel pages. */

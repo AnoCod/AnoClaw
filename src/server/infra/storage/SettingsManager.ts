@@ -72,7 +72,7 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
     lang: 'zh-CN',
     userMode: 'simple',
     theme: 'dark',
-    accentColor: '#ffffff',
+    accentColor: '#0b8ce9',
     showThinkCards: true,
     showToolCards: true,
     compactionThreshold: 70,

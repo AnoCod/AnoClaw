@@ -24,6 +24,7 @@ const DEFAULT_STATE = {
   runningCount: 0,
   waitingCount: 0,
   recentSessions: [],
+  activityItems: [],
   waitingInbox: null,
   currentTask: null,
   clipboardText: '',
@@ -66,6 +67,8 @@ function phaseForState(state) {
   if (state.waitingCount > 0) return 'waiting';
   if (state.runningCount > 0) return 'running';
   if (state.connection === 'disconnected') return 'disconnected';
+  if (state.currentTask?.phase === 'failed') return 'failed';
+  if (state.currentTask?.phase === 'done') return 'done';
   return 'idle';
 }
 
@@ -73,6 +76,8 @@ function phaseLabel(phase) {
   switch (phase) {
     case 'waiting': return 'Waiting';
     case 'running': return 'Running';
+    case 'failed': return 'Failed';
+    case 'done': return 'Done';
     case 'disconnected': return 'Offline';
     default: return 'Ready';
   }
@@ -163,20 +168,12 @@ function renderPanel() {
     : 'Copy selected text to unlock actions.';
   els.panel.classList.toggle('has-clip', Boolean(clipboardText));
   els.panel.classList.toggle('has-waiting', Boolean(waiting && currentState.waitingCount > 0));
+  els.panel.classList.toggle('has-activity', Array.isArray(currentState.activityItems) && currentState.activityItems.length > 0);
   els.panel.classList.toggle('is-selection-captured', selectionCaptured);
   if (els.clipTitle) els.clipTitle.textContent = selectionCaptured ? 'Selection captured' : 'Clipboard text';
   els.quickInput.placeholder = clipboardText ? 'Ask about selected text...' : 'Ask quickly...';
 
-  els.recentList.innerHTML = '';
-  (currentState.recentSessions || []).slice(0, 3).forEach((session) => {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'recent-item';
-    row.innerHTML = '<span class="recent-dot"></span><span class="recent-title"></span>';
-    row.querySelector('.recent-title').textContent = cleanText(session.title, 30) || 'Session';
-    row.addEventListener('click', () => sendAction('open-session', { sessionId: session.id }));
-    els.recentList.appendChild(row);
-  });
+  renderActivityOrRecent();
 }
 
 function renderWaitingCard(waiting) {
@@ -201,6 +198,36 @@ function renderWaitingCard(waiting) {
 function render() {
   renderPanel();
   renderSatellites();
+}
+
+function renderActivityOrRecent() {
+  const activities = Array.isArray(currentState.activityItems) ? currentState.activityItems.slice(0, 3) : [];
+  els.recentList.innerHTML = '';
+  els.recentList.classList.toggle('activity-list', activities.length > 0);
+  if (activities.length > 0) {
+    activities.forEach((activity) => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = `recent-item activity-item activity-${activity.status === 'failed' ? 'failed' : 'completed'}`;
+      row.title = `${cleanText(activity.title, 80)}${activity.detail ? ` · ${cleanText(activity.detail, 100)}` : ''}`;
+      row.innerHTML = '<span class="recent-dot"></span><span class="recent-title"></span>';
+      row.querySelector('.recent-title').textContent = cleanText(activity.detail || activity.title, 34) || 'Activity';
+      row.addEventListener('click', () => sendAction('open-session', { sessionId: activity.sessionId || currentState.activeSessionId }));
+      els.recentList.appendChild(row);
+    });
+    return;
+  }
+
+  els.recentList.classList.remove('activity-list');
+  (currentState.recentSessions || []).slice(0, 3).forEach((session) => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'recent-item';
+    row.innerHTML = '<span class="recent-dot"></span><span class="recent-title"></span>';
+    row.querySelector('.recent-title').textContent = cleanText(session.title, 30) || 'Session';
+    row.addEventListener('click', () => sendAction('open-session', { sessionId: session.id }));
+    els.recentList.appendChild(row);
+  });
 }
 
 async function refreshState() {

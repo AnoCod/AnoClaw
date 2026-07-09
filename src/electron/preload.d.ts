@@ -181,6 +181,15 @@ interface FloatingBallSession {
   status?: string;
 }
 
+interface FloatingBallActivityItem {
+  id: string;
+  sessionId: string | null;
+  title: string;
+  detail?: string;
+  status: 'completed' | 'failed';
+  timestamp: number;
+}
+
 interface FloatingBallState {
   activeSessionId: string | null;
   activeTitle: string | null;
@@ -188,6 +197,7 @@ interface FloatingBallState {
   runningCount: number;
   waitingCount: number;
   recentSessions: FloatingBallSession[];
+  activityItems?: FloatingBallActivityItem[];
   waitingInbox?: {
     count: number;
     sessionId: string | null;

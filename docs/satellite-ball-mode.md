@@ -80,6 +80,12 @@
 
    长时间 build/test/search/package/run server 时，最小化后仍能看到运行状态。球体外圈转动表示有任务在跑；任务失败时变红，并保留最近失败摘要。
 
+   V1 已落地最近活动雷达：
+   - 主窗口从 `tool_execution_completed`、`task_notification`、`command_result`、`error`、`loop_completed` 中提取最近活动。
+   - FloatingBall state 包含 `activityItems`，小面板底部优先显示最近 3 条完成/失败摘要。
+   - 最近失败会让空闲球体进入 red/failed 状态，最近完成会短期显示 green/done 状态。
+   - 点击活动摘要会恢复主窗口并打开对应 session。
+
 3. Goal Pulse
 
    goal 模式下，球体显示 goal 状态：
@@ -149,6 +155,14 @@ floating-ball-state -> {
   connection: "connected" | "connecting" | "disconnected";
   runningCount: number;
   waitingCount: number;
+  activityItems?: Array<{
+    id: string;
+    sessionId: string | null;
+    title: string;
+    detail?: string;
+    status: "completed" | "failed";
+    timestamp: number;
+  }>;
   waitingInbox?: {
     count: number;
     sessionId: string | null;

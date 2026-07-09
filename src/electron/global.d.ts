@@ -5,6 +5,14 @@ export {};
 type FloatingBallConnection = 'connected' | 'connecting' | 'disconnected';
 type FloatingBallPhase = 'thinking' | 'tool' | 'waiting' | 'done' | 'failed' | 'idle';
 type FloatingBallSession = { id: string; title: string; status?: string };
+type FloatingBallActivityItem = {
+  id: string;
+  sessionId: string | null;
+  title: string;
+  detail?: string;
+  status: 'completed' | 'failed';
+  timestamp: number;
+};
 type FloatingBallState = {
   activeSessionId: string | null;
   activeTitle: string | null;
@@ -12,6 +20,7 @@ type FloatingBallState = {
   runningCount: number;
   waitingCount: number;
   recentSessions: FloatingBallSession[];
+  activityItems?: FloatingBallActivityItem[];
   waitingInbox?: {
     count: number;
     sessionId: string | null;

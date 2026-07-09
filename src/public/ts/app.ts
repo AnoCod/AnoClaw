@@ -26,6 +26,8 @@ import { localeDirection, normalizeLocale, setLocale } from './i18n/index.js';
 import { normalizeUserMode } from './userMode.js';
 
 const SETTINGS_KEY = 'anoclaw-settings';
+const FLOATING_BALL_ACTIVITY_LIMIT = 6;
+const FLOATING_BALL_ACTIVITY_PHASE_MS = 10 * 60 * 1000;
 
 const DEFAULT_SETTINGS: AppSettings = {
   lang: 'zh-CN',
@@ -36,6 +38,17 @@ const DEFAULT_SETTINGS: AppSettings = {
   accentColor: '#0b8ce9',
   compactionThreshold: 70,
 };
+
+type FloatingBallActivityStatus = 'completed' | 'failed';
+
+interface FloatingBallActivityItem {
+  id: string;
+  sessionId: string | null;
+  title: string;
+  detail?: string;
+  status: FloatingBallActivityStatus;
+  timestamp: number;
+}
 
 /**
  * Singleton App class — the frontend bootstrap.
@@ -66,6 +79,7 @@ class App {
   private _registeredPluginPages: string[] = [];
   private _pendingNav: string | null = null;
   private _floatingBallStateTimer: ReturnType<typeof setTimeout> | null = null;
+  private _floatingBallActivity: FloatingBallActivityItem[] = [];
 
   private constructor() {
     this._settings = this._loadSettings();
@@ -624,6 +638,7 @@ class App {
       console.log('[App] WS event received, dispatching:', d.type, 'sessionId:', d.sessionId);
       // Events not tied to a specific session (sessionId empty) go through as-is
       router.dispatch(d.type, d.data || {}, d.sessionId || '');
+      this._recordFloatingBallActivity(d.type, d.data || {}, d.sessionId || '');
       this._scheduleFloatingBallStateUpdate();
     });
 
@@ -692,7 +707,12 @@ class App {
     const taskNode = taskSessionId ? this._sessionVM.sessions.getById(taskSessionId) : null;
     const activeGoal = active?.metadata?.goal as { status?: string; objective?: string } | undefined;
     const isRunning = taskSessionId ? this._conversationVM.isSessionStreaming(taskSessionId) : false;
-    const phase = waitingCount > 0 ? 'waiting' : isRunning ? 'thinking' : activeGoal?.status === 'active' ? 'thinking' : 'idle';
+    const latestActivity = this._recentFloatingBallActivity()[0] || null;
+    const latestActivityIsFresh = latestActivity ? Date.now() - latestActivity.timestamp < FLOATING_BALL_ACTIVITY_PHASE_MS : false;
+    const activityPhase = latestActivityIsFresh
+      ? latestActivity?.status === 'failed' ? 'failed' : latestActivity?.status === 'completed' ? 'done' : 'idle'
+      : 'idle';
+    const phase = waitingCount > 0 ? 'waiting' : isRunning ? 'thinking' : activeGoal?.status === 'active' ? 'thinking' : activityPhase;
     const detail = waitingCount > 0
       ? waitingItem
         ? `${waitingItem.displayName} approval needed${waitingItem.riskLevel ? ` · ${waitingItem.riskLevel}` : ''}`
@@ -701,7 +721,9 @@ class App {
         ? activeGoal.objective || 'Active goal'
         : isRunning
           ? 'Agent is working'
-          : 'Ready';
+          : latestActivityIsFresh && latestActivity
+            ? latestActivity.title
+            : 'Ready';
 
     api.floatingBallUpdateState({
       activeSessionId: active?.id || null,
@@ -710,6 +732,7 @@ class App {
       runningCount: streamingIds.length,
       waitingCount,
       recentSessions,
+      activityItems: this._recentFloatingBallActivity().slice(0, 3),
       waitingInbox: waitingCount > 0 ? {
         count: waitingCount,
         sessionId: waitingSessionId,
@@ -724,6 +747,82 @@ class App {
         detail,
       } : undefined,
     });
+  }
+
+  private _recordFloatingBallActivity(type: string, data: Record<string, unknown>, fallbackSessionId: string): void {
+    const sessionId = String((data.sessionId as string | undefined) || fallbackSessionId || '') || null;
+    const idBase = `${type}-${sessionId || 'global'}-${Date.now()}`;
+    let item: FloatingBallActivityItem | null = null;
+
+    if (type === 'tool_execution_completed') {
+      const toolName = String(data.toolName || 'Tool');
+      const success = data.success !== false;
+      const durationMs = Number(data.durationMs || 0);
+      item = {
+        id: `${idBase}-${toolName}`,
+        sessionId,
+        title: `${toolName} ${success ? 'completed' : 'failed'}`,
+        detail: durationMs > 0 ? `${Math.round(durationMs / 100) / 10}s` : undefined,
+        status: success ? 'completed' : 'failed',
+        timestamp: Date.now(),
+      };
+    } else if (type === 'task_notification') {
+      const rawStatus = String(data.taskStatus || data.status || 'completed');
+      const failed = rawStatus === 'failed';
+      const summary = String(data.taskSummary || data.summary || 'Background task');
+      item = {
+        id: `${idBase}-${String(data.taskId || '')}`,
+        sessionId,
+        title: failed ? 'Task failed' : 'Task completed',
+        detail: summary,
+        status: failed ? 'failed' : 'completed',
+        timestamp: Date.now(),
+      };
+    } else if (type === 'command_result') {
+      const command = String(data.command || 'Command');
+      const success = data.success !== false;
+      item = {
+        id: `${idBase}-${command}`,
+        sessionId,
+        title: `${command} ${success ? 'completed' : 'failed'}`,
+        detail: String(data.output || data.errorMessage || '').trim() || undefined,
+        status: success ? 'completed' : 'failed',
+        timestamp: Date.now(),
+      };
+    } else if (type === 'error') {
+      item = {
+        id: idBase,
+        sessionId,
+        title: 'Agent error',
+        detail: String(data.message || data.error || data.content || 'Unknown error'),
+        status: 'failed',
+        timestamp: Date.now(),
+      };
+    } else if (type === 'loop_completed') {
+      const turns = Number(data.turnCount || 0);
+      const tokens = Number(data.totalTokens || 0);
+      item = {
+        id: `${idBase}-${String(data.agentId || '')}`,
+        sessionId,
+        title: 'Agent turn completed',
+        detail: [turns > 0 ? `${turns} turns` : '', tokens > 0 ? `${tokens} tokens` : ''].filter(Boolean).join(' · ') || undefined,
+        status: 'completed',
+        timestamp: Date.now(),
+      };
+    }
+
+    if (!item) return;
+    this._floatingBallActivity = [
+      item,
+      ...this._floatingBallActivity.filter((existing) => existing.id !== item!.id),
+    ].slice(0, FLOATING_BALL_ACTIVITY_LIMIT);
+  }
+
+  private _recentFloatingBallActivity(): FloatingBallActivityItem[] {
+    return this._floatingBallActivity
+      .slice()
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, FLOATING_BALL_ACTIVITY_LIMIT);
   }
 
   private async _handleFloatingBallCommand(payload: { action?: string; data?: unknown }): Promise<void> {

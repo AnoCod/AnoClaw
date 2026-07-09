@@ -27,6 +27,16 @@ body[data-phase="waiting"] {
   --phase-soft: rgba(255, 197, 51, 0.22);
 }
 
+body[data-phase="done"] {
+  --phase-color: #59d499;
+  --phase-soft: rgba(89, 212, 153, 0.18);
+}
+
+body[data-phase="failed"] {
+  --phase-color: #ff6161;
+  --phase-soft: rgba(255, 97, 97, 0.2);
+}
+
 body[data-phase="disconnected"] {
   --phase-color: #ff6161;
   --phase-soft: rgba(255, 97, 97, 0.2);
@@ -414,6 +424,10 @@ body.panel-open .helper-panel {
   margin-top: 8px;
 }
 
+.helper-panel.has-activity:not(.is-selection-captured) .clip-card {
+  display: none;
+}
+
 .helper-panel.has-waiting .clip-preview {
   height: 30px;
 }
@@ -475,6 +489,10 @@ body.panel-open .helper-panel {
   display: none;
 }
 
+.helper-panel.is-selection-captured .activity-list {
+  display: none;
+}
+
 .recent-item {
   min-width: 0;
   flex: 1 1 0;
@@ -503,6 +521,23 @@ body.panel-open .helper-panel {
   white-space: nowrap;
   font-size: 10px;
   font-weight: 650;
+}
+
+.activity-list .recent-item {
+  border-color: rgba(255,255,255,0.11);
+  background: rgba(255,255,255,0.045);
+}
+
+.activity-list .recent-title {
+  font-weight: 700;
+}
+
+.activity-item.activity-completed .recent-dot {
+  background: #59d499;
+}
+
+.activity-item.activity-failed .recent-dot {
+  background: #ff6161;
 }
 
 button:hover {

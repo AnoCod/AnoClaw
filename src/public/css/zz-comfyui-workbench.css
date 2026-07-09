@@ -252,41 +252,68 @@ html[data-theme="dark"] .page-col-right:not(.collapsed) {
 
 html[data-theme="dark"] .cinema-edge-left,
 html[data-theme="dark"] .cinema-edge-right {
-  gap: 8px;
-  padding-top: 10px;
+  width: 52px;
+  min-width: 52px;
+  gap: 10px;
+  padding-top: 12px;
   box-shadow: var(--comfy-shadow);
 }
 
 html[data-theme="dark"] .cinema-edge-left .edge-search,
 html[data-theme="dark"] .cinema-edge-left .edge-new-btn,
 html[data-theme="dark"] .cinema-edge-icon {
-  width: 32px;
-  height: 32px;
-  min-height: 32px;
-  border: 0 !important;
-  border-radius: 4px !important;
+  width: 38px;
+  height: 38px;
+  min-height: 38px;
+  border: 1px solid transparent !important;
+  border-radius: 6px !important;
   background: transparent !important;
-  color: var(--comfy-text-muted);
+  color: #aeb2b8;
 }
 
 html[data-theme="dark"] .cinema-edge-left .edge-search:hover,
 html[data-theme="dark"] .cinema-edge-left .edge-new-btn:hover,
 html[data-theme="dark"] .cinema-edge-icon:hover {
-  background: var(--comfy-charcoal-600) !important;
-  color: var(--comfy-text-primary) !important;
+  border-color: #3c3f45 !important;
+  background: #2b2c30 !important;
+  color: #ffffff !important;
 }
 
 html[data-theme="dark"] .cinema-edge-left .edge-search.active,
 html[data-theme="dark"] .cinema-edge-icon.active {
-  background: var(--comfy-charcoal-500) !important;
-  color: var(--comfy-text-primary) !important;
+  border-color: #4a4d54 !important;
+  background: #33353a !important;
+  color: #ffffff !important;
   box-shadow: inset 3px 0 0 var(--comfy-blue);
+}
+
+html[data-theme="dark"] .cinema-edge-left .edge-search svg,
+html[data-theme="dark"] .cinema-edge-left .edge-new-btn svg,
+html[data-theme="dark"] .cinema-edge-icon svg {
+  width: 18px !important;
+  height: 18px !important;
+  stroke-width: 1.9;
+}
+
+html[data-theme="dark"] .cinema-edge-ctx-text {
+  width: 24px !important;
+  height: 24px !important;
+  border-width: 1.8px !important;
+  color: #aeb2b8 !important;
+  font-size: 9px !important;
+  font-weight: 600;
+}
+
+html[data-theme="dark"] .cinema-edge-icon:hover .cinema-edge-ctx-text,
+html[data-theme="dark"] .cinema-edge-icon.active .cinema-edge-ctx-text {
+  border-color: #ffffff !important;
+  color: #ffffff !important;
 }
 
 html[data-theme="dark"] .cinema-edge-left .edge-label {
   color: var(--comfy-text-muted);
-  font-size: 8px;
-  letter-spacing: 0.6px;
+  font-size: 9px;
+  letter-spacing: 0.05em;
 }
 
 html[data-theme="dark"] .cinema-center {

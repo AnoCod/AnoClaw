@@ -157,6 +157,18 @@ export async function createApp(electron: typeof import('electron')) {
   // ── WebContentsView management IPC (delegates to BrowserViewManager) ──
   const bvm = BrowserViewManager.getInstance();
 
+  const wireFloatingBallMinimize = (win: any): void => {
+    if (!win || win.__floatingBallMinimizeWired) return;
+    win.__floatingBallMinimizeWired = true;
+    win.on('minimize', (event: { preventDefault: () => void }) => {
+      if (globalThis._quitting) return;
+      event.preventDefault();
+      FloatingBallManager.getInstance().saveMainWindowBounds(win.getBounds());
+      win.hide();
+      FloatingBallManager.getInstance().show();
+    });
+  };
+
   ipcMain.handle('wv-create', async (_e: IpcMainInvokeEvent, url: string, options?: { sessionId?: string; workspacePath?: string }) => {
     try { return { viewId: bvm.create(url, options || {}) }; }
     catch (err) { return { viewId: null, error: String(err) }; }
@@ -287,7 +299,7 @@ export async function createApp(electron: typeof import('electron')) {
         await startServer();
       }
 
-      WindowManager.getInstance().createWindow();
+      wireFloatingBallMinimize(WindowManager.getInstance().createWindow());
       TrayManager.getInstance().createTray();
 
       // ── Keyboard shortcuts (hidden menu) ──
@@ -316,6 +328,6 @@ export async function createApp(electron: typeof import('electron')) {
     callback(false);
   });
   app.on('activate', () => {
-    if (!WindowManager.getInstance().getMainWindow()) WindowManager.getInstance().createWindow();
+    if (!WindowManager.getInstance().getMainWindow()) wireFloatingBallMinimize(WindowManager.getInstance().createWindow());
   });
 }

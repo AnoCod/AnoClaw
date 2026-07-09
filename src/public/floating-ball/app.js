@@ -1,27 +1,72 @@
-// Floating Ball — satellite actions, distance-based hover
-// Renders 6 satellite circles around the AnoClaw icon.
-// - Hover detection uses mousemove distance from window center (100px threshold).
-// - Satellites appear/disappear via body.hover class (CSS animations).
-// - Click actions: new-session or open-session via IPC to main process.
-//
-// SATELLITES layout:
-//   0: ✏️ 快速对话 (new session)
-//   1-5: Most recent sessions (first char as avatar, truncated title as label)
+// Floating Ball quick helper.
+// Provides status, satellite shortcuts, quick ask, and clipboard text actions.
 
 const api = window.electronAPI;
 
-const SATELLITES = [
-  { label: '快速对话', icon: '✏️', action: 'new-session' },
-  { label: '最近会话', icon: '', action: 'session', sessionIndex: 0 },
-  { icon: '', action: 'session', sessionIndex: 1 },
-  { icon: '', action: 'session', sessionIndex: 2 },
-  { icon: '', action: 'session', sessionIndex: 3 },
-  { icon: '', action: 'session', sessionIndex: 4 },
-];
+const CENTER = { x: 200, y: 200 };
+const ORBIT_RADIUS = 100;
+const HOVER_RADIUS = 105;
+const CLIP_LIMIT = 4000;
 
-const ORBIT_RADIUS = 95;
-const CENTER = { x: 200, y: 200 }; // center of 400x400 window
-const HOVER_RADIUS = 100; // px from center to show satellites
+const ICONS = {
+  plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke-width="2" stroke-linecap="round"/></svg>',
+  open: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18 18 6M9 6h9v9" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 7 9 5-9 5V7Z" fill="currentColor"/></svg>',
+  wait: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v6l4 2M5 4h14M5 20h14" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  stop: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"/></svg>',
+};
+
+const DEFAULT_STATE = {
+  activeSessionId: null,
+  activeTitle: null,
+  connection: 'disconnected',
+  runningCount: 0,
+  waitingCount: 0,
+  recentSessions: [],
+  currentTask: null,
+  clipboardText: '',
+};
+
+let currentState = { ...DEFAULT_STATE };
+let hoverActive = false;
+let panelOpen = false;
+let clipboardPoll = null;
+
+const els = {
+  body: document.body,
+  satellites: document.getElementById('satellites'),
+  panel: document.getElementById('helperPanel'),
+  panelClose: document.getElementById('panelClose'),
+  ballButton: document.getElementById('ballButton'),
+  helperTitle: document.getElementById('helperTitle'),
+  statusPill: document.getElementById('statusPill'),
+  statusDetail: document.getElementById('statusDetail'),
+  quickInput: document.getElementById('quickInput'),
+  quickSend: document.getElementById('quickSend'),
+  clipRefresh: document.getElementById('clipRefresh'),
+  clipPreview: document.getElementById('clipPreview'),
+  recentList: document.getElementById('recentList'),
+};
+
+function cleanText(value, limit = 240) {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit);
+}
+
+function phaseForState(state) {
+  if (state.waitingCount > 0) return 'waiting';
+  if (state.runningCount > 0) return 'running';
+  if (state.connection === 'disconnected') return 'disconnected';
+  return 'idle';
+}
+
+function phaseLabel(phase) {
+  switch (phase) {
+    case 'waiting': return 'Waiting';
+    case 'running': return 'Running';
+    case 'disconnected': return 'Offline';
+    default: return 'Ready';
+  }
+}
 
 function orbitalPosition(index, total) {
   const angle = (index / total) * Math.PI * 2 - Math.PI / 2;
@@ -31,83 +76,183 @@ function orbitalPosition(index, total) {
   };
 }
 
-function renderSatellites(sessions) {
-  const container = document.getElementById('satellites');
-  container.innerHTML = '';
-
-  SATELLITES.forEach((def, i) => {
-    const pos = orbitalPosition(i, SATELLITES.length);
-    const el = document.createElement('div');
-    el.className = 'sat';
-    el.style.setProperty('--ox', `${pos.x}px`);
-    el.style.setProperty('--oy', `${pos.y}px`);
-    el.style.setProperty('--delay', `${i * 0.07}s`);
-
-    if (def.action === 'new-session') {
-      el.textContent = '✏️';
-      el.style.fontSize = '18px';
-      el.title = def.label;
-    } else {
-      const session = sessions && sessions[i - 1];
-      if (session) {
-        el.textContent = session.title.charAt(0).toUpperCase() || '·';
-        el.title = session.title;
-      } else {
-        el.textContent = '·';
-        el.style.opacity = '0.25';
-      }
-      const label = document.createElement('div');
-      label.className = 'sat-label';
-      label.textContent = def.label || (session && session.title.length > 5 ? session.title.slice(0, 5) + '…' : (session?.title || ''));
-      el.appendChild(label);
-    }
-
-    el.dataset.action = def.action;
-    el.dataset.sessionIndex = String(def.sessionIndex ?? '');
-    el.addEventListener('click', (e) => {
-      e.stopPropagation();
-      handleAction(el);
+function buildSatellites(state) {
+  const items = [];
+  if (state.waitingCount > 0) {
+    items.push({ label: 'Waiting', icon: ICONS.wait, action: 'open-waiting', data: { sessionId: state.currentTask?.sessionId || state.activeSessionId } });
+  }
+  items.push({ label: 'Continue', icon: ICONS.play, action: 'continue-current' });
+  items.push({ label: 'New', icon: ICONS.plus, action: 'new-session' });
+  if (state.runningCount > 0) {
+    items.push({ label: 'Stop', icon: ICONS.stop, action: 'stop-current', data: { sessionId: state.currentTask?.sessionId || state.activeSessionId } });
+  }
+  for (const session of state.recentSessions || []) {
+    if (items.length >= 6) break;
+    items.push({
+      label: cleanText(session.title, 12) || 'Session',
+      text: cleanText(session.title, 1).toUpperCase() || 'S',
+      action: 'open-session',
+      data: { sessionId: session.id },
     });
-    container.appendChild(el);
+  }
+  while (items.length < 4) items.push({ label: 'Open', icon: ICONS.open, action: 'open-current' });
+  return items.slice(0, 6);
+}
+
+function renderSatellites() {
+  const items = buildSatellites(currentState);
+  els.satellites.innerHTML = '';
+  items.forEach((item, index) => {
+    const pos = orbitalPosition(index, items.length);
+    const button = document.createElement('button');
+    button.className = 'sat';
+    button.type = 'button';
+    button.title = item.label;
+    button.style.setProperty('--ox', `${pos.x}px`);
+    button.style.setProperty('--oy', `${pos.y}px`);
+    button.style.setProperty('--delay', `${index * 0.05}s`);
+    if (item.icon) button.innerHTML = item.icon;
+    else button.textContent = item.text || 'S';
+    const label = document.createElement('span');
+    label.className = 'sat-label';
+    label.textContent = item.label;
+    button.appendChild(label);
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      sendAction(item.action, item.data || {});
+    });
+    els.satellites.appendChild(button);
   });
 }
 
-function handleAction(el) {
-  const action = el.dataset.action;
-  if (action === 'new-session') {
-    api?.floatingBallAction?.('new-session');
-  } else if (action === 'session') {
-    const idx = parseInt(el.dataset.sessionIndex);
-    api?.floatingBallAction?.('open-session', idx);
+function renderPanel() {
+  const phase = phaseForState(currentState);
+  const task = currentState.currentTask || {};
+  const activeTitle = cleanText(currentState.activeTitle || task.title || 'Ready', 42);
+  const clipboardText = cleanText(currentState.clipboardText || '', CLIP_LIMIT);
+
+  els.body.dataset.phase = phase;
+  els.helperTitle.textContent = activeTitle;
+  els.statusPill.textContent = phaseLabel(phase);
+  els.statusDetail.textContent = cleanText(task.detail || `${currentState.runningCount} running, ${currentState.waitingCount} waiting`, 70);
+  els.clipPreview.textContent = clipboardText
+    ? clipboardText.slice(0, 190) + (clipboardText.length > 190 ? '...' : '')
+    : 'Copy selected text to unlock actions.';
+  els.panel.classList.toggle('has-clip', Boolean(clipboardText));
+
+  els.recentList.innerHTML = '';
+  (currentState.recentSessions || []).slice(0, 3).forEach((session) => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'recent-item';
+    row.innerHTML = '<span class="recent-dot"></span><span class="recent-title"></span>';
+    row.querySelector('.recent-title').textContent = cleanText(session.title, 30) || 'Session';
+    row.addEventListener('click', () => sendAction('open-session', { sessionId: session.id }));
+    els.recentList.appendChild(row);
+  });
+}
+
+function render() {
+  renderPanel();
+  renderSatellites();
+}
+
+async function refreshState() {
+  try {
+    const next = await api?.floatingBallGetState?.();
+    currentState = { ...DEFAULT_STATE, ...(next || {}) };
+    render();
+  } catch {
+    currentState = { ...currentState, connection: 'disconnected' };
+    render();
   }
 }
 
-// ─── Distance-based hover: measure mouse distance from window center ───
-let hoverActive = false;
+function sendAction(action, data) {
+  api?.floatingBallAction?.(action, data || {});
+}
 
-document.addEventListener('mousemove', (e) => {
-  const dx = e.clientX - CENTER.x;
-  const dy = e.clientY - CENTER.y;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  const near = dist < HOVER_RADIUS;
+function sendQuickAsk() {
+  const question = cleanText(els.quickInput.value, 1000);
+  if (!question) return;
+  sendAction('quick-ask', { question });
+  els.quickInput.value = '';
+}
 
-  if (near === hoverActive) return;
-  hoverActive = near;
-
-  if (near) {
-    document.body.classList.add('hover');
-  } else {
-    document.body.classList.remove('hover');
+function sendTextAction(kind) {
+  const text = String(currentState.clipboardText || '').trim().slice(0, CLIP_LIMIT);
+  if (!text) {
+    els.clipPreview.textContent = 'Copy text first, then refresh.';
+    return;
   }
+  sendAction('text-action', {
+    kind,
+    text,
+    question: cleanText(els.quickInput.value, 600),
+  });
+}
+
+function setHoverActive(active) {
+  if (panelOpen) active = false;
+  if (active === hoverActive) return;
+  hoverActive = active;
+  els.body.classList.toggle('hover', active);
+}
+
+function setPanelOpen(open) {
+  panelOpen = open;
+  els.body.classList.toggle('panel-open', open);
+  setHoverActive(false);
+  if (open) {
+    refreshState();
+    els.quickInput.focus();
+    if (!clipboardPoll) {
+      clipboardPoll = setInterval(refreshState, 1400);
+    }
+  } else if (clipboardPoll) {
+    clearInterval(clipboardPoll);
+    clipboardPoll = null;
+  }
+}
+
+document.addEventListener('mousemove', (event) => {
+  const dx = event.clientX - CENTER.x;
+  const dy = event.clientY - CENTER.y;
+  setHoverActive(Math.sqrt(dx * dx + dy * dy) < HOVER_RADIUS);
 });
 
-async function init() {
-  try {
-    const sessions = await api?.floatingBallGetSessions?.();
-    renderSatellites(sessions || []);
-  } catch {
-    renderSatellites([]);
-  }
-}
+document.addEventListener('mouseleave', () => setHoverActive(false));
 
-init();
+els.ballButton?.addEventListener('click', (event) => {
+  event.stopPropagation();
+  setPanelOpen(!panelOpen);
+});
+
+els.ballButton?.addEventListener('contextmenu', (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  setPanelOpen(true);
+});
+
+els.panelClose?.addEventListener('click', () => setPanelOpen(false));
+els.panel?.addEventListener('click', (event) => event.stopPropagation());
+els.quickSend?.addEventListener('click', sendQuickAsk);
+els.quickInput?.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') sendQuickAsk();
+});
+els.clipRefresh?.addEventListener('click', refreshState);
+
+document.querySelectorAll('[data-helper-action]').forEach((button) => {
+  button.addEventListener('click', () => sendAction(button.dataset.helperAction));
+});
+
+document.querySelectorAll('[data-text-action]').forEach((button) => {
+  button.addEventListener('click', () => sendTextAction(button.dataset.textAction));
+});
+
+api?.onFloatingBallStateChanged?.((state) => {
+  currentState = { ...DEFAULT_STATE, ...(state || {}) };
+  render();
+});
+
+refreshState();

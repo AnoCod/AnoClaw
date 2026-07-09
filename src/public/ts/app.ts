@@ -65,6 +65,7 @@ class App {
   private _pluginVM: PluginViewModel;
   private _registeredPluginPages: string[] = [];
   private _pendingNav: string | null = null;
+  private _floatingBallStateTimer: ReturnType<typeof setTimeout> | null = null;
 
   private constructor() {
     this._settings = this._loadSettings();
@@ -174,6 +175,7 @@ class App {
 
     // Navigate to page from URL hash, default to workspace (sessions always visible on right)
     this._setupHashNav();
+    this._setupFloatingBallBridge();
     if (window.location.hash) {
       const page = window.location.hash.slice(1);
       if (page === 'sessions' || pageRegistry.getPage(page)) this.navigateTo(page);
@@ -237,11 +239,13 @@ class App {
       this._sessionVM.createSession(undefined, undefined).catch(() => {});
     });
 
-    // Floating ball — open session by index
+    // Floating ball — open a recent session.
     window.addEventListener('floating-ball-open-session', ((e: CustomEvent) => {
       this.navigateTo('sessions');
-      // The SessionViewModel handles loading recent sessions — index-based selection
-      // is done via the floating ball's session list
+      const detail = (e.detail || {}) as { sessionId?: string; index?: number };
+      if (detail.sessionId) {
+        this._sessionVM.selectSession(detail.sessionId);
+      }
     }) as EventListener);
   }
 
@@ -460,6 +464,33 @@ class App {
   /** Wire mousedown-based split handle dragging for #layout-split-handle. */
   private _wireSplitHandle(handle: HTMLElement, pageArea: HTMLElement): void {
     let dragging = false;
+    const cssPx = (name: string, fallback: number): number => {
+      const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      const parsed = Number.parseFloat(raw);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    };
+    const applySplit = (desiredPct: number): void => {
+      const container = document.getElementById('page-container');
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const usable = Math.max(0, rect.width - handle.offsetWidth);
+      if (usable <= 0) return;
+      const minPage = cssPx('--page-area-min-width', 300);
+      const minSessions = cssPx('--sessions-panel-min-width', 340);
+      const desiredPx = usable * (desiredPct / 100);
+      const maxPage = Math.max(0, usable - minSessions);
+      const minPageWhenPossible = Math.min(minPage, maxPage);
+      const clampedPx = Math.min(maxPage, Math.max(minPageWhenPossible, desiredPx));
+      pageArea.style.flex = `0 0 ${Math.round(clampedPx)}px`;
+    };
+    const clampCurrent = (): void => {
+      const container = document.getElementById('page-container');
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const usable = Math.max(1, rect.width - handle.offsetWidth);
+      const currentPct = (pageArea.getBoundingClientRect().width / usable) * 100;
+      applySplit(currentPct);
+    };
     handle.addEventListener('mousedown', (e) => {
       dragging = true;
       handle.classList.add('active');
@@ -472,10 +503,9 @@ class App {
       const container = document.getElementById('page-container');
       if (!container) return;
       const rect = container.getBoundingClientRect();
-      const handleW = handle.offsetWidth;
       const rawPct = ((e.clientX - rect.left) / rect.width) * 100;
       const pct = Math.min(70, Math.max(25, rawPct));
-      pageArea.style.flex = `0 0 ${pct}%`;
+      applySplit(pct);
     });
     document.addEventListener('mouseup', () => {
       if (!dragging) return;
@@ -483,6 +513,10 @@ class App {
       handle.classList.remove('active');
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
+    });
+    window.addEventListener('resize', () => {
+      if (dragging) return;
+      requestAnimationFrame(clampCurrent);
     });
   }
 
@@ -566,6 +600,7 @@ class App {
     // Connection state changes → update TitleBar status dot
     this._sseClient.on('connectionStateChanged', (state: unknown) => {
       this._titleBar.setConnectionState(state as WSConnectionState);
+      this._scheduleFloatingBallStateUpdate();
     });
 
     // WS connection lost → clean up streaming state
@@ -588,6 +623,7 @@ class App {
       console.log('[App] WS event received, dispatching:', d.type, 'sessionId:', d.sessionId);
       // Events not tied to a specific session (sessionId empty) go through as-is
       router.dispatch(d.type, d.data || {}, d.sessionId || '');
+      this._scheduleFloatingBallStateUpdate();
     });
 
     // On page close/refresh, let the WS disconnect naturally.
@@ -597,6 +633,166 @@ class App {
 
     // Subscribe AgentViewModel to real-time agent status/lifecycle events via WS
     this._agentVM.subscribeToAgentEvents(this._sseClient);
+  }
+
+  private _setupFloatingBallBridge(): void {
+    const api = (window as any).electronAPI;
+    if (!api) return;
+
+    if (api.onFloatingBallCommand) {
+      api.onFloatingBallCommand((payload: { action?: string; data?: unknown }) => {
+        this._handleFloatingBallCommand(payload).catch((err) => {
+          ClientLogger.app.error('Floating ball command failed', { error: (err as Error).message });
+        });
+      });
+    }
+
+    const schedule = () => this._scheduleFloatingBallStateUpdate();
+    this._sessionVM.on('sessionsLoaded', schedule);
+    this._sessionVM.on('sessionAdded', schedule);
+    this._sessionVM.on('sessionUpdated', schedule);
+    this._sessionVM.on('sessionRemoved', schedule);
+    this._sessionVM.on('sessionSelected', schedule);
+    this._conversationVM.on('activeSessionChanged', schedule);
+    this._conversationVM.on('permissionModeChanged', schedule);
+    this._conversationVM.on('goalChanged', schedule);
+    window.addEventListener('focus', schedule);
+    schedule();
+  }
+
+  private _scheduleFloatingBallStateUpdate(): void {
+    if (this._floatingBallStateTimer) clearTimeout(this._floatingBallStateTimer);
+    this._floatingBallStateTimer = setTimeout(() => {
+      this._floatingBallStateTimer = null;
+      this._pushFloatingBallState();
+    }, 80);
+  }
+
+  private _pushFloatingBallState(): void {
+    const api = (window as any).electronAPI;
+    if (!api?.floatingBallUpdateState) return;
+
+    const active = this._sessionVM.activeSession;
+    const streamingIds = this._conversationVM.getStreamingSessionIds();
+    const waitingCount = ToolConfirmationQueue.getInstance().pendingCount;
+    const recentSessions = [...this._sessionVM.sessions.all]
+      .sort((a, b) => new Date(b.lastActiveAt || 0).getTime() - new Date(a.lastActiveAt || 0).getTime())
+      .slice(0, 5)
+      .map((session) => ({
+        id: session.id,
+        title: session.title || 'Session',
+        status: this._conversationVM.isSessionStreaming(session.id) ? 'running' : (session.status || 'idle'),
+      }));
+
+    const taskSessionId = active?.id || streamingIds[0] || null;
+    const taskNode = taskSessionId ? this._sessionVM.sessions.getById(taskSessionId) : null;
+    const activeGoal = active?.metadata?.goal as { status?: string; objective?: string } | undefined;
+    const isRunning = taskSessionId ? this._conversationVM.isSessionStreaming(taskSessionId) : false;
+    const phase = waitingCount > 0 ? 'waiting' : isRunning ? 'thinking' : activeGoal?.status === 'active' ? 'thinking' : 'idle';
+    const detail = waitingCount > 0
+      ? `${waitingCount} waiting`
+      : activeGoal?.status === 'active'
+        ? activeGoal.objective || 'Active goal'
+        : isRunning
+          ? 'Agent is working'
+          : 'Ready';
+
+    api.floatingBallUpdateState({
+      activeSessionId: active?.id || null,
+      activeTitle: active?.title || null,
+      connection: this._sseClient.connectionState,
+      runningCount: streamingIds.length,
+      waitingCount,
+      recentSessions,
+      currentTask: taskSessionId ? {
+        sessionId: taskSessionId,
+        title: taskNode?.title || active?.title || 'Session',
+        phase,
+        detail,
+      } : undefined,
+    });
+  }
+
+  private async _handleFloatingBallCommand(payload: { action?: string; data?: unknown }): Promise<void> {
+    const action = payload?.action || '';
+    const data = (payload?.data || {}) as {
+      sessionId?: string;
+      question?: string;
+      text?: string;
+      kind?: string;
+    };
+
+    switch (action) {
+      case 'open-current':
+      case 'open-waiting': {
+        this.navigateTo('sessions');
+        const target = data.sessionId || this._sessionVM.activeSessionId;
+        if (target) this._sessionVM.selectSession(target);
+        break;
+      }
+      case 'continue-current': {
+        await this._sendFloatingBallPrompt('继续当前任务，先用一句话说明你接下来会做什么，然后直接推进。');
+        break;
+      }
+      case 'stop-current': {
+        const target = data.sessionId || this._sessionVM.activeSessionId;
+        if (target) await this._conversationVM.getAgent(target).stopGeneration();
+        break;
+      }
+      case 'quick-ask': {
+        const question = (data.question || '').trim();
+        if (question) await this._sendFloatingBallPrompt(question);
+        break;
+      }
+      case 'text-action': {
+        const prompt = this._buildTextActionPrompt(data.kind || 'ask', data.text || '', data.question || '');
+        if (prompt) await this._sendFloatingBallPrompt(prompt);
+        break;
+      }
+    }
+    this._scheduleFloatingBallStateUpdate();
+  }
+
+  private _buildTextActionPrompt(kind: string, text: string, question: string): string {
+    const selected = text.trim();
+    if (!selected) return question.trim();
+    const block = `\n\n---\n${selected}\n---`;
+    switch (kind) {
+      case 'translate':
+        return `请把下面这段选中文本翻译成中文。保留专有名词、代码、路径和格式，只输出清晰自然的译文。${block}`;
+      case 'polish':
+        return `请润色下面这段选中文本。保持原意，改得更清晰、更专业；如果原文是中文就润色中文，如果是英文就润色英文。${block}`;
+      case 'summarize':
+        return `请总结下面这段选中文本，给出要点和下一步建议。${block}`;
+      case 'ask':
+      default:
+        return question.trim()
+          ? `${question.trim()}\n\n请基于下面这段选中文本回答：${block}`
+          : `请解释下面这段选中文本，并指出它对当前任务可能有什么用。${block}`;
+    }
+  }
+
+  private async _sendFloatingBallPrompt(prompt: string): Promise<void> {
+    const content = prompt.trim();
+    if (!content) return;
+    const sessionId = await this._ensureFloatingBallSession();
+    if (!sessionId) return;
+    this.navigateTo('sessions');
+    this._sessionVM.selectSession(sessionId);
+    const agent = this._conversationVM.getAgent(sessionId);
+    await agent.sendMessage(content, this._conversationVM.permissionMode, this._conversationVM.effortMode, []);
+  }
+
+  private async _ensureFloatingBallSession(): Promise<string | null> {
+    if (this._sessionVM.activeSessionId) return this._sessionVM.activeSessionId;
+    const recent = [...this._sessionVM.sessions.all]
+      .sort((a, b) => new Date(b.lastActiveAt || 0).getTime() - new Date(a.lastActiveAt || 0).getTime());
+    if (recent[0]?.id) {
+      this._sessionVM.selectSession(recent[0].id);
+      return recent[0].id;
+    }
+    const created = await this._sessionVM.createSession('Quick Ask', undefined);
+    return created?.id || null;
   }
 
   /** Send a quality score rating via WebSocket. */

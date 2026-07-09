@@ -2,6 +2,26 @@
 // Frontend code should use preload.d.ts for the electronAPI interface.
 export {};
 
+type FloatingBallConnection = 'connected' | 'connecting' | 'disconnected';
+type FloatingBallPhase = 'thinking' | 'tool' | 'waiting' | 'done' | 'failed' | 'idle';
+type FloatingBallSession = { id: string; title: string; status?: string };
+type FloatingBallState = {
+  activeSessionId: string | null;
+  activeTitle: string | null;
+  connection: FloatingBallConnection;
+  runningCount: number;
+  waitingCount: number;
+  recentSessions: FloatingBallSession[];
+  currentTask?: {
+    sessionId: string;
+    title: string;
+    phase: FloatingBallPhase;
+    detail?: string;
+  };
+  clipboardText?: string;
+};
+type FloatingBallCommand = { action: string; data?: unknown };
+
 declare global {
   var _quitting: boolean | undefined;
 
@@ -19,9 +39,13 @@ declare global {
     getAutoStart: () => Promise<boolean>;
     setAutoStart: (enabled: boolean) => void;
     onFloatingBallNewSession: (cb: () => void) => void;
-    onFloatingBallOpenSession: (cb: (idx: number) => void) => void;
+    onFloatingBallOpenSession: (cb: (payload: number | { sessionId?: string; index?: number | null }) => void) => void;
+    onFloatingBallCommand: (cb: (payload: FloatingBallCommand) => void) => () => void;
+    onFloatingBallStateChanged: (cb: (state: FloatingBallState) => void) => () => void;
     floatingBallAction: (action: string, data?: unknown) => void;
-    floatingBallGetSessions: () => Promise<Array<{ id: string; title: string }>>;
+    floatingBallGetSessions: () => Promise<FloatingBallSession[]>;
+    floatingBallGetState: () => Promise<FloatingBallState>;
+    floatingBallUpdateState: (state: Partial<FloatingBallState>) => void;
     openExternal: (url: string) => Promise<{ ok: boolean; error?: string }>;
     openPath: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
     showNotification: (title: string, body: string) => Promise<{ ok: boolean; error?: string }>;

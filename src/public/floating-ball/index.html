@@ -9,15 +9,52 @@
 <body>
   <!-- Satellites fixed to full window, appear on hover -->
   <div id="satellites" class="satellites"></div>
+  <section id="helperPanel" class="helper-panel" aria-label="AnoClaw quick helper">
+    <div class="helper-head">
+      <div>
+        <div class="helper-kicker">AnoClaw Helper</div>
+        <div id="helperTitle" class="helper-title">Ready</div>
+      </div>
+      <button id="panelClose" class="panel-icon-btn" aria-label="Close helper">×</button>
+    </div>
+    <div class="status-row">
+      <span id="statusPill" class="status-pill">Idle</span>
+      <span id="statusDetail" class="status-detail">No active task</span>
+    </div>
+    <div class="quick-row">
+      <input id="quickInput" class="quick-input" type="text" placeholder="Ask quickly..." autocomplete="off">
+      <button id="quickSend" class="quick-send">Send</button>
+    </div>
+    <div class="action-grid">
+      <button data-helper-action="continue-current">Continue</button>
+      <button data-helper-action="open-current">Open</button>
+      <button data-helper-action="stop-current">Stop</button>
+    </div>
+    <div class="clip-card">
+      <div class="clip-head">
+        <span>Clipboard text</span>
+        <button id="clipRefresh" class="text-btn">Refresh</button>
+      </div>
+      <div id="clipPreview" class="clip-preview">Copy selected text to unlock actions.</div>
+      <div class="clip-actions">
+        <button data-text-action="translate">Translate</button>
+        <button data-text-action="polish">Polish</button>
+        <button data-text-action="summarize">Summarize</button>
+        <button data-text-action="ask">Ask Agent</button>
+      </div>
+    </div>
+    <div id="recentList" class="recent-list"></div>
+  </section>
 
-  <!-- The ball, centered. html is draggable via -webkit-app-region -->
+  <!-- The ball, centered. Outer ring drags the window; the core opens actions. -->
   <div class="ball-wrap">
-    <div class="ball">
+    <div class="ball-drag-ring" title="拖动卫星球"></div>
+    <button class="ball" id="ballButton" aria-label="展开卫星球动作" title="展开动作">
       <svg class="icon" viewBox="0 0 512 512">
         <polygon points="370,44 52,460 468,460" fill="#FF2800"/>
         <polygon points="370,44 52,460 260,460" fill="#FF4422" opacity="0.35"/>
       </svg>
-    </div>
+    </button>
   </div>
 
   <script src="app.js"></script>

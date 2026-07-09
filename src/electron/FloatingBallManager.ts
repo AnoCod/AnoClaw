@@ -10,12 +10,30 @@
 //   → hide() / destroy() on cleanup
 //
 // IPC:
-//   floating-ball-action:   'new-session' | 'open-session'  (from renderer)
+//   floating-ball-action:   quick helper actions from the floating renderer
 //   floating-ball-sessions: getRecentSessions() (provider registered in main.ts)
+//   floating-ball-state:    status snapshot for the floating helper
 
 import * as path from 'path';
-import { app, screen, BrowserWindow as BwType, IpcMain } from 'electron';
+import { app, clipboard, screen, BrowserWindow as BwType, IpcMain } from 'electron';
 import { WindowManager } from './WindowManager.js';
+
+type FloatingBallSession = { id: string; title: string; status?: string };
+type FloatingBallState = {
+  activeSessionId: string | null;
+  activeTitle: string | null;
+  connection: 'connected' | 'connecting' | 'disconnected';
+  runningCount: number;
+  waitingCount: number;
+  recentSessions: FloatingBallSession[];
+  currentTask?: {
+    sessionId: string;
+    title: string;
+    phase: 'thinking' | 'tool' | 'waiting' | 'done' | 'failed' | 'idle';
+    detail?: string;
+  };
+  clipboardText?: string;
+};
 
 export class FloatingBallManager {
   private static instance: FloatingBallManager;
@@ -23,7 +41,15 @@ export class FloatingBallManager {
   private _Bw: typeof BwType | null = null;
   private _ipcMain: IpcMain | null = null;
   private _ipcInstalled = false;
-  private _sessionProvider: (() => Promise<Array<{ id: string; title: string }>>) | null = null;
+  private _sessionProvider: (() => Promise<FloatingBallSession[]>) | null = null;
+  private _state: FloatingBallState = {
+    activeSessionId: null,
+    activeTitle: null,
+    connection: 'disconnected',
+    runningCount: 0,
+    waitingCount: 0,
+    recentSessions: [],
+  };
   /** Saved main window bounds before minimize, used to position ball at that window's corner. */
   private _mainWinBounds: { x: number; y: number; width: number; height: number } | null = null;
 
@@ -46,17 +72,49 @@ export class FloatingBallManager {
       ipcMain.handle('floating-ball-sessions', async () => {
         return inst._sessionProvider ? inst._sessionProvider() : [];
       });
+      ipcMain.handle('floating-ball-state', async () => inst._buildState());
+      ipcMain.on('floating-ball-update-state', (_e, patch: Partial<FloatingBallState>) => {
+        inst.updateState(patch);
+      });
     }
   }
 
   /** Register a provider for recent sessions (used by satellite display). */
-  setSessionProvider(fn: () => Promise<Array<{ id: string; title: string }>>): void {
+  setSessionProvider(fn: () => Promise<FloatingBallSession[]>): void {
     this._sessionProvider = fn;
+  }
+
+  /** Merge the latest renderer status into the floating helper state. */
+  updateState(patch: Partial<FloatingBallState>): void {
+    this._state = {
+      ...this._state,
+      ...patch,
+      recentSessions: Array.isArray(patch.recentSessions) ? patch.recentSessions : this._state.recentSessions,
+    };
+    this._pushStateToBall();
   }
 
   /** Store main window bounds so the ball window appears at the correct corner. */
   saveMainWindowBounds(bounds: { x: number; y: number; width: number; height: number }): void {
-    this._mainWinBounds = bounds;
+    const normalized = {
+      x: bounds.x,
+      y: bounds.y,
+      width: Math.max(800, bounds.width),
+      height: Math.max(600, bounds.height),
+    };
+    const visibleEnough = screen.getAllDisplays().some((display) => {
+      const b = display.workArea;
+      const visibleW = Math.min(normalized.x + normalized.width, b.x + b.width) - Math.max(normalized.x, b.x);
+      const visibleH = Math.min(normalized.y + normalized.height, b.y + b.height) - Math.max(normalized.y, b.y);
+      return visibleW >= Math.min(600, normalized.width * 0.6) && visibleH >= Math.min(400, normalized.height * 0.6);
+    });
+    if (!visibleEnough) {
+      const display = screen.getPrimaryDisplay();
+      const b = display.workArea;
+      normalized.x = Math.round(b.x + (b.width - normalized.width) / 2);
+      normalized.y = Math.round(b.y + (b.height - normalized.height) / 2);
+    }
+    this._mainWinBounds = normalized;
   }
 
   /** Show the 400x400 ball window at the main window's top-right corner. */
@@ -158,21 +216,76 @@ export class FloatingBallManager {
     this._ball.setIgnoreMouseEvents(false);
   }
 
+  private async _buildState(): Promise<FloatingBallState> {
+    let recentSessions = this._state.recentSessions;
+    if (this._sessionProvider) {
+      try {
+        const provided = await this._sessionProvider();
+        if (Array.isArray(provided)) recentSessions = provided;
+      } catch {
+        recentSessions = this._state.recentSessions;
+      }
+    }
+
+    let clipboardText = '';
+    try {
+      clipboardText = clipboard.readText().trim().slice(0, 4000);
+    } catch {
+      clipboardText = '';
+    }
+
+    return {
+      ...this._state,
+      recentSessions,
+      clipboardText,
+    };
+  }
+
+  private _pushStateToBall(): void {
+    if (!this._ball || this._ball.isDestroyed?.()) return;
+    this._buildState()
+      .then((state) => {
+        if (!this._ball || this._ball.isDestroyed?.()) return;
+        this._ball.webContents.send('floating-ball-state-changed', state);
+      })
+      .catch(() => {});
+  }
+
   /** Handle satellite action: show main window and dispatch new-session / open-session event. */
   private _handleAction(action: string, data?: any): void {
+    const showMain = (): BwType | null => {
+      const mainWin = WindowManager.getInstance().getMainWindow();
+      if (!mainWin) {
+        WindowManager.getInstance().createWindow();
+        return null;
+      }
+      if (this._mainWinBounds) {
+        try { mainWin.setBounds(this._mainWinBounds); } catch {}
+      }
+      mainWin.show();
+      mainWin.focus();
+      return mainWin;
+    };
+
     switch (action) {
       case 'new-session': {
         this.hide();
-        const mainWin = WindowManager.getInstance().getMainWindow();
-        if (mainWin) { mainWin.show(); mainWin.webContents.send('floating-ball-new-session'); }
-        else { WindowManager.getInstance().createWindow(); }
+        showMain()?.webContents.send('floating-ball-new-session');
         break;
       }
       case 'open-session': {
         this.hide();
-        const mainWin = WindowManager.getInstance().getMainWindow();
-        if (mainWin) { mainWin.show(); mainWin.webContents.send('floating-ball-open-session', data); }
-        else { WindowManager.getInstance().createWindow(); }
+        showMain()?.webContents.send('floating-ball-open-session', data);
+        break;
+      }
+      case 'continue-current':
+      case 'open-current':
+      case 'open-waiting':
+      case 'quick-ask':
+      case 'text-action':
+      case 'stop-current': {
+        this.hide();
+        showMain()?.webContents.send('floating-ball-command', { action, data });
         break;
       }
     }

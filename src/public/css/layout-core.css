@@ -22,6 +22,8 @@ html, body {
 :root {
   --sidebar-width: 240px;
   --tab-panel-width: 280px;
+  --page-area-min-width: 300px;
+  --sessions-panel-min-width: 340px;
 
   /* Hairline vars moved to theme.css for centralization */
 
@@ -144,7 +146,7 @@ html, body {
 
 #page-area {
   flex: 0 0 50%;
-  min-width: 360px;
+  min-width: var(--page-area-min-width);
   display: flex;
   min-height: 0;
   box-sizing: border-box;
@@ -155,7 +157,7 @@ html, body {
 
 #sessions-panel {
   flex: 1;
-  min-width: 420px;
+  min-width: var(--sessions-panel-min-width);
   display: flex;
   flex-direction: column;
   min-height: 0;

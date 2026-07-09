@@ -30,6 +30,10 @@ export class ToolConfirmationQueue {
     this._autoApprover = fn;
   }
 
+  get pendingCount(): number {
+    return this._queue.length + (this._active ? 1 : 0);
+  }
+
   enqueue(request: ToolConfirmRequest): void {
     if (request.autoApprove === true || this._autoApprover?.(request)) {
       this._sendResponse(request.toolCallId, true);

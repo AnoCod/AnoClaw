@@ -110,6 +110,14 @@ export class ConversationViewModel extends EventEmitter {
 
   getActiveSessionId(): string | null { return this._activeSessionId; }
 
+  getStreamingSessionIds(): string[] {
+    return Array.from(this._activeStreamingIds);
+  }
+
+  isSessionStreaming(sessionId: string): boolean {
+    return this._activeStreamingIds.has(sessionId) || this._agents.get(sessionId)?.state.isStreaming === true;
+  }
+
   /** True when the supplied session, or the current active session, belongs to an active root goal. */
   hasActiveGoalForSession(sessionId?: string | null): boolean {
     if (!this._sessionVM) return false;

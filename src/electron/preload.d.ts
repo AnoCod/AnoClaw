@@ -171,6 +171,37 @@ interface ExecJsResult {
   error?: string;
 }
 
+type FloatingBallSessionOpenPayload = number | { sessionId?: string; index?: number | null };
+type FloatingBallConnection = 'connected' | 'connecting' | 'disconnected';
+type FloatingBallPhase = 'thinking' | 'tool' | 'waiting' | 'done' | 'failed' | 'idle';
+
+interface FloatingBallSession {
+  id: string;
+  title: string;
+  status?: string;
+}
+
+interface FloatingBallState {
+  activeSessionId: string | null;
+  activeTitle: string | null;
+  connection: FloatingBallConnection;
+  runningCount: number;
+  waitingCount: number;
+  recentSessions: FloatingBallSession[];
+  currentTask?: {
+    sessionId: string;
+    title: string;
+    phase: FloatingBallPhase;
+    detail?: string;
+  };
+  clipboardText?: string;
+}
+
+interface FloatingBallCommand {
+  action: string;
+  data?: unknown;
+}
+
 interface ElectronAPI {
   // ── Window controls ──
   windowMinimize: () => void;
@@ -191,7 +222,13 @@ interface ElectronAPI {
 
   // ── Floating ball events (main -> renderer listeners) ──
   onFloatingBallNewSession: (cb: () => void) => void;
-  onFloatingBallOpenSession: (cb: (idx: number) => void) => void;
+  onFloatingBallOpenSession: (cb: (payload: FloatingBallSessionOpenPayload) => void) => void;
+  onFloatingBallCommand: (cb: (payload: FloatingBallCommand) => void) => () => void;
+  onFloatingBallStateChanged: (cb: (state: FloatingBallState) => void) => () => void;
+  floatingBallAction: (action: string, data?: unknown) => void;
+  floatingBallGetSessions: () => Promise<FloatingBallSession[]>;
+  floatingBallGetState: () => Promise<FloatingBallState>;
+  floatingBallUpdateState: (state: Partial<FloatingBallState>) => void;
 
   // ── File/link opening ──
   openExternal: (url: string) => Promise<ApiResult>;

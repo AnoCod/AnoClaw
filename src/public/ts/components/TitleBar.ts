@@ -69,9 +69,12 @@ export class TitleBar {
       });
     }
     if (api?.onFloatingBallOpenSession) {
-      api.onFloatingBallOpenSession((sessionIdx: number) => {
+      api.onFloatingBallOpenSession((payload: unknown) => {
         window.dispatchEvent(new CustomEvent('navigate-to', { detail: { page: 'sessions' } }));
-        window.dispatchEvent(new CustomEvent('floating-ball-open-session', { detail: { index: sessionIdx } }));
+        const detail = typeof payload === 'object' && payload !== null
+          ? payload
+          : { index: typeof payload === 'number' ? payload : undefined };
+        window.dispatchEvent(new CustomEvent('floating-ball-open-session', { detail }));
       });
     }
   }

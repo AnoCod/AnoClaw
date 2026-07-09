@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import { app, BrowserWindow as BwType } from 'electron';
+import { app, BrowserWindow as BwType, screen } from 'electron';
 
 export class WindowManager {
   private static instance: WindowManager;
@@ -76,11 +76,34 @@ export class WindowManager {
     // In packaged mode, app.getAppPath() is inside asar (read-only).
     // Use userData for writable state — standard Electron API.
     const statePath = path.join(app.getPath('userData'), 'window-state.json');
-    try { return JSON.parse(fs.readFileSync(statePath, 'utf-8')); }
+    try { return this.normalizeState(JSON.parse(fs.readFileSync(statePath, 'utf-8'))); }
     catch { return { width: 1200, height: 800, maximized: false }; }
   }
 
+  private normalizeState(raw: any): { width: number; height: number; x?: number; y?: number; maximized: boolean } {
+    const width = Math.max(800, Number(raw?.width) || 1200);
+    const height = Math.max(600, Number(raw?.height) || 800);
+    const maximized = raw?.maximized === true;
+    const x = Number(raw?.x);
+    const y = Number(raw?.y);
+    const state: { width: number; height: number; x?: number; y?: number; maximized: boolean } = { width, height, maximized };
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return state;
+
+    const visibleEnough = screen.getAllDisplays().some((display) => {
+      const b = display.workArea;
+      const visibleW = Math.min(x + width, b.x + b.width) - Math.max(x, b.x);
+      const visibleH = Math.min(y + height, b.y + b.height) - Math.max(y, b.y);
+      return visibleW >= Math.min(600, width * 0.6) && visibleH >= Math.min(400, height * 0.6);
+    });
+    if (visibleEnough) {
+      state.x = x;
+      state.y = y;
+    }
+    return state;
+  }
+
   private saveState(win: BwType): void {
+    if (!win.isVisible() || win.isMinimized()) return;
     const maximized = win.isMaximized?.() ?? false;
     const b = maximized ? ((win as any)._preBounds ?? win.getBounds()) : win.getBounds();
     try {

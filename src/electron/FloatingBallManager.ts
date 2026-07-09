@@ -33,6 +33,15 @@ type FloatingBallHelperNotice = {
   text: string;
   timestamp: number;
 };
+type FloatingBallPhase = 'thinking' | 'tool' | 'waiting' | 'done' | 'failed' | 'idle' | 'goal' | 'paused';
+type FloatingBallGoalPulse = {
+  sessionId: string | null;
+  status: 'active' | 'paused' | 'blocked' | 'completed' | 'deleted';
+  objective: string;
+  runCount?: number;
+  updatedAt?: string;
+  lastRunAt?: string;
+};
 type FloatingBallState = {
   activeSessionId: string | null;
   activeTitle: string | null;
@@ -49,10 +58,11 @@ type FloatingBallState = {
     detail?: string;
     riskLevel?: string;
   };
+  goalPulse?: FloatingBallGoalPulse | null;
   currentTask?: {
     sessionId: string;
     title: string;
-    phase: 'thinking' | 'tool' | 'waiting' | 'done' | 'failed' | 'idle';
+    phase: FloatingBallPhase;
     detail?: string;
   };
   clipboardText?: string;
@@ -379,7 +389,8 @@ export class FloatingBallManager {
         break;
       }
       case 'open-current':
-      case 'open-waiting': {
+      case 'open-waiting':
+      case 'open-goal': {
         this.hide();
         showMain()?.webContents.send('floating-ball-command', { action, data });
         break;
@@ -387,7 +398,8 @@ export class FloatingBallManager {
       case 'continue-current':
       case 'quick-ask':
       case 'text-action':
-      case 'stop-current': {
+      case 'stop-current':
+      case 'goal-toggle': {
         const mainWin = WindowManager.getInstance().getMainWindow();
         if (!mainWin) {
           this.hide();

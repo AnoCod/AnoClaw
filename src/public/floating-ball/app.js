@@ -14,6 +14,8 @@ const ICONS = {
   plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke-width="2" stroke-linecap="round"/></svg>',
   open: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18 18 6M9 6h9v9" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 7 9 5-9 5V7Z" fill="currentColor"/></svg>',
+  pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12M16 6v12" fill="none" stroke-width="2.4" stroke-linecap="round"/></svg>',
+  goal: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v3M12 17v3M4 12h3M17 12h3" fill="none" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="5" fill="none" stroke-width="2"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/></svg>',
   wait: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v6l4 2M5 4h14M5 20h14" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   stop: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"/></svg>',
 };
@@ -28,6 +30,7 @@ const DEFAULT_STATE = {
   activityItems: [],
   helperNotice: null,
   waitingInbox: null,
+  goalPulse: null,
   currentTask: null,
   clipboardText: '',
 };
@@ -53,6 +56,12 @@ const els = {
   helperTitle: document.getElementById('helperTitle'),
   statusPill: document.getElementById('statusPill'),
   statusDetail: document.getElementById('statusDetail'),
+  goalCard: document.getElementById('goalCard'),
+  goalBadge: document.getElementById('goalBadge'),
+  goalTitle: document.getElementById('goalTitle'),
+  goalDetail: document.getElementById('goalDetail'),
+  goalToggle: document.getElementById('goalToggle'),
+  goalOpen: document.getElementById('goalOpen'),
   quickTarget: document.getElementById('quickTarget'),
   quickInput: document.getElementById('quickInput'),
   quickSend: document.getElementById('quickSend'),
@@ -69,10 +78,21 @@ function cleanText(value, limit = 240) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit);
 }
 
+function currentGoal(state = currentState) {
+  const goal = state.goalPulse || null;
+  if (!goal || goal.status === 'deleted') return null;
+  if (!cleanText(goal.objective, 1) && !goal.sessionId) return null;
+  return goal;
+}
+
 function phaseForState(state) {
-  if (state.waitingCount > 0) return 'waiting';
-  if (state.runningCount > 0) return 'running';
+  const goal = currentGoal(state);
+  if (state.waitingCount > 0 || goal?.status === 'blocked') return 'waiting';
   if (state.connection === 'disconnected') return 'disconnected';
+  if (goal?.status === 'active') return 'goal';
+  if (state.runningCount > 0) return 'running';
+  if (goal?.status === 'paused') return 'paused';
+  if (goal?.status === 'completed') return 'done';
   if (state.currentTask?.phase === 'failed') return 'failed';
   if (state.currentTask?.phase === 'done') return 'done';
   return 'idle';
@@ -82,10 +102,22 @@ function phaseLabel(phase) {
   switch (phase) {
     case 'waiting': return 'Waiting';
     case 'running': return 'Running';
+    case 'goal': return 'Goal';
+    case 'paused': return 'Paused';
     case 'failed': return 'Failed';
     case 'done': return 'Done';
     case 'disconnected': return 'Offline';
     default: return 'Ready';
+  }
+}
+
+function goalBadgeText(status) {
+  switch (status) {
+    case 'blocked': return 'Waiting';
+    case 'paused': return 'Paused';
+    case 'completed': return 'Done';
+    case 'active':
+    default: return 'Goal';
   }
 }
 
@@ -105,12 +137,21 @@ function orbitalPosition(index, total) {
 
 function buildSatellites(state) {
   const items = [];
+  const goal = currentGoal(state);
   if (state.waitingCount > 0) {
     items.push({
       label: 'Waiting',
       icon: ICONS.wait,
       action: 'open-waiting',
       data: { sessionId: state.waitingInbox?.sessionId || state.currentTask?.sessionId || state.activeSessionId },
+    });
+  }
+  if (goal) {
+    items.push({
+      label: goal.status === 'paused' ? 'Goal Paused' : 'Goal',
+      icon: goal.status === 'paused' ? ICONS.pause : ICONS.goal,
+      action: 'open-goal',
+      data: { sessionId: goal.sessionId },
     });
   }
   items.push({ label: 'Continue', icon: ICONS.play, action: 'continue-current' });
@@ -162,6 +203,7 @@ function renderPanel() {
   const task = currentState.currentTask || {};
   const waiting = currentState.waitingInbox || null;
   const notice = freshNotice();
+  const goal = currentGoal(currentState);
   const activeTitle = cleanText(currentState.activeTitle || task.title || 'Ready', 42);
   const clipboardText = cleanText(currentState.clipboardText || '', CLIP_LIMIT);
   const selectionCaptured = Boolean(clipboardText && capturedClipboardText && clipboardText === capturedClipboardText);
@@ -179,7 +221,10 @@ function renderPanel() {
     ? 'Selected text copied. Choose an action below.'
     : waiting
       ? cleanText(waiting.title || task.detail || `${currentState.waitingCount} waiting`, 70)
+    : goal
+      ? cleanText(goal.objective || task.detail || 'Goal active', 70)
     : cleanText(task.detail || `${currentState.runningCount} running, ${currentState.waitingCount} waiting`, 70);
+  renderGoalCard(goal);
   renderTargetPicker();
   renderWaitingCard(waiting);
   els.clipPreview.textContent = clipboardText
@@ -187,6 +232,7 @@ function renderPanel() {
     : 'Copy selected text to unlock actions.';
   els.panel.classList.toggle('has-clip', Boolean(clipboardText));
   els.panel.classList.toggle('has-waiting', Boolean(waiting && currentState.waitingCount > 0));
+  els.panel.classList.toggle('has-goal', Boolean(goal));
   els.panel.classList.toggle('has-activity', Array.isArray(currentState.activityItems) && currentState.activityItems.length > 0);
   els.panel.classList.toggle('is-selection-captured', selectionCaptured);
   if (els.clipTitle) els.clipTitle.textContent = selectionCaptured ? 'Selection captured' : 'Clipboard text';
@@ -206,6 +252,36 @@ function scheduleNoticeExpiry(notice) {
   if (remaining > 0) noticeTimer = setTimeout(renderPanel, remaining + 60);
 }
 
+function renderGoalCard(goal) {
+  if (!els.goalCard) return;
+  const visible = Boolean(goal);
+  els.goalCard.classList.toggle('is-visible', visible);
+  els.goalCard.dataset.status = goal?.status || '';
+  if (!visible) {
+    els.goalBadge.textContent = 'Goal';
+    els.goalTitle.textContent = 'No goal';
+    els.goalDetail.textContent = 'Ready';
+    els.goalToggle.disabled = true;
+    return;
+  }
+
+  const status = goal.status || 'active';
+  const isPaused = status === 'paused';
+  const canToggle = status === 'active' || status === 'blocked' || status === 'paused';
+  const objective = cleanText(goal.objective || 'Active goal', 90);
+  const meta = [
+    goal.runCount ? `Run #${goal.runCount}` : '',
+    goal.lastRunAt ? 'Recently active' : '',
+  ].filter(Boolean).join(' · ');
+
+  els.goalBadge.textContent = goalBadgeText(status);
+  els.goalTitle.textContent = objective;
+  els.goalTitle.title = goal.objective || objective;
+  els.goalDetail.textContent = meta || (isPaused ? 'Paused from FloatingBall' : 'Visible while AnoClaw is minimized');
+  els.goalToggle.textContent = isPaused ? 'Resume' : 'Pause';
+  els.goalToggle.disabled = !canToggle;
+}
+
 function targetChoices() {
   const choices = [];
   const seen = new Set();
@@ -214,7 +290,9 @@ function targetChoices() {
     seen.add(id);
     choices.push({ id, label: `${prefix}: ${cleanText(label || 'Session', 44)}` });
   };
+  const goal = currentGoal(currentState);
   add(currentState.waitingInbox?.sessionId, currentState.waitingInbox?.title || currentState.currentTask?.title, 'Waiting');
+  add(goal?.sessionId, goal?.objective || currentState.activeTitle, 'Goal');
   add(currentState.activeSessionId, currentState.activeTitle, 'Active');
   add(currentState.currentTask?.sessionId, currentState.currentTask?.title, 'Task');
   (currentState.recentSessions || []).slice(0, 5).forEach((session) => add(session.id, session.title, 'Recent'));
@@ -443,6 +521,17 @@ els.clipRefresh?.addEventListener('click', refreshState);
 els.waitingCard?.addEventListener('click', () => {
   const waiting = currentState.waitingInbox || {};
   sendAction('open-waiting', { sessionId: waiting.sessionId || currentState.currentTask?.sessionId || currentState.activeSessionId });
+});
+els.goalToggle?.addEventListener('click', (event) => {
+  event.stopPropagation();
+  const goal = currentGoal(currentState);
+  if (!goal) return;
+  sendAction('goal-toggle', { sessionId: goal.sessionId, status: goal.status });
+});
+els.goalOpen?.addEventListener('click', (event) => {
+  event.stopPropagation();
+  const goal = currentGoal(currentState);
+  sendAction('open-goal', { sessionId: goal?.sessionId || currentState.activeSessionId });
 });
 
 document.querySelectorAll('[data-helper-action]').forEach((button) => {

@@ -94,6 +94,17 @@
    - blocked: amber + 等待数量。
    - complete: green/blue 短闪，然后回到 idle。
 
+   V1 已落地：
+   - 主窗口推送 `goalPulse`，从等待项、当前任务、active session、最近会话向上找到 root session 的 goal。
+   - FloatingBall active goal 使用独立 `goal` phase，不再只伪装成普通 running。
+   - 小面板显示 Goal 卡片，包括目标摘要、运行次数、Pause/Resume、Open。
+   - Pause/Resume 可以在不展开主窗口的情况下执行；Open 会恢复主窗口并选中 goal 所属 root session。
+   - 当 goal 所属 session 有等待确认时，goal 进入 blocked/waiting 态，优先提醒用户处理。
+
+   后续增强：
+   - Goal complete 需要服务端显式状态，目前客户端只预留 `completed` 展示。
+   - 小球中心可增加运行/等待数字，但不应牺牲当前紧凑交互。
+
 4. Context Return
 
    卫星按钮不只打开 AnoClaw，而是回到正确上下文：
@@ -181,11 +192,19 @@ floating-ball-state -> {
     detail?: string;
     riskLevel?: string;
   };
+  goalPulse?: {
+    sessionId: string | null;
+    status: "active" | "paused" | "blocked" | "completed" | "deleted";
+    objective: string;
+    runCount?: number;
+    updatedAt?: string;
+    lastRunAt?: string;
+  } | null;
   recentSessions: Array<{ id: string; title: string; status?: string }>;
   currentTask?: {
     sessionId: string;
     title: string;
-    phase: "thinking" | "tool" | "waiting" | "done" | "failed";
+    phase: "thinking" | "tool" | "waiting" | "done" | "failed" | "idle" | "goal" | "paused";
     detail?: string;
   };
 }
@@ -215,6 +234,8 @@ floating-ball-action:
   "continue-current"
   "quick-ask"
   "text-action"
+  "open-goal"
+  "goal-toggle"
 ```
 
 Low-risk inline actions can come later. High-risk approvals should first restore the main window and show the full confirmation context.

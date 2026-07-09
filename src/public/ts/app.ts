@@ -19,7 +19,8 @@ import { PluginsPage } from './components/pages/PluginsPage.js';
 import { PluginPageContainer } from './components/pages/PluginPageContainer.js';
 import { PluginViewModel } from './viewmodel/PluginViewModel.js';
 import { ToolConfirmationQueue } from './viewmodel/ToolConfirmationQueue.js';
-import type { AppSettings, PluginPageContribution } from './types.js';
+import type { AppSettings, PluginPageContribution, SessionNode } from './types.js';
+import type { GoalState } from './components/conversation/types.js';
 import { ClientLogger } from './ClientLogger.js';
 import { initAnoClawAPI } from './anoclaw-api.js';
 import { localeDirection, normalizeLocale, setLocale } from './i18n/index.js';
@@ -51,6 +52,17 @@ interface FloatingBallActivityItem {
 }
 
 type FloatingBallNoticeKind = 'info' | 'success' | 'error';
+type FloatingBallPhase = 'thinking' | 'tool' | 'waiting' | 'done' | 'failed' | 'idle' | 'goal' | 'paused';
+type FloatingBallGoalStatus = GoalState['status'] | 'blocked' | 'completed';
+
+interface FloatingBallGoalPulse {
+  sessionId: string | null;
+  status: FloatingBallGoalStatus;
+  objective: string;
+  runCount?: number;
+  updatedAt?: string;
+  lastRunAt?: string;
+}
 
 /**
  * Singleton App class — the frontend bootstrap.
@@ -708,20 +720,37 @@ class App {
     const waitingSessionId = waitingItem?.sessionId || null;
     const taskSessionId = waitingSessionId || active?.id || streamingIds[0] || null;
     const taskNode = taskSessionId ? this._sessionVM.sessions.getById(taskSessionId) : null;
-    const activeGoal = active?.metadata?.goal as { status?: string; objective?: string } | undefined;
+    const goalPulse = this._floatingBallGoalSnapshot(
+      [waitingSessionId, taskSessionId, active?.id, ...streamingIds],
+      waitingSessionId,
+      waitingCount,
+    );
     const isRunning = taskSessionId ? this._conversationVM.isSessionStreaming(taskSessionId) : false;
     const latestActivity = this._recentFloatingBallActivity()[0] || null;
     const latestActivityIsFresh = latestActivity ? Date.now() - latestActivity.timestamp < FLOATING_BALL_ACTIVITY_PHASE_MS : false;
     const activityPhase = latestActivityIsFresh
       ? latestActivity?.status === 'failed' ? 'failed' : latestActivity?.status === 'completed' ? 'done' : 'idle'
       : 'idle';
-    const phase = waitingCount > 0 ? 'waiting' : isRunning ? 'thinking' : activeGoal?.status === 'active' ? 'thinking' : activityPhase;
+    const goalPhase = goalPulse?.status === 'active'
+      ? 'goal'
+      : goalPulse?.status === 'paused'
+        ? 'paused'
+        : goalPulse?.status === 'blocked'
+          ? 'waiting'
+          : goalPulse?.status === 'completed'
+            ? 'done'
+            : null;
+    const phase: FloatingBallPhase = waitingCount > 0
+      ? 'waiting'
+      : isRunning
+        ? (goalPulse?.status === 'active' ? 'goal' : 'thinking')
+        : goalPhase || activityPhase;
     const detail = waitingCount > 0
       ? waitingItem
         ? `${waitingItem.displayName} approval needed${waitingItem.riskLevel ? ` · ${waitingItem.riskLevel}` : ''}`
         : `${waitingCount} waiting`
-      : activeGoal?.status === 'active'
-        ? activeGoal.objective || 'Active goal'
+      : goalPulse && goalPulse.status !== 'deleted'
+        ? goalPulse.objective || (goalPulse.status === 'paused' ? 'Goal paused' : 'Active goal')
         : isRunning
           ? 'Agent is working'
           : latestActivityIsFresh && latestActivity
@@ -743,6 +772,7 @@ class App {
         detail: waitingItem?.detail || detail,
         riskLevel: waitingItem?.riskLevel,
       } : undefined,
+      goalPulse,
       currentTask: taskSessionId ? {
         sessionId: taskSessionId,
         title: taskNode?.title || active?.title || 'Session',
@@ -828,6 +858,72 @@ class App {
       .slice(0, FLOATING_BALL_ACTIVITY_LIMIT);
   }
 
+  private _floatingBallGoalSnapshot(
+    preferredSessionIds: Array<string | null | undefined>,
+    waitingSessionId: string | null,
+    waitingCount: number,
+  ): FloatingBallGoalPulse | null {
+    const checkedRoots = new Set<string>();
+
+    const fromNode = (node: SessionNode | null | undefined): FloatingBallGoalPulse | null => {
+      const root = this._floatingBallRootForSession(node);
+      if (!root || checkedRoots.has(root.id)) return null;
+      checkedRoots.add(root.id);
+      const goal = root.metadata?.goal as GoalState | null | undefined;
+      if (!goal || goal.status === 'deleted') return null;
+
+      const waitingRoot = waitingSessionId
+        ? this._floatingBallRootForSession(this._sessionVM.sessions.getById(waitingSessionId))
+        : null;
+      const blocked = goal.status === 'active' && waitingCount > 0 && (!waitingRoot || waitingRoot.id === root.id);
+      return {
+        sessionId: root.id,
+        status: blocked ? 'blocked' : goal.status,
+        objective: goal.objective || 'Active goal',
+        runCount: goal.runCount,
+        updatedAt: goal.updatedAt,
+        lastRunAt: goal.lastRunAt,
+      };
+    };
+
+    for (const sessionId of preferredSessionIds) {
+      const snapshot = sessionId ? fromNode(this._sessionVM.sessions.getById(sessionId)) : null;
+      if (snapshot) return snapshot;
+    }
+
+    const recent = [...this._sessionVM.sessions.all]
+      .sort((a, b) => new Date(b.lastActiveAt || 0).getTime() - new Date(a.lastActiveAt || 0).getTime());
+    for (const session of recent) {
+      const snapshot = fromNode(session);
+      if (snapshot) return snapshot;
+    }
+    return null;
+  }
+
+  private _floatingBallRootForSession(node: SessionNode | null | undefined): SessionNode | null {
+    if (!node) return null;
+    let current: SessionNode | null | undefined = node;
+    while (current && !this._isFloatingBallRootSession(current)) {
+      const parentId: string | null = current.parentId || current.parentSessionId || null;
+      current = parentId ? this._sessionVM.sessions.getById(parentId) : null;
+    }
+    return current || node;
+  }
+
+  private _isFloatingBallRootSession(node: SessionNode): boolean {
+    return !node.parentId && !node.parentSessionId && (node.level === undefined || node.level === 0);
+  }
+
+  private _currentFloatingBallGoalSnapshot(): FloatingBallGoalPulse | null {
+    const active = this._sessionVM.activeSession;
+    const waitingSnapshot = ToolConfirmationQueue.getInstance().snapshot;
+    return this._floatingBallGoalSnapshot(
+      [waitingSnapshot.first?.sessionId || null, active?.id || null, ...this._conversationVM.getStreamingSessionIds()],
+      waitingSnapshot.first?.sessionId || null,
+      waitingSnapshot.count,
+    );
+  }
+
   private async _handleFloatingBallCommand(payload: { action?: string; data?: unknown }): Promise<void> {
     const action = payload?.action || '';
     const data = (payload?.data || {}) as {
@@ -835,6 +931,7 @@ class App {
       question?: string;
       text?: string;
       kind?: string;
+      status?: FloatingBallGoalStatus;
     };
 
     switch (action) {
@@ -843,6 +940,37 @@ class App {
         this.navigateTo('sessions');
         const target = data.sessionId || this._sessionVM.activeSessionId;
         if (target) this._sessionVM.selectSession(target);
+        break;
+      }
+      case 'open-goal': {
+        this.navigateTo('sessions');
+        const goal = data.sessionId
+          ? this._floatingBallGoalSnapshot([data.sessionId], null, 0)
+          : this._currentFloatingBallGoalSnapshot();
+        const target = goal?.sessionId || data.sessionId || this._sessionVM.activeSessionId;
+        if (target) this._sessionVM.selectSession(target);
+        break;
+      }
+      case 'goal-toggle': {
+        const goal = data.sessionId
+          ? this._floatingBallGoalSnapshot([data.sessionId], null, 0)
+          : this._currentFloatingBallGoalSnapshot();
+        const target = goal?.sessionId || data.sessionId || null;
+        if (!target) {
+          this._pushFloatingBallNotice('info', 'No active goal');
+          break;
+        }
+        if (target !== this._sessionVM.activeSessionId) this._sessionVM.selectSession(target);
+        const status = goal?.status || data.status;
+        if (status === 'paused') {
+          this._conversationVM.setGoal('resume');
+          this._pushFloatingBallNotice('success', 'Goal resumed');
+        } else if (status === 'active' || status === 'blocked') {
+          this._conversationVM.setGoal('pause');
+          this._pushFloatingBallNotice('success', 'Goal paused');
+        } else {
+          this._pushFloatingBallNotice('info', 'Goal is not active');
+        }
         break;
       }
       case 'continue-current': {

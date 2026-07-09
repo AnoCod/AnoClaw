@@ -3,7 +3,7 @@
 export {};
 
 type FloatingBallConnection = 'connected' | 'connecting' | 'disconnected';
-type FloatingBallPhase = 'thinking' | 'tool' | 'waiting' | 'done' | 'failed' | 'idle';
+type FloatingBallPhase = 'thinking' | 'tool' | 'waiting' | 'done' | 'failed' | 'idle' | 'goal' | 'paused';
 type FloatingBallSession = { id: string; title: string; status?: string };
 type FloatingBallActivityItem = {
   id: string;
@@ -17,6 +17,14 @@ type FloatingBallHelperNotice = {
   kind: 'info' | 'success' | 'error';
   text: string;
   timestamp: number;
+};
+type FloatingBallGoalPulse = {
+  sessionId: string | null;
+  status: 'active' | 'paused' | 'blocked' | 'completed' | 'deleted';
+  objective: string;
+  runCount?: number;
+  updatedAt?: string;
+  lastRunAt?: string;
 };
 type FloatingBallState = {
   activeSessionId: string | null;
@@ -34,6 +42,7 @@ type FloatingBallState = {
     detail?: string;
     riskLevel?: string;
   };
+  goalPulse?: FloatingBallGoalPulse | null;
   currentTask?: {
     sessionId: string;
     title: string;

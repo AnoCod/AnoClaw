@@ -173,7 +173,7 @@ interface ExecJsResult {
 
 type FloatingBallSessionOpenPayload = number | { sessionId?: string; index?: number | null };
 type FloatingBallConnection = 'connected' | 'connecting' | 'disconnected';
-type FloatingBallPhase = 'thinking' | 'tool' | 'waiting' | 'done' | 'failed' | 'idle';
+type FloatingBallPhase = 'thinking' | 'tool' | 'waiting' | 'done' | 'failed' | 'idle' | 'goal' | 'paused';
 
 interface FloatingBallSession {
   id: string;
@@ -196,6 +196,15 @@ interface FloatingBallHelperNotice {
   timestamp: number;
 }
 
+interface FloatingBallGoalPulse {
+  sessionId: string | null;
+  status: 'active' | 'paused' | 'blocked' | 'completed' | 'deleted';
+  objective: string;
+  runCount?: number;
+  updatedAt?: string;
+  lastRunAt?: string;
+}
+
 interface FloatingBallState {
   activeSessionId: string | null;
   activeTitle: string | null;
@@ -212,6 +221,7 @@ interface FloatingBallState {
     detail?: string;
     riskLevel?: string;
   };
+  goalPulse?: FloatingBallGoalPulse | null;
   currentTask?: {
     sessionId: string;
     title: string;

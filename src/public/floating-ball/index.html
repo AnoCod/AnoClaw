@@ -21,6 +21,17 @@
       <span id="statusPill" class="status-pill">Idle</span>
       <span id="statusDetail" class="status-detail">No active task</span>
     </div>
+    <div id="goalCard" class="goal-card" aria-live="polite">
+      <span id="goalBadge" class="goal-badge">Goal</span>
+      <div class="goal-copy">
+        <div id="goalTitle" class="goal-title">No goal</div>
+        <div id="goalDetail" class="goal-detail">Ready</div>
+      </div>
+      <div class="goal-actions">
+        <button id="goalToggle" type="button">Pause</button>
+        <button id="goalOpen" type="button">Open</button>
+      </div>
+    </div>
     <div class="target-row">
       <label class="target-label" for="quickTarget">To</label>
       <select id="quickTarget" class="target-select" aria-label="Quick ask target"></select>

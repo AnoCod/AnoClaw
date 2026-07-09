@@ -37,7 +37,7 @@ import {
   subAgentAllowedTools,
   type DelegationState,
 } from './AgentDelegation.js';
-import { resolveSessionEffort, resolveSessionPermissionMode } from './PermissionModePolicy.js';
+import { goalContinuationPermissionMode, resolveSessionEffort, resolveSessionPermissionMode } from './PermissionModePolicy.js';
 import { TaskResolver } from '../capability/TaskResolver.js';
 
 export interface ProcessMessageOptions {
@@ -381,7 +381,7 @@ export class AgentRuntime extends EventEmitter {
       }
 
       try {
-        const freshPermissionMode = resolveSessionPermissionMode(sessionManager, sessionId);
+        const freshPermissionMode = goalContinuationPermissionMode();
         const freshEffort = resolveSessionEffort(sessionManager, sessionId);
         const settings = SettingsManager.getInstance();
         const userMode = settings.get<string>('ui.userMode', 'simple');

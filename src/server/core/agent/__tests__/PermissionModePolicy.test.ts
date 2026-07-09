@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  goalContinuationPermissionMode,
   normalizePermissionMode,
   parsePermissionMode,
   permissionModeToUi,
@@ -26,5 +27,9 @@ describe('PermissionModePolicy', () => {
     expect(permissionModeToUi('AutoEdit')).toBe('auto-edit');
     expect(permissionModeToUi('Plan')).toBe('plan');
     expect(permissionModeToUi('Auto')).toBe('auto');
+  });
+
+  it('runs autonomous goal continuations with AutoEdit permissions', () => {
+    expect(goalContinuationPermissionMode()).toBe('AutoEdit');
   });
 });

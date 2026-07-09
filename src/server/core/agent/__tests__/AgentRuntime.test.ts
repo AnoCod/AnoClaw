@@ -13,6 +13,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { AgentRuntime, buildGoalContinuationContent } from '../AgentRuntime.js';
+import { AgentLoop } from '../AgentLoop.js';
 import { AgentRegistry } from '../AgentRegistry.js';
 import { Agent } from '../Agent.js';
 import { AgentRole, AgentState } from '../../../../shared/types/agent.js';
@@ -24,6 +25,7 @@ import { ToolRegistry } from '../../tools/ToolRegistry.js';
 import { Tool, type ExecutionContext } from '../../tools/Tool.js';
 import type { Message } from '../../../../shared/types/session.js';
 import type { ToolResult } from '../../../../shared/types/tool.js';
+import { WsServer } from '../../../infra/network/WsServer.js';
 
 // Reset singletons before each test
 beforeEach(() => {
@@ -475,6 +477,75 @@ describe('AgentRuntime', () => {
   });
 
   describe('goal continuation context', () => {
+    it('runs autonomous goal continuations with AutoEdit loop permissions', async () => {
+      const runtime = AgentRuntime.getInstance();
+      const goal = {
+        objective: '持续修复构建问题',
+        status: 'active',
+        createdAt: '2026-07-07T00:00:00.000Z',
+        updatedAt: '2026-07-07T00:01:00.000Z',
+        runCount: 0,
+      };
+      const appended: Message[] = [];
+      let loopPermissionMode: string | undefined;
+
+      const sessionManager = {
+        session: vi.fn(() => ({ isRoot: () => true, metadata: { permissionMode: 'Auto' } })),
+        getGoal: vi.fn()
+          .mockReturnValueOnce(goal)
+          .mockReturnValueOnce(goal)
+          .mockReturnValueOnce(null),
+        getRootSession: vi.fn(() => ({ id: 'session-1', workspace: 'F:/Projects/AnoClaw' })),
+        touchGoalRun: vi.fn(async (_sessionId: string, context: Record<string, unknown>) => ({
+          ...goal,
+          runCount: 1,
+          lastPermissionMode: context.permissionMode,
+        })),
+        appendMessage: vi.fn(async (_sessionId: string, message: Message) => {
+          appended.push(message);
+        }),
+        getHistory: vi.fn(async () => appended),
+      };
+      const runSpy = vi.spyOn(AgentLoop.prototype, 'run').mockImplementation(async function* () {
+        loopPermissionMode = (this as unknown as { permissionMode?: string }).permissionMode;
+        yield { type: SSEEventType.Done };
+      });
+      const sendSpy = vi.spyOn(WsServer.getInstance(), 'send').mockImplementation(() => undefined);
+      const sleepSpy = vi.spyOn(runtime as any, '_sleepUntilGoalWake').mockResolvedValue(undefined);
+      const resolveGoalSpy = vi.spyOn(runtime as any, '_resolveGoalTask').mockResolvedValue(null);
+
+      try {
+        const events: unknown[] = [];
+        for await (const event of (runtime as any)._runGoalMode(
+          'session-1',
+          sessionManager,
+          {
+            agentId: 'main-1',
+            sessionId: 'session-1',
+            maxTurns: 1,
+            temperature: 0,
+            contextWindow: 128000,
+            permissionMode: 'Auto',
+          },
+          new AbortController().signal,
+        )) {
+          events.push(event);
+        }
+
+        expect(sessionManager.touchGoalRun).toHaveBeenCalledWith('session-1', expect.objectContaining({
+          permissionMode: 'AutoEdit',
+        }));
+        expect(appended[0]?.content).toContain('Permission mode: AutoEdit');
+        expect(loopPermissionMode).toBe('AutoEdit');
+        expect(events.some((event: any) => event.type === SSEEventType.Wake)).toBe(true);
+      } finally {
+        runSpy.mockRestore();
+        sendSpy.mockRestore();
+        sleepSpy.mockRestore();
+        resolveGoalSpy.mockRestore();
+      }
+    });
+
     it('builds a workspace-aware goal wake prompt with mode and capability routing', () => {
       const content = buildGoalContinuationContent({
         sessionId: 'session-1',

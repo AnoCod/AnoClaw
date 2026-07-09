@@ -48,6 +48,12 @@ export function defaultPermissionMode(): PermissionMode {
   }
 }
 
+export function goalContinuationPermissionMode(): PermissionMode {
+  // Goal wakeups run without a waiting user, so avoid confirmation dialogs
+  // pausing autonomous progress.
+  return 'AutoEdit';
+}
+
 export function resolveSessionPermissionMode(
   sessionManager: SessionManager,
   sessionId: string,

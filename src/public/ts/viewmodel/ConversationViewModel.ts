@@ -162,6 +162,7 @@ export class ConversationViewModel extends EventEmitter {
     });
 
     const now = new Date().toISOString();
+    let activatedGoalMode = false;
     if (action === 'start' || action === 'edit') {
       const next: GoalState = {
         ...(this.goal || { createdAt: now }),
@@ -169,16 +170,25 @@ export class ConversationViewModel extends EventEmitter {
         status: 'active',
         updatedAt: now,
       };
-      root.metadata = { ...(root.metadata || {}), goal: next };
+      root.metadata = { ...(root.metadata || {}), goal: next, permissionMode: 'AutoEdit' };
       this.goal = next;
+      this.permissionMode = 'auto-edit';
+      activatedGoalMode = true;
     } else if (this.goal) {
       const status = action === 'pause' ? 'paused' : action === 'resume' ? 'active' : 'deleted';
       const next = { ...this.goal, status, updatedAt: now } as GoalState;
-      root.metadata = { ...(root.metadata || {}), goal: next };
+      activatedGoalMode = status === 'active';
+      root.metadata = {
+        ...(root.metadata || {}),
+        goal: next,
+        ...(activatedGoalMode ? { permissionMode: 'AutoEdit' } : {}),
+      };
       this.goal = status === 'deleted' ? null : next;
+      if (activatedGoalMode) this.permissionMode = 'auto-edit';
     }
     this._sessionVM.sessions.updateSession({ id: root.id, metadata: root.metadata });
     this.emit('goalChanged', this.goal);
+    if (activatedGoalMode) this.emit('permissionModeChanged', this.permissionMode);
     if (action === 'start' || action === 'resume' || action === 'edit') {
       this._kickGoalIfIdle(root).catch((err) => {
         ClientLogger.vm.error('Failed to kick goal loop', { error: (err as Error).message });

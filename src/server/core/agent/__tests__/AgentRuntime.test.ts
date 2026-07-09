@@ -506,11 +506,11 @@ describe('AgentRuntime', () => {
         }),
         getHistory: vi.fn(async () => appended),
       };
-      const runSpy = vi.spyOn(AgentLoop.prototype, 'run').mockImplementation(async function* () {
-        loopPermissionMode = (this as unknown as { permissionMode?: string }).permissionMode;
+      const runSpy = vi.spyOn(AgentLoop.prototype, 'run').mockImplementation(async function* (this: AgentLoop) {
+        loopPermissionMode = this.permissionMode;
         yield { type: SSEEventType.Done };
       });
-      const sendSpy = vi.spyOn(WsServer.getInstance(), 'send').mockImplementation(() => undefined);
+      const sendSpy = vi.spyOn(WsServer.getInstance(), 'send').mockImplementation(() => true);
       const sleepSpy = vi.spyOn(runtime as any, '_sleepUntilGoalWake').mockResolvedValue(undefined);
       const resolveGoalSpy = vi.spyOn(runtime as any, '_resolveGoalTask').mockResolvedValue(null);
 

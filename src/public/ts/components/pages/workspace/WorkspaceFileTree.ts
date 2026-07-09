@@ -4,6 +4,7 @@ import type { FileEntry } from '../../../types.js';
 
 /** Local alias using isDirectory for convenience; maps from FileEntry type field. */
 type FileNode = FileEntry & { isDirectory?: boolean; modifiedAt?: string };
+type TreeFilter = 'all' | 'files' | 'folders';
 
 export class WorkspaceFileTree {
   readonly element: HTMLElement;
@@ -12,7 +13,13 @@ export class WorkspaceFileTree {
   private _contextMenu: HTMLElement|null = null;
   private _nodeMap = new Map<string, HTMLElement>();
   private _treeBody: HTMLElement;
+  private _searchInput: HTMLInputElement;
+  private _treeMeta: HTMLElement;
   private _refreshBtn: HTMLElement;
+  private _filterButtons = new Map<TreeFilter, HTMLButtonElement>();
+  private _rootNodes: FileNode[] = [];
+  private _filterMode: TreeFilter = 'all';
+  private _searchQuery = '';
   private _pollTimer = 0;
   private _fileCount = 0;
   private _selectedPath = '';
@@ -24,6 +31,9 @@ export class WorkspaceFileTree {
   constructor(onFileOpen: (path:string, name:string)=>void) {
     this.element = document.createElement('div'); this.element.className = 'ws-file-tree-pane';
     this._onFileOpen = onFileOpen;
+
+    const panelHead = document.createElement('div');
+    panelHead.className = 'ws-tree-panel-head';
 
     // Header
     const header = document.createElement('div');
@@ -55,7 +65,70 @@ export class WorkspaceFileTree {
     this._refreshBtn.title = 'Refresh file tree';
     this._refreshBtn.addEventListener('click', () => { this.refreshAll(); });
     header.appendChild(this._refreshBtn);
-    this.element.appendChild(header);
+    panelHead.appendChild(header);
+
+    const searchWrap = document.createElement('div');
+    searchWrap.className = 'ws-tree-search';
+    const searchIcon = document.createElement('span');
+    searchIcon.className = 'ws-tree-search-icon';
+    searchIcon.innerHTML = _SVG_SEARCH;
+    searchWrap.appendChild(searchIcon);
+
+    this._searchInput = document.createElement('input');
+    this._searchInput.className = 'ws-tree-search-input';
+    this._searchInput.type = 'search';
+    this._searchInput.placeholder = 'Search current folder';
+    this._searchInput.spellcheck = false;
+    this._searchInput.addEventListener('input', () => {
+      this._searchQuery = this._searchInput.value.trim().toLowerCase();
+      searchWrap.classList.toggle('has-value', this._searchQuery.length > 0);
+      void this._renderRootNodes(false);
+    });
+    searchWrap.appendChild(this._searchInput);
+
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'ws-tree-search-clear';
+    clearBtn.type = 'button';
+    clearBtn.title = 'Clear search';
+    clearBtn.innerHTML = _SVG_X;
+    clearBtn.addEventListener('click', () => {
+      if (!this._searchInput.value) return;
+      this._searchInput.value = '';
+      this._searchQuery = '';
+      searchWrap.classList.remove('has-value');
+      this._searchInput.focus();
+      void this._renderRootNodes(false);
+    });
+    searchWrap.appendChild(clearBtn);
+    panelHead.appendChild(searchWrap);
+
+    const filterRow = document.createElement('div');
+    filterRow.className = 'ws-tree-filter-row';
+    const filters: Array<{ mode: TreeFilter; label: string }> = [
+      { mode: 'all', label: 'All' },
+      { mode: 'files', label: 'Files' },
+      { mode: 'folders', label: 'Folders' },
+    ];
+    for (const filter of filters) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ws-tree-filter-chip';
+      btn.dataset.filter = filter.mode;
+      btn.addEventListener('click', () => {
+        if (this._filterMode === filter.mode) return;
+        this._filterMode = filter.mode;
+        this._syncFilterButtons();
+        void this._renderRootNodes(false);
+      });
+      filterRow.appendChild(btn);
+      this._filterButtons.set(filter.mode, btn);
+    }
+    panelHead.appendChild(filterRow);
+
+    this._treeMeta = document.createElement('div');
+    this._treeMeta.className = 'ws-tree-meta';
+    panelHead.appendChild(this._treeMeta);
+    this.element.appendChild(panelHead);
 
     // Scrollable tree body
     this._treeBody = document.createElement('div');
@@ -79,9 +152,15 @@ export class WorkspaceFileTree {
 
   async loadRoot(sessionId: string): Promise<void> {
     this._sessionId = sessionId; this._treeBody.innerHTML = ''; this._nodeMap.clear();
+    this._rootNodes = [];
     this._expandedPaths.clear();
     this._lastFileFingerprint = '';
-    if (!sessionId) return;
+    this._syncFilterButtons();
+    this._updateTreeMeta(0, 0);
+    if (!sessionId) {
+      this._showEmpty('No workspace', 'Bind a workspace to browse files.');
+      return;
+    }
     await this._doLoadRoot();
     this._startPolling();
   }
@@ -93,14 +172,10 @@ export class WorkspaceFileTree {
       this._treeBody.innerHTML = '';
       this._nodeMap.clear();
       const nodes = (await resp.json()).nodes || [];
-      this._fileCount = nodes.length;
       this._lastFileFingerprint = nodes.map((n: FileNode) => `${n.path}|${n.modifiedAt||''}|${n.isDirectory?'d':'f'}`).sort().join(',');
-      if (nodes.length === 0) {
-        this._treeBody.innerHTML = '<div class="ws-tree-empty"><span>Empty folder</span><small>No files in this workspace.</small></div>';
-        return;
-      }
-      this._renderNodes(nodes, this._treeBody, 0);
-      await this._restoreExpandedState();
+      this._rootNodes = nodes;
+      this._fileCount = nodes.length;
+      await this._renderRootNodes(true);
     } catch { console.debug('WorkspaceFileTree: loadRoot failed'); }
   }
 
@@ -118,16 +193,9 @@ export class WorkspaceFileTree {
         const fingerprint = nodes.map((n: FileNode) => `${n.path}|${n.modifiedAt||''}|${n.isDirectory?'d':'f'}`).sort().join(',');
         if (fingerprint === this._lastFileFingerprint) return;
         this._lastFileFingerprint = fingerprint;
+        this._rootNodes = nodes;
         this._fileCount = nodes.length;
-        // Re-render root, then restore all expanded directories
-        this._treeBody.innerHTML = '';
-        this._nodeMap.clear();
-        if (nodes.length === 0) {
-          this._treeBody.innerHTML = '<div class="ws-tree-empty"><span>Empty folder</span><small>No files in this workspace.</small></div>';
-          return;
-        }
-        this._renderNodes(nodes, this._treeBody, 0);
-        await this._restoreExpandedState();
+        await this._renderRootNodes(true);
       } catch { console.debug('WorkspaceFileTree: poll refresh failed'); }
     }, 5000);
   }
@@ -141,6 +209,10 @@ export class WorkspaceFileTree {
   }
 
   async refreshDirectory(dirPath: string): Promise<void> {
+    if (!dirPath || dirPath === '/') {
+      await this._doLoadRoot();
+      return;
+    }
     const wrapper = this._nodeMap.get(dirPath); if (!wrapper) return;
     const childContainer = wrapper.querySelector('.ws-tree-children') as HTMLElement; if (!childContainer) return;
     try {
@@ -172,6 +244,74 @@ export class WorkspaceFileTree {
     row.classList.add('selected');
     this._selectedPath = normalized;
     row.scrollIntoView({ block: 'center' });
+  }
+
+  private async _renderRootNodes(restoreExpanded: boolean): Promise<void> {
+    this._treeBody.innerHTML = '';
+    this._nodeMap.clear();
+    this._syncFilterButtons();
+
+    const filtered = this._filteredRootNodes();
+    this._updateTreeMeta(filtered.length, this._rootNodes.length);
+
+    if (this._rootNodes.length === 0) {
+      this._showEmpty('Empty folder', 'No files in this workspace.');
+      return;
+    }
+    if (filtered.length === 0) {
+      this._showEmpty('No matches', 'Try a different search or filter.');
+      return;
+    }
+
+    this._renderNodes(filtered, this._treeBody, 0);
+    if (restoreExpanded && this._filterMode === 'all' && !this._searchQuery) {
+      await this._restoreExpandedState();
+    }
+  }
+
+  private _filteredRootNodes(): FileNode[] {
+    const query = this._searchQuery;
+    return this._rootNodes.filter((node) => {
+      if (this._filterMode === 'files' && node.isDirectory) return false;
+      if (this._filterMode === 'folders' && !node.isDirectory) return false;
+      if (!query) return true;
+      return `${node.name} ${node.path}`.toLowerCase().includes(query);
+    });
+  }
+
+  private _syncFilterButtons(): void {
+    const counts: Record<TreeFilter, number> = {
+      all: this._rootNodes.length,
+      files: this._rootNodes.filter((node) => !node.isDirectory).length,
+      folders: this._rootNodes.filter((node) => node.isDirectory).length,
+    };
+    const labels: Record<TreeFilter, string> = {
+      all: 'All',
+      files: 'Files',
+      folders: 'Folders',
+    };
+    this._filterButtons.forEach((btn, mode) => {
+      btn.classList.toggle('active', this._filterMode === mode);
+      btn.innerHTML = `<span>${labels[mode]}</span><strong>${counts[mode]}</strong>`;
+    });
+  }
+
+  private _updateTreeMeta(visible: number, total: number): void {
+    if (!this._treeMeta) return;
+    if (total === 0) {
+      this._treeMeta.textContent = 'No entries';
+      return;
+    }
+    const folders = this._rootNodes.filter((node) => node.isDirectory).length;
+    const files = Math.max(0, total - folders);
+    const filtered = visible !== total || this._filterMode !== 'all' || !!this._searchQuery;
+    this._treeMeta.textContent = filtered
+      ? `${visible} of ${total} shown`
+      : `${folders} folders / ${files} files`;
+  }
+
+  private _showEmpty(title: string, subtitle: string): void {
+    this._treeBody.innerHTML = `<div class="ws-tree-empty"><span>${_esc(title)}</span><small>${_esc(subtitle)}</small></div>`;
   }
 
   // Restore expanded state after a full tree rebuild (polling / refreshAll).
@@ -413,6 +553,8 @@ const _SVG_IMAGE = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" 
 const _SVG_FILE_PLUS = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 3.5H7A2 2 0 0 0 5 5.5v13A2 2 0 0 0 7 20.5h10a2 2 0 0 0 2-2V8Z"/><path d="M14.5 3.5V8H19"/><path d="M12 12v5"/><path d="M9.5 14.5h5"/></svg>`;
 const _SVG_FOLDER_PLUS = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2.5h7.5A2.5 2.5 0 0 1 21 9v8.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5Z"/><path d="M12 11v5"/><path d="M9.5 13.5h5"/></svg>`;
 const _SVG_REFRESH = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 16v5h5"/><path d="M3 12A9 9 0 0 1 18.5 5.7L21 8"/><path d="M21 8V3h-5"/></svg>`;
+const _SVG_SEARCH = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>`;
+const _SVG_X = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>`;
 const _SVG_CHEVRON_RIGHT = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>`;
 const _SVG_TS = _SVG_CODE;
 const _SVG_JS = _SVG_CODE;

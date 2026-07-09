@@ -245,14 +245,24 @@
   background:rgba(13,13,13,0.92);
 }
 
+.ws-tree-panel-head {
+  flex-shrink:0;
+  display:flex;
+  flex-direction:column;
+  gap:7px;
+  padding:7px 8px 8px;
+  border-bottom:1px solid var(--color-hairline,#242728);
+  background:var(--color-surface,#0d0d0d);
+}
+
 .ws-tree-header {
   min-height:38px;
   display:flex;
   align-items:center;
   gap:5px;
-  padding:6px 8px;
-  border-bottom:1px solid var(--color-hairline,#242728);
-  background:var(--color-surface,#0d0d0d);
+  padding:0;
+  border-bottom:0;
+  background:transparent;
   flex-shrink:0;
 }
 
@@ -287,6 +297,131 @@
   border-color:var(--color-hairline-strong,rgba(255,255,255,0.16));
   color:var(--color-text-primary,#f4f4f6);
   background:var(--color-surface-card,#121212);
+}
+
+.ws-tree-search {
+  position:relative;
+  display:flex;
+  align-items:center;
+  min-height:32px;
+  border:1px solid var(--color-hairline,#242728);
+  border-radius:6px;
+  background:var(--color-bg,#07080a);
+  color:var(--color-text-tertiary,#6a6b6c);
+}
+
+.ws-tree-search:focus-within {
+  border-color:var(--color-primary,#0b8ce9);
+  color:var(--color-text-secondary,#9c9c9d);
+}
+
+.ws-tree-search-icon {
+  width:30px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  flex:0 0 30px;
+  pointer-events:none;
+}
+
+.ws-tree-search-input {
+  width:100%;
+  min-width:0;
+  height:30px;
+  padding:0 28px 0 0;
+  border:0;
+  outline:0;
+  background:transparent;
+  color:var(--color-text-primary,#f4f4f6);
+  font:inherit;
+  font-size:12px;
+}
+
+.ws-tree-search-input::placeholder {
+  color:var(--color-text-tertiary,#6a6b6c);
+}
+
+.ws-tree-search-clear {
+  position:absolute;
+  right:4px;
+  top:50%;
+  width:22px;
+  height:22px;
+  min-height:22px;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  padding:0;
+  border:0;
+  border-radius:4px;
+  background:transparent;
+  color:var(--color-text-tertiary,#6a6b6c);
+  cursor:pointer;
+}
+
+.ws-tree-search.has-value .ws-tree-search-clear {
+  display:flex;
+}
+
+.ws-tree-search-clear:hover {
+  background:var(--color-surface-elevated,#101111);
+  color:var(--color-text-primary,#f4f4f6);
+}
+
+.ws-tree-filter-row {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:5px;
+}
+
+.ws-tree-filter-chip {
+  min-width:0;
+  min-height:28px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  padding:0 7px;
+  border:1px solid var(--color-hairline,#242728);
+  border-radius:6px;
+  background:transparent;
+  color:var(--color-text-secondary,#9c9c9d);
+  cursor:pointer;
+  font:inherit;
+  font-size:11px;
+}
+
+.ws-tree-filter-chip:hover {
+  border-color:var(--color-hairline-strong,rgba(255,255,255,0.16));
+  background:var(--color-surface-elevated,#101111);
+  color:var(--color-text-primary,#f4f4f6);
+}
+
+.ws-tree-filter-chip.active {
+  border-color:var(--color-primary,#0b8ce9);
+  background:rgba(11,140,233,0.14);
+  color:var(--color-text-primary,#f4f4f6);
+}
+
+.ws-tree-filter-chip strong {
+  min-width:14px;
+  color:var(--color-text-tertiary,#6a6b6c);
+  font-size:10px;
+  font-weight:600;
+}
+
+.ws-tree-filter-chip.active strong {
+  color:inherit;
+}
+
+.ws-tree-meta {
+  min-height:14px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:var(--color-text-quaternary,#636363);
+  font-size:10px;
+  line-height:1.2;
 }
 
 .ws-tree-body {

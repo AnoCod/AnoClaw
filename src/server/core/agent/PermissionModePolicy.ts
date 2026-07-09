@@ -48,10 +48,22 @@ export function defaultPermissionMode(): PermissionMode {
   }
 }
 
+export function activeGoalPermissionMode(): PermissionMode {
+  return 'AutoEdit';
+}
+
 export function goalContinuationPermissionMode(): PermissionMode {
   // Goal wakeups run without a waiting user, so avoid confirmation dialogs
   // pausing autonomous progress.
-  return 'AutoEdit';
+  return activeGoalPermissionMode();
+}
+
+export function hasActiveSessionGoal(sessionManager: SessionManager, sessionId: string): boolean {
+  try {
+    return sessionManager.getGoal(sessionId)?.status === 'active';
+  } catch {
+    return false;
+  }
 }
 
 export function resolveSessionPermissionMode(
@@ -62,6 +74,7 @@ export function resolveSessionPermissionMode(
   const session = sessionManager.session(sessionId);
   if (!session) return normalizePermissionMode(requested, defaultPermissionMode());
   if (!session.isRoot()) return 'AutoEdit';
+  if (hasActiveSessionGoal(sessionManager, sessionId)) return activeGoalPermissionMode();
 
   const requestedMode = parsePermissionMode(requested);
   if (requestedMode) return requestedMode;

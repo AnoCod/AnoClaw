@@ -9,6 +9,11 @@
 import type { WsMessageHandler } from '../WsMessageRouter.js';
 import { WsMessageType } from '../../../../shared/types/ws-protocol.js';
 import { SessionManager } from '../../../core/session/SessionManager.js';
+import {
+  goalContinuationPermissionMode,
+  permissionModeToUi,
+  type PermissionMode,
+} from '../../../core/agent/PermissionModePolicy.js';
 
 export const setGoalHandler: WsMessageHandler = async (ctx) => {
   const action = String(ctx.data.action || '').toLowerCase();
@@ -17,6 +22,7 @@ export const setGoalHandler: WsMessageHandler = async (ctx) => {
 
   try {
     let goal = null;
+    let goalMode: { rootId: string; mode: PermissionMode; effort: boolean } | null = null;
     if (action === 'start' || action === 'edit') {
       if (!objective) {
         ctx.ws.send(ctx.sessionId, {
@@ -27,10 +33,14 @@ export const setGoalHandler: WsMessageHandler = async (ctx) => {
         return;
       }
       goal = await sessionManager.setGoal(ctx.sessionId, objective);
+      goalMode = await applyGoalAutoEditMode(sessionManager, ctx.sessionId);
     } else if (action === 'pause') {
       goal = await sessionManager.updateGoalStatus(ctx.sessionId, 'paused');
     } else if (action === 'resume') {
       goal = await sessionManager.updateGoalStatus(ctx.sessionId, 'active');
+      if (goal?.status === 'active') {
+        goalMode = await applyGoalAutoEditMode(sessionManager, ctx.sessionId);
+      }
     } else if (action === 'delete') {
       goal = await sessionManager.updateGoalStatus(ctx.sessionId, 'deleted');
     } else {
@@ -40,6 +50,16 @@ export const setGoalHandler: WsMessageHandler = async (ctx) => {
         code: 'INVALID_GOAL_ACTION',
       });
       return;
+    }
+
+    if (goalMode) {
+      ctx.ws.send(goalMode.rootId, {
+        type: WsMessageType.SessionModeChanged,
+        sessionId: goalMode.rootId,
+        mode: permissionModeToUi(goalMode.mode),
+        effort: goalMode.effort,
+        locked: false,
+      });
     }
 
     ctx.ws.send(ctx.sessionId, {
@@ -56,3 +76,16 @@ export const setGoalHandler: WsMessageHandler = async (ctx) => {
     });
   }
 };
+
+async function applyGoalAutoEditMode(
+  sessionManager: SessionManager,
+  sessionId: string,
+): Promise<{ rootId: string; mode: PermissionMode; effort: boolean }> {
+  const root = sessionManager.getRootSession(sessionId);
+  const mode = await sessionManager.setSessionPermissionMode(root.id, goalContinuationPermissionMode());
+  return {
+    rootId: root.id,
+    mode,
+    effort: root.metadata.effortMode !== false,
+  };
+}

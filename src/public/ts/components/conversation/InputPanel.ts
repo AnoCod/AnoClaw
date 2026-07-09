@@ -117,7 +117,7 @@ export class InputPanel {
   private _makeTextarea(): HTMLTextAreaElement {
     const ta = document.createElement('textarea');
     ta.className = 'cinema-textarea';
-    ta.placeholder = 'Continue...  (type / for commands)';
+    ta.placeholder = 'Message AnoClaw...';
     ta.rows = 1;
     let heightRaf = 0;
     ta.addEventListener('input', () => {

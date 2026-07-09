@@ -26,7 +26,7 @@ export class SettingsPage implements Page {
     this.container.style.display = 'none';
     this.container.innerHTML = `
       <div class="cinema-static-inner">
-        <form id="settings-form"></form>
+        <form id="settings-form" class="settings-workbench-form"></form>
       </div>
     `;
   }
@@ -146,60 +146,60 @@ export class SettingsPage implements Page {
     const modeDescription = USER_MODE_OPTIONS.find((mode) => mode.value === currentUserMode)?.descriptionKey || 'settings.userMode.simpleDesc';
 
     form.innerHTML = `
-      <div class="cinema-section">
+      <div class="cinema-section settings-section settings-section-appearance">
         <div class="cinema-section-legend">${t('settings.appearance')}</div>
-        <div style="display:flex;flex-direction:column;gap:12px;">
+        <div class="settings-section-body settings-appearance-body">
           <div>
-            <div style="font-size:10px;color:var(--color-cinema-text-muted);letter-spacing:1px;margin-bottom:8px;">${t('settings.theme')}</div>
+            <div class="settings-field-label">${t('settings.theme')}</div>
             <span id="appearance-theme"></span>
           </div>
           <div>
-            <div style="font-size:10px;color:var(--color-cinema-text-muted);letter-spacing:1px;margin-bottom:8px;">${t('settings.accent')}</div>
+            <div class="settings-field-label">${t('settings.accent')}</div>
             <span id="appearance-accent"></span>
           </div>
         </div>
       </div>
 
-      <div class="cinema-section">
+      <div class="cinema-section settings-section">
         <div class="cinema-section-legend">${t('settings.language')}</div>
-        <div style="display:flex;flex-direction:column;gap:8px;">
-          <label style="display:flex;align-items:center;justify-content:space-between;gap:16px;">
-            <span style="font-size:12px;color:var(--color-cinema-text-secondary);">${t('settings.interfaceLanguage')}</span>
+        <div class="settings-section-body">
+          <label class="settings-row">
+            <span class="settings-row-label">${t('settings.interfaceLanguage')}</span>
             <select name="lang" class="cinema-select" style="min-width:150px;">${languageOptions}</select>
           </label>
-          <div style="font-size:10px;color:var(--color-cinema-text-muted);line-height:1.5;">${t('settings.languageHint')}</div>
+          <div class="settings-helper">${t('settings.languageHint')}</div>
         </div>
       </div>
 
-      <div class="cinema-section">
+      <div class="cinema-section settings-section">
         <div class="cinema-section-legend">${t('settings.userMode')}</div>
-        <div style="display:flex;flex-direction:column;gap:8px;">
-          <label style="display:flex;align-items:center;justify-content:space-between;gap:16px;">
-            <span style="font-size:12px;color:var(--color-cinema-text-secondary);">${t('settings.userMode.label')}</span>
+        <div class="settings-section-body">
+          <label class="settings-row">
+            <span class="settings-row-label">${t('settings.userMode.label')}</span>
             <select name="userMode" class="cinema-select" style="min-width:170px;">${userModeOptions}</select>
           </label>
-          <div id="user-mode-hint" style="font-size:10px;color:var(--color-cinema-text-muted);line-height:1.5;">${t(modeDescription)}</div>
-          <div style="font-size:10px;color:var(--color-cinema-text-muted);line-height:1.5;">${t('settings.userMode.hint')}</div>
+          <div id="user-mode-hint" class="settings-helper">${t(modeDescription)}</div>
+          <div class="settings-helper">${t('settings.userMode.hint')}</div>
         </div>
       </div>
 
-      <div class="cinema-section">
+      <div class="cinema-section settings-section">
         <div class="cinema-section-legend">${t('settings.display')}</div>
-        <div style="display:flex;flex-direction:column;gap:8px;">
-          <label style="display:flex;align-items:center;justify-content:space-between;">
-            <span style="font-size:12px;color:var(--color-cinema-text-secondary);">${t('settings.showThinkingCards')}</span>
+        <div class="settings-section-body">
+          <label class="settings-row">
+            <span class="settings-row-label">${t('settings.showThinkingCards')}</span>
             <span id="toggle-think"></span>
           </label>
-          <label style="display:flex;align-items:center;justify-content:space-between;">
-            <span style="font-size:12px;color:var(--color-cinema-text-secondary);">${t('settings.showToolCards')}</span>
+          <label class="settings-row">
+            <span class="settings-row-label">${t('settings.showToolCards')}</span>
             <span id="toggle-tool"></span>
           </label>
         </div>
       </div>
 
-      <div class="cinema-section">
+      <div class="cinema-section settings-section">
         <div class="cinema-section-legend">${t('settings.context')}</div>
-        <div style="display:flex;flex-direction:column;gap:4px;">
+        <div class="settings-section-body">
           <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--color-cinema-text-muted);">
             <span>${t('settings.compactionThreshold')}</span>
             <span id="compaction-val">${s.compactionThreshold}%</span>
@@ -210,17 +210,17 @@ export class SettingsPage implements Page {
         </div>
       </div>
 
-      <div class="cinema-section">
+      <div class="cinema-section settings-section">
         <div class="cinema-section-legend">${t('settings.data')}</div>
-        <div style="display:flex;gap:8px;">
+        <div class="settings-section-body settings-action-row">
           <button type="button" id="btn-export" class="cinema-btn">${t('settings.exportSettings')}</button>
           <button type="button" id="btn-clear" class="cinema-btn">${t('settings.clearAllSessions')}</button>
         </div>
       </div>
 
-      <div class="cinema-section">
+      <div class="cinema-section settings-section settings-section-evolution">
         <div class="cinema-section-legend">${t('settings.evolution')}</div>
-        <div style="display:flex;flex-direction:column;gap:4px;">
+        <div class="settings-section-body settings-evolution-body">
           <div id="evo-stats" class="evo-stats-grid">
             <div class="evo-stat-card">
               <div class="evo-stat-value"><span class="evo-spinner"></span></div>
@@ -248,7 +248,7 @@ export class SettingsPage implements Page {
         </div>
       </div>
 
-      <div style="display:flex;justify-content:flex-end;padding-top:8px;">
+      <div class="settings-save-row">
         <button type="submit" class="cinema-btn cinema-btn-primary">${t('settings.save')}</button>
       </div>
     `;

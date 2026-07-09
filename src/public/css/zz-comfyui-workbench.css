@@ -1224,6 +1224,225 @@ html[data-theme="dark"] .evo-tool-table tr:hover td {
   background: var(--comfy-charcoal-700);
 }
 
+/* Settings page: compact ComfyUI-style inspector panels */
+html[data-theme="dark"] [data-page="settings"] .cinema-static-inner {
+  max-width: 780px;
+  margin: 0;
+  padding: 20px 24px 32px;
+}
+
+html[data-theme="dark"] [data-page="settings"] .settings-workbench-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+html[data-theme="dark"] [data-page="settings"] .settings-section {
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden;
+  border-color: var(--comfy-charcoal-400) !important;
+  background: var(--comfy-charcoal-800) !important;
+}
+
+html[data-theme="dark"] [data-page="settings"] .settings-section .cinema-section-legend {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  margin: 0;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--comfy-charcoal-500);
+  background: var(--comfy-menu-secondary-bg);
+  color: var(--comfy-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+html[data-theme="dark"] [data-page="settings"] .settings-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+html[data-theme="dark"] [data-page="settings"] .settings-appearance-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 14px;
+}
+
+html[data-theme="dark"] [data-page="settings"] .settings-field-label,
+html[data-theme="dark"] [data-page="settings"] .settings-helper {
+  color: var(--comfy-text-muted) !important;
+  font-size: 10px !important;
+  line-height: 1.45 !important;
+  letter-spacing: 0 !important;
+}
+
+html[data-theme="dark"] [data-page="settings"] .settings-field-label {
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+html[data-theme="dark"] [data-page="settings"] .settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 240px);
+  align-items: center;
+  gap: 14px;
+  min-height: 32px;
+}
+
+html[data-theme="dark"] [data-page="settings"] .settings-row + .settings-row {
+  padding-top: 8px;
+  border-top: 1px solid var(--comfy-charcoal-500);
+}
+
+html[data-theme="dark"] [data-page="settings"] .settings-row-label {
+  min-width: 0;
+  color: var(--comfy-text-secondary) !important;
+  font-size: 12px !important;
+  line-height: 1.35;
+}
+
+html[data-theme="dark"] [data-page="settings"] .cinema-select,
+html[data-theme="dark"] [data-page="settings"] select {
+  height: 30px;
+  padding: 4px 28px 4px 8px !important;
+}
+
+html[data-theme="dark"] [data-page="settings"] .appearance-theme-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+html[data-theme="dark"] [data-page="settings"] .appearance-theme-card {
+  min-height: 34px;
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 5px 8px !important;
+}
+
+html[data-theme="dark"] [data-page="settings"] .appearance-theme-preview {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 20px;
+  border-color: var(--comfy-charcoal-400);
+  border-radius: 3px;
+  font-size: 8px;
+  letter-spacing: 0;
+}
+
+html[data-theme="dark"] [data-page="settings"] .appearance-theme-label {
+  min-width: 0;
+  color: var(--comfy-text-secondary) !important;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+html[data-theme="dark"] [data-page="settings"] .appearance-swatches {
+  align-items: center;
+  gap: 6px;
+}
+
+html[data-theme="dark"] [data-page="settings"] .appearance-swatch {
+  width: 24px;
+  height: 24px;
+  border-width: 1px;
+  transform: none !important;
+}
+
+html[data-theme="dark"] [data-page="settings"] .appearance-swatch.active {
+  border-color: #ffffff !important;
+  box-shadow: 0 0 0 2px rgba(11, 140, 233, 0.26);
+}
+
+html[data-theme="dark"] [data-page="settings"] .settings-action-row {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+html[data-theme="dark"] [data-page="settings"] .settings-evolution-body {
+  gap: 8px;
+}
+
+html[data-theme="dark"] [data-page="settings"] .evo-stats-grid {
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 0;
+  margin: 0 0 8px;
+  overflow: hidden;
+  border: 1px solid var(--comfy-charcoal-400);
+  border-radius: 4px;
+  background: var(--comfy-menu-secondary-bg);
+}
+
+html[data-theme="dark"] [data-page="settings"] .evo-stat-card {
+  min-height: 50px;
+  padding: 7px 8px !important;
+  border: 0 !important;
+  border-right: 1px solid var(--comfy-charcoal-500) !important;
+  border-bottom: 1px solid var(--comfy-charcoal-500) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+html[data-theme="dark"] [data-page="settings"] .evo-stat-value {
+  font-size: 17px;
+  line-height: 1.15;
+}
+
+html[data-theme="dark"] [data-page="settings"] .evo-stat-label,
+html[data-theme="dark"] [data-page="settings"] .evo-section-title,
+html[data-theme="dark"] [data-page="settings"] .evo-empty {
+  color: var(--comfy-text-muted);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+html[data-theme="dark"] [data-page="settings"] .evo-section-title {
+  margin: 6px 0 2px;
+  font-size: 10px;
+}
+
+html[data-theme="dark"] [data-page="settings"] .evo-empty {
+  padding: 2px 0;
+  font-style: normal;
+}
+
+html[data-theme="dark"] [data-page="settings"] .settings-save-row {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 0 0;
+}
+
+html[data-theme="dark"] [data-page="settings"] .cinema-btn-primary {
+  border-color: var(--comfy-blue) !important;
+  background: var(--comfy-blue) !important;
+  color: #ffffff !important;
+}
+
+html[data-theme="dark"] [data-page="settings"] .cinema-btn-primary:hover {
+  border-color: var(--comfy-blue-hover) !important;
+  background: var(--comfy-blue-hover) !important;
+}
+
+@media (max-width: 720px) {
+  html[data-theme="dark"] [data-page="settings"] .cinema-static-inner {
+    padding: 14px;
+  }
+
+  html[data-theme="dark"] [data-page="settings"] .settings-appearance-body,
+  html[data-theme="dark"] [data-page="settings"] .settings-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* ComfyUI refinement pass: compact top telemetry and tool surfaces */
 html[data-theme="dark"] .topbar-cinema {
   gap: 8px;

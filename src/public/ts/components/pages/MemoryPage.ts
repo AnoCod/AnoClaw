@@ -131,7 +131,8 @@ export class MemoryPage implements Page {
 
   private _buildCard(mem: MemoryEntry): HTMLElement {
     const card = document.createElement('div');
-    card.className = 'cinema-card mem-card';
+    card.className = 'cinema-card mem-card mem-row-card';
+    card.dataset.memoryType = mem.type || 'reference';
     card.addEventListener('click', () => this._showModal(mem));
 
     // Top: icon + title + type badge

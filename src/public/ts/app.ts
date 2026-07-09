@@ -19,6 +19,12 @@ import { PluginsPage } from './components/pages/PluginsPage.js';
 import { PluginPageContainer } from './components/pages/PluginPageContainer.js';
 import { PluginViewModel } from './viewmodel/PluginViewModel.js';
 import { ToolConfirmationQueue } from './viewmodel/ToolConfirmationQueue.js';
+import {
+  combineFloatingBallWaiting,
+  summarizeAskUserWaiting,
+  type AskUserSessionMessages,
+  type FloatingBallWaitingSnapshot,
+} from './viewmodel/FloatingBallWaiting.js';
 import type { AppSettings, PluginPageContribution, SessionNode } from './types.js';
 import type { GoalState } from './components/conversation/types.js';
 import { ClientLogger } from './ClientLogger.js';
@@ -687,6 +693,7 @@ class App {
     this._conversationVM.on('activeSessionChanged', schedule);
     this._conversationVM.on('permissionModeChanged', schedule);
     this._conversationVM.on('goalChanged', schedule);
+    this._conversationVM.on('messagesChanged', schedule);
     window.addEventListener('focus', schedule);
     schedule();
   }
@@ -705,7 +712,10 @@ class App {
 
     const active = this._sessionVM.activeSession;
     const streamingIds = this._conversationVM.getStreamingSessionIds();
-    const waitingSnapshot = ToolConfirmationQueue.getInstance().snapshot;
+    const waitingSnapshot = combineFloatingBallWaiting(
+      ToolConfirmationQueue.getInstance().snapshot,
+      this._floatingBallAskUserSnapshot(),
+    );
     const waitingItem = waitingSnapshot.first;
     const waitingCount = waitingSnapshot.count;
     const recentSessions = [...this._sessionVM.sessions.all]
@@ -747,7 +757,9 @@ class App {
         : goalPhase || activityPhase;
     const detail = waitingCount > 0
       ? waitingItem
-        ? `${waitingItem.displayName} approval needed${waitingItem.riskLevel ? ` · ${waitingItem.riskLevel}` : ''}`
+        ? waitingItem.source === 'ask-user'
+          ? 'Question needs your answer'
+          : `${waitingItem.displayName} approval needed${waitingItem.riskLevel ? ` · ${waitingItem.riskLevel}` : ''}`
         : `${waitingCount} waiting`
       : goalPulse && goalPulse.status !== 'deleted'
         ? goalPulse.objective || (goalPulse.status === 'paused' ? 'Goal paused' : 'Active goal')
@@ -768,7 +780,11 @@ class App {
       waitingInbox: waitingCount > 0 ? {
         count: waitingCount,
         sessionId: waitingSessionId,
-        title: waitingItem ? `${waitingItem.displayName} needs approval` : `${waitingCount} items need attention`,
+        title: waitingItem
+          ? waitingItem.source === 'ask-user'
+            ? 'Question needs answer'
+            : `${waitingItem.displayName} needs approval`
+          : `${waitingCount} items need attention`,
         detail: waitingItem?.detail || detail,
         riskLevel: waitingItem?.riskLevel,
         toolCallId: waitingItem?.toolCallId,
@@ -860,6 +876,23 @@ class App {
       .slice(0, FLOATING_BALL_ACTIVITY_LIMIT);
   }
 
+  private _floatingBallAskUserSnapshot(): FloatingBallWaitingSnapshot {
+    const knownAgents = this._conversationVM.getKnownAgents();
+    if (knownAgents.length === 0) return { count: 0, first: null };
+
+    const sessions: AskUserSessionMessages[] = knownAgents.map((agent) => {
+      const node = this._sessionVM.sessions.getById(agent.sessionId);
+      return {
+        sessionId: agent.sessionId,
+        title: node?.title,
+        lastActiveAt: node?.lastActiveAt,
+        messages: agent.state.messages.messages,
+      };
+    });
+
+    return summarizeAskUserWaiting(sessions);
+  }
+
   private _floatingBallGoalSnapshot(
     preferredSessionIds: Array<string | null | undefined>,
     waitingSessionId: string | null,
@@ -918,7 +951,10 @@ class App {
 
   private _currentFloatingBallGoalSnapshot(): FloatingBallGoalPulse | null {
     const active = this._sessionVM.activeSession;
-    const waitingSnapshot = ToolConfirmationQueue.getInstance().snapshot;
+    const waitingSnapshot = combineFloatingBallWaiting(
+      ToolConfirmationQueue.getInstance().snapshot,
+      this._floatingBallAskUserSnapshot(),
+    );
     return this._floatingBallGoalSnapshot(
       [waitingSnapshot.first?.sessionId || null, active?.id || null, ...this._conversationVM.getStreamingSessionIds()],
       waitingSnapshot.first?.sessionId || null,

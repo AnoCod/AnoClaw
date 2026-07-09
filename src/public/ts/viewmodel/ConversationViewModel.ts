@@ -82,8 +82,18 @@ export class ConversationViewModel extends EventEmitter {
       // Forward streaming tracking
       agent.on('streamingStarted', () => this._activeStreamingIds.add(sessionId));
       agent.on('streamingStopped', () => this._activeStreamingIds.delete(sessionId));
+      const emitMessagesChanged = () => this.emit('messagesChanged', sessionId);
+      agent.on('messageAdded', emitMessagesChanged);
+      agent.on('messageUpdated', emitMessagesChanged);
+      agent.on('messageRemoved', emitMessagesChanged);
+      agent.on('reset', emitMessagesChanged);
+      agent.on('historyLoaded', emitMessagesChanged);
     }
     return agent;
+  }
+
+  getKnownAgents(): SessionAgent[] {
+    return Array.from(this._agents.values());
   }
 
   /** Destroy and remove a SessionAgent — cleans up emitter + state. */

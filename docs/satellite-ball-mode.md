@@ -71,16 +71,15 @@
 
    球体变 amber，并显示等待数量。点击 Waiting 后恢复主窗口并定位到对应会话/卡片。后续可以支持在小面板里直接批准或拒绝低风险工具确认。
 
-   V1 已落地工具确认队列：
+   V1 已落地工具确认和 AskUser 等待汇总：
    - `ToolConfirmationQueue` 暴露当前等待数量和第一个等待项摘要。
+   - AskUserQuestion 会话卡片如果出现在最后一条用户消息之后，会被识别为未回答等待项。
    - FloatingBall state 包含 `waitingInbox`，提供 sessionId、toolCallId、标题、风险等级、参数摘要和是否可小窗处理。
    - 小面板在等待时显示 “Needs attention” 卡片，点击正文恢复主窗口并打开对应会话。
    - Safe/Low 风险等待项会在小面板内显示 Approve/Reject，可不展开主窗口直接处理。
-   - Medium/High/Critical 仍只做定位和上下文展示，不在小窗内直接批准，避免误触。
+   - AskUserQuestion 和 Medium/High/Critical 工具确认仍只做定位和上下文展示，不在小窗内直接批准，避免误触。
 
    后续增强：
-   - AskUserQuestion 等待项接入同一个 inbox。
-   - 对明确低风险确认增加小窗内批准/拒绝。
    - 恢复主窗口后滚动到具体确认卡片。
 
 2. Background Task Radar

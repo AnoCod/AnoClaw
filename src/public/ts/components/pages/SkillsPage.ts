@@ -19,6 +19,9 @@ type SkillVisual = {
 export class SkillsPage implements Page {
   name = 'skills';
   container: HTMLElement;
+  private _summaryEl!: HTMLElement;
+  private _toneStripEl!: HTMLElement;
+  private _toneLegendEl!: HTMLElement;
   private _gridEl!: HTMLElement;
   private _skills: SkillEntry[] = [];
   private _modalOverlay: HTMLElement | null = null;
@@ -33,19 +36,42 @@ export class SkillsPage implements Page {
     const inner = this.container.querySelector('#skills-inner')!;
     // Header
     const header = document.createElement('div');
-    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;';
-    const title = document.createElement('span');
-    title.style.cssText = 'font-size:13px;font-weight:500;color:var(--cinema-text-btn);';
-    title.textContent = 'Skills';
-    header.appendChild(title);
+    header.className = 'skills-workbench-head';
+    const titleGroup = document.createElement('div');
+    titleGroup.className = 'skills-workbench-title';
+    const kicker = document.createElement('div');
+    kicker.className = 'skills-kicker';
+    kicker.textContent = 'Skills';
+    titleGroup.appendChild(kicker);
+    this._summaryEl = document.createElement('div');
+    this._summaryEl.className = 'skills-summary';
+    this._summaryEl.textContent = 'Loading skills';
+    titleGroup.appendChild(this._summaryEl);
+    header.appendChild(titleGroup);
     const btnGroup = document.createElement('div');
-    btnGroup.style.cssText = 'display:flex;gap:8px;';
+    btnGroup.className = 'skills-actions';
     const createBtn = new Button({ label: '+ Create', variant: 'default', size: 'sm', onClick: () => this._showEditor(null) });
     const importBtn = new Button({ label: 'Import', variant: 'default', size: 'sm', onClick: () => this._showImportForm() });
     btnGroup.appendChild(createBtn.element);
     btnGroup.appendChild(importBtn.element);
     header.appendChild(btnGroup);
     inner.appendChild(header);
+
+    const overview = document.createElement('div');
+    overview.className = 'skills-map';
+    overview.innerHTML = `
+      <div class="skills-map-top">
+        <span>Skill map</span>
+        <span class="skills-map-note">enabled and type mix</span>
+      </div>
+    `;
+    this._toneStripEl = document.createElement('div');
+    this._toneStripEl.className = 'skills-map-strip';
+    overview.appendChild(this._toneStripEl);
+    this._toneLegendEl = document.createElement('div');
+    this._toneLegendEl.className = 'skills-map-legend';
+    overview.appendChild(this._toneLegendEl);
+    inner.appendChild(overview);
 
     this._gridEl = document.createElement('div');
     this._gridEl.className = 'cinema-card-grid';
@@ -75,12 +101,76 @@ export class SkillsPage implements Page {
   }
 
   private _renderGrid(): void {
+    this._renderOverview();
     this._gridEl.innerHTML = '';
     if (!this._skills.length) {
       this._gridEl.innerHTML = '<div class="ui-empty" style="grid-column:1/-1;"><div class="ui-empty-title">No skills loaded</div><div class="ui-empty-desc">Create or import a skill to get started.</div></div>';
       return;
     }
     for (const sk of this._skills) this._gridEl.appendChild(this._buildCard(sk));
+  }
+
+  private _renderOverview(): void {
+    const total = this._skills.length;
+    const enabled = this._skills.filter(skill => skill.enabled).length;
+    const disabled = total - enabled;
+    const groups = new Map<string, { tone: string; label: string; count: number; enabled: number }>();
+
+    for (const skill of this._skills) {
+      const visual = this._skillVisual(skill);
+      const group = groups.get(visual.tone) ?? { tone: visual.tone, label: visual.label, count: 0, enabled: 0 };
+      group.count += 1;
+      if (skill.enabled) group.enabled += 1;
+      groups.set(visual.tone, group);
+    }
+
+    this._summaryEl.textContent = total
+      ? `${enabled}/${total} enabled · ${groups.size} skill types`
+      : 'No skills loaded';
+
+    this._toneStripEl.innerHTML = '';
+    this._toneLegendEl.innerHTML = '';
+
+    if (!total) {
+      const emptySegment = document.createElement('div');
+      emptySegment.className = 'skills-map-segment skills-map-segment-empty';
+      this._toneStripEl.appendChild(emptySegment);
+      const empty = document.createElement('div');
+      empty.className = 'skills-map-empty';
+      empty.textContent = 'Create or import a skill to populate the map.';
+      this._toneLegendEl.appendChild(empty);
+      return;
+    }
+
+    const sorted = Array.from(groups.values()).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+    for (const group of sorted) {
+      const segment = document.createElement('div');
+      segment.className = 'skills-map-segment';
+      segment.setAttribute('data-skill-tone', group.tone);
+      segment.style.flexGrow = String(group.count);
+      segment.title = `${group.label}: ${group.count}`;
+      this._toneStripEl.appendChild(segment);
+    }
+
+    for (const group of sorted) {
+      const share = Math.max(3, Math.round((group.count / total) * 100));
+      const row = document.createElement('div');
+      row.className = 'skills-map-row';
+      row.setAttribute('data-skill-tone', group.tone);
+      row.style.setProperty('--skill-share', `${share}%`);
+      row.innerHTML = `
+        <span class="skills-map-dot"></span>
+        <span class="skills-map-label">${_esc(group.label)}</span>
+        <span class="skills-map-count">${group.enabled}/${group.count}</span>
+        <span class="skills-map-bar"><span></span></span>
+      `;
+      this._toneLegendEl.appendChild(row);
+    }
+
+    const status = document.createElement('div');
+    status.className = 'skills-map-status';
+    status.textContent = disabled ? `${disabled} disabled` : 'All enabled';
+    this._toneLegendEl.appendChild(status);
   }
 
   /** Cinema-styled row with type-aware icon, toggle, and description. */
@@ -347,4 +437,8 @@ export class SkillsPage implements Page {
   private async _toggleSkill(s: SkillEntry): Promise<void> {
     try { await fetch(`/api/v1/skills/${s.id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:s.enabled})}); } catch {}
   }
+}
+
+function _esc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }

@@ -10,6 +10,12 @@ import { Button } from '../ui/Button.js';
 import { Dialog } from '../ui/Dialog.js';
 import { Toggle } from '../ui/Toggle.js';
 
+type SkillVisual = {
+  tone: string;
+  label: string;
+  icon: string;
+};
+
 export class SkillsPage implements Page {
   name = 'skills';
   container: HTMLElement;
@@ -77,33 +83,41 @@ export class SkillsPage implements Page {
     for (const sk of this._skills) this._gridEl.appendChild(this._buildCard(sk));
   }
 
-  /** Cinema-styled card with avatar-gradient icon, toggle, and description. */
+  /** Cinema-styled row with type-aware icon, toggle, and description. */
   private _buildCard(skill: SkillEntry): HTMLElement {
+    const visual = this._skillVisual(skill);
     const card = document.createElement('div');
-    card.className = skill.enabled ? 'ui-card ui-card-interactive' : 'ui-card ui-card-interactive ui-card-disabled';
+    card.className = skill.enabled
+      ? 'ui-card ui-card-interactive skill-row-card'
+      : 'ui-card ui-card-interactive ui-card-disabled skill-row-card';
+    card.setAttribute('data-skill-tone', visual.tone);
 
     // Top row: icon + name + toggle
     const top = document.createElement('div');
-    top.style.cssText = 'display:flex;align-items:center;gap:10px;margin-bottom:8px;';
+    top.className = 'skill-row-main';
 
-    // Icon with themed gradient (uses avatar palette tokens)
-    let h = 0; for (let i = 0; i < skill.name.length; i++) h = (h * 31 + skill.name.charCodeAt(i)) | 0;
-    const c = `var(--color-avatar-${Math.abs(h) % 8})`;
     const icon = document.createElement('div');
-    icon.style.cssText = `width:36px;height:36px;border-radius:8px;background:linear-gradient(135deg,color-mix(in srgb,${c} 25%,transparent),color-mix(in srgb,${c} 8%,transparent));display:flex;align-items:center;justify-content:center;flex-shrink:0;`;
-    icon.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2"><path d="M14.7 6.3a1 1 0 000-1.4l-1.6-1.6a1 1 0 00-1.4 0l-1.1 1.1 3 3 1.1-1.1zM4 16.2V20h3.8l9.8-9.8-3.8-3.8L4 16.2z"/></svg>`;
+    icon.className = 'skill-kind-icon';
+    icon.innerHTML = visual.icon;
     top.appendChild(icon);
 
     const nameGroup = document.createElement('div');
-    nameGroup.style.cssText = 'flex:1;min-width:0;';
+    nameGroup.className = 'skill-row-title';
     const nameEl = document.createElement('div');
     nameEl.textContent = skill.name;
-    nameEl.style.cssText = 'font-size:12px;color:var(--cinema-text-body);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    nameEl.className = 'skill-row-name';
     nameGroup.appendChild(nameEl);
-    const stEl = document.createElement('div');
+    const metaEl = document.createElement('div');
+    metaEl.className = 'skill-row-meta';
+    const kindEl = document.createElement('span');
+    kindEl.className = 'skill-row-kind';
+    kindEl.textContent = visual.label;
+    metaEl.appendChild(kindEl);
+    const stEl = document.createElement('span');
+    stEl.className = 'skill-row-status';
     stEl.textContent = skill.enabled ? 'Enabled' : 'Disabled';
-    stEl.style.cssText = `font-size:9px;color:${skill.enabled ? 'var(--color-success)' : 'var(--cinema-text-welcome-desc)'};`;
-    nameGroup.appendChild(stEl);
+    metaEl.appendChild(stEl);
+    nameGroup.appendChild(metaEl);
     top.appendChild(nameGroup);
 
     // Cinema toggle
@@ -114,8 +128,9 @@ export class SkillsPage implements Page {
       this._toggleSkill(skill);
       toggle.checked = skill.enabled;
       stEl.textContent = skill.enabled ? 'Enabled' : 'Disabled';
-      stEl.style.color = skill.enabled ? 'var(--color-success)' : 'var(--cinema-text-welcome-desc)';
-      card.className = skill.enabled ? 'ui-card ui-card-interactive' : 'ui-card ui-card-interactive ui-card-disabled';
+      card.className = skill.enabled
+        ? 'ui-card ui-card-interactive skill-row-card'
+        : 'ui-card ui-card-interactive ui-card-disabled skill-row-card';
     });
     top.appendChild(toggle.element);
     card.appendChild(top);
@@ -123,14 +138,100 @@ export class SkillsPage implements Page {
     // Description
     const desc = document.createElement('p');
     desc.textContent = skill.description || 'No description';
-    desc.style.cssText = 'font-size:11px;color:var(--cinema-text-edge);line-height:1.5;margin:0 0 10px 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;';
+    desc.className = 'skill-row-desc';
     card.appendChild(desc);
 
     // Edit button
     const editBtn = new Button({ label: 'Edit', variant: 'default', size: 'sm', onClick: () => { this._showEditor(skill); } });
+    editBtn.element.classList.add('skill-row-edit');
     card.appendChild(editBtn.element);
 
     return card;
+  }
+
+  private _skillVisual(skill: SkillEntry): SkillVisual {
+    const name = skill.name.toLowerCase();
+    const text = `${skill.name} ${skill.description || ''}`.toLowerCase();
+    const has = (terms: string[]) => terms.some(term => text.includes(term));
+
+    if (name.includes('design')) {
+      return { tone: 'design', label: 'Design', icon: this._iconDesign() };
+    }
+    if (name.includes('brainstorm') || name.includes('ideation')) {
+      return { tone: 'idea', label: 'Idea', icon: this._iconIdea() };
+    }
+    if (name.includes('computer-use') || has(['desktop', 'local app', 'clicking', 'typing', 'scrolling'])) {
+      return { tone: 'control', label: 'Control', icon: this._iconControl() };
+    }
+    if (has(['browser', 'web ', 'web-', 'screenshot', 'forms', 'page'])) {
+      return { tone: 'browser', label: 'Browser', icon: this._iconBrowser() };
+    }
+    if (has(['data', 'csv', 'json', 'excel', 'analysis', 'python', 'statistics'])) {
+      return { tone: 'data', label: 'Data', icon: this._iconData() };
+    }
+    if (has(['docx', 'document', 'pdf', 'word', 'presentation', 'spreadsheet', 'report'])) {
+      return { tone: 'docs', label: 'Docs', icon: this._iconDocs() };
+    }
+    if (has(['brainstorm', 'ideation', 'requirements', 'planning']) || text.includes('user intent')) {
+      return { tone: 'idea', label: 'Idea', icon: this._iconIdea() };
+    }
+    if (has(['design', 'creative', 'visual', 'interface', 'ui'])) {
+      return { tone: 'design', label: 'Design', icon: this._iconDesign() };
+    }
+    if (has(['code', 'frontend', 'debug', 'review', 'security', 'merge', 'implementation', 'repo'])) {
+      return { tone: 'code', label: 'Code', icon: this._iconCode() };
+    }
+    if (has(['test', 'qa', 'verification', 'audit'])) {
+      return { tone: 'quality', label: 'Quality', icon: this._iconQuality() };
+    }
+    if (has(['memory', 'context', 'knowledge'])) {
+      return { tone: 'memory', label: 'Memory', icon: this._iconMemory() };
+    }
+    return { tone: 'system', label: 'System', icon: this._iconSystem() };
+  }
+
+  private _svg(paths: string): string {
+    return `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">${paths}</svg>`;
+  }
+
+  private _iconBrowser(): string {
+    return this._svg('<rect x="3.5" y="5" width="17" height="14" rx="2.5"/><path d="M4 9h16"/><path d="M7 7h.01"/><path d="M10 7h.01"/>');
+  }
+
+  private _iconCode(): string {
+    return this._svg('<path d="m8 9-4 3 4 3"/><path d="m16 9 4 3-4 3"/><path d="m14 5-4 14"/>');
+  }
+
+  private _iconControl(): string {
+    return this._svg('<rect x="7" y="3.5" width="10" height="17" rx="5"/><path d="M12 7v4"/><path d="M8.5 16.5h7"/>');
+  }
+
+  private _iconData(): string {
+    return this._svg('<ellipse cx="12" cy="6" rx="6.5" ry="3"/><path d="M5.5 6v6c0 1.7 2.9 3 6.5 3s6.5-1.3 6.5-3V6"/><path d="M5.5 12v6c0 1.7 2.9 3 6.5 3s6.5-1.3 6.5-3v-6"/>');
+  }
+
+  private _iconDocs(): string {
+    return this._svg('<path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-9L14 3.5Z"/><path d="M14 3.5v5a1 1 0 0 0 1 1h4"/><path d="M8 13h8"/><path d="M8 17h6"/>');
+  }
+
+  private _iconIdea(): string {
+    return this._svg('<path d="M9 18h6"/><path d="M10 21h4"/><path d="M8.6 14.5A6 6 0 1 1 15.4 14.5c-.8.7-1.2 1.4-1.2 2.5H9.8c0-1.1-.4-1.8-1.2-2.5Z"/>');
+  }
+
+  private _iconDesign(): string {
+    return this._svg('<path d="M12 19.5 19.5 12l2 2L14 21.5h-2v-2Z"/><path d="m16 8 3 3"/><path d="M4 20c4-1 5.5-4 5.5-7.5"/><path d="M5 5h6v6H5z"/>');
+  }
+
+  private _iconQuality(): string {
+    return this._svg('<circle cx="11" cy="11" r="6.5"/><path d="m15.5 15.5 4 4"/><path d="m8.5 11 1.8 1.8 3.7-4"/>');
+  }
+
+  private _iconMemory(): string {
+    return this._svg('<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 3v3"/><path d="M15 3v3"/><path d="M9 18v3"/><path d="M15 18v3"/><path d="M3 9h3"/><path d="M3 15h3"/><path d="M18 9h3"/><path d="M18 15h3"/>');
+  }
+
+  private _iconSystem(): string {
+    return this._svg('<circle cx="12" cy="12" r="3.2"/><path d="M12 4v3"/><path d="M12 17v3"/><path d="M4 12h3"/><path d="M17 12h3"/><path d="m6.3 6.3 2.1 2.1"/><path d="m15.6 15.6 2.1 2.1"/><path d="m17.7 6.3-2.1 2.1"/><path d="m8.4 15.6-2.1 2.1"/>');
   }
 
   // ── Modal (now uses shared Dialog component) ──
@@ -247,4 +348,3 @@ export class SkillsPage implements Page {
     try { await fetch(`/api/v1/skills/${s.id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:s.enabled})}); } catch {}
   }
 }
-

@@ -1060,11 +1060,52 @@ html[data-theme="dark"] .ws-browser-agent-trace-chip.start {
   border-color: rgba(11, 140, 233, 0.36) !important;
 }
 
+html[data-theme="dark"] .layout-split-handle,
+html[data-theme="dark"] .resize-handle,
+html[data-theme="dark"] .ws-resize-grip {
+  position: relative;
+  background: rgba(18, 19, 21, 0.76) !important;
+  box-shadow:
+    inset 1px 0 0 rgba(255, 255, 255, 0.035),
+    inset -1px 0 0 rgba(0, 0, 0, 0.5);
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+html[data-theme="dark"] .layout-split-handle::after,
+html[data-theme="dark"] .resize-handle::after,
+html[data-theme="dark"] .ws-resize-grip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2px;
+  height: 34px;
+  border-radius: 999px;
+  background: #4a4d54;
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  transition: height 120ms ease, opacity 120ms ease, background 120ms ease;
+}
+
 html[data-theme="dark"] .layout-split-handle:hover,
 html[data-theme="dark"] .layout-split-handle.active,
 html[data-theme="dark"] .resize-handle:hover,
-html[data-theme="dark"] .resize-handle.active {
-  background: var(--comfy-blue) !important;
+html[data-theme="dark"] .resize-handle.active,
+html[data-theme="dark"] .ws-resize-grip:hover {
+  background: #202124 !important;
+  box-shadow:
+    inset 1px 0 0 rgba(255, 255, 255, 0.05),
+    inset -1px 0 0 rgba(0, 0, 0, 0.6);
+}
+
+html[data-theme="dark"] .layout-split-handle:hover::after,
+html[data-theme="dark"] .layout-split-handle.active::after,
+html[data-theme="dark"] .resize-handle:hover::after,
+html[data-theme="dark"] .resize-handle.active::after,
+html[data-theme="dark"] .ws-resize-grip:hover::after {
+  height: 72px;
+  background: var(--comfy-blue);
+  opacity: 0.82;
 }
 
 html[data-theme="dark"] ::selection {

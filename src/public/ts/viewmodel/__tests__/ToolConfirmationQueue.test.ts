@@ -86,4 +86,48 @@ describe('ToolConfirmationQueue', () => {
       approved: false,
     });
   });
+
+  it('exposes a waiting snapshot while a confirmation is active', async () => {
+    const queue = ToolConfirmationQueue.getInstance();
+    const send = vi.fn();
+    const changes: number[] = [];
+    const showSpy = vi.spyOn(ToolConfirmDialog, 'show').mockResolvedValue(true);
+
+    queue.setSender(send);
+    queue.onChange(() => changes.push(queue.snapshot.count));
+
+    queue.enqueue({
+      sessionId: 'regular-session',
+      toolCallId: 'tc-bash',
+      toolName: 'Bash',
+      displayName: 'Bash',
+      riskLevel: 'High',
+      params: { command: 'npm test -- --runInBand', timeout: 120000 },
+    });
+
+    expect(showSpy).toHaveBeenCalledOnce();
+    expect(queue.snapshot).toMatchObject({
+      count: 1,
+      first: {
+        toolCallId: 'tc-bash',
+        toolName: 'Bash',
+        displayName: 'Bash',
+        riskLevel: 'High',
+        sessionId: 'regular-session',
+      },
+    });
+    expect(queue.snapshot.first?.detail).toContain('command:');
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(queue.snapshot).toEqual({ count: 0, first: null });
+    expect(changes).toContain(1);
+    expect(changes[changes.length - 1]).toBe(0);
+    expect(send).toHaveBeenCalledWith({
+      type: 'tool_confirm_response',
+      toolCallId: 'tc-bash',
+      approved: true,
+    });
+  });
 });

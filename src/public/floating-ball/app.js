@@ -24,6 +24,7 @@ const DEFAULT_STATE = {
   runningCount: 0,
   waitingCount: 0,
   recentSessions: [],
+  waitingInbox: null,
   currentTask: null,
   clipboardText: '',
 };
@@ -51,6 +52,9 @@ const els = {
   clipRefresh: document.getElementById('clipRefresh'),
   clipPreview: document.getElementById('clipPreview'),
   clipTitle: document.querySelector('.clip-head span'),
+  waitingCard: document.getElementById('waitingCard'),
+  waitingTitle: document.getElementById('waitingTitle'),
+  waitingDetail: document.getElementById('waitingDetail'),
   recentList: document.getElementById('recentList'),
 };
 
@@ -85,7 +89,12 @@ function orbitalPosition(index, total) {
 function buildSatellites(state) {
   const items = [];
   if (state.waitingCount > 0) {
-    items.push({ label: 'Waiting', icon: ICONS.wait, action: 'open-waiting', data: { sessionId: state.currentTask?.sessionId || state.activeSessionId } });
+    items.push({
+      label: 'Waiting',
+      icon: ICONS.wait,
+      action: 'open-waiting',
+      data: { sessionId: state.waitingInbox?.sessionId || state.currentTask?.sessionId || state.activeSessionId },
+    });
   }
   items.push({ label: 'Continue', icon: ICONS.play, action: 'continue-current' });
   items.push({ label: 'New', icon: ICONS.plus, action: 'new-session' });
@@ -134,6 +143,7 @@ function renderSatellites() {
 function renderPanel() {
   const phase = phaseForState(currentState);
   const task = currentState.currentTask || {};
+  const waiting = currentState.waitingInbox || null;
   const activeTitle = cleanText(currentState.activeTitle || task.title || 'Ready', 42);
   const clipboardText = cleanText(currentState.clipboardText || '', CLIP_LIMIT);
   const selectionCaptured = Boolean(clipboardText && capturedClipboardText && clipboardText === capturedClipboardText);
@@ -144,11 +154,15 @@ function renderPanel() {
   els.statusPill.textContent = phaseLabel(phase);
   els.statusDetail.textContent = selectionCaptured
     ? 'Selected text copied. Choose an action below.'
+    : waiting
+      ? cleanText(waiting.title || task.detail || `${currentState.waitingCount} waiting`, 70)
     : cleanText(task.detail || `${currentState.runningCount} running, ${currentState.waitingCount} waiting`, 70);
+  renderWaitingCard(waiting);
   els.clipPreview.textContent = clipboardText
     ? clipboardText.slice(0, 190) + (clipboardText.length > 190 ? '...' : '')
     : 'Copy selected text to unlock actions.';
   els.panel.classList.toggle('has-clip', Boolean(clipboardText));
+  els.panel.classList.toggle('has-waiting', Boolean(waiting && currentState.waitingCount > 0));
   els.panel.classList.toggle('is-selection-captured', selectionCaptured);
   if (els.clipTitle) els.clipTitle.textContent = selectionCaptured ? 'Selection captured' : 'Clipboard text';
   els.quickInput.placeholder = clipboardText ? 'Ask about selected text...' : 'Ask quickly...';
@@ -163,6 +177,25 @@ function renderPanel() {
     row.addEventListener('click', () => sendAction('open-session', { sessionId: session.id }));
     els.recentList.appendChild(row);
   });
+}
+
+function renderWaitingCard(waiting) {
+  if (!els.waitingCard) return;
+  const hasWaiting = Boolean(waiting && currentState.waitingCount > 0);
+  els.waitingCard.classList.toggle('is-visible', hasWaiting);
+  els.waitingCard.disabled = !hasWaiting;
+  if (!hasWaiting) {
+    els.waitingTitle.textContent = 'Needs attention';
+    els.waitingDetail.textContent = 'Open AnoClaw to review.';
+    return;
+  }
+  const risk = cleanText(waiting.riskLevel || '', 18);
+  const title = cleanText(waiting.title || 'Needs attention', 54);
+  const detail = cleanText(waiting.detail || 'Open AnoClaw to review the waiting item.', 82);
+  els.waitingTitle.textContent = currentState.waitingCount > 1
+    ? `${title} +${currentState.waitingCount - 1}`
+    : title;
+  els.waitingDetail.textContent = risk ? `${risk} · ${detail}` : detail;
 }
 
 function render() {
@@ -291,6 +324,10 @@ els.quickInput?.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') sendQuickAsk();
 });
 els.clipRefresh?.addEventListener('click', refreshState);
+els.waitingCard?.addEventListener('click', () => {
+  const waiting = currentState.waitingInbox || {};
+  sendAction('open-waiting', { sessionId: waiting.sessionId || currentState.currentTask?.sessionId || currentState.activeSessionId });
+});
 
 document.querySelectorAll('[data-helper-action]').forEach((button) => {
   button.addEventListener('click', () => sendAction(button.dataset.helperAction));

@@ -4,12 +4,28 @@
 
 import { ToolConfirmDialog, type ToolConfirmRequest } from '../components/ToolConfirmDialog.js';
 
+export interface ToolConfirmationSummary {
+  toolCallId: string;
+  toolName: string;
+  displayName: string;
+  riskLevel: string;
+  sessionId?: string;
+  detail?: string;
+}
+
+export interface ToolConfirmationSnapshot {
+  count: number;
+  first: ToolConfirmationSummary | null;
+}
+
 export class ToolConfirmationQueue {
   private static _instance: ToolConfirmationQueue;
   private _queue: ToolConfirmRequest[] = [];
   private _active = false;
+  private _activeRequest: ToolConfirmRequest | null = null;
   private _sendFn: ((data: Record<string, unknown>) => void) | null = null;
   private _autoApprover: ((request: ToolConfirmRequest) => boolean) | null = null;
+  private _listeners = new Set<() => void>();
 
   static getInstance(): ToolConfirmationQueue {
     if (!ToolConfirmationQueue._instance) {
@@ -30,8 +46,21 @@ export class ToolConfirmationQueue {
     this._autoApprover = fn;
   }
 
+  onChange(listener: () => void): () => void {
+    this._listeners.add(listener);
+    return () => this._listeners.delete(listener);
+  }
+
   get pendingCount(): number {
     return this._queue.length + (this._active ? 1 : 0);
+  }
+
+  get snapshot(): ToolConfirmationSnapshot {
+    const first = this._activeRequest || this._queue[0] || null;
+    return {
+      count: this.pendingCount,
+      first: first ? summarizeRequest(first) : null,
+    };
   }
 
   enqueue(request: ToolConfirmRequest): void {
@@ -40,6 +69,7 @@ export class ToolConfirmationQueue {
       return;
     }
     this._queue.push(request);
+    this._notify();
     this._processNext();
   }
 
@@ -47,6 +77,8 @@ export class ToolConfirmationQueue {
     if (this._active || this._queue.length === 0) return;
     this._active = true;
     const request = this._queue.shift()!;
+    this._activeRequest = request;
+    this._notify();
     try {
       const approved = await ToolConfirmDialog.show(request);
       this._sendResponse(request.toolCallId, approved);
@@ -54,6 +86,8 @@ export class ToolConfirmationQueue {
       this._sendResponse(request.toolCallId, false);
     } finally {
       this._active = false;
+      this._activeRequest = null;
+      this._notify();
       this._processNext();
     }
   }
@@ -66,4 +100,41 @@ export class ToolConfirmationQueue {
       approved,
     });
   }
+
+  private _notify(): void {
+    for (const listener of this._listeners) {
+      try {
+        listener();
+      } catch {
+        // UI state listeners must not block confirmation handling.
+      }
+    }
+  }
+}
+
+function summarizeRequest(request: ToolConfirmRequest): ToolConfirmationSummary {
+  return {
+    toolCallId: request.toolCallId,
+    toolName: request.toolName,
+    displayName: request.displayName || request.toolName,
+    riskLevel: request.riskLevel,
+    sessionId: request.sessionId,
+    detail: summarizeParams(request.params || {}),
+  };
+}
+
+function summarizeParams(params: Record<string, unknown>): string {
+  const keys = Object.keys(params);
+  if (keys.length === 0) return '';
+  const parts: string[] = [];
+  for (const key of keys.slice(0, 3)) {
+    const val = params[key];
+    if (typeof val === 'string') {
+      parts.push(val.length > 56 ? `${key}: "${val.slice(0, 56)}..."` : `${key}: "${val}"`);
+    } else if (typeof val === 'number' || typeof val === 'boolean') {
+      parts.push(`${key}: ${val}`);
+    }
+  }
+  if (keys.length > 3) parts.push(`+${keys.length - 3} more`);
+  return parts.join('; ');
 }

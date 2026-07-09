@@ -616,6 +616,7 @@ class App {
     const toolConfirmQueue = ToolConfirmationQueue.getInstance();
     toolConfirmQueue.setSender((data) => this._sseClient.send(data));
     toolConfirmQueue.setAutoApprover((request) => this._conversationVM.hasActiveGoalForSession(request.sessionId));
+    toolConfirmQueue.onChange(() => this._scheduleFloatingBallStateUpdate());
 
     // Every received WS message → dispatch by type. session-less events pass empty sessionId.
     this._sseClient.on('event', (data: unknown) => {
@@ -674,7 +675,9 @@ class App {
 
     const active = this._sessionVM.activeSession;
     const streamingIds = this._conversationVM.getStreamingSessionIds();
-    const waitingCount = ToolConfirmationQueue.getInstance().pendingCount;
+    const waitingSnapshot = ToolConfirmationQueue.getInstance().snapshot;
+    const waitingItem = waitingSnapshot.first;
+    const waitingCount = waitingSnapshot.count;
     const recentSessions = [...this._sessionVM.sessions.all]
       .sort((a, b) => new Date(b.lastActiveAt || 0).getTime() - new Date(a.lastActiveAt || 0).getTime())
       .slice(0, 5)
@@ -684,13 +687,16 @@ class App {
         status: this._conversationVM.isSessionStreaming(session.id) ? 'running' : (session.status || 'idle'),
       }));
 
-    const taskSessionId = active?.id || streamingIds[0] || null;
+    const waitingSessionId = waitingItem?.sessionId || null;
+    const taskSessionId = waitingSessionId || active?.id || streamingIds[0] || null;
     const taskNode = taskSessionId ? this._sessionVM.sessions.getById(taskSessionId) : null;
     const activeGoal = active?.metadata?.goal as { status?: string; objective?: string } | undefined;
     const isRunning = taskSessionId ? this._conversationVM.isSessionStreaming(taskSessionId) : false;
     const phase = waitingCount > 0 ? 'waiting' : isRunning ? 'thinking' : activeGoal?.status === 'active' ? 'thinking' : 'idle';
     const detail = waitingCount > 0
-      ? `${waitingCount} waiting`
+      ? waitingItem
+        ? `${waitingItem.displayName} approval needed${waitingItem.riskLevel ? ` · ${waitingItem.riskLevel}` : ''}`
+        : `${waitingCount} waiting`
       : activeGoal?.status === 'active'
         ? activeGoal.objective || 'Active goal'
         : isRunning
@@ -704,6 +710,13 @@ class App {
       runningCount: streamingIds.length,
       waitingCount,
       recentSessions,
+      waitingInbox: waitingCount > 0 ? {
+        count: waitingCount,
+        sessionId: waitingSessionId,
+        title: waitingItem ? `${waitingItem.displayName} needs approval` : `${waitingCount} items need attention`,
+        detail: waitingItem?.detail || detail,
+        riskLevel: waitingItem?.riskLevel,
+      } : undefined,
       currentTask: taskSessionId ? {
         sessionId: taskSessionId,
         title: taskNode?.title || active?.title || 'Session',

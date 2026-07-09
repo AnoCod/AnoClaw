@@ -65,6 +65,17 @@
 
    球体变 amber，并显示等待数量。点击 Waiting 后恢复主窗口并定位到对应会话/卡片。后续可以支持在小面板里直接批准或拒绝低风险工具确认。
 
+   V1 已落地工具确认队列：
+   - `ToolConfirmationQueue` 暴露当前等待数量和第一个等待项摘要。
+   - FloatingBall state 包含 `waitingInbox`，提供 sessionId、标题、风险等级和参数摘要。
+   - 小面板在等待时显示 “Needs attention” 卡片，点击后恢复主窗口并打开对应会话。
+   - 这里只做定位和上下文展示，不在小窗内直接批准高风险工具，避免误触。
+
+   后续增强：
+   - AskUserQuestion 等待项接入同一个 inbox。
+   - 对明确低风险确认增加小窗内批准/拒绝。
+   - 恢复主窗口后滚动到具体确认卡片。
+
 2. Background Task Radar
 
    长时间 build/test/search/package/run server 时，最小化后仍能看到运行状态。球体外圈转动表示有任务在跑；任务失败时变红，并保留最近失败摘要。
@@ -138,6 +149,13 @@ floating-ball-state -> {
   connection: "connected" | "connecting" | "disconnected";
   runningCount: number;
   waitingCount: number;
+  waitingInbox?: {
+    count: number;
+    sessionId: string | null;
+    title: string;
+    detail?: string;
+    riskLevel?: string;
+  };
   recentSessions: Array<{ id: string; title: string; status?: string }>;
   currentTask?: {
     sessionId: string;

@@ -188,6 +188,13 @@ interface FloatingBallState {
   runningCount: number;
   waitingCount: number;
   recentSessions: FloatingBallSession[];
+  waitingInbox?: {
+    count: number;
+    sessionId: string | null;
+    title: string;
+    detail?: string;
+    riskLevel?: string;
+  };
   currentTask?: {
     sessionId: string;
     title: string;

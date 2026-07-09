@@ -18,6 +18,15 @@ const KERNEL_PAGES: PageEntry[] = [
   { page: 'settings', label: 'Settings' },
 ];
 
+const PAGE_TONES: Record<string, string> = {
+  workspace: 'workspace',
+  agents: 'agents',
+  skills: 'skills',
+  memory: 'memory',
+  settings: 'settings',
+  plugins: 'plugins',
+};
+
 const SVG_WIN_MINIMIZE = `<svg width="10" height="10" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>`;
 const SVG_WIN_MAXIMIZE = `<svg width="10" height="10" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>`;
 const SVG_WIN_RESTORE = `<svg width="10" height="10" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8V5h11v11h-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><rect x="5" y="8" width="11" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>`;
@@ -38,6 +47,7 @@ export class TitleBar {
   private _switcherMenu: HTMLElement | null = null;
   private _switcherAnchor: HTMLElement;
   private _pluginPages: PageEntry[] = [];
+  private _currentPage = 'workspace';
 
   constructor() {
     this.element = this._build();
@@ -83,14 +93,17 @@ export class TitleBar {
   }
 
   setPageName(name: string): void {
+    this._currentPage = name;
     if (this._pageNameEl) {
-      this._pageNameEl.textContent = name;
+      this._pageNameEl.textContent = this._labelForPage(name);
     }
+    if (this._switcherMenu) this._syncActiveSwitcherItem();
   }
 
   /** Set dynamic plugin-contributed pages */
   setPluginPages(pages: Array<{ page: string; label: string }>): void {
     this._pluginPages = pages;
+    if (this._pageNameEl) this._pageNameEl.textContent = this._labelForPage(this._currentPage);
     if (this._switcherMenu) {
       this._closeSwitcher();
     }
@@ -123,7 +136,8 @@ export class TitleBar {
 
     const switcherBtn = document.createElement('button');
     switcherBtn.className = 'topbar-page-switcher';
-    switcherBtn.textContent = 'PAGES';
+    switcherBtn.setAttribute('aria-label', 'Open pages menu');
+    switcherBtn.innerHTML = '<span>Pages</span><span class="topbar-page-switcher-chevron" aria-hidden="true"></span>';
     switcherBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this._togglePageSwitcher(switcherBtn);
@@ -182,45 +196,66 @@ export class TitleBar {
     this._switcherMenu.className = 'page-switcher-menu';
     this._switcherMenu.setAttribute('role', 'menu');
 
-    // Merge kernel pages + plugin pages, insert divider between the two groups
-    const allPages = [...KERNEL_PAGES, ...this._pluginPages];
-
-    let isKernel = true;
-    for (const p of allPages) {
-      // First plugin page → insert separator divider
-      if (isKernel && this._pluginPages.length > 0 && p === this._pluginPages[0]) {
-        isKernel = false;
-        const divider = document.createElement('div');
-        divider.className = 'page-switcher-divider';
-        this._switcherMenu!.appendChild(divider);
-      }
-
-      const item = document.createElement('button');
-      item.className = 'page-switcher-item';
-      item.setAttribute('role', 'menuitem');
-      item.textContent = p.label;
-      item.addEventListener('click', () => {
-        this._closeSwitcher();
-        window.dispatchEvent(new CustomEvent('navigate-to', { detail: { page: p.page } }));
-      });
-      this._switcherMenu!.appendChild(item);
+    this._appendSwitcherSection('Core', KERNEL_PAGES);
+    if (this._pluginPages.length > 0) {
+      const divider = document.createElement('div');
+      divider.className = 'page-switcher-divider';
+      this._switcherMenu.appendChild(divider);
+      this._appendSwitcherSection('Plugins', this._pluginPages);
     }
+
+    this._syncActiveSwitcherItem();
 
     document.body.appendChild(this._switcherMenu);
 
     // Position below the button, right-aligned to button edge
     const rect = anchor.getBoundingClientRect();
     this._switcherMenu.style.position = 'fixed';
-    this._switcherMenu.style.top = `${rect.bottom + 4}px`;
-    // Clamp right edge within viewport (min 168px menu width)
+    this._switcherMenu.style.top = `${rect.bottom + 5}px`;
+    // Clamp right edge within viewport (min 196px menu width)
     const rightVal = window.innerWidth - rect.right;
-    this._switcherMenu.style.right = `${Math.max(4, Math.min(rightVal, window.innerWidth - 168))}px`;
+    this._switcherMenu.style.right = `${Math.max(6, Math.min(rightVal, window.innerWidth - 196))}px`;
     this._switcherMenu.style.left = 'auto';
 
     // Defer listener registration to avoid immediately capturing the opening click
     setTimeout(() => {
       document.addEventListener('click', this._onOutsideClick);
     }, 0);
+  }
+
+  private _appendSwitcherSection(label: string, pages: PageEntry[]): void {
+    if (!this._switcherMenu || pages.length === 0) return;
+    const heading = document.createElement('div');
+    heading.className = 'page-switcher-section';
+    heading.textContent = label;
+    this._switcherMenu.appendChild(heading);
+
+    for (const p of pages) {
+      const item = document.createElement('button');
+      item.className = 'page-switcher-item';
+      item.setAttribute('role', 'menuitem');
+      item.dataset.page = p.page;
+      item.dataset.tone = PAGE_TONES[p.page] || 'plugin';
+      item.innerHTML = `<span class="page-switcher-dot" aria-hidden="true"></span><span class="page-switcher-label"></span>`;
+      const labelEl = item.querySelector('.page-switcher-label') as HTMLElement;
+      labelEl.textContent = p.label;
+      item.addEventListener('click', () => {
+        this._closeSwitcher();
+        window.dispatchEvent(new CustomEvent('navigate-to', { detail: { page: p.page } }));
+      });
+      this._switcherMenu.appendChild(item);
+    }
+  }
+
+  private _syncActiveSwitcherItem(): void {
+    if (!this._switcherMenu) return;
+    this._switcherMenu.querySelectorAll<HTMLElement>('.page-switcher-item').forEach((item) => {
+      item.classList.toggle('active', item.dataset.page === this._currentPage);
+    });
+  }
+
+  private _labelForPage(page: string): string {
+    return [...KERNEL_PAGES, ...this._pluginPages].find((entry) => entry.page === page)?.label || page;
   }
 
   private _closeSwitcher(): void {

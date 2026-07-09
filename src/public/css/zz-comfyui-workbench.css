@@ -3089,3 +3089,95 @@ html[data-theme="dark"] [data-page="workspace"] .ws-tab-plus svg {
   height: 15px;
   stroke-width: 1.9;
 }
+
+/* Workspace empty/unavailable states: quiet canvas hints, not nested cards. */
+html[data-theme="dark"] [data-page="workspace"] .ws-file-tree-pane.is-unavailable .ws-tree-search,
+html[data-theme="dark"] [data-page="workspace"] .ws-file-tree-pane.is-unavailable .ws-tree-filter-chip,
+html[data-theme="dark"] [data-page="workspace"] .ws-file-tree-pane.is-unavailable .ws-tree-create-btn {
+  opacity: 0.44;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-file-tree-pane.is-unavailable .ws-tree-search {
+  background: #1a1b1d !important;
+  border-color: #26282c !important;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-file-tree-pane.is-unavailable .ws-tree-search-input,
+html[data-theme="dark"] [data-page="workspace"] .ws-file-tree-pane.is-unavailable .ws-tree-filter-chip,
+html[data-theme="dark"] [data-page="workspace"] .ws-file-tree-pane.is-unavailable .ws-tree-create-btn {
+  cursor: default;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-file-tree-pane.is-unavailable .ws-tree-create-btn:hover,
+html[data-theme="dark"] [data-page="workspace"] .ws-file-tree-pane.is-unavailable .ws-tree-filter-chip:hover {
+  border-color: #2d2f34 !important;
+  background: #222326 !important;
+  color: #b2b5bb !important;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tree-empty {
+  min-height: 164px;
+  padding: 28px 18px;
+  color: #74777d;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tree-empty-mark {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 7px;
+  border: 1px solid #303238;
+  border-radius: 6px;
+  background: #1b1c1f;
+  color: #aeb2b8;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tree-empty-mark svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.75;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tree-empty span {
+  color: #d7d9dd;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tree-empty small {
+  max-width: 190px;
+  color: #74777d;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-editor-empty-panel {
+  padding: 0;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-editor-empty-mark {
+  width: 38px;
+  height: 28px;
+  border-color: #303238 !important;
+  border-radius: 6px;
+  background: #1b1c1f;
+  opacity: 0.92;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-editor-empty-title {
+  margin-top: 2px;
+  color: #d7d9dd;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-editor-empty-meta {
+  color: #74777d;
+  font-size: 10px;
+}

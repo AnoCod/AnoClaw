@@ -15,7 +15,8 @@ export class WorkspaceFileTree {
   private _treeBody: HTMLElement;
   private _searchInput: HTMLInputElement;
   private _treeMeta: HTMLElement;
-  private _refreshBtn: HTMLElement;
+  private _refreshBtn: HTMLButtonElement;
+  private _createButtons: HTMLButtonElement[] = [];
   private _filterButtons = new Map<TreeFilter, HTMLButtonElement>();
   private _rootNodes: FileNode[] = [];
   private _filterMode: TreeFilter = 'all';
@@ -45,17 +46,19 @@ export class WorkspaceFileTree {
 
     // New File button
     const newFileBtn = document.createElement('button');
-    newFileBtn.className = 'ws-tree-action-btn';
+    newFileBtn.className = 'ws-tree-action-btn ws-tree-create-btn';
     newFileBtn.innerHTML = _SVG_FILE_PLUS;
     newFileBtn.title = 'New File';
+    this._createButtons.push(newFileBtn);
     newFileBtn.addEventListener('click', (e) => { e.stopPropagation(); void this._createFile('/'); });
     header.appendChild(newFileBtn);
 
     // New Folder button
     const newFolderBtn = document.createElement('button');
-    newFolderBtn.className = 'ws-tree-action-btn';
+    newFolderBtn.className = 'ws-tree-action-btn ws-tree-create-btn';
     newFolderBtn.innerHTML = _SVG_FOLDER_PLUS;
     newFolderBtn.title = 'New Folder';
+    this._createButtons.push(newFolderBtn);
     newFolderBtn.addEventListener('click', (e) => { e.stopPropagation(); void this._createFolder('/'); });
     header.appendChild(newFolderBtn);
 
@@ -158,9 +161,11 @@ export class WorkspaceFileTree {
     this._syncFilterButtons();
     this._updateTreeMeta(0, 0);
     if (!sessionId) {
+      this._setUnavailable(true);
       this._showEmpty('No workspace', 'Bind a workspace to browse files.');
       return;
     }
+    this._setUnavailable(false);
     await this._doLoadRoot();
     this._startPolling();
   }
@@ -168,7 +173,13 @@ export class WorkspaceFileTree {
   private async _doLoadRoot(): Promise<void> {
     try {
       const resp = await fetch(`/api/v1/workspace/browse?sessionId=${encodeURIComponent(this._sessionId)}&path=/`);
-      if (!resp.ok) return;
+      if (!resp.ok) {
+        this._setUnavailable(true);
+        this._updateTreeMeta(0, 0);
+        this._showEmpty('No workspace', 'Bind a workspace to browse files.');
+        return;
+      }
+      this._setUnavailable(false);
       this._treeBody.innerHTML = '';
       this._nodeMap.clear();
       const nodes = (await resp.json()).nodes || [];
@@ -176,7 +187,11 @@ export class WorkspaceFileTree {
       this._rootNodes = nodes;
       this._fileCount = nodes.length;
       await this._renderRootNodes(true);
-    } catch { console.debug('WorkspaceFileTree: loadRoot failed'); }
+    } catch {
+      this._setUnavailable(true);
+      this._showEmpty('Workspace unavailable', 'Refresh after binding a folder.');
+      console.debug('WorkspaceFileTree: loadRoot failed');
+    }
   }
 
   private _startPolling(): void {
@@ -311,7 +326,14 @@ export class WorkspaceFileTree {
   }
 
   private _showEmpty(title: string, subtitle: string): void {
-    this._treeBody.innerHTML = `<div class="ws-tree-empty"><span>${_esc(title)}</span><small>${_esc(subtitle)}</small></div>`;
+    this._treeBody.innerHTML = `<div class="ws-tree-empty"><div class="ws-tree-empty-mark">${_SVG_FOLDER}</div><span>${_esc(title)}</span><small>${_esc(subtitle)}</small></div>`;
+  }
+
+  private _setUnavailable(disabled: boolean): void {
+    this.element.classList.toggle('is-unavailable', disabled);
+    this._searchInput.disabled = disabled;
+    for (const btn of this._createButtons) btn.disabled = disabled;
+    this._filterButtons.forEach((btn) => { btn.disabled = disabled; });
   }
 
   // Restore expanded state after a full tree rebuild (polling / refreshAll).

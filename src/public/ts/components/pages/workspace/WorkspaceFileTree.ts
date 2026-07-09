@@ -80,7 +80,7 @@ export class WorkspaceFileTree {
     this._searchInput = document.createElement('input');
     this._searchInput.className = 'ws-tree-search-input';
     this._searchInput.type = 'search';
-    this._searchInput.placeholder = 'Search current folder';
+    this._searchInput.placeholder = 'Search files...';
     this._searchInput.spellcheck = false;
     this._searchInput.addEventListener('input', () => {
       this._searchQuery = this._searchInput.value.trim().toLowerCase();

@@ -66,7 +66,7 @@ export class SkillsPage implements Page {
       </div>
     `;
     this._toneStripEl = document.createElement('div');
-    this._toneStripEl.className = 'skills-map-strip';
+    this._toneStripEl.className = 'skills-map-flow';
     overview.appendChild(this._toneStripEl);
     this._toneLegendEl = document.createElement('div');
     this._toneLegendEl.className = 'skills-map-legend';
@@ -132,9 +132,17 @@ export class SkillsPage implements Page {
     this._toneLegendEl.innerHTML = '';
 
     if (!total) {
-      const emptySegment = document.createElement('div');
-      emptySegment.className = 'skills-map-segment skills-map-segment-empty';
-      this._toneStripEl.appendChild(emptySegment);
+      const emptyNode = document.createElement('div');
+      emptyNode.className = 'skills-map-node skills-map-node-muted skills-map-node-empty';
+      const emptyValue = document.createElement('span');
+      emptyValue.className = 'skills-map-node-value';
+      emptyValue.textContent = '0';
+      const emptyLabel = document.createElement('span');
+      emptyLabel.className = 'skills-map-node-label';
+      emptyLabel.textContent = 'Skills';
+      emptyNode.appendChild(emptyValue);
+      emptyNode.appendChild(emptyLabel);
+      this._toneStripEl.appendChild(emptyNode);
       const empty = document.createElement('div');
       empty.className = 'skills-map-empty';
       empty.textContent = 'Create or import a skill to populate the map.';
@@ -143,13 +151,24 @@ export class SkillsPage implements Page {
     }
 
     const sorted = Array.from(groups.values()).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
-    for (const group of sorted) {
-      const segment = document.createElement('div');
-      segment.className = 'skills-map-segment';
-      segment.setAttribute('data-skill-tone', group.tone);
-      segment.style.flexGrow = String(group.count);
-      segment.title = `${group.label}: ${group.count}`;
-      this._toneStripEl.appendChild(segment);
+    const nodeData = [
+      { label: 'Enabled', value: String(enabled), className: 'skills-map-node-primary' },
+      { label: 'Disabled', value: String(disabled), className: disabled ? 'skills-map-node-warning' : 'skills-map-node-muted' },
+      { label: 'Types', value: String(groups.size), className: 'skills-map-node-muted' },
+    ];
+
+    for (const node of nodeData) {
+      const nodeEl = document.createElement('div');
+      nodeEl.className = `skills-map-node ${node.className}`;
+      const valueEl = document.createElement('span');
+      valueEl.className = 'skills-map-node-value';
+      valueEl.textContent = node.value;
+      const labelEl = document.createElement('span');
+      labelEl.className = 'skills-map-node-label';
+      labelEl.textContent = node.label;
+      nodeEl.appendChild(valueEl);
+      nodeEl.appendChild(labelEl);
+      this._toneStripEl.appendChild(nodeEl);
     }
 
     for (const group of sorted) {
@@ -158,12 +177,22 @@ export class SkillsPage implements Page {
       row.className = 'skills-map-row';
       row.setAttribute('data-skill-tone', group.tone);
       row.style.setProperty('--skill-share', `${share}%`);
-      row.innerHTML = `
-        <span class="skills-map-dot"></span>
-        <span class="skills-map-label">${_esc(group.label)}</span>
-        <span class="skills-map-count">${group.enabled}/${group.count}</span>
-        <span class="skills-map-bar"><span></span></span>
-      `;
+      const dot = document.createElement('span');
+      dot.className = 'skills-map-dot';
+      const label = document.createElement('span');
+      label.className = 'skills-map-label';
+      label.textContent = group.label;
+      const count = document.createElement('span');
+      count.className = 'skills-map-count';
+      count.textContent = `${group.enabled}/${group.count}`;
+      const bar = document.createElement('span');
+      bar.className = 'skills-map-bar';
+      const fill = document.createElement('span');
+      bar.appendChild(fill);
+      row.appendChild(dot);
+      row.appendChild(label);
+      row.appendChild(count);
+      row.appendChild(bar);
       this._toneLegendEl.appendChild(row);
     }
 
@@ -437,8 +466,4 @@ export class SkillsPage implements Page {
   private async _toggleSkill(s: SkillEntry): Promise<void> {
     try { await fetch(`/api/v1/skills/${s.id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:s.enabled})}); } catch {}
   }
-}
-
-function _esc(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }

@@ -381,6 +381,8 @@ export class WorkspaceTabGroup {
     WorkspaceTabGroup._groups.add(this);
     this.element = document.createElement('div'); this.element.className = 'ws-tab-group';
     this._tabBar = document.createElement('div'); this._tabBar.className = 'ws-tab-bar';
+    this._tabBar.setAttribute('role', 'tablist');
+    this._tabBar.setAttribute('aria-label', 'Workspace tabs');
     this.element.appendChild(this._tabBar);
 
     this._plusBtn = document.createElement('button'); this._plusBtn.className = 'ws-tab-plus';
@@ -839,11 +841,37 @@ export class WorkspaceTabGroup {
     const btn = document.createElement('div');
     btn.className = 'ws-tab' + (tab.fileType==='browser'?' ws-tab-browser':'');
     btn.setAttribute('data-tab-path', tab.path);
+    btn.setAttribute('data-tab-kind', tab.fileType);
+    btn.setAttribute('role', 'tab');
+    btn.setAttribute('aria-selected', 'false');
+    btn.setAttribute('tabindex', '-1');
+    btn.title = tab.path;
     const nm = document.createElement('span'); nm.className = 'ws-tab-name'; nm.textContent = tab.name; btn.appendChild(nm);
-    const cls = document.createElement('span'); cls.className = 'ws-tab-close'; cls.textContent = '\xD7';
+    const cls = document.createElement('span');
+    cls.className = 'ws-tab-close';
+    cls.setAttribute('role', 'button');
+    cls.setAttribute('aria-label', `Close ${tab.name}`);
+    cls.setAttribute('tabindex', '-1');
+    cls.innerHTML = _SVG_TAB_CLOSE;
     cls.addEventListener('click', (e) => { e.stopPropagation(); this.closeTab(tab.path); });
+    cls.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        e.stopPropagation();
+        this.closeTab(tab.path);
+      }
+    });
     btn.appendChild(cls);
     btn.addEventListener('click', () => this._activate(tab));
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        this._activate(tab);
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        this.closeTab(tab.path);
+      }
+    });
     btn.addEventListener('mousedown', (e) => { if (e.button===1) { e.preventDefault(); this.closeTab(tab.path); } });
     this._tabBar.insertBefore(btn, this._plusBtn);
   }
@@ -851,7 +879,12 @@ export class WorkspaceTabGroup {
   private _activate(tab: OpenTab): void {
     if (this._editor) { const cur = this._tabs.find(t => t.path===this._activePath); if (cur) cur.viewState = this._editor.saveViewState(); }
     this._activePath = tab.path;
-    this._tabBar.querySelectorAll('.ws-tab').forEach(el => el.classList.toggle('active', el.getAttribute('data-tab-path')===tab.path));
+    this._tabBar.querySelectorAll('.ws-tab').forEach(el => {
+      const active = el.getAttribute('data-tab-path') === tab.path;
+      el.classList.toggle('active', active);
+      el.setAttribute('aria-selected', String(active));
+      el.setAttribute('tabindex', active ? '0' : '-1');
+    });
     // Destroy any existing browser view before switching
     this._destroyBrowserView();
     switch (tab.fileType) {
@@ -3032,6 +3065,7 @@ const _SVG_BROWSER_DEVTOOLS = `<svg width="14" height="14" viewBox="0 0 24 24" f
 const _SVG_BROWSER_MORE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>`;
 const _SVG_BROWSER_PANEL = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>`;
 const _SVG_BROWSER_DEVICE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M11 18h2"/></svg>`;
+const _SVG_TAB_CLOSE = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`;
 
 const BROWSER_VIEWPORT_PRESETS: BrowserViewportPreset[] = [
   { name: 'desktop', label: 'Desktop' },

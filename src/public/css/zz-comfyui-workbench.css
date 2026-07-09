@@ -2907,3 +2907,159 @@ html[data-theme="dark"] .star-rating__input {
 html[data-theme="dark"] .star-rating__submit {
   color: #0b0b0c;
 }
+
+/* Workspace tabs: closer to ComfyUI's compact, flat tab strip. */
+html[data-theme="dark"] [data-page="workspace"] .ws-tab-bar {
+  height: 38px !important;
+  min-height: 38px !important;
+  align-items: stretch !important;
+  padding: 0 !important;
+  border-top: 0 !important;
+  border-bottom: 1px solid #3a3b40 !important;
+  background: #242528 !important;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tab {
+  position: relative;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 224px;
+  height: 38px !important;
+  min-height: 38px !important;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px 0 11px !important;
+  border: 0 !important;
+  border-right: 1px solid #34363a !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #a9abb1 !important;
+  font-size: 12px;
+  line-height: 1;
+  outline: none;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tab::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: transparent;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tab:hover {
+  background: #2b2c30 !important;
+  color: #d7d9dd !important;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tab.active {
+  background: #303136 !important;
+  color: #ffffff !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tab.active::after {
+  background: var(--comfy-blue);
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tab:focus-visible {
+  box-shadow:
+    inset 0 0 0 1px rgba(11, 140, 233, 0.65),
+    inset 0 -2px 0 var(--comfy-blue);
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tab-name {
+  min-width: 0;
+  max-width: 168px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tab-browser .ws-tab-name {
+  font-style: normal;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tab-favicon {
+  width: 14px !important;
+  height: 14px !important;
+  margin: 0 !important;
+  border-radius: 2px;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tab.dirty .ws-tab-name {
+  font-style: normal;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tab.dirty .ws-tab-name::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 7px;
+  border-radius: 999px;
+  background: #cfd1d5;
+  vertical-align: 1px;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tab-close {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 3px !important;
+  color: #8f9298;
+  opacity: 0;
+  transition: background 120ms ease, color 120ms ease, opacity 120ms ease;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tab.active .ws-tab-close,
+html[data-theme="dark"] [data-page="workspace"] .ws-tab:hover .ws-tab-close {
+  opacity: 0.72;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tab-close:hover {
+  background: #3b3d42 !important;
+  color: #ffffff !important;
+  opacity: 1 !important;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tab-close svg {
+  display: block;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tab-plus {
+  width: 38px !important;
+  height: 38px !important;
+  min-height: 38px !important;
+  margin: 0 !important;
+  align-self: stretch;
+  border: 0 !important;
+  border-right: 1px solid #34363a !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #8f9298 !important;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tab-plus:hover {
+  background: #2b2c30 !important;
+  color: #ffffff !important;
+}
+
+html[data-theme="dark"] [data-page="workspace"] .ws-tab-plus svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 1.9;
+}

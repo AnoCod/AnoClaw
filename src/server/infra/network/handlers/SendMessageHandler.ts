@@ -23,10 +23,49 @@ import { resolveSessionEffort, resolveSessionPermissionMode } from '../../../cor
 
 const log = LogManager.getInstance().logger('anochat.ws');
 
+export interface IncomingAttachment {
+  name?: string;
+  path?: string;
+  type?: string;
+  size?: number;
+  content?: string;
+}
+
+export function hasSendableUserPayload(content: unknown, attachments: unknown): boolean {
+  return (typeof content === 'string' && content.trim().length > 0)
+    || (Array.isArray(attachments) && attachments.length > 0);
+}
+
+export function attachmentTextBlocks(attachments: IncomingAttachment[] | undefined): string[] {
+  if (!attachments || attachments.length === 0) return [];
+  return attachments.map((attachment) => {
+    const name = attachment.name?.trim() || 'unnamed';
+    if (typeof attachment.content === 'string') {
+      return `[File: ${name}]\n${attachment.content || '(empty file)'}`;
+    }
+
+    const details = [
+      attachment.type ? `type=${attachment.type}` : '',
+      Number.isFinite(attachment.size) ? `size=${attachment.size} bytes` : '',
+    ].filter(Boolean).join(', ');
+    return `[Attached file: ${name}]\nContent not available in message payload.${details ? ` Metadata: ${details}.` : ''}`;
+  });
+}
+
+export function buildUserContent(rawContent: string, attachments: IncomingAttachment[] | undefined): string {
+  const content = rawContent.trim();
+  const blocks = attachmentTextBlocks(attachments);
+  if (blocks.length === 0) return content;
+  const attachmentText = blocks.join('\n\n');
+  if (!content) return attachmentText;
+  if (content.includes(attachmentText)) return content;
+  return `${attachmentText}\n\n${content}`;
+}
+
 export const sendMessageHandler: WsMessageHandler = async (ctx) => {
   const msg = ctx.data;
-  if (!msg.content) {
-    ctx.ws.send(ctx.sessionId, { type: WsMessageType.Error, errorMessage: 'Missing content', code: 'MISSING_CONTENT' });
+  if (!hasSendableUserPayload(msg.content, msg.attachments)) {
+    ctx.ws.send(ctx.sessionId, { type: WsMessageType.Error, errorMessage: 'Missing content or attachments', code: 'MISSING_CONTENT' });
     return;
   }
 
@@ -121,6 +160,10 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
     effort: effectiveEffort,
   };
 
+  const rawContent = typeof msg.content === 'string' ? msg.content.trim() : '';
+  const attachments = Array.isArray(msg.attachments) ? msg.attachments as IncomingAttachment[] : undefined;
+  const userContent = buildUserContent(rawContent, attachments);
+
   // Soft interrupt: if session already has an active AgentLoop, queue the message
   // without creating a second loop. The running AgentLoop handles it mid-turn.
   // Must return BEFORE touching StreamPersister/event-buffer to avoid corrupting
@@ -130,13 +173,13 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
       id: `ws-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       sessionId: effectiveSessionId,
       role: MessageRole.User,
-      content: (msg.content as string) || '',
+      content: userContent,
       tokenCount: 0,
       compressed: false,
       timestamp: new Date().toISOString(),
     };
     await sessionManager.appendMessage(effectiveSessionId, userMsg, { notify: false });
-    InterruptController.getInstance().setPendingUserMessage(effectiveSessionId, (msg.content as string) || '');
+    InterruptController.getInstance().setPendingUserMessage(effectiveSessionId, userContent);
     InterruptController.getInstance().requestInterrupt(effectiveSessionId, InterruptReason.UserSteer);
     ctx.ws.send(effectiveSessionId, {
       type: WsMessageType.StatusInfo,
@@ -145,18 +188,7 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
     return;
   }
 
-  // Build user message — merge attachment contents
-  const rawContent = (msg.content as string) || '';
-  let userContent: string = rawContent;
-  const attachments = msg.attachments as Array<{ name: string; content: string }> | undefined;
-  if (attachments && attachments.length > 0) {
-    const fileTexts = attachments
-      .filter((a) => a.content)
-      .map((a) => `[File: ${a.name}]\n${a.content}`);
-    if (fileTexts.length > 0 && !userContent.includes('[File:')) {
-      userContent = fileTexts.join('\n\n') + (userContent ? '\n\n' + userContent : '');
-    }
-  }
+  // Build user message — merge attachment contents and metadata into text.
   const userMessage: Message = {
     id: `ws-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     sessionId: effectiveSessionId,

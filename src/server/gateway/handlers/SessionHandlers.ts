@@ -9,7 +9,11 @@ import { JsonlStore } from '../../infra/storage/JsonlStore.js';
 import { AgentRegistry } from '../../core/agent/AgentRegistry.js';
 import { AgentRuntime } from '../../core/agent/AgentRuntime.js';
 import { WsServer } from '../../infra/network/WsServer.js';
-import { sendMessageHandler } from '../../infra/network/handlers/SendMessageHandler.js';
+import {
+  hasSendableUserPayload,
+  sendMessageHandler,
+  type IncomingAttachment,
+} from '../../infra/network/handlers/SendMessageHandler.js';
 import { TypedEventBus } from '../../core/events/TypedEventBus.js';
 import { requireWs, requireWsAny } from '../WsRequired.js';
 import { LogManager } from '../../infra/logging/LogManager.js';
@@ -599,9 +603,10 @@ export async function handleSendMessage(
   readBody: ReadBody,
 ): Promise<void> {
   const body = await readBody(req);
-  const content = body.content as string | undefined;
-  if (!content || typeof content !== 'string') {
-    sendJson(res, 400, { error: 'Bad Request', message: 'Missing "content" field' });
+  const content = typeof body.content === 'string' ? body.content.trim() : '';
+  const attachments = Array.isArray(body.attachments) ? body.attachments as IncomingAttachment[] : undefined;
+  if (!hasSendableUserPayload(content, attachments)) {
+    sendJson(res, 400, { error: 'Bad Request', message: 'Missing "content" or "attachments" field' });
     return;
   }
 
@@ -647,7 +652,7 @@ export async function handleSendMessage(
       content,
       mode: (body.mode as string) || 'auto',
       effort: (body.effort as boolean) ?? true,
-      attachments: body.attachments as Array<{ name: string; content: string }> | undefined,
+      attachments,
       parentSessionId: body.parentSessionId as string | undefined,
     },
     ws: wsServer,

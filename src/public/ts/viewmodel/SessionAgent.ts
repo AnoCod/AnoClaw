@@ -12,6 +12,10 @@ import { ClientLogger } from '../ClientLogger.js';
 import { ToastManager } from '../ToastManager.js';
 import type { SessionViewModel } from './SessionViewModel.js';
 import type { WSClient } from './WSClient.js';
+import {
+  attachmentDisplayLabel,
+  buildPromptContentWithAttachments,
+} from '../components/conversation/AttachmentFormatting.js';
 
 // Re-export these so ConversationWsHandlers can be pure functions operating on SessionAgent
 export { ClientLogger, ToastManager };
@@ -505,19 +509,12 @@ export class SessionAgent extends EventEmitter {
     console.log('[SessionAgent] sendMessage', { sessionId: this.sessionId, inputLen: inputValue.length });
 
     const content = inputValue.trim();
-    let displayContent = content || '(attachments)';
+    let displayContent = content;
     let effectiveContent = content;
     // If attachments have inlined content, prepend them to the message text
     if (attachments.length > 0) {
-      const fileTexts = attachments.filter(a => a.content).map(a => `[File: ${a.name}]\n${a.content}`);
-      if (fileTexts.length > 0) {
-        const prefix = fileTexts.join('\n\n');
-        effectiveContent = content ? prefix + '\n\n' + content : prefix;
-      } else {
-        const names = attachments.map(a => a.name).join(', ');
-        displayContent = content || `[Attached: ${names}]`;
-        effectiveContent = displayContent;
-      }
+      displayContent = content || attachmentDisplayLabel(attachments);
+      effectiveContent = buildPromptContentWithAttachments(content, attachments);
     }
     const userMsg: Message = {
       id: generateId(), sessionId: this.sessionId, type: 'message', role: 'user', content: displayContent, timestamp: Date.now(),
@@ -555,7 +552,7 @@ export class SessionAgent extends EventEmitter {
       this.state.currentStreamMessage = '';
 
       wsClient.sendMessage(this.sessionId, content, permissionMode, effortMode, attachments);
-      ClientLogger.vm.debug('Message sent via WS', { sid: this.sessionId, mode: permissionMode, contentLen: content.length });
+      ClientLogger.vm.debug('Message sent via WS', { sid: this.sessionId, mode: permissionMode, contentLen: effectiveContent.length });
 
       this.emit('messageAdded', userMsg);
       this.state.isStreaming = true;

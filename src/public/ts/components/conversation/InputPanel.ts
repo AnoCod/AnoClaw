@@ -230,6 +230,7 @@ export class InputPanel {
           || /\.(txt|md|json|js|ts|jsx|tsx|css|scss|less|html|xml|yaml|yml|toml|ini|cfg|conf|log|sh|bash|zsh|py|rb|rs|go|java|kt|swift|c|cpp|h|hpp|sql|r|env|gitignore|editorconfig)$/i.test(file.name);
         if (!isText) {
           this._attachments.push({ name: file.name, path: file.name, type: file.type || 'application/octet-stream', size: file.size });
+          this._renderAttachments();
           continue;
         }
         const reader = new FileReader();
@@ -565,7 +566,7 @@ export class InputPanel {
   // Clear textarea and attachments, then fire onSend with content + mode + attachments
   private _fireSend(): void {
     let content = this._textarea.value.trim();
-    if (!content) return;
+    if (!content && this._attachments.length === 0) return;
     console.log('[Input] fireSend', { contentLen: content.length, attachments: this._attachments.length });
     if (this._attachments.length === 0 && this._tryRunSlashCommand(content)) {
       this._textarea.value = '';

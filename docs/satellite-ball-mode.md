@@ -73,9 +73,10 @@
 
    V1 已落地工具确认队列：
    - `ToolConfirmationQueue` 暴露当前等待数量和第一个等待项摘要。
-   - FloatingBall state 包含 `waitingInbox`，提供 sessionId、标题、风险等级和参数摘要。
-   - 小面板在等待时显示 “Needs attention” 卡片，点击后恢复主窗口并打开对应会话。
-   - 这里只做定位和上下文展示，不在小窗内直接批准高风险工具，避免误触。
+   - FloatingBall state 包含 `waitingInbox`，提供 sessionId、toolCallId、标题、风险等级、参数摘要和是否可小窗处理。
+   - 小面板在等待时显示 “Needs attention” 卡片，点击正文恢复主窗口并打开对应会话。
+   - Safe/Low 风险等待项会在小面板内显示 Approve/Reject，可不展开主窗口直接处理。
+   - Medium/High/Critical 仍只做定位和上下文展示，不在小窗内直接批准，避免误触。
 
    后续增强：
    - AskUserQuestion 等待项接入同一个 inbox。
@@ -197,6 +198,8 @@ floating-ball-state -> {
     title: string;
     detail?: string;
     riskLevel?: string;
+    toolCallId?: string;
+    canInlineResolve?: boolean;
   };
   goalPulse?: {
     sessionId: string | null;
@@ -242,9 +245,10 @@ floating-ball-action:
   "text-action"
   "open-goal"
   "goal-toggle"
+  "waiting-resolve"
 ```
 
-Low-risk inline actions can come later. High-risk approvals should first restore the main window and show the full confirmation context.
+Low-risk inline actions are available in the helper panel. High-risk approvals should first restore the main window and show the full confirmation context.
 
 ## Design Rules
 

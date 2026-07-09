@@ -45,11 +45,17 @@
       <button data-helper-action="open-current">Open</button>
       <button data-helper-action="stop-current">Stop</button>
     </div>
-    <button id="waitingCard" class="waiting-card" type="button">
-      <span class="waiting-badge">Waiting</span>
-      <span id="waitingTitle" class="waiting-title">Needs attention</span>
-      <span id="waitingDetail" class="waiting-detail">Open AnoClaw to review.</span>
-    </button>
+    <div id="waitingCard" class="waiting-card">
+      <button id="waitingOpen" class="waiting-open" type="button">
+        <span class="waiting-badge">Waiting</span>
+        <span id="waitingTitle" class="waiting-title">Needs attention</span>
+        <span id="waitingDetail" class="waiting-detail">Open AnoClaw to review.</span>
+      </button>
+      <div id="waitingActions" class="waiting-actions" aria-label="Waiting item actions">
+        <button id="waitingReject" type="button">Reject</button>
+        <button id="waitingApprove" type="button">Approve</button>
+      </div>
+    </div>
     <div class="clip-card">
       <div class="clip-head">
         <span>Clipboard text</span>

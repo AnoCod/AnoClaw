@@ -130,4 +130,54 @@ describe('ToolConfirmationQueue', () => {
       approved: true,
     });
   });
+
+  it('allows inline resolving a low-risk active confirmation', async () => {
+    const queue = ToolConfirmationQueue.getInstance();
+    const send = vi.fn();
+    vi.spyOn(ToolConfirmDialog, 'show').mockImplementation(() => new Promise<boolean>(() => {}));
+
+    queue.setSender(send);
+    queue.enqueue({
+      sessionId: 'regular-session',
+      toolCallId: 'tc-edit',
+      toolName: 'Edit',
+      displayName: 'Edit',
+      riskLevel: 'Low',
+      params: { file_path: 'src/app.ts' },
+    });
+
+    expect(queue.snapshot.first?.canInlineResolve).toBe(true);
+    expect(queue.respondToFirst(true, 'tc-edit')).toBe(true);
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(send).toHaveBeenCalledWith({
+      type: 'tool_confirm_response',
+      toolCallId: 'tc-edit',
+      approved: true,
+    });
+    expect(queue.snapshot).toEqual({ count: 0, first: null });
+  });
+
+  it('does not inline-approve high-risk confirmations', async () => {
+    const queue = ToolConfirmationQueue.getInstance();
+    const send = vi.fn();
+    vi.spyOn(ToolConfirmDialog, 'show').mockImplementation(() => new Promise<boolean>(() => {}));
+
+    queue.setSender(send);
+    queue.enqueue({
+      sessionId: 'regular-session',
+      toolCallId: 'tc-bash',
+      toolName: 'Bash',
+      displayName: 'Bash',
+      riskLevel: 'High',
+      params: { command: 'rm -rf dist' },
+    });
+
+    expect(queue.snapshot.first?.canInlineResolve).toBe(false);
+    expect(queue.respondToFirst(true, 'tc-bash')).toBe(false);
+    expect(send).not.toHaveBeenCalled();
+    expect(queue.snapshot.count).toBe(1);
+  });
 });

@@ -41,6 +41,8 @@ type FloatingBallState = {
     title: string;
     detail?: string;
     riskLevel?: string;
+    toolCallId?: string;
+    canInlineResolve?: boolean;
   };
   goalPulse?: FloatingBallGoalPulse | null;
   currentTask?: {

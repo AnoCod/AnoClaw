@@ -70,6 +70,9 @@ const els = {
   clipPreview: document.getElementById('clipPreview'),
   clipTitle: document.querySelector('.clip-head span'),
   waitingCard: document.getElementById('waitingCard'),
+  waitingOpen: document.getElementById('waitingOpen'),
+  waitingApprove: document.getElementById('waitingApprove'),
+  waitingReject: document.getElementById('waitingReject'),
   waitingTitle: document.getElementById('waitingTitle'),
   waitingDetail: document.getElementById('waitingDetail'),
   recentList: document.getElementById('recentList'),
@@ -380,7 +383,10 @@ function renderWaitingCard(waiting) {
   if (!els.waitingCard) return;
   const hasWaiting = Boolean(waiting && currentState.waitingCount > 0);
   els.waitingCard.classList.toggle('is-visible', hasWaiting);
-  els.waitingCard.disabled = !hasWaiting;
+  els.waitingCard.classList.toggle('can-inline', Boolean(hasWaiting && waiting?.canInlineResolve));
+  els.waitingOpen.disabled = !hasWaiting;
+  els.waitingApprove.disabled = !hasWaiting || !waiting?.canInlineResolve;
+  els.waitingReject.disabled = !hasWaiting || !waiting?.canInlineResolve;
   if (!hasWaiting) {
     els.waitingTitle.textContent = 'Needs attention';
     els.waitingDetail.textContent = 'Open AnoClaw to review.';
@@ -393,6 +399,15 @@ function renderWaitingCard(waiting) {
     ? `${title} +${currentState.waitingCount - 1}`
     : title;
   els.waitingDetail.textContent = risk ? `${risk} · ${detail}` : detail;
+}
+
+function waitingPayload(extra = {}) {
+  const waiting = currentState.waitingInbox || {};
+  return {
+    ...extra,
+    toolCallId: waiting.toolCallId,
+    sessionId: waiting.sessionId || currentState.currentTask?.sessionId || currentState.activeSessionId,
+  };
 }
 
 function render() {
@@ -555,10 +570,9 @@ els.quickTarget?.addEventListener('change', () => {
   selectedTargetSessionId = els.quickTarget.value || '';
 });
 els.clipRefresh?.addEventListener('click', refreshState);
-els.waitingCard?.addEventListener('click', () => {
-  const waiting = currentState.waitingInbox || {};
-  sendAction('open-waiting', { sessionId: waiting.sessionId || currentState.currentTask?.sessionId || currentState.activeSessionId });
-});
+els.waitingOpen?.addEventListener('click', () => sendAction('open-waiting', waitingPayload()));
+els.waitingApprove?.addEventListener('click', () => sendAction('waiting-resolve', waitingPayload({ approved: true })));
+els.waitingReject?.addEventListener('click', () => sendAction('waiting-resolve', waitingPayload({ approved: false })));
 els.goalToggle?.addEventListener('click', (event) => {
   event.stopPropagation();
   const goal = currentGoal(currentState);

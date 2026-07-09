@@ -309,6 +309,10 @@ body.hover:not(.panel-open) .sat {
   -webkit-app-region: no-drag;
 }
 
+.helper-panel.has-waiting {
+  top: 92px;
+}
+
 body.panel-open .helper-panel {
   opacity: 1;
   pointer-events: auto;
@@ -556,6 +560,10 @@ body.panel-open .helper-panel {
   margin-top: 8px;
 }
 
+.helper-panel.has-waiting .action-grid {
+  display: none;
+}
+
 .action-grid button,
 .clip-actions button {
   height: 30px;
@@ -575,10 +583,21 @@ body.panel-open .helper-panel {
 }
 
 .waiting-card.is-visible {
+  display: block;
+}
+
+.waiting-open {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 3px 8px;
   align-items: center;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
 }
 
 .waiting-badge {
@@ -607,6 +626,45 @@ body.panel-open .helper-panel {
   grid-column: 1 / -1;
   color: #c3b68a;
   font-size: 10px;
+}
+
+.waiting-actions {
+  display: none;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.waiting-card.can-inline .waiting-actions {
+  display: grid;
+}
+
+.waiting-actions button {
+  height: 28px;
+  border: 1px solid rgba(255,255,255,0.11);
+  border-radius: 7px;
+  color: #eef2f4;
+  background: #24282e;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.waiting-actions #waitingApprove {
+  border-color: rgba(89, 212, 153, 0.35);
+  color: #bff5d7;
+  background: rgba(89, 212, 153, 0.12);
+}
+
+.waiting-actions #waitingReject {
+  border-color: rgba(255, 97, 97, 0.28);
+  color: #ffb7b7;
+  background: rgba(255, 97, 97, 0.08);
+}
+
+.waiting-actions button:disabled {
+  color: #717b84;
+  cursor: default;
 }
 
 .clip-card {

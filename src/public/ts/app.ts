@@ -771,6 +771,8 @@ class App {
         title: waitingItem ? `${waitingItem.displayName} needs approval` : `${waitingCount} items need attention`,
         detail: waitingItem?.detail || detail,
         riskLevel: waitingItem?.riskLevel,
+        toolCallId: waitingItem?.toolCallId,
+        canInlineResolve: waitingItem?.canInlineResolve === true,
       } : undefined,
       goalPulse,
       currentTask: taskSessionId ? {
@@ -932,6 +934,8 @@ class App {
       text?: string;
       kind?: string;
       status?: FloatingBallGoalStatus;
+      toolCallId?: string;
+      approved?: boolean;
     };
 
     switch (action) {
@@ -970,6 +974,19 @@ class App {
           this._pushFloatingBallNotice('success', 'Goal paused');
         } else {
           this._pushFloatingBallNotice('info', 'Goal is not active');
+        }
+        break;
+      }
+      case 'waiting-resolve': {
+        const approved = data.approved === true;
+        const ok = ToolConfirmationQueue.getInstance().respondToFirst(approved, data.toolCallId);
+        if (ok) {
+          this._pushFloatingBallNotice('success', approved ? 'Approved waiting item' : 'Rejected waiting item');
+        } else {
+          this._pushFloatingBallNotice('info', 'Open AnoClaw to review this item');
+          this.navigateTo('sessions');
+          const target = data.sessionId || this._sessionVM.activeSessionId;
+          if (target) this._sessionVM.selectSession(target);
         }
         break;
       }

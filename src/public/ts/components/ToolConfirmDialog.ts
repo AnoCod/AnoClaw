@@ -13,14 +13,24 @@ export interface ToolConfirmRequest {
 }
 
 export class ToolConfirmDialog {
+  private static _active = new Map<string, (value: boolean) => void>();
+
   static show(request: ToolConfirmRequest): Promise<boolean> {
     return new Promise((resolve) => {
+      let settled = false;
+      let overlay: HTMLDivElement;
+      let onKey: (e: KeyboardEvent) => void;
+
       const done = (value: boolean) => {
+        if (settled) return;
+        settled = true;
+        ToolConfirmDialog._active.delete(request.toolCallId);
+        document.removeEventListener('keydown', onKey);
         overlay.remove();
         resolve(value);
       };
 
-      const overlay = document.createElement('div');
+      overlay = document.createElement('div');
       overlay.className = 'dialog-overlay';
       overlay.setAttribute('role', 'dialog');
       overlay.setAttribute('aria-label', 'Tool Confirmation');
@@ -87,16 +97,21 @@ export class ToolConfirmDialog {
         if (e.target === overlay) done(false);
       });
 
-      const onKey = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') {
-          document.removeEventListener('keydown', onKey);
-          done(false);
-        }
+      onKey = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') done(false);
       };
       document.addEventListener('keydown', onKey);
 
       document.body.appendChild(overlay);
+      ToolConfirmDialog._active.set(request.toolCallId, done);
     });
+  }
+
+  static resolve(toolCallId: string, approved: boolean): boolean {
+    const done = ToolConfirmDialog._active.get(toolCallId);
+    if (!done) return false;
+    done(approved);
+    return true;
   }
 }
 

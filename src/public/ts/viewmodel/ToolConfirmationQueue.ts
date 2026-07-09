@@ -11,6 +11,7 @@ export interface ToolConfirmationSummary {
   riskLevel: string;
   sessionId?: string;
   detail?: string;
+  canInlineResolve: boolean;
 }
 
 export interface ToolConfirmationSnapshot {
@@ -23,6 +24,7 @@ export class ToolConfirmationQueue {
   private _queue: ToolConfirmRequest[] = [];
   private _active = false;
   private _activeRequest: ToolConfirmRequest | null = null;
+  private _activeResolver: ((approved: boolean) => void) | null = null;
   private _sendFn: ((data: Record<string, unknown>) => void) | null = null;
   private _autoApprover: ((request: ToolConfirmRequest) => boolean) | null = null;
   private _listeners = new Set<() => void>();
@@ -73,6 +75,25 @@ export class ToolConfirmationQueue {
     this._processNext();
   }
 
+  respondToFirst(approved: boolean, toolCallId?: string): boolean {
+    const first = this._activeRequest || this._queue[0] || null;
+    if (!first) return false;
+    if (toolCallId && first.toolCallId !== toolCallId) return false;
+    if (!isInlineResolvableRisk(first.riskLevel)) return false;
+
+    if (this._activeRequest) {
+      ToolConfirmDialog.resolve(first.toolCallId, approved);
+      this._activeResolver?.(approved);
+      return true;
+    }
+
+    this._queue.shift();
+    this._sendResponse(first.toolCallId, approved);
+    this._notify();
+    this._processNext();
+    return true;
+  }
+
   private async _processNext(): Promise<void> {
     if (this._active || this._queue.length === 0) return;
     this._active = true;
@@ -80,13 +101,20 @@ export class ToolConfirmationQueue {
     this._activeRequest = request;
     this._notify();
     try {
-      const approved = await ToolConfirmDialog.show(request);
+      const externalResponse = new Promise<boolean>((resolve) => {
+        this._activeResolver = resolve;
+      });
+      const approved = await Promise.race([
+        ToolConfirmDialog.show(request),
+        externalResponse,
+      ]);
       this._sendResponse(request.toolCallId, approved);
     } catch {
       this._sendResponse(request.toolCallId, false);
     } finally {
       this._active = false;
       this._activeRequest = null;
+      this._activeResolver = null;
       this._notify();
       this._processNext();
     }
@@ -120,7 +148,13 @@ function summarizeRequest(request: ToolConfirmRequest): ToolConfirmationSummary 
     riskLevel: request.riskLevel,
     sessionId: request.sessionId,
     detail: summarizeParams(request.params || {}),
+    canInlineResolve: isInlineResolvableRisk(request.riskLevel),
   };
+}
+
+function isInlineResolvableRisk(riskLevel: string): boolean {
+  const normalized = String(riskLevel || '').trim().toLowerCase();
+  return normalized === 'safe' || normalized === 'low';
 }
 
 function summarizeParams(params: Record<string, unknown>): string {

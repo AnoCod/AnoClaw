@@ -57,6 +57,8 @@ type FloatingBallState = {
     title: string;
     detail?: string;
     riskLevel?: string;
+    toolCallId?: string;
+    canInlineResolve?: boolean;
   };
   goalPulse?: FloatingBallGoalPulse | null;
   currentTask?: {
@@ -399,7 +401,8 @@ export class FloatingBallManager {
       case 'quick-ask':
       case 'text-action':
       case 'stop-current':
-      case 'goal-toggle': {
+      case 'goal-toggle':
+      case 'waiting-resolve': {
         const mainWin = WindowManager.getInstance().getMainWindow();
         if (!mainWin) {
           this.hide();

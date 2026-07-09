@@ -9,14 +9,20 @@ import { join } from 'node:path';
 const CSS_DIR = 'src/public/css';
 const OUT_FILE = 'src/public/css/bundle.css';
 
-const files = readdirSync(CSS_DIR).filter(f => f.endsWith('.css'));
+const BUNDLE_EXCLUDES = new Set([
+  'bundle.css',
+  // Plugin iframe skins are injected into sandboxed plugin pages by PluginPageContainer.
+  'plugin-comfyui.css',
+]);
+
+const files = readdirSync(CSS_DIR).filter(f => f.endsWith('.css') && !BUNDLE_EXCLUDES.has(f));
 
 // Priority order for CSS cascade
 const FIRST = ['theme.css', 'layout-core.css', 'layout-motion.css'];
 const ordered = [
   ...FIRST.filter(f => files.includes(f)),
   ...files.filter(f => !FIRST.includes(f) && f.startsWith('layout-')).sort(),
-  ...files.filter(f => !FIRST.includes(f) && !f.startsWith('layout-') && f !== 'bundle.css').sort(),
+  ...files.filter(f => !FIRST.includes(f) && !f.startsWith('layout-')).sort(),
 ];
 
 let total = 0;

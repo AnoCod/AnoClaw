@@ -788,3 +788,280 @@ html[data-theme="dark"] ::selection {
   background: rgba(11, 140, 233, 0.35);
   color: #ffffff;
 }
+
+/* ComfyUI-style dense management pages */
+html[data-theme="dark"] .cinema-static-page {
+  background:
+    linear-gradient(var(--comfy-canvas-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--comfy-canvas-grid) 1px, transparent 1px),
+    var(--comfy-canvas) !important;
+  background-size: 32px 32px, 32px 32px, auto !important;
+}
+
+html[data-theme="dark"] .cinema-static-page .cinema-static-inner {
+  max-width: none;
+  width: 100%;
+  margin: 0;
+  padding: 20px 24px;
+}
+
+html[data-theme="dark"] [data-page="skills"] .cinema-card-grid,
+html[data-theme="dark"] .plugins-grid,
+html[data-theme="dark"] .mem-grid,
+html[data-theme="dark"] .skills-grid {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0 !important;
+  overflow: hidden;
+  border: 1px solid var(--comfy-charcoal-400);
+  border-radius: 6px;
+  background: var(--comfy-charcoal-800);
+}
+
+html[data-theme="dark"] [data-page="skills"] .cinema-card-grid > .ui-card,
+html[data-theme="dark"] .skill-card,
+html[data-theme="dark"] .mem-card,
+html[data-theme="dark"] .plg-card {
+  min-height: 70px;
+  padding: 10px 12px !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--comfy-charcoal-500) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  transition: background 0.12s, border-color 0.12s, opacity 0.12s;
+}
+
+html[data-theme="dark"] [data-page="skills"] .cinema-card-grid > .ui-card:last-child,
+html[data-theme="dark"] .skill-card:last-child,
+html[data-theme="dark"] .mem-card:last-child,
+html[data-theme="dark"] .plg-card:last-child {
+  border-bottom: 0 !important;
+}
+
+html[data-theme="dark"] [data-page="skills"] .cinema-card-grid > .ui-card:hover,
+html[data-theme="dark"] .skill-card:hover,
+html[data-theme="dark"] .mem-card:hover,
+html[data-theme="dark"] .plg-card:hover {
+  background: var(--comfy-charcoal-700) !important;
+}
+
+html[data-theme="dark"] [data-page="skills"] .ui-card > div:first-child {
+  margin-bottom: 4px !important;
+}
+
+html[data-theme="dark"] [data-page="skills"] .ui-card p {
+  max-width: 100%;
+  margin: 0 0 8px 46px !important;
+  color: var(--comfy-text-muted) !important;
+}
+
+html[data-theme="dark"] [data-page="skills"] .ui-card > button:last-child {
+  width: fit-content;
+  min-height: 26px;
+  margin-left: 46px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+html[data-theme="dark"] .ui-card-disabled,
+html[data-theme="dark"] .skill-card-disabled {
+  opacity: 0.48;
+  pointer-events: auto;
+}
+
+html[data-theme="dark"] .ui-toggle,
+html[data-theme="dark"] .skill-toggle,
+html[data-theme="dark"] .toggle-switch,
+html[data-theme="dark"] .cinema-toggle {
+  width: 34px;
+  height: 18px;
+}
+
+html[data-theme="dark"] .ui-toggle,
+html[data-theme="dark"] .skill-toggle-track,
+html[data-theme="dark"] .toggle-slider,
+html[data-theme="dark"] .cinema-toggle {
+  border: 1px solid var(--comfy-charcoal-400) !important;
+  border-radius: 999px !important;
+  background: var(--comfy-charcoal-600) !important;
+}
+
+html[data-theme="dark"] .ui-toggle.on,
+html[data-theme="dark"] .skill-toggle-track-on,
+html[data-theme="dark"] .toggle-switch input:checked + .toggle-slider,
+html[data-theme="dark"] .cinema-toggle.on {
+  border-color: var(--comfy-blue) !important;
+  background: var(--comfy-blue) !important;
+}
+
+html[data-theme="dark"] .ui-toggle-thumb,
+html[data-theme="dark"] .skill-toggle-thumb,
+html[data-theme="dark"] .toggle-slider::before,
+html[data-theme="dark"] .cinema-toggle-thumb {
+  width: 14px;
+  height: 14px;
+  background: var(--comfy-text-secondary) !important;
+}
+
+html[data-theme="dark"] .ui-toggle.on .ui-toggle-thumb,
+html[data-theme="dark"] .skill-toggle-track-on .skill-toggle-thumb,
+html[data-theme="dark"] .toggle-switch input:checked + .toggle-slider::before,
+html[data-theme="dark"] .cinema-toggle.on .cinema-toggle-thumb {
+  background: #ffffff !important;
+}
+
+html[data-theme="dark"] .ui-toggle.on .ui-toggle-thumb,
+html[data-theme="dark"] .skill-toggle-track-on .skill-toggle-thumb,
+html[data-theme="dark"] .cinema-toggle.on .cinema-toggle-thumb {
+  left: 17px !important;
+}
+
+html[data-theme="dark"] .toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(16px);
+}
+
+html[data-theme="dark"] .plg-card-top,
+html[data-theme="dark"] .mem-card-top {
+  padding: 10px 12px !important;
+}
+
+html[data-theme="dark"] .plg-card-name,
+html[data-theme="dark"] .mem-card-title,
+html[data-theme="dark"] .skill-card-name {
+  color: var(--comfy-text-primary) !important;
+  font-size: 12px !important;
+}
+
+html[data-theme="dark"] .plg-card-publisher,
+html[data-theme="dark"] .plg-card-meta,
+html[data-theme="dark"] .mem-card-meta,
+html[data-theme="dark"] .mem-card-time,
+html[data-theme="dark"] .skill-card-status,
+html[data-theme="dark"] .skill-card-status-off {
+  color: var(--comfy-text-muted) !important;
+  font-size: 10px !important;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+html[data-theme="dark"] .plg-card-desc,
+html[data-theme="dark"] .mem-card-snippet,
+html[data-theme="dark"] .skill-card-description {
+  color: var(--comfy-text-muted) !important;
+  font-size: 11px !important;
+}
+
+html[data-theme="dark"] .plg-status-dot.active {
+  background: var(--comfy-blue) !important;
+}
+
+html[data-theme="dark"] .plg-status-dot.error {
+  background: var(--comfy-coral) !important;
+}
+
+html[data-theme="dark"] .ag-edit-panel,
+html[data-theme="dark"] .ag-tools-panel {
+  background: var(--comfy-charcoal-800) !important;
+}
+
+html[data-theme="dark"] .ag-tool-list {
+  gap: 8px;
+}
+
+html[data-theme="dark"] .ag-tool-section {
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--comfy-charcoal-400);
+  border-radius: 6px;
+  background: var(--comfy-charcoal-800);
+}
+
+html[data-theme="dark"] .ag-tool-section-head {
+  min-height: 34px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--comfy-charcoal-500) !important;
+  background: var(--comfy-menu-secondary-bg) !important;
+}
+
+html[data-theme="dark"] .ag-tool-section-items {
+  gap: 0;
+}
+
+html[data-theme="dark"] .ag-tool-card {
+  min-height: 42px;
+  padding: 8px 10px !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--comfy-charcoal-500) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+html[data-theme="dark"] .ag-tool-card:last-child {
+  border-bottom: 0 !important;
+}
+
+html[data-theme="dark"] .ag-tool-card:hover {
+  background: var(--comfy-charcoal-700) !important;
+}
+
+html[data-theme="dark"] .ag-tool-check {
+  border-color: var(--comfy-charcoal-300);
+  background: var(--comfy-input-bg);
+}
+
+html[data-theme="dark"] .ag-tool-card--on .ag-tool-check {
+  border-color: var(--comfy-blue);
+  background: var(--comfy-blue);
+}
+
+html[data-theme="dark"] .ag-tool-card--on .ag-tool-check::after {
+  border-color: #ffffff;
+}
+
+html[data-theme="dark"] .ag-tool-card-group {
+  border-radius: 4px;
+  border-color: var(--comfy-charcoal-400);
+  background: var(--comfy-menu-secondary-bg);
+  color: var(--comfy-text-muted);
+}
+
+html[data-theme="dark"] .appearance-theme-card {
+  border-radius: 6px;
+  border-color: var(--comfy-charcoal-400);
+  background: var(--comfy-charcoal-800);
+}
+
+html[data-theme="dark"] .appearance-theme-card.active,
+html[data-theme="dark"] .appearance-theme-card:hover {
+  border-color: var(--comfy-blue);
+  background: var(--comfy-charcoal-700);
+}
+
+html[data-theme="dark"] .appearance-swatch {
+  border-radius: 4px;
+}
+
+html[data-theme="dark"] .appearance-swatch.active {
+  border-color: var(--comfy-blue);
+  box-shadow: 0 0 0 2px rgba(11, 140, 233, 0.22);
+}
+
+html[data-theme="dark"] .evo-tool-table {
+  border: 1px solid var(--comfy-charcoal-400);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--comfy-charcoal-800);
+}
+
+html[data-theme="dark"] .evo-tool-table th {
+  background: var(--comfy-menu-secondary-bg);
+  color: var(--comfy-text-muted);
+}
+
+html[data-theme="dark"] .evo-tool-table td {
+  border-color: var(--comfy-charcoal-500);
+}
+
+html[data-theme="dark"] .evo-tool-table tr:hover td {
+  background: var(--comfy-charcoal-700);
+}

@@ -59,19 +59,19 @@
   }
 
   function installHint() {
-    if (document.querySelector(".rc-kbd-hint")) return;
+    if (document.querySelector(".comfy-kbd-hint")) return;
     var hint = document.createElement("div");
-    hint.className = "rc-kbd-hint";
+    hint.className = "comfy-kbd-hint";
     hint.textContent = "Ctrl K";
     document.body.appendChild(hint);
     window.setTimeout(function () {
-      document.documentElement.classList.remove("rc-plugin-ready");
+      document.documentElement.classList.remove("comfy-plugin-ready");
     }, 2400);
   }
 
   ready(function () {
-    document.documentElement.classList.add("rc-plugin-ready");
-    document.documentElement.setAttribute("data-raycast-plugin", "true");
+    document.documentElement.classList.add("comfy-plugin-ready");
+    document.documentElement.setAttribute("data-comfyui-plugin", "true");
     installThemeSync();
     installKeys();
     installHint();

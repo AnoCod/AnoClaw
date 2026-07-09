@@ -1,0 +1,215 @@
+/*
+ * AnoClaw plugin ComfyUI skin.
+ * Injected only into sandboxed plugin iframes by PluginPageContainer.
+ */
+
+:root {
+  --comfy-charcoal-100: #55565e;
+  --comfy-charcoal-200: #494a50;
+  --comfy-charcoal-300: #3c3d42;
+  --comfy-charcoal-400: #313235;
+  --comfy-charcoal-500: #2d2e32;
+  --comfy-charcoal-600: #262729;
+  --comfy-charcoal-700: #202121;
+  --comfy-charcoal-800: #171718;
+  --comfy-menu-bg: #353535;
+  --comfy-menu-secondary-bg: #292929;
+  --comfy-input-bg: #222222;
+  --comfy-canvas: #0b0b0c;
+  --comfy-text-primary: #f3f3f3;
+  --comfy-text-secondary: #bbbbbb;
+  --comfy-text-muted: #8a8a8a;
+  --comfy-blue: #0b8ce9;
+  --comfy-blue-hover: #31b9f4;
+  --comfy-gold: #fdab34;
+  --comfy-coral: #e04e48;
+  --comfy-shadow: 1px 1px 8px 0 rgba(0, 0, 0, 0.4);
+
+  --bg: var(--comfy-canvas);
+  --surface: var(--comfy-charcoal-800);
+  --surface-hover: var(--comfy-charcoal-700);
+  --input-bg: var(--comfy-input-bg);
+  --border: var(--comfy-charcoal-400);
+  --text: var(--comfy-text-primary);
+  --text-dim: var(--comfy-text-muted);
+  --accent: var(--comfy-blue);
+  --accent-hover: var(--comfy-blue-hover);
+  --success: #00cd72;
+  --danger: var(--comfy-coral);
+  --warning: var(--comfy-gold);
+
+  --color-bg: var(--comfy-canvas);
+  --color-surface: var(--comfy-charcoal-800);
+  --color-surface-elevated: var(--comfy-charcoal-700);
+  --color-surface-card: var(--comfy-charcoal-600);
+  --color-hairline: var(--comfy-charcoal-500);
+  --color-hairline-strong: var(--comfy-charcoal-300);
+  --color-text: var(--comfy-text-primary);
+  --color-text-primary: var(--comfy-text-primary);
+  --color-text-secondary: var(--comfy-text-secondary);
+  --color-text-tertiary: var(--comfy-text-muted);
+  --color-text-quaternary: #636363;
+  --color-accent: var(--comfy-blue);
+  --color-on-accent: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+  background: var(--comfy-canvas);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  color: var(--comfy-text-primary);
+  font: 12px/1.45 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.024) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.024) 1px, transparent 1px),
+    var(--comfy-canvas);
+  background-size: 32px 32px, 32px 32px, auto;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+.btn,
+.button,
+[role="button"] {
+  min-height: 30px;
+  border: 1px solid var(--comfy-charcoal-400);
+  border-radius: 4px;
+  background: var(--comfy-menu-secondary-bg);
+  color: var(--comfy-text-secondary);
+  cursor: pointer;
+}
+
+button:hover,
+.btn:hover,
+.button:hover,
+[role="button"]:hover {
+  border-color: var(--comfy-charcoal-200);
+  background: var(--comfy-charcoal-600);
+  color: var(--comfy-text-primary);
+}
+
+button.primary,
+.btn-primary,
+.button-primary,
+[data-variant="primary"] {
+  border-color: var(--comfy-blue);
+  background: var(--comfy-blue);
+  color: #ffffff;
+}
+
+button.primary:hover,
+.btn-primary:hover,
+.button-primary:hover,
+[data-variant="primary"]:hover {
+  border-color: var(--comfy-blue-hover);
+  background: var(--comfy-blue-hover);
+  color: #ffffff;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+select,
+textarea {
+  min-height: 30px;
+  border: 1px solid var(--comfy-charcoal-300);
+  border-radius: 4px;
+  background: var(--comfy-input-bg);
+  color: var(--comfy-text-primary);
+  outline: none;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--comfy-blue);
+  box-shadow: 0 0 0 1px rgba(11, 140, 233, 0.35);
+}
+
+a {
+  color: var(--comfy-blue-hover);
+}
+
+.panel,
+.card,
+.surface,
+.toolbar,
+.dialog,
+.modal,
+.popover,
+.dropdown,
+.menu,
+.list,
+.table-wrap {
+  border: 1px solid var(--comfy-charcoal-400);
+  border-radius: 6px;
+  background: var(--comfy-charcoal-800);
+  box-shadow: none;
+}
+
+.toolbar,
+.header,
+.topbar {
+  min-height: 40px;
+  border-bottom: 1px solid var(--comfy-charcoal-500);
+  background: var(--comfy-menu-bg);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--comfy-charcoal-800);
+}
+
+th,
+td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--comfy-charcoal-500);
+}
+
+th {
+  color: var(--comfy-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+tr:hover td {
+  background: var(--comfy-charcoal-700);
+}
+
+.comfy-kbd-hint {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 99999;
+  padding: 3px 7px;
+  border: 1px solid var(--comfy-charcoal-400);
+  border-radius: 4px;
+  background: var(--comfy-menu-secondary-bg);
+  color: var(--comfy-text-muted);
+  font-size: 10px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.18s, transform 0.18s;
+}
+
+.comfy-plugin-ready .comfy-kbd-hint {
+  opacity: 1;
+  transform: translateY(0);
+}

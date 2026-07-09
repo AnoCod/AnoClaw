@@ -146,9 +146,9 @@ export class PluginPageContainer implements Page {
         const uiTag = [
           pluginBoot,
           `<link rel=\"stylesheet\" href=\"${mainBase}css/tokens.css\">`,
-          `<link rel=\"stylesheet\" href=\"${mainBase}css/plugin-raycast.css\">`,
+          `<link rel=\"stylesheet\" href=\"${mainBase}css/plugin-comfyui.css\">`,
           `<script src=\"${mainBase}anoclaw-ui.js\"></script>`,
-          `<script src=\"${mainBase}plugin-raycast.js\"></script>`,
+          `<script src=\"${mainBase}plugin-comfyui.js\"></script>`,
         ].join('');
         if (fixed.includes('</head>')) {
           fixed = fixed.replace('</head>', uiTag + '</head>');
@@ -198,10 +198,10 @@ export class PluginPageContainer implements Page {
     link.href = mainBase + 'css/tokens.css';
     head.appendChild(link);
 
-    const raycastLink = doc.createElement('link');
-    raycastLink.rel = 'stylesheet';
-    raycastLink.href = mainBase + 'css/plugin-raycast.css';
-    head.appendChild(raycastLink);
+    const pluginSkinLink = doc.createElement('link');
+    pluginSkinLink.rel = 'stylesheet';
+    pluginSkinLink.href = mainBase + 'css/plugin-comfyui.css';
+    head.appendChild(pluginSkinLink);
 
     this._updateIframeThemeAttrs();
 
@@ -209,9 +209,9 @@ export class PluginPageContainer implements Page {
     script.src = mainBase + 'anoclaw-ui.js';
     head.appendChild(script);
 
-    const raycastScript = doc.createElement('script');
-    raycastScript.src = mainBase + 'plugin-raycast.js';
-    head.appendChild(raycastScript);
+    const pluginSkinScript = doc.createElement('script');
+    pluginSkinScript.src = mainBase + 'plugin-comfyui.js';
+    head.appendChild(pluginSkinScript);
 
     console.log(`[Plugin] assets injected into iframe — tokens.css + anoclaw-ui.js`);
     this._tokensInjected = true;

@@ -419,15 +419,16 @@
   padding: 7px 18px;
   border: none;
   border-radius: 6px;
-  background: #fff;
-  color: #000;
+  background: var(--color-primary, #0b8ce9);
+  color: var(--color-on-primary, #ffffff);
   cursor: pointer;
   font-size: 13px;
   font-weight: 500;
 }
 
 .tp-preview-hire-btn:hover {
-  opacity: 0.9;
+  background: var(--color-primary-pressed, #31b9f4);
+  opacity: 1;
 }
 
 .tp-preview-close-btn {

@@ -99,7 +99,7 @@
   transform: scale(1.3);
 }
 .session-dot.active {
-  background: #fff;
+  background: var(--color-primary, #0b8ce9);
   box-shadow: none;
 }
 .session-dot.child {

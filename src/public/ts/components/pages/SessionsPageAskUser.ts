@@ -1,7 +1,6 @@
 /**
- * AnoClaw Cinema — AskUserQuestion Interactive Card
- * Noticeable (user needs to see questions) but borderless cinema aesthetic.
- * Raycast-like surface lift with a white primary confirmation affordance.
+ * AskUserQuestion interactive card.
+ * Noticeable enough for pending questions while matching the workbench skin.
  */
 import type { Message } from '../../types.js';
 
@@ -102,7 +101,7 @@ export class AskUserQuestionCard {
         if (qAnswered) {
           const check = document.createElement('span');
           check.innerHTML = '&#10003;';
-          check.style.cssText = 'color: #10b981; font-size: 11px;';
+          check.style.cssText = 'color: var(--color-success, #00cd72); font-size: 11px;';
           hdr.appendChild(check);
         }
         qBlock.appendChild(hdr);
@@ -135,9 +134,9 @@ export class AskUserQuestionCard {
               } else {
                 selectedOptions.add(opt);
                 btn.setAttribute('data-selected', '1');
-                btn.style.background = '#fff';
-                btn.style.color = '#000';
-                btn.style.borderColor = '#fff';
+                btn.style.background = 'var(--color-primary, #0b8ce9)';
+                btn.style.color = 'var(--color-on-primary, #fff)';
+                btn.style.borderColor = 'var(--color-primary, #0b8ce9)';
               }
             });
             btnGroup.appendChild(btn);
@@ -146,7 +145,9 @@ export class AskUserQuestionCard {
           confirmBtn.textContent = 'Confirm';
           confirmBtn.style.cssText = `
             padding: 6px 16px; font-size: 12px; cursor: pointer;
-            border: 1px solid #fff; background: #fff; color: #000;
+            border: 1px solid var(--color-primary, #0b8ce9);
+            background: var(--color-primary, #0b8ce9);
+            color: var(--color-on-primary, #fff);
             border-radius: 4px; font-family: var(--font-sans); font-weight: 600;
           `;
           confirmBtn.addEventListener('click', () => {
@@ -262,7 +263,7 @@ export class AskUserQuestionCard {
       const check = document.createElement('span');
       check.className = 'aq-check';
       check.innerHTML = '&#10003;';
-      check.style.cssText = 'color: #10b981; font-size: 11px;';
+      check.style.cssText = 'color: var(--color-success, #00cd72); font-size: 11px;';
       headerEl.appendChild(check);
     }
   }

@@ -128,9 +128,9 @@ export class ToolActivityDelegate {
         line-height: 1.6; padding: 10px 12px; margin: 6px 0 12px;
         white-space: pre-wrap; word-break: break-all;
         font-family: var(--font-mono, monospace);
-        background: var(--raycast-card-fill, rgba(255,255,255,0.034));
-        border: 1px solid rgba(255,255,255,0.055);
-        border-radius: var(--raycast-radius-control, 8px);
+        background: var(--color-surface-elevated, #202121);
+        border: 1px solid var(--color-hairline, #2d2e32);
+        border-radius: 6px;
         box-shadow: none;
         ${isLong && !this._expanded ? 'max-height: 72px; overflow: hidden;' : ''}
       `;

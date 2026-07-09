@@ -126,8 +126,6 @@ export class AgentsPage implements Page {
 
   onEnter(): void {
     this._active = true;
-    const pa = document.getElementById('page-area');
-    if (pa) pa.style.overflow = 'visible';
     this.container.addEventListener('wheel', this._onWheel, { passive: false });
     this._load();
     App.getInstance().agentVM.on('agentsChanged', this._onAgentsChanged);
@@ -141,8 +139,6 @@ export class AgentsPage implements Page {
     if (this._sim) { this._sim.stop(); this._sim = null; }
     if (this._resizeObs) { this._resizeObs.disconnect(); this._resizeObs = null; }
     if (this._panCleanup) { this._panCleanup(); this._panCleanup = null; }
-    const pa = document.getElementById('page-area');
-    if (pa) pa.style.overflow = '';
     this._closeEditPanel();
     this._closeCtxMenu();
     this._talentPool?.close();

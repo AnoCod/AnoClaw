@@ -43,13 +43,13 @@
   flex-shrink: 0;
 }
 .mode-radio.active {
-  border-color: #fff;
+  border-color: var(--color-primary, #0b8ce9);
 }
 .mode-radio-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--color-primary, #0b8ce9);
 }
 
 .mode-dropdown-text {
@@ -105,14 +105,14 @@
   transition: background var(--transition-slow);
 }
 .mode-effort-track.enabled {
-  background: #fff;
+  background: var(--color-primary, #0b8ce9);
 }
 
 .mode-effort-knob {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: white;
+  background: var(--color-text-secondary, #bbbbbb);
   position: absolute;
   top: 2px;
   left: 2px;
@@ -120,7 +120,7 @@
 }
 .mode-effort-knob.enabled {
   left: 18px;
-  background: #000;
+  background: var(--color-on-primary, #ffffff);
 }
 
 
@@ -338,9 +338,9 @@
 }
 
 .send-btn {
-  background: #fff;
-  color: #000;
-  border: 1px solid #fff;
+  background: var(--color-primary, #0b8ce9);
+  color: var(--color-on-primary, #ffffff);
+  border: 1px solid var(--color-primary, #0b8ce9);
   border-radius: var(--radius);
   padding: 8px 16px;
   cursor: pointer;
@@ -351,8 +351,8 @@
   transition: opacity var(--transition-normal), background var(--transition-normal);
 }
 .send-btn:hover {
-  background: #e8e8e8;
-  border-color: #e8e8e8;
+  background: var(--color-primary-pressed, #31b9f4);
+  border-color: var(--color-primary-pressed, #31b9f4);
   opacity: 1;
 }
 
@@ -519,7 +519,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--color-primary, #0b8ce9);
   box-shadow: none;
 }
 .input-goal-card.paused .input-goal-dot {

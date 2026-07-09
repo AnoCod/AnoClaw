@@ -3,7 +3,7 @@
    delegation) are in layout-delegate-cards.css. */
 
 /* ========================================
-   Message Delegates — Raycast style
+   Message delegates — workbench style
    ======================================== */
 
 /* --- User message delegate --- */
@@ -368,7 +368,7 @@
 .star-rating__star {
   cursor: pointer;
   font-size: 9px;
-  color: #6b7280;
+  color: var(--color-text-quaternary);
   transition: color .15s;
 }
 
@@ -377,16 +377,16 @@
 }
 
 .star-rating__star--selected {
-  color: #f59e0b;
+  color: var(--color-warning);
 }
 
 .star-rating__star--hovered {
-  color: #fbbf24;
+  color: var(--color-warning);
 }
 
 .star-rating__label {
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--color-text-tertiary);
   margin-left: 6px;
 }
 
@@ -399,10 +399,10 @@
 .star-rating__input {
   width: 100%;
   padding: 4px 8px;
-  border: 1px solid #374151;
+  border: 1px solid var(--color-hairline-strong);
   border-radius: 4px;
-  background: #1f2937;
-  color: #e5e7eb;
+  background: var(--color-bg);
+  color: var(--color-text-primary);
   font-size: 12px;
   outline: none;
   box-sizing: border-box;
@@ -418,16 +418,16 @@
   margin-top: 4px;
   padding: 2px 10px;
   font-size: 11px;
-  border: 1px solid #f59e0b;
+  border: 1px solid var(--color-warning);
   border-radius: 4px;
-  background: #f59e0b;
-  color: #1f2937;
+  background: var(--color-warning);
+  color: var(--color-bg);
   cursor: pointer;
 }
 
 .star-rating__submit.is-saved {
-  border-color: #10b981;
-  background: #10b981;
+  border-color: var(--color-success);
+  background: var(--color-success);
 }
 
 .star-rating__footer {
@@ -444,11 +444,9 @@
 .tool-result-card {
   --tool-accent: rgba(255,255,255,0.72);
   margin: 0 0 14px;
-  border-radius: var(--raycast-radius-control, 8px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background:
-    linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.016)),
-    var(--raycast-card-fill, rgba(255, 255, 255, 0.034));
+  border-radius: 6px;
+  border: 1px solid var(--color-hairline);
+  background: var(--color-surface);
   box-shadow: none;
   overflow: hidden !important;
   color: var(--color-text-primary);
@@ -473,8 +471,8 @@
   min-height: 34px;
   padding: 8px 12px;
   border: 0;
-  border-bottom: 1px solid rgba(255,255,255,0.045);
-  background: linear-gradient(90deg, rgba(255,255,255,0.045), transparent 46%);
+  border-bottom: 1px solid var(--color-hairline);
+  background: var(--color-surface-elevated);
   color: var(--color-text-primary);
   font: inherit;
   text-align: left;
@@ -482,7 +480,7 @@
 }
 
 .tool-result-header:hover {
-  background: linear-gradient(90deg, rgba(255,255,255,0.06), rgba(255,255,255,0.028) 48%, transparent);
+  background: var(--color-surface-card);
 }
 
 .tool-result-mark {
@@ -572,7 +570,7 @@
 .tool-result-note {
   margin: 0 12px 10px;
   padding: 9px 10px;
-  border-radius: var(--raycast-radius-control, 8px);
+  border-radius: 6px;
   background: color-mix(in srgb, var(--tool-accent) 10%, rgba(255,255,255,0.03));
   border: 1px solid color-mix(in srgb, var(--tool-accent) 18%, transparent);
 }
@@ -626,9 +624,9 @@
 .tool-result-output {
   position: relative;
   margin: 0 12px 10px;
-  border-radius: var(--raycast-radius-control, 8px);
-  background: rgba(5, 6, 9, 0.42);
-  border: 1px solid rgba(255,255,255,0.045);
+  border-radius: 6px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-hairline);
   overflow: hidden;
 }
 
@@ -689,9 +687,9 @@
 }
 
 .tool-activity-output {
-  background: var(--raycast-card-fill, rgba(255,255,255,0.034)) !important;
-  border: 1px solid rgba(255,255,255,0.055) !important;
-  border-radius: var(--raycast-radius-control, 8px) !important;
+  background: var(--color-surface-elevated) !important;
+  border: 1px solid var(--color-hairline) !important;
+  border-radius: 6px !important;
   box-shadow: none !important;
 }
 

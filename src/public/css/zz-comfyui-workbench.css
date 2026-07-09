@@ -202,6 +202,23 @@ html[data-theme="dark"] .page-container {
 }
 
 html[data-theme="dark"] #page-area,
+html[data-theme="dark"] #sessions-panel {
+  min-height: 0;
+  max-width: 100%;
+  overflow: hidden !important;
+  box-sizing: border-box;
+  isolation: isolate;
+}
+
+html[data-theme="dark"] #page-area > *,
+html[data-theme="dark"] #sessions-panel > * {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+html[data-theme="dark"] #page-area,
 html[data-theme="dark"] #sessions-panel,
 html[data-theme="dark"] .cinema-page,
 html[data-theme="dark"] .conversation-panel,
@@ -483,7 +500,7 @@ html[data-theme="dark"] .mode-effort-track.enabled {
 }
 
 html[data-theme="dark"] .mode-effort-knob.enabled {
-  background: #ffffff;
+  background: var(--color-on-primary);
 }
 
 html[data-theme="dark"] .mode-dropdown-divider,
@@ -803,6 +820,7 @@ html[data-theme="dark"] .cinema-static-page .cinema-static-inner {
   width: 100%;
   margin: 0;
   padding: 20px 24px;
+  box-sizing: border-box;
 }
 
 html[data-theme="dark"] [data-page="skills"] .cinema-card-grid,
@@ -846,12 +864,21 @@ html[data-theme="dark"] .plg-card:hover {
 }
 
 html[data-theme="dark"] [data-page="skills"] .ui-card > div:first-child {
+  display: grid !important;
+  grid-template-columns: 36px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 10px !important;
   margin-bottom: 4px !important;
+}
+
+html[data-theme="dark"] [data-page="skills"] .ui-card > div:first-child > .ui-toggle,
+html[data-theme="dark"] [data-page="skills"] .ui-card > div:first-child > .cinema-toggle {
+  justify-self: end;
 }
 
 html[data-theme="dark"] [data-page="skills"] .ui-card p {
   max-width: 100%;
-  margin: 0 0 8px 46px !important;
+  margin: 0 56px 8px 46px !important;
   color: var(--comfy-text-muted) !important;
 }
 
@@ -907,7 +934,7 @@ html[data-theme="dark"] .ui-toggle.on .ui-toggle-thumb,
 html[data-theme="dark"] .skill-toggle-track-on .skill-toggle-thumb,
 html[data-theme="dark"] .toggle-switch input:checked + .toggle-slider::before,
 html[data-theme="dark"] .cinema-toggle.on .cinema-toggle-thumb {
-  background: #ffffff !important;
+  background: var(--color-on-primary) !important;
 }
 
 html[data-theme="dark"] .ui-toggle.on .ui-toggle-thumb,
@@ -1064,4 +1091,139 @@ html[data-theme="dark"] .evo-tool-table td {
 
 html[data-theme="dark"] .evo-tool-table tr:hover td {
   background: var(--comfy-charcoal-700);
+}
+
+/* ComfyUI refinement pass: compact top telemetry and tool surfaces */
+html[data-theme="dark"] .topbar-cinema {
+  gap: 8px;
+  overflow: hidden;
+}
+
+html[data-theme="dark"] .topbar-cinema [data-slot="titlebar-left"] {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+html[data-theme="dark"] .topbar-cinema .topbar-status {
+  flex: 0 0 auto;
+  gap: 6px;
+  margin-left: 8px;
+}
+
+html[data-theme="dark"] .connection-status-dot {
+  width: 7px;
+  height: 7px;
+  box-shadow: none !important;
+}
+
+html[data-theme="dark"] .topbar-cinema [data-slot="titlebar-right"] {
+  min-width: 0;
+  max-width: min(46vw, 560px);
+  flex: 0 1 auto;
+  gap: 4px !important;
+  overflow: hidden;
+}
+
+html[data-theme="dark"] .topbar-cinema [data-slot="titlebar-right"] .anoclaw-slot-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  max-width: 132px;
+  min-width: 0;
+  padding: 0 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 10px;
+  line-height: 1;
+}
+
+html[data-theme="dark"] .topbar-cinema [data-slot="titlebar-right"] .anoclaw-slot-pill strong {
+  flex: 0 0 auto;
+  color: var(--comfy-text-primary);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+html[data-theme="dark"] .topbar-cinema [data-slot="titlebar-right"] .anoclaw-slot-pill span:not(.slot-dot) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+html[data-theme="dark"] .topbar-cinema [data-slot="titlebar-right"] .slot-dot {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--comfy-blue);
+}
+
+html[data-theme="dark"] .topbar-cinema [data-slot="titlebar-right"] .anoclaw-slot-pill[data-tone="ok"] .slot-dot,
+html[data-theme="dark"] .topbar-cinema [data-slot="titlebar-right"] .anoclaw-slot-pill[data-tone="success"] .slot-dot {
+  background: var(--color-success);
+}
+
+html[data-theme="dark"] .topbar-cinema [data-slot="titlebar-right"] .anoclaw-slot-pill[data-tone="warn"] .slot-dot,
+html[data-theme="dark"] .topbar-cinema [data-slot="titlebar-right"] .anoclaw-slot-pill[data-tone="warning"] .slot-dot {
+  background: var(--comfy-gold);
+}
+
+html[data-theme="dark"] .topbar-cinema [data-slot="titlebar-right"] .anoclaw-slot-pill[data-tone="error"] .slot-dot,
+html[data-theme="dark"] .topbar-cinema [data-slot="titlebar-right"] .anoclaw-slot-pill[data-tone="danger"] .slot-dot {
+  background: var(--comfy-coral);
+}
+
+html[data-theme="dark"] .tool-result-card {
+  border-color: var(--comfy-charcoal-400) !important;
+  border-radius: 6px !important;
+  background: var(--comfy-charcoal-800) !important;
+}
+
+html[data-theme="dark"] .tool-result-header {
+  min-height: 32px;
+  background: var(--comfy-menu-secondary-bg) !important;
+}
+
+html[data-theme="dark"] .tool-result-kind,
+html[data-theme="dark"] .tool-result-detail-key,
+html[data-theme="dark"] .tool-result-title {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+html[data-theme="dark"] .tool-result-category,
+html[data-theme="dark"] .tool-result-badge,
+html[data-theme="dark"] .tool-result-status,
+html[data-theme="dark"] .tool-result-toggle {
+  border: 1px solid var(--comfy-charcoal-400);
+  border-radius: 4px;
+  background: var(--comfy-charcoal-700);
+}
+
+html[data-theme="dark"] .tool-result-note,
+html[data-theme="dark"] .tool-result-detail,
+html[data-theme="dark"] .tool-activity-output,
+html[data-theme="dark"] .ui-toolcard-body,
+html[data-theme="dark"] .ui-toolcard-diff-old,
+html[data-theme="dark"] .ui-toolcard-diff-new {
+  border: 1px solid var(--comfy-charcoal-500) !important;
+  border-radius: 4px !important;
+  background: var(--comfy-charcoal-700) !important;
+}
+
+html[data-theme="dark"] .ui-toolcard-body {
+  padding: 8px 10px;
+  margin: 6px 0 10px;
+}
+
+html[data-theme="dark"] .star-rating__input {
+  border-color: var(--comfy-charcoal-300);
+  background: var(--comfy-input-bg);
+  color: var(--comfy-text-primary);
+}
+
+html[data-theme="dark"] .star-rating__submit {
+  color: #0b0b0c;
 }

@@ -212,11 +212,11 @@
 }
 
 .ag-edit-btn-save {
-  background: #fff; color: #000; border: 1px solid #fff;
+  background: var(--color-primary, #0b8ce9); color: var(--color-on-primary, #ffffff); border: 1px solid var(--color-primary, #0b8ce9);
   border-radius: 6px; padding: 7px 20px; cursor: pointer;
   font-size: 13px; font-weight: 600;
 }
-.ag-edit-btn-save:hover { background: #e8e8e8; border-color: #e8e8e8; opacity: 1; }
+.ag-edit-btn-save:hover { background: var(--color-primary-pressed, #31b9f4); border-color: var(--color-primary-pressed, #31b9f4); opacity: 1; }
 
 .ag-edit-btn-cancel {
   background: var(--color-surface-elevated); color: var(--color-text-primary);
@@ -344,7 +344,7 @@
   text-align: center;
 }
 .ag-empty-btn {
-  background: #fff; color: #000; border: 1px solid #fff; border-radius: 6px;
+  background: var(--color-primary, #0b8ce9); color: var(--color-on-primary, #ffffff); border: 1px solid var(--color-primary, #0b8ce9); border-radius: 6px;
   padding: 8px 22px; cursor: pointer; font-size: 13px; font-weight: 600;
 }
 
@@ -477,15 +477,15 @@
 }
 
 .ag-edit-btn-save {
-  background: #fff;
-  color: #000;
-  border: 1px solid #fff;
+  background: var(--color-primary, #0b8ce9);
+  color: var(--color-on-primary, #ffffff);
+  border: 1px solid var(--color-primary, #0b8ce9);
   padding: 7px 22px;
 }
 
 .ag-edit-btn-save:hover {
-  background: #e8e8e8;
-  border-color: #e8e8e8;
+  background: var(--color-primary-pressed, #31b9f4);
+  border-color: var(--color-primary-pressed, #31b9f4);
   opacity: 1;
 }
 
@@ -635,8 +635,8 @@
 }
 
 .ag-tool-card--on .ag-tool-check {
-  background: #fff;
-  border-color: #fff;
+  background: var(--color-primary, #0b8ce9);
+  border-color: var(--color-primary, #0b8ce9);
   box-shadow: none;
 }
 
@@ -646,8 +646,8 @@
   width: 6px;
   height: 3px;
   margin: 3px 0 0 3px;
-  border-left: 2px solid #000;
-  border-bottom: 2px solid #000;
+  border-left: 2px solid var(--color-on-primary, #ffffff);
+  border-bottom: 2px solid var(--color-on-primary, #ffffff);
   transform: rotate(-45deg);
 }
 

@@ -44,10 +44,16 @@ export class PluginsPage implements Page {
 
     this.container.innerHTML = `
       <div class="cinema-static-inner">
-        <div class="cinema-section">
-          <div class="cinema-section-legend">Extensions</div>
-          <div class="cinema-section-desc">
-            ${plugins.length} installed &middot; ${activatedCount} active${errorCount > 0 ? ` &middot; ${errorCount} error` : ''}
+        <div class="plugins-workbench-head">
+          <div class="plugins-workbench-title">
+            <div class="plugins-kicker">Extensions</div>
+            <div class="plugins-summary">
+              ${plugins.length} installed &middot; ${activatedCount} active${errorCount > 0 ? ` &middot; ${errorCount} error` : ''}
+            </div>
+          </div>
+          <div class="plugins-status-strip" aria-label="Plugin status summary">
+            <span class="plugins-status-pill plugins-status-pill-active">${activatedCount} active</span>
+            ${errorCount > 0 ? `<span class="plugins-status-pill plugins-status-pill-error">${errorCount} error</span>` : ''}
           </div>
         </div>
         ${plugins.length === 0 ? `
@@ -85,7 +91,7 @@ export class PluginsPage implements Page {
     if (pageCount > 0) meta += ` &middot; ${pageCount} page${pageCount > 1 ? 's' : ''}`;
 
     return `
-      <div class="plg-card" data-plugin="${this._esc(p.name)}">
+      <div class="plg-card plg-row-card" data-plugin="${this._esc(p.name)}" data-plugin-status="${this._esc(p.status)}">
         <div class="plg-card-top">
           <div class="plg-card-left">
             <div class="plg-card-name">

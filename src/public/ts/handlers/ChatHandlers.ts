@@ -204,6 +204,7 @@ export function registerChatHandlers(
       displayName: d.displayName || d.toolName,
       riskLevel: d.riskLevel,
       params: d.params || {},
+      sessionId: ctx.sessionId,
     });
   });
 }

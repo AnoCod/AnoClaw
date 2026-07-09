@@ -9,6 +9,7 @@ export class ToolConfirmationQueue {
   private _queue: ToolConfirmRequest[] = [];
   private _active = false;
   private _sendFn: ((data: Record<string, unknown>) => void) | null = null;
+  private _autoApprover: ((request: ToolConfirmRequest) => boolean) | null = null;
 
   static getInstance(): ToolConfirmationQueue {
     if (!ToolConfirmationQueue._instance) {
@@ -17,11 +18,23 @@ export class ToolConfirmationQueue {
     return ToolConfirmationQueue._instance;
   }
 
+  static resetInstance(): void {
+    ToolConfirmationQueue._instance = undefined as unknown as ToolConfirmationQueue;
+  }
+
   setSender(fn: (data: Record<string, unknown>) => void): void {
     this._sendFn = fn;
   }
 
+  setAutoApprover(fn: ((request: ToolConfirmRequest) => boolean) | null): void {
+    this._autoApprover = fn;
+  }
+
   enqueue(request: ToolConfirmRequest): void {
+    if (this._autoApprover?.(request)) {
+      this._sendResponse(request.toolCallId, true);
+      return;
+    }
     this._queue.push(request);
     this._processNext();
   }

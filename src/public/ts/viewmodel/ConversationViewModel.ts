@@ -110,6 +110,16 @@ export class ConversationViewModel extends EventEmitter {
 
   getActiveSessionId(): string | null { return this._activeSessionId; }
 
+  /** True when the supplied session, or the current active session, belongs to an active root goal. */
+  hasActiveGoalForSession(sessionId?: string | null): boolean {
+    if (!this._sessionVM) return false;
+    if (sessionId) {
+      const node = this._sessionVM.sessions.getById(sessionId);
+      return node ? this._hasActiveGoal(this._rootForSession(node)) : false;
+    }
+    return this._hasActiveGoal(this._activeRootSession());
+  }
+
   // ── Permission / mode ──
 
   /** Change tool execution gate. Fires permissionModeChanged for UI updates. */
@@ -243,13 +253,17 @@ export class ConversationViewModel extends EventEmitter {
 
   private _activeRootSession(): SessionNode | null {
     const active = this._sessionVM?.activeSession;
-    if (!active || !this._sessionVM) return null;
-    let current: SessionNode | undefined = active;
+    return this._rootForSession(active);
+  }
+
+  private _rootForSession(node: SessionNode | null | undefined): SessionNode | null {
+    if (!node || !this._sessionVM) return null;
+    let current: SessionNode | undefined = node;
     while (current && !this._isRootSession(current)) {
       const parentId: string | null = current.parentId || current.parentSessionId || null;
       current = parentId ? this._sessionVM.sessions.getById(parentId) : undefined;
     }
-    return current || active;
+    return current || node;
   }
 
   private async _kickGoalIfIdle(root: SessionNode): Promise<void> {

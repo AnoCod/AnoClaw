@@ -578,7 +578,9 @@ class App {
     registerChatHandlers(router, this._conversationVM, this._sessionVM);
 
     // Wire ToolConfirmationQueue to WS client
-    ToolConfirmationQueue.getInstance().setSender((data) => this._sseClient.send(data));
+    const toolConfirmQueue = ToolConfirmationQueue.getInstance();
+    toolConfirmQueue.setSender((data) => this._sseClient.send(data));
+    toolConfirmQueue.setAutoApprover((request) => this._conversationVM.hasActiveGoalForSession(request.sessionId));
 
     // Every received WS message → dispatch by type. session-less events pass empty sessionId.
     this._sseClient.on('event', (data: unknown) => {

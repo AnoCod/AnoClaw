@@ -8,6 +8,7 @@ export interface ToolConfirmRequest {
   displayName: string;
   riskLevel: string;
   params: Record<string, unknown>;
+  sessionId?: string;
 }
 
 export class ToolConfirmDialog {

@@ -49,7 +49,12 @@ import { TypedEventBus } from '../events/TypedEventBus.js';
 import { BackgroundTaskManager } from './supervision/BackgroundTaskManager.js';
 import { SharedContextStore } from './SharedContextStore.js';
 import { createAgentLoopSummarizer } from './AgentLoopSummarizer.js';
-import { normalizePermissionMode, type PermissionMode } from './PermissionModePolicy.js';
+import {
+  activeGoalPermissionMode,
+  hasActiveSessionGoal,
+  normalizePermissionMode,
+  type PermissionMode,
+} from './PermissionModePolicy.js';
 import { ConfirmationRegistry } from './ConfirmationRegistry.js';
 import { WsServer } from '../../infra/network/WsServer.js';
 import { RiskLevel } from '../../../shared/types/tool.js';
@@ -991,6 +996,10 @@ export class AgentLoop {
 
   private _permissionMode(): PermissionMode {
     try {
+      const sessionManager = SessionManager.getInstance();
+      if (hasActiveSessionGoal(sessionManager, this.sessionId)) {
+        return activeGoalPermissionMode();
+      }
       return normalizePermissionMode(
         this.permissionMode || SettingsManager.getInstance().get<string>('ui.permissionMode', 'Auto'),
       );

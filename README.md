@@ -4,18 +4,33 @@ AI desktop platform — users customize their own AI software by creating plugin
 
 ## Quick Start
 
-Electron desktop app. Download and run the installer, or double-click `release9/win-unpacked/AnoClaw.exe`.
+AnoClaw is a Windows Electron desktop app.
 
-Build from source:
+### Download a ready build
+
+Open [Releases](https://github.com/AnoCod/AnoClaw/releases) and download one of these assets:
+
+- `AnoClaw Setup 2.0.0.exe` — normal Windows installer. Recommended for most users.
+- `AnoClaw-2.0.0-win-unpacked.zip` — portable/unpacked build. Extract it, then double-click `AnoClaw.exe`.
+
+The first launch opens a setup wizard to configure your LLM provider: API URL, model, and API key.
+
+### Build from source
+
+Use this path if you want to compile the app yourself.
 
 ```bash
 npm install
 npm run build:all
 npx electron-builder --win
 ```
-Double-click `release9/win-unpacked/AnoClaw.exe`.
 
-First launch opens a setup wizard to configure your LLM provider (API key, model, API URL).
+Build output:
+
+- Installer: `release9/AnoClaw Setup 2.0.0.exe`
+- Unpacked app: `release9/win-unpacked/AnoClaw.exe`
+
+Do not use `npm run dev` unless you are on Windows `cmd.exe`; the project build path is `npm run build:all` followed by `npx electron-builder --win`.
 
 ## How it works
 
@@ -52,6 +67,7 @@ TypeScript + Node.js `http` + `ws`. Frontend: vanilla DOM, no framework. Electro
 ```bash
 npm run build:all      # Full build (server + frontend + CSS + plugins)
 npm test               # Vitest (~500 tests)
+npx electron-builder --win
 ```
 
 ## License

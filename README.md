@@ -10,7 +10,7 @@ AnoClaw is a Windows Electron desktop app.
 
 Open [Releases](https://github.com/AnoCod/AnoClaw/releases) and download one of these assets:
 
-- `AnoClaw Setup 2.0.0.exe` — normal Windows installer. Recommended for most users.
+- `AnoClaw.Setup.2.0.0.exe` — normal Windows installer. Recommended for most users.
 - `AnoClaw-2.0.0-win-unpacked.zip` — portable/unpacked build. Extract it, then double-click `AnoClaw.exe`.
 
 The first launch opens a setup wizard to configure your LLM provider: API URL, model, and API key.

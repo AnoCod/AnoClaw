@@ -436,6 +436,10 @@ export class SessionAgent extends EventEmitter {
   private _sessionVM: SessionViewModel | null = null;
   /** Prevent concurrent sendMessage calls for the same session. */
   private _sendingLock = false;
+  /** Reconcile persisted history after a WebSocket reconnect. */
+  private _historyReconcileTimer: ReturnType<typeof setTimeout> | null = null;
+  private _needsHistoryReconcile = false;
+  private _historyReconcileActiveRetries = 0;
 
   get agentId(): string | undefined {
     return this._sessionVM?.sessions.getById(this.sessionId)?.agentId;
@@ -461,6 +465,8 @@ export class SessionAgent extends EventEmitter {
    *  SessionsPage subscribes directly to these events for UI updates. */
   onServerEvent(eventType: string, data: Record<string, unknown>): void {
     console.debug('[SessionAgent] WS event received', { eventType, sessionId: this.sessionId });
+    // Any live event makes an in-flight history snapshot stale.
+    this.state.generationSeq++;
     try {
       switch (eventType) {
         case 'think': onThink(this, data.content as string, data.durationMs as number | undefined); break;
@@ -490,6 +496,10 @@ export class SessionAgent extends EventEmitter {
         case 'artifact_done':
           onArtifactEvent(this, data);
           break;
+      }
+      if (this._needsHistoryReconcile) {
+        if (eventType === 'done' || eventType === 'error') this._historyReconcileActiveRetries = 0;
+        this._scheduleHistoryReconcile(eventType === 'done' || eventType === 'error' ? 50 : 250);
       }
     } catch (err) {
       ClientLogger.vm.error('Error handling WS event in SessionAgent', {
@@ -605,23 +615,14 @@ export class SessionAgent extends EventEmitter {
 
   /** Fetch stored messages for this session from the backend. Aborts any in-flight load.
    *  Reconstructs the message list, streaming state, and token breakdown. */
-  async loadHistory(): Promise<void> {
+  async loadHistory(): Promise<boolean> {
     const s = this.state;
-    // Abort any in-progress load before starting a new one
+    // Abort any in-progress load before starting a new one.
     if (s.loadAbortController) s.loadAbortController.abort();
-    s.loadAbortController = new AbortController();
-    const signal = s.loadAbortController.signal;
-
-    // Reset state for fresh load
-    s.messages.clear();
-    s.isStreaming = false;
-    s.currentStreamMessage = '';
-    s.tokenBreakdown = null;
-    s.streamMsgId = null;
-    s.currentThinkMsg = null;
-    s.generationSeq++;
-
-    this.emit('reset');
+    const controller = new AbortController();
+    s.loadAbortController = controller;
+    const signal = controller.signal;
+    const loadSeq = ++s.generationSeq;
 
     this.emit('historyLoading', { sessionId: this.sessionId });
 
@@ -630,8 +631,25 @@ export class SessionAgent extends EventEmitter {
       const resp = await fetch(`/api/v1/sessions/${this.sessionId}/messages`, { signal });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
-      if (signal.aborted) return;
-      // Ingest stored messages one by one, handling flat/structured formats
+      if (signal.aborted) return false;
+      // A WS event or local send occurred while the request was in flight. Keep
+      // the live state and let reconnect reconciliation retry on a quiet edge.
+      if (s.generationSeq !== loadSeq) {
+        ClientLogger.vm.debug('Discarding stale conversation history snapshot', { sid: this.sessionId });
+        return false;
+      }
+
+      const wasStreaming = s.isStreaming;
+      // Apply the fetched snapshot atomically only after it is known to be current.
+      s.messages.clear();
+      s.isStreaming = data.isStreaming === true;
+      s.currentStreamMessage = '';
+      s.tokenBreakdown = null;
+      s.streamMsgId = null;
+      s.currentThinkMsg = null;
+      this.emit('reset');
+
+      // Ingest stored messages one by one, handling flat/structured formats.
       for (const m of (data.messages || [])) this._ingestStoredMessage(m);
       if (data.tokenBreakdown) {
         s.tokenBreakdown = {
@@ -647,15 +665,56 @@ export class SessionAgent extends EventEmitter {
       }
       ClientLogger.vm.debug('Conversation history loaded', { sid: this.sessionId, messageCount: (data.messages || []).length });
       this.emit('historyLoaded', { sessionId: this.sessionId });
+      // Recreate transient stream controls after the history cards render.
+      if (s.isStreaming) this.emit('streamingStarted');
+      else if (wasStreaming) this.emit('streamingStopped');
       if (s.tokenBreakdown) this.emit('tokensUpdated', s.tokenBreakdown);
       this.loadArtifacts().catch((err) => {
         ClientLogger.vm.warn('Failed to load artifacts after history', { sid: this.sessionId, error: (err as Error).message });
       });
+      return true;
     } catch (e) {
-      if (signal.aborted) return;
+      if (signal.aborted) return false;
       ClientLogger.vm.error('Failed to load conversation history', { sid: this.sessionId, error: (e as Error).message });
       this.emit('historyLoadError', { sessionId: this.sessionId, error: (e as Error).message });
+      return false;
+    } finally {
+      if (s.loadAbortController === controller) {
+        s.loadAbortController = null;
+        this.emit('historyLoadSettled', { sessionId: this.sessionId });
+      }
     }
+  }
+
+  /** Mark this session for persisted-history reconciliation after reconnect. */
+  requestHistoryReconcile(): void {
+    this._needsHistoryReconcile = true;
+    this._historyReconcileActiveRetries = 0;
+    this._scheduleHistoryReconcile(100);
+  }
+
+  private _scheduleHistoryReconcile(delayMs: number): void {
+    if (!this._needsHistoryReconcile) return;
+    if (this._historyReconcileTimer) clearTimeout(this._historyReconcileTimer);
+    this._historyReconcileTimer = setTimeout(() => {
+      this._historyReconcileTimer = null;
+      this.loadHistory().then((applied) => {
+        if (!applied) return;
+        if (!this.state.isStreaming) {
+          this._needsHistoryReconcile = false;
+          this._historyReconcileActiveRetries = 0;
+          return;
+        }
+        // `done` is transported before the final delta flush completes. Retry a
+        // bounded number of times so reconnect recovery observes the final idle
+        // snapshot even on a slow disk, without turning this into polling.
+        if (this._needsHistoryReconcile && !this._historyReconcileTimer && this._historyReconcileActiveRetries < 3) {
+          const retryDelay = 250 * (2 ** this._historyReconcileActiveRetries);
+          this._historyReconcileActiveRetries++;
+          this._scheduleHistoryReconcile(retryDelay);
+        }
+      }).catch(() => {});
+    }, delayMs);
   }
 
   async loadArtifacts(): Promise<void> {
@@ -836,6 +895,12 @@ export class SessionAgent extends EventEmitter {
   /** Clean up: abort any in-flight load request and remove all event listeners. */
   destroy(): void {
     console.log('[SessionAgent] destroy', { sessionId: this.sessionId });
+    if (this._historyReconcileTimer) {
+      clearTimeout(this._historyReconcileTimer);
+      this._historyReconcileTimer = null;
+    }
+    this._needsHistoryReconcile = false;
+    this._historyReconcileActiveRetries = 0;
     if (this.state.loadAbortController) {
       this.state.loadAbortController.abort();
     }

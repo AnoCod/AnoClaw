@@ -127,9 +127,12 @@ export class StreamPersister {
       return this._prevUuid; // unknown event — skip persistence
     }
 
-    await this.store.persistEvent(this.sessionId, jsonlEvent, { skipMetaUpdate: true }).catch(err => {
+    try {
+      await this.store.persistEvent(this.sessionId, jsonlEvent, { skipMetaUpdate: true });
+    } catch (err) {
       this.logger.error('Failed to persist stream event', { sid: this.sessionId, error: (err as Error).message });
-    });
+      throw err;
+    }
 
     this._prevUuid = evUuid;
     return evUuid;
@@ -140,6 +143,8 @@ export class StreamPersister {
   private _textBuffer = '';
   private _thinkBuffer = '';
   private _flushTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Serializes timer/tool/final drains so overlapping flushes cannot race. */
+  private _flushChain: Promise<void> = Promise.resolve();
 
   /** Buffer a think/text delta. Flushed on timer or when tool event arrives. */
   bufferDelta(type: 'text' | 'think', content: string): void {
@@ -156,13 +161,36 @@ export class StreamPersister {
   /** Flush buffered think/text deltas to JSONL. Called before tool events and on turn end. */
   async flushDeltas(): Promise<void> {
     if (this._flushTimer) { clearTimeout(this._flushTimer); this._flushTimer = null; }
-    if (this._thinkBuffer) {
-      await this.persistEvent('think', { content: this._thinkBuffer });
-      this._thinkBuffer = '';
+    const flush = this._flushChain.then(() => this._drainDeltaBuffers());
+    // Keep the internal chain usable after a failed write while returning the
+    // original promise so explicit callers still observe the failure.
+    this._flushChain = flush.catch(() => {});
+    return flush;
+  }
+
+  /** Snapshot buffers before awaiting I/O; requeue failed chunks ahead of newer deltas. */
+  private async _drainDeltaBuffers(): Promise<void> {
+    const think = this._thinkBuffer;
+    const text = this._textBuffer;
+    this._thinkBuffer = '';
+    this._textBuffer = '';
+
+    if (think) {
+      try {
+        await this.persistEvent('think', { content: think });
+      } catch (err) {
+        this._thinkBuffer = think + this._thinkBuffer;
+        this._textBuffer = text + this._textBuffer;
+        throw err;
+      }
     }
-    if (this._textBuffer) {
-      await this.persistEvent('text', { content: this._textBuffer });
-      this._textBuffer = '';
+    if (text) {
+      try {
+        await this.persistEvent('text', { content: text });
+      } catch (err) {
+        this._textBuffer = text + this._textBuffer;
+        throw err;
+      }
     }
   }
 

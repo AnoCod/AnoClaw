@@ -191,8 +191,12 @@ class App {
     ws.on('reconnected', () => {
       ClientLogger.app.info('WS reconnected — refreshing state');
       this._syncSettingsFromServer();
+      // Recover already-known sessions immediately, then repeat after the
+      // session list refresh so buffered events routed during reconnect join in.
+      this._conversationVM.reconcileAfterReconnect();
       this._sessionVM.loadSessions().then(() => {
         this._sessionVM.restoreActiveSession();
+        this._conversationVM.reconcileAfterReconnect();
       }).catch(() => {});
       this._agentVM.loadAgents().catch(() => {});
     });

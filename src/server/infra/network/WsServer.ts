@@ -123,11 +123,7 @@ export class WsServer extends EventEmitter implements Transport {
     if (!this._conn || this._conn.ws.readyState !== WebSocket.OPEN) {
       // Buffer for reconnect (with timestamp and sequence number)
       if (data.type !== 'ping') {
-        const buf = this._eventBuffers.get(sessionId) || [];
-        if (buf.length < WsServer.MAX_BUFFERED_EVENTS) {
-          buf.push({ event: data, ts: Date.now(), seq: ++this._seqCounter });
-          this._eventBuffers.set(sessionId, buf);
-        }
+        this._bufferEvent(sessionId, data);
       }
       return false;
     }
@@ -139,11 +135,7 @@ export class WsServer extends EventEmitter implements Transport {
             sid: sessionId, type: data.type, error: err.message,
           });
           if (data.type !== 'ping') {
-            const buf = this._eventBuffers.get(sessionId) || [];
-            if (buf.length < WsServer.MAX_BUFFERED_EVENTS) {
-              buf.push({ event: data, ts: Date.now(), seq: ++this._seqCounter });
-              this._eventBuffers.set(sessionId, buf);
-            }
+            this._bufferEvent(sessionId, data);
           }
           try { this._conn?.ws.terminate(); } catch {}
           this._conn = null;
@@ -187,6 +179,48 @@ export class WsServer extends EventEmitter implements Transport {
     return this._conn ? 1 : 0;
   }
 
+  /**
+   * Add an event to the disconnected buffer. Adjacent delta events are
+   * coalesced during long streams, and terminal events displace lower-value
+   * entries instead of being dropped when the buffer is full.
+   */
+  private _bufferEvent(sessionId: string, event: Record<string, unknown>): void {
+    const buf = this._eventBuffers.get(sessionId) || [];
+    const type = String(event.type || '');
+    const last = buf[buf.length - 1];
+    const isAdjacentGlobally = !!last && last.seq === this._seqCounter;
+
+    if (isAdjacentGlobally && (type === 'text' || type === 'think') && last.event.type === type) {
+      last.event = {
+        ...last.event,
+        ...event,
+        content: String(last.event.content || '') + String(event.content || ''),
+      };
+      last.ts = Date.now();
+      this._eventBuffers.set(sessionId, buf);
+      return;
+    }
+    if (isAdjacentGlobally && type === 'status' && last.event.type === type) {
+      last.event = { ...last.event, ...event };
+      last.ts = Date.now();
+      this._eventBuffers.set(sessionId, buf);
+      return;
+    }
+
+    const isTerminal = type === 'done' || type === 'error';
+    if (buf.length >= WsServer.MAX_BUFFERED_EVENTS) {
+      if (!isTerminal) return;
+      const replaceIndex = buf.findIndex((entry) => {
+        const bufferedType = String(entry.event.type || '');
+        return bufferedType === 'text' || bufferedType === 'think' || bufferedType === 'status';
+      });
+      buf.splice(replaceIndex >= 0 ? replaceIndex : 0, 1);
+    }
+
+    buf.push({ event, ts: Date.now(), seq: ++this._seqCounter });
+    this._eventBuffers.set(sessionId, buf);
+  }
+
   /** Flush ALL buffered events to a newly connected client.
    *  Sorted by global sequence number to preserve event order across sessions.
    *  Drops events older than BUFFER_TTL_MS during flush. */
@@ -209,32 +243,24 @@ export class WsServer extends EventEmitter implements Transport {
     }
     // Sort by global sequence number — preserves causal order across sessions
     allEntries.sort((a, b) => a.entry.seq - b.entry.seq);
+    // Clear before sending so any callback/exception can safely re-buffer.
+    for (const sid of this._eventBuffers.keys()) this._eventBuffers.delete(sid);
     for (const { sid, entry } of allEntries) {
       if (ws.readyState === WebSocket.OPEN) {
         try {
           ws.send(JSON.stringify({ ...entry.event, _sessionId: sid }), (err?: Error) => {
             if (err) {
-              const buf = this._eventBuffers.get(sid) || [];
-              if (buf.length < WsServer.MAX_BUFFERED_EVENTS) {
-                buf.push({ event: entry.event, ts: Date.now(), seq: ++this._seqCounter });
-                this._eventBuffers.set(sid, buf);
-              }
+              this._bufferEvent(sid, entry.event);
               logger.warn('WS flush send failed, re-buffered', { sid, type: entry.event.type, error: err.message });
             }
           });
         } catch (e) {
-          const buf = this._eventBuffers.get(sid) || [];
-          if (buf.length < WsServer.MAX_BUFFERED_EVENTS) {
-            buf.push({ event: entry.event, ts: Date.now(), seq: ++this._seqCounter });
-            this._eventBuffers.set(sid, buf);
-          }
+          this._bufferEvent(sid, entry.event);
           logger.warn('WS flush send exception, re-buffered', { sid, type: entry.event.type, error: (e as Error).message });
         }
+      } else {
+        this._bufferEvent(sid, entry.event);
       }
-    }
-    // Clear all buffers after flushing
-    for (const sid of this._eventBuffers.keys()) {
-      this._eventBuffers.delete(sid);
     }
   }
 

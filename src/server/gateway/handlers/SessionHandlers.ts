@@ -587,6 +587,7 @@ export async function handleSessionMessages(
       messages,
       total: messages.length,
       tokenBreakdown: meta.tokenBreakdown || null,
+      isStreaming: AgentRuntime.getInstance().isSessionActive(sessionId),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

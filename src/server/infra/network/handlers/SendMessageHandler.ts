@@ -313,7 +313,6 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
 
   // Update session UUID chain and touch meta after turn completes
   if (statusInterval) clearInterval(statusInterval);
-  ctx.ws.clearEventBuffer?.(effectiveSessionId);
   session.lastEventUuid = persister.prevUuid;
   session.touch();
   try {

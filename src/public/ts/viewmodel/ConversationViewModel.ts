@@ -96,6 +96,12 @@ export class ConversationViewModel extends EventEmitter {
     return Array.from(this._agents.values());
   }
 
+  /** Reconcile every known session, including the active one, after WS reconnect. */
+  reconcileAfterReconnect(): void {
+    if (this._activeSessionId) this.getAgent(this._activeSessionId);
+    for (const agent of this._agents.values()) agent.requestHistoryReconcile();
+  }
+
   /** Destroy and remove a SessionAgent — cleans up emitter + state. */
   removeAgent(sessionId: string): void {
     const agent = this._agents.get(sessionId);

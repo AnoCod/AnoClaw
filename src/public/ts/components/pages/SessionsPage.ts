@@ -81,7 +81,7 @@ export class SessionsPage implements Page {
   private _scrollThreshold: number = 50; // px from bottom to consider "at bottom"
 
   // Bound event handlers for subscribe/unsubscribe to agent emitter
-  private _onStreamingStarted = () => { this._hideWelcome(); this._resetAutoScroll(); this._startStreamingCard(); };
+  private _onStreamingStarted = () => { this._hideWelcome(); this._resetAutoScroll(); this._inputPanel.setStreaming(true); this._startStreamingCard(); };
   private _onStreamToken = (token: string) => this._appendToken(token);
   private _onStreamingStopped = () => this._finalizeStreaming();
   private _onTextFinalized = (data: any) => { this._appendCard(data); if (this._streamingDelegate && this._streamingEl) this._streamingDelegate.setContent(''); };
@@ -91,6 +91,9 @@ export class SessionsPage implements Page {
   private _onHistoryLoaded = (data: any) => { if ((data as { sessionId: string }).sessionId === this._activeSessionId) this._renderHistory(); };
   private _onHistoryLoading = () => this._showHistoryLoading();
   private _onHistoryLoadError = () => {
+    if (this._loadingEl) { this._loadingEl.remove(); this._loadingEl = null; }
+  };
+  private _onHistoryLoadSettled = () => {
     if (this._loadingEl) { this._loadingEl.remove(); this._loadingEl = null; }
   };
   private _onTokensUpdated = (data: unknown) => {
@@ -380,6 +383,7 @@ export class SessionsPage implements Page {
     agent.on('historyLoaded', this._onHistoryLoaded);
     agent.on('historyLoading', this._onHistoryLoading);
     agent.on('historyLoadError', this._onHistoryLoadError);
+    agent.on('historyLoadSettled', this._onHistoryLoadSettled);
     agent.on('tokensUpdated', this._onTokensUpdated);
     agent.on('rowsRemoved', this._onRowsRemoved);
   }
@@ -396,6 +400,7 @@ export class SessionsPage implements Page {
     this._activeAgent.off('historyLoaded', this._onHistoryLoaded);
     this._activeAgent.off('historyLoading', this._onHistoryLoading);
     this._activeAgent.off('historyLoadError', this._onHistoryLoadError);
+    this._activeAgent.off('historyLoadSettled', this._onHistoryLoadSettled);
     this._activeAgent.off('tokensUpdated', this._onTokensUpdated);
     this._activeAgent.off('rowsRemoved', this._onRowsRemoved);
     this._activeAgent = null;

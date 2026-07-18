@@ -38,6 +38,15 @@ export class SessionViewModel extends EventEmitter {
       }
     });
 
+    // Workspace binding is shared state used by Sessions, Workspace, and Goal.
+    // Keep the central session model authoritative even when the binding was
+    // changed from another page, otherwise a newly-created Goal can pin the
+    // previous workspace path.
+    this._sseClient.on('workspace_changed', (data: unknown) => {
+      const d = data as { sessionId?: string; workspace?: string };
+      if (d.sessionId) this.updateSessionWorkspace(d.sessionId, d.workspace || '');
+    });
+
     // Listen for session hard deletes via WebSocket (e.g. CEO permanently deletes)
     this._sseClient.on('session_hard_deleted', (data: unknown) => {
       const d = data as { sessionId: string };
@@ -48,6 +57,14 @@ export class SessionViewModel extends EventEmitter {
   }
 
   getWSClient(): WSClient { return this._sseClient; }
+
+  /** Synchronize a session's bound workspace across every frontend surface. */
+  updateSessionWorkspace(sessionId: string, workspace: string): void {
+    const session = this.sessions.getById(sessionId);
+    if (!session || session.workspace === workspace) return;
+    this.sessions.updateSession({ id: sessionId, workspace });
+    this.emit('workspaceChanged', { sessionId, workspace });
+  }
 
   setAgentVM(agentVM: AgentViewModel): void {
     this._agentVM = agentVM;

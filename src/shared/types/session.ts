@@ -27,17 +27,98 @@ export interface SessionNode {
   metadata: Record<string, unknown>;
 }
 
-export interface SessionGoal {
+export type GoalStatus =
+  | 'active'
+  | 'paused'
+  | 'waiting_user'
+  | 'waiting_confirmation'
+  | 'waiting_review'
+  | 'blocked'
+  | 'failed'
+  | 'budget_exhausted'
+  | 'completed'
+  | 'deleted';
+
+export type GoalReportOutcome =
+  | 'progress'
+  | 'waiting_user'
+  | 'waiting_review'
+  | 'blocked'
+  | 'failed';
+
+export interface GoalEvidence {
+  type: 'file' | 'image' | 'test' | 'url' | 'note';
+  label: string;
+  path?: string;
+  url?: string;
+  detail?: string;
+}
+
+export interface GoalRunRecord {
+  runId: string;
+  startedAt: string;
+  finishedAt?: string;
+  outcome?: GoalReportOutcome | 'paused' | 'unreported';
+  summary?: string;
+  nextStep?: string;
+  error?: string;
+  evidence?: GoalEvidence[];
+}
+
+export interface GoalContractInput {
   objective: string;
-  status: 'active' | 'paused' | 'deleted';
+  acceptanceCriteria?: string;
+  workspace?: string;
+  permissionMode?: string;
+  maxRuns?: number;
+  maxConsecutiveFailures?: number;
+  wakeIntervalMs?: number;
+  completionMode?: 'review' | 'automatic';
+}
+
+export interface GoalRunReport {
+  runId: string;
+  outcome: GoalReportOutcome;
+  summary: string;
+  nextStep?: string;
+  reason?: string;
+  progress?: number;
+  evidence?: GoalEvidence[];
+}
+
+export interface SessionGoal {
+  goalId: string;
+  version: number;
+  objective: string;
+  acceptanceCriteria: string;
+  workspace: string;
+  permissionMode: string;
+  maxRuns: number;
+  maxConsecutiveFailures: number;
+  wakeIntervalMs: number;
+  completionMode: 'review' | 'automatic';
+  status: GoalStatus;
+  statusReason?: string;
   createdAt: string;
   updatedAt: string;
-  runCount?: number;
+  runCount: number;
+  consecutiveFailures: number;
+  nextRunAt?: string;
+  currentRunId?: string;
+  currentRunStartedAt?: string;
+  lastReportedRunId?: string;
+  progress?: number;
+  lastSummary?: string;
+  nextStep?: string;
+  evidence?: GoalEvidence[];
+  lastError?: string;
+  recentRuns?: GoalRunRecord[];
   lastRunAt?: string;
   lastWorkspace?: string;
   lastPermissionMode?: string;
   lastEffort?: 'HIGH' | 'NORMAL';
   lastUserMode?: string;
+  completedAt?: string;
   deletedAt?: string;
 }
 

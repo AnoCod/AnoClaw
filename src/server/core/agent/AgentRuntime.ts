@@ -37,12 +37,13 @@ import {
   subAgentAllowedTools,
   type DelegationState,
 } from './AgentDelegation.js';
-import { goalContinuationPermissionMode, resolveSessionEffort, resolveSessionPermissionMode } from './PermissionModePolicy.js';
+import { normalizePermissionMode, resolveSessionEffort, resolveSessionPermissionMode } from './PermissionModePolicy.js';
 import { TaskResolver } from '../capability/TaskResolver.js';
 
 export interface ProcessMessageOptions {
   permissionMode?: string;
   effort?: string;
+  goalKick?: boolean;
 }
 
 interface UserTaskResolution {
@@ -140,7 +141,9 @@ export class AgentRuntime extends EventEmitter {
       return;
     }
 
-    const taskResolution = await this._resolveUserTask(sessionId, agent, message, logger);
+    const taskResolution = options.goalKick
+      ? null
+      : await this._resolveUserTask(sessionId, agent, message, logger);
     if (taskResolution) {
       yield {
         type: SSEEventType.StatusInfo,
@@ -195,6 +198,12 @@ export class AgentRuntime extends EventEmitter {
     const sessionManager = SessionManager.getInstance();
     const resolvedPermissionMode = resolveSessionPermissionMode(sessionManager, sessionId, options.permissionMode);
     const resolvedEffort = resolveSessionEffort(sessionManager, sessionId, options.effort);
+    let activeGoal: SessionGoal | null = null;
+    try {
+      activeGoal = sessionManager.getGoal(sessionId);
+    } catch {
+      // Some internal/test callers can invoke the runtime before session recovery.
+    }
 
     // Build AgentLoop configuration from agent config
     const loopConfig: AgentLoopConfig = {
@@ -205,37 +214,40 @@ export class AgentRuntime extends EventEmitter {
       contextWindow: agent.contextWindow,
       permissionMode: resolvedPermissionMode,
       effort: resolvedEffort,
-      extraAllowedTools: taskResolutionExtraTools(taskResolution),
+      workspace: activeGoal?.status === 'active' ? activeGoal.workspace : undefined,
+      extraAllowedTools: [
+        ...taskResolutionExtraTools(taskResolution),
+      ],
     };
 
     const loop = new AgentLoop(loopConfig);
     this._activeLoops.set(sessionId, loop);
 
     try {
-      // Run the AgentLoop
-      const effectiveHistory = this._historyWithTaskResolution(history, sessionId, taskResolution);
-      yield* this._executeAndForwardLoop(loop, message, effectiveHistory, signal, sessionId, agentId, logger);
+      if (!options.goalKick) {
+        // Run the user-requested AgentLoop. A goal kick skips this transient
+        // bootstrap turn and enters the bounded Goal runner directly.
+        const effectiveHistory = this._historyWithTaskResolution(history, sessionId, taskResolution);
+        yield* this._executeAndForwardLoop(loop, message, effectiveHistory, signal, sessionId, agentId, logger);
 
-      // Loop completed successfully
-      agent.setSessionStatus(sessionId, AgentStatus.Working); // back to "ready" (not actively in loop)
-      this.emit(AgentRuntimeEvents.AgentLoopCompleted, {
-        sessionId,
-        agentId,
-        status: 'completed',
-      });
-      TypedEventBus.emit('loop:completed', {
-        sessionId,
-        agentId,
-        turnCount: loop.maxTurns,
-        totalTokens: 0,
-      });
-      logger.debug('Agent loop completed', { sid: sessionId, aid: agentId });
-
-
-      runMemoryLifecycle(agentId, sessionId).catch(() => {});
+        agent.setSessionStatus(sessionId, AgentStatus.Working);
+        this.emit(AgentRuntimeEvents.AgentLoopCompleted, {
+          sessionId,
+          agentId,
+          status: 'completed',
+        });
+        TypedEventBus.emit('loop:completed', {
+          sessionId,
+          agentId,
+          turnCount: loop.maxTurns,
+          totalTokens: 0,
+        });
+        logger.debug('Agent loop completed', { sid: sessionId, aid: agentId });
+        runMemoryLifecycle(agentId, sessionId).catch(() => {});
+      }
 
       // Goal mode: keep advancing the active root-session goal after completion.
-      yield* this._runGoalMode(sessionId, sessionManager, loopConfig, signal);
+      yield* this._runGoalMode(sessionId, sessionManager, loopConfig, signal, options.goalKick === true);
 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -335,17 +347,25 @@ export class AgentRuntime extends EventEmitter {
     sessionManager: ReturnType<typeof SessionManager.getInstance>,
     loopConfig: AgentLoopConfig,
     signal: AbortSignal,
+    startImmediately = false,
   ): AsyncGenerator<SSEEvent> {
     const session = sessionManager.session(sessionId);
     if (session && !session.isRoot()) return;
 
+    let immediate = startImmediately;
     while (true) {
       const goal = sessionManager.getGoal(sessionId);
       if (!goal || goal.status !== 'active') break;
 
-      yield { type: SSEEventType.Sleep, content: '(Goal active -- waiting before next step)' };
-
-      await this._sleepUntilGoalWake(signal, 3000);
+      const scheduledAt = goal.nextRunAt ? Date.parse(goal.nextRunAt) : Date.now() + goal.wakeIntervalMs;
+      const waitMs = immediate && !goal.nextRunAt
+        ? 0
+        : Math.max(0, Number.isFinite(scheduledAt) ? scheduledAt - Date.now() : goal.wakeIntervalMs);
+      immediate = false;
+      if (waitMs > 0) {
+        yield { type: SSEEventType.Sleep, content: '(Goal active -- waiting for the next scheduled run)' };
+        await this._sleepUntilGoalWake(signal, waitMs);
+      }
       if (signal.aborted) {
         const interruptController = InterruptController.getInstance();
         const pending = interruptController.takePendingUserMessage(sessionId);
@@ -366,13 +386,9 @@ export class AgentRuntime extends EventEmitter {
         const newLoop = new AgentLoop(freshLoopConfig);
         this._activeLoops.set(sessionId, newLoop);
         yield { type: SSEEventType.Wake, content: '(Goal wake -- processing user message)' };
-        try {
-          for await (const evt of newLoop.run(pendingMessage, loopHistory, signal)) {
-            yield evt;
-            SupervisionManager.getInstance().heartbeat(sessionId);
-          }
-        } finally {
-          this._activeLoops.delete(sessionId);
+        for await (const evt of newLoop.run(pendingMessage, loopHistory, signal)) {
+          yield evt;
+          SupervisionManager.getInstance().heartbeat(sessionId);
         }
         continue;
       }
@@ -384,19 +400,45 @@ export class AgentRuntime extends EventEmitter {
       }
 
       try {
-        const freshPermissionMode = goalContinuationPermissionMode();
+        const freshPermissionMode = normalizePermissionMode(currentGoal.permissionMode, 'Auto');
         const freshEffort = resolveSessionEffort(sessionManager, sessionId);
         const settings = SettingsManager.getInstance();
         const userMode = settings.get<string>('ui.userMode', 'simple');
         const locale = settings.get<string>('ui.lang', 'zh-CN');
         const root = sessionManager.getRootSession(sessionId);
-        const taskResolution = await this._resolveGoalTask(currentGoal.objective, userMode, locale);
-        const runGoal = await sessionManager.touchGoalRun(sessionId, {
-          workspace: root.workspace,
+        const taskResolution = await this._resolveGoalTask(
+          `${currentGoal.objective}\nAcceptance criteria: ${currentGoal.acceptanceCriteria}`,
+          userMode,
+          locale,
+        );
+        const resolutionBlocker = goalResolutionBlocker(taskResolution);
+        if (resolutionBlocker) {
+          const blocked = await sessionManager.updateGoalStatus(sessionId, 'blocked', resolutionBlocker);
+          WsServer.getInstance().send(root.id, {
+            type: SSEEventType.GoalChanged,
+            sessionId: root.id,
+            action: 'blocked',
+            goal: blocked,
+          });
+          yield { type: SSEEventType.StatusInfo, content: `(Goal blocked: ${resolutionBlocker})` };
+          break;
+        }
+
+        const runGoal = await sessionManager.beginGoalRun(sessionId, {
+          workspace: currentGoal.workspace,
           permissionMode: freshPermissionMode,
           effort: freshEffort,
           userMode,
-        }) || currentGoal;
+        });
+        if (!runGoal || runGoal.status !== 'active' || !runGoal.currentRunId) {
+          WsServer.getInstance().send(root.id, {
+            type: SSEEventType.GoalChanged,
+            sessionId: root.id,
+            action: 'stopped',
+            goal: runGoal,
+          });
+          break;
+        }
         WsServer.getInstance().send(root.id, {
           type: SSEEventType.GoalChanged,
           sessionId: root.id,
@@ -406,7 +448,7 @@ export class AgentRuntime extends EventEmitter {
         const content = buildGoalContinuationContent({
           sessionId,
           goal: runGoal,
-          workspace: root.workspace,
+          workspace: runGoal.workspace,
           permissionMode: freshPermissionMode,
           effort: freshEffort,
           userMode,
@@ -422,29 +464,56 @@ export class AgentRuntime extends EventEmitter {
           compressed: false,
           timestamp: new Date().toISOString(),
         };
-        await sessionManager.appendMessage(sessionId, goalMessage, { notify: false });
-
         const fullHistory = await sessionManager.getHistory(sessionId);
-        const loopHistory = fullHistory.filter((m) => m.id !== goalMessage.id);
+        const loopHistory = fullHistory;
         const freshLoopConfig: AgentLoopConfig = {
           ...loopConfig,
           permissionMode: freshPermissionMode,
           effort: freshEffort,
+          workspace: runGoal.workspace,
+          extraAllowedTools: [...new Set([...(loopConfig.extraAllowedTools || []), 'GoalReport'])],
         };
         const newLoop = new AgentLoop(freshLoopConfig);
         this._activeLoops.set(sessionId, newLoop);
         yield { type: SSEEventType.Wake, content: '(Goal wake -- continuing active goal)' };
-        try {
-          for await (const evt of newLoop.run(goalMessage, loopHistory, signal)) {
-            yield evt;
-            SupervisionManager.getInstance().heartbeat(sessionId);
-          }
-        } finally {
-          this._activeLoops.delete(sessionId);
+        for await (const evt of newLoop.run(goalMessage, loopHistory, signal)) {
+          yield evt;
+          SupervisionManager.getInstance().heartbeat(sessionId);
+        }
+
+        const reported = sessionManager.getGoal(sessionId);
+        if (!reported || reported.status !== 'active') {
+          break;
+        }
+        if (reported.currentRunId === runGoal.currentRunId) {
+          const failed = await sessionManager.failGoalRun(
+            sessionId,
+            'Goal run ended without the required GoalReport.',
+            runGoal.currentRunId,
+          );
+          WsServer.getInstance().send(root.id, {
+            type: SSEEventType.GoalChanged,
+            sessionId: root.id,
+            action: 'unreported',
+            goal: failed,
+          });
+          if (!failed || failed.status !== 'active') break;
         }
       } catch (err) {
-        createLogger('anochat.agent').warn('Goal mode sub-loop error', { sid: sessionId, error: (err as Error).message });
-        yield { type: SSEEventType.Error, errorMessage: `Goal mode error: ${(err as Error).message}`, code: 'GOAL_LOOP_ERROR' };
+        const errorMessage = (err as Error).message;
+        createLogger('anochat.agent').warn('Goal mode sub-loop error', { sid: sessionId, error: errorMessage });
+        const current = sessionManager.getGoal(sessionId);
+        if (!current || current.status !== 'active') break;
+        const failed = await sessionManager.failGoalRun(sessionId, errorMessage);
+        const root = sessionManager.getRootSession(sessionId);
+        WsServer.getInstance().send(root.id, {
+          type: SSEEventType.GoalChanged,
+          sessionId: root.id,
+          action: 'error',
+          goal: failed,
+        });
+        yield { type: SSEEventType.Error, errorMessage: `Goal mode error: ${errorMessage}`, code: 'GOAL_LOOP_ERROR' };
+        if (!failed || failed.status !== 'active') break;
       }
 
       SupervisionManager.getInstance().heartbeat(sessionId);
@@ -1260,8 +1329,11 @@ export function buildGoalContinuationContent(ctx: GoalContinuationContext): stri
     '',
     '# Active Goal',
     `Objective: ${ctx.goal.objective}`,
+    `Acceptance criteria: ${ctx.goal.acceptanceCriteria || '(not specified)'}`,
     `Status: ${ctx.goal.status}`,
     `Run count: ${ctx.goal.runCount || 0}`,
+    `Run ID: ${ctx.goal.currentRunId || '(missing)'}`,
+    `Run budget: ${ctx.goal.runCount}/${ctx.goal.maxRuns}`,
     ctx.goal.lastRunAt ? `Last run: ${ctx.goal.lastRunAt}` : '',
     '',
     '# Current Execution Context',
@@ -1285,6 +1357,8 @@ export function buildGoalContinuationContent(ctx: GoalContinuationContext): stri
     '- Prefer durable artifacts, code changes, tests, or concrete workspace updates over vague progress summaries.',
     '- If the goal is already complete, say so clearly and stop taking further action.',
     '- If blocked, name the blocker, preserve useful partial work, and suggest the next concrete unblock action.',
+    '- Before ending this run, call GoalReport exactly once with the Run ID above. A run without GoalReport is treated as a failed no-progress run.',
+    '- Use waiting_review when the acceptance criteria appear satisfied. Do not keep working after submitting a terminal or waiting outcome.',
   );
 
   if (ctx.userMode === 'coding') {
@@ -1350,6 +1424,23 @@ function formatGoalTaskRouting(result: TaskResolveResult | null): string[] {
   }
 
   return lines;
+}
+
+function goalResolutionBlocker(result: TaskResolveResult | null): string | null {
+  if (!result) return null;
+  if (result.missingTools.length > 0) {
+    return `Required tools are unavailable: ${result.missingTools.join(', ')}`;
+  }
+  if (result.missingInputs.length > 0) {
+    return `Required input is missing: ${result.missingInputs.map((input) => input.label || input.name).join(', ')}`;
+  }
+  if (result.nextAction === 'ask_user') {
+    return result.reason || 'User input is required before the Goal can continue.';
+  }
+  if (result.nextAction === 'recommend_plugin') {
+    return result.reason || 'A required capability is not installed.';
+  }
+  return null;
 }
 
 function buildTaskResolutionContext(taskResolution: UserTaskResolution): string {

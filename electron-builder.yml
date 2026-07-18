@@ -52,6 +52,7 @@ extraResources:
     to: app.asar.unpacked/plugins
     filter:
       - "**/node_modules/**/*"
+      - "!**/*.map"
 win:
   target:
     - target: nsis

@@ -255,7 +255,14 @@ export class SessionStore extends EventEmitter {
     const dir = path.join(this.sessionsDir, sanitise(sessionId));
     await fsp.mkdir(dir, { recursive: true });
     const metaPath = path.join(dir, META_FILE);
-    await fsp.writeFile(metaPath, JSON.stringify(node, null, 2), 'utf-8');
+    const tempPath = path.join(dir, `${META_FILE}.${process.pid}.${Date.now()}.tmp`);
+    try {
+      await fsp.writeFile(tempPath, JSON.stringify(node, null, 2), 'utf-8');
+      await fsp.rename(tempPath, metaPath);
+    } catch (err) {
+      await fsp.rm(tempPath, { force: true }).catch(() => {});
+      throw err;
+    }
     // Invalidate JsonlStore's cache so next read picks up the updated meta
     this.jsonlStore.invalidateMetaCache(sessionId);
     createLogger('anochat.system').debug('Session meta written', { sid: sessionId });

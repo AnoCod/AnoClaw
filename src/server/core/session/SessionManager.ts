@@ -18,6 +18,10 @@ import type {
   TokenBreakdown,
   JsonlEvent,
   SessionGoal,
+  GoalContractInput,
+  GoalRunReport,
+  GoalRunRecord,
+  GoalStatus,
 } from '../../../shared/types/session.js';
 import { MessageRole } from '../../../shared/types/session.js';
 import type { PermissionMode } from '../agent/PermissionModePolicy.js';
@@ -28,6 +32,172 @@ import { TypedEventBus } from '../events/TypedEventBus.js';
 import type { ILogger } from '../interfaces/ILogger.js';
 import * as fs from 'fs';
 import * as path from 'path';
+
+const DEFAULT_GOAL_MAX_RUNS = 20;
+const DEFAULT_GOAL_MAX_FAILURES = 3;
+const DEFAULT_GOAL_WAKE_INTERVAL_MS = 15_000;
+const MIN_GOAL_WAKE_INTERVAL_MS = 5_000;
+const MAX_GOAL_WAKE_INTERVAL_MS = 60 * 60_000;
+const MAX_GOAL_BACKOFF_MS = 5 * 60_000;
+const MAX_RECENT_GOAL_RUNS = 12;
+
+const GOAL_STATUSES = new Set<GoalStatus>([
+  'active',
+  'paused',
+  'waiting_user',
+  'waiting_confirmation',
+  'waiting_review',
+  'blocked',
+  'failed',
+  'budget_exhausted',
+  'completed',
+  'deleted',
+]);
+
+function createGoalDefaults(workspace: string, permissionMode: unknown, now: string): SessionGoal {
+  return {
+    goalId: randomUUID(),
+    version: 1,
+    objective: '',
+    acceptanceCriteria: '',
+    workspace,
+    permissionMode: normalizePermissionMode(permissionMode, 'Auto'),
+    maxRuns: DEFAULT_GOAL_MAX_RUNS,
+    maxConsecutiveFailures: DEFAULT_GOAL_MAX_FAILURES,
+    wakeIntervalMs: DEFAULT_GOAL_WAKE_INTERVAL_MS,
+    completionMode: 'review',
+    status: 'active',
+    createdAt: now,
+    updatedAt: now,
+    runCount: 0,
+    consecutiveFailures: 0,
+    progress: 0,
+    recentRuns: [],
+  };
+}
+
+function normalizeSessionGoal(raw: unknown, workspace: string, permissionMode: unknown): SessionGoal | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const value = raw as Partial<SessionGoal>;
+  const objective = normalizeGoalText(value.objective, '');
+  if (!objective) return null;
+  const now = new Date().toISOString();
+  const defaults = createGoalDefaults(workspace, permissionMode, now);
+  const status = typeof value.status === 'string' && GOAL_STATUSES.has(value.status as GoalStatus)
+    ? value.status as GoalStatus
+    : 'paused';
+  return {
+    ...defaults,
+    ...value,
+    goalId: normalizeGoalText(value.goalId, defaults.goalId),
+    version: clampInteger(value.version, 1, 1, Number.MAX_SAFE_INTEGER),
+    objective,
+    acceptanceCriteria: normalizeGoalText(value.acceptanceCriteria, ''),
+    workspace: normalizeGoalText(value.workspace, workspace),
+    permissionMode: normalizePermissionMode(value.permissionMode ?? permissionMode, 'Auto'),
+    maxRuns: clampInteger(value.maxRuns, DEFAULT_GOAL_MAX_RUNS, 1, 1000),
+    maxConsecutiveFailures: clampInteger(value.maxConsecutiveFailures, DEFAULT_GOAL_MAX_FAILURES, 1, 20),
+    wakeIntervalMs: clampInteger(
+      value.wakeIntervalMs,
+      DEFAULT_GOAL_WAKE_INTERVAL_MS,
+      MIN_GOAL_WAKE_INTERVAL_MS,
+      MAX_GOAL_WAKE_INTERVAL_MS,
+    ),
+    completionMode: value.completionMode === 'automatic' ? 'automatic' : 'review',
+    status,
+    statusReason: normalizeOptionalGoalText(value.statusReason),
+    createdAt: normalizeGoalText(value.createdAt, now),
+    updatedAt: normalizeGoalText(value.updatedAt, now),
+    runCount: clampInteger(value.runCount, 0, 0, Number.MAX_SAFE_INTEGER),
+    consecutiveFailures: clampInteger(value.consecutiveFailures, 0, 0, 1000),
+    progress: normalizeGoalProgress(value.progress, 0),
+    evidence: normalizeGoalEvidence(value.evidence),
+    recentRuns: normalizeRecentGoalRuns(value.recentRuns),
+  };
+}
+
+function normalizeGoalText(value: unknown, fallback: string): string {
+  return typeof value === 'string' ? value.trim() : fallback;
+}
+
+function normalizeOptionalGoalText(value: unknown): string | undefined {
+  const normalized = normalizeGoalText(value, '');
+  return normalized || undefined;
+}
+
+function clampInteger(value: unknown, fallback: number, min: number, max: number): number {
+  const numberValue = typeof value === 'number' ? value : Number.NaN;
+  if (!Number.isFinite(numberValue)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(numberValue)));
+}
+
+function normalizeGoalProgress(value: unknown, fallback: number | undefined): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.min(100, Math.max(0, Math.round(value)));
+}
+
+function normalizeGoalEvidence(value: unknown): NonNullable<SessionGoal['evidence']> {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 20).flatMap((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const raw = item as Record<string, unknown>;
+    const type = typeof raw.type === 'string' && ['file', 'image', 'test', 'url', 'note'].includes(raw.type)
+      ? raw.type as NonNullable<SessionGoal['evidence']>[number]['type']
+      : 'note';
+    const label = normalizeGoalText(raw.label, '');
+    if (!label) return [];
+    return [{
+      type,
+      label,
+      path: normalizeOptionalGoalText(raw.path),
+      url: normalizeOptionalGoalText(raw.url),
+      detail: normalizeOptionalGoalText(raw.detail),
+    }];
+  });
+}
+
+function normalizeRecentGoalRuns(value: unknown): GoalRunRecord[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is GoalRunRecord => !!item && typeof item === 'object' && typeof item.runId === 'string')
+    .slice(-MAX_RECENT_GOAL_RUNS);
+}
+
+function appendRecentGoalRun(existing: GoalRunRecord[] | undefined, run: GoalRunRecord): GoalRunRecord[] {
+  return [...(existing || []), run].slice(-MAX_RECENT_GOAL_RUNS);
+}
+
+function replaceRecentGoalRun(existing: GoalRunRecord[] | undefined, run: GoalRunRecord): GoalRunRecord[] {
+  const runs = [...(existing || [])];
+  const index = runs.findIndex((item) => item.runId === run.runId);
+  if (index >= 0) runs[index] = run;
+  else runs.push(run);
+  return runs.slice(-MAX_RECENT_GOAL_RUNS);
+}
+
+function goalStatusForReport(outcome: GoalRunReport['outcome'], completionMode: SessionGoal['completionMode']): GoalStatus {
+  if (outcome === 'progress') return 'active';
+  if (outcome === 'waiting_review') return completionMode === 'automatic' ? 'completed' : 'waiting_review';
+  return outcome;
+}
+
+export function isGoalTransitionAllowed(from: GoalStatus, to: GoalStatus): boolean {
+  if (from === to) return true;
+  if (from === 'deleted') return false;
+  if (to === 'deleted') return true;
+  const transitions: Record<Exclude<GoalStatus, 'deleted'>, GoalStatus[]> = {
+    active: ['paused', 'waiting_user', 'waiting_confirmation', 'waiting_review', 'blocked', 'failed', 'budget_exhausted'],
+    paused: ['active'],
+    waiting_user: ['active', 'paused', 'blocked'],
+    waiting_confirmation: ['active', 'paused', 'blocked'],
+    waiting_review: ['active', 'paused', 'completed'],
+    blocked: ['active', 'paused'],
+    failed: ['active', 'paused'],
+    budget_exhausted: ['active', 'paused'],
+    completed: ['active'],
+  };
+  return transitions[from].includes(to);
+}
 
 // ---------------------------------------------------------------------------
 // Event types for typed listeners
@@ -86,13 +256,28 @@ export class SessionManager extends EventEmitter {
 
   /** Persist in-memory session node to meta.json — keeps disk consistent with RAM.
    *  Called after every mutation that changes session state. */
-  private async _syncMeta(sessionId: string): Promise<void> {
+  private async _syncMeta(sessionId: string, strict = false): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;
-    await SessionStore.getInstance().writeSessionMeta(sessionId, session.toJSON()).catch((err) => {
+    try {
+      await SessionStore.getInstance().writeSessionMeta(sessionId, session.toJSON());
+    } catch (err) {
       const msg = (err as Error).message;
       this.log.warn('Failed to sync session meta', { sid: sessionId, error: msg });
-    });
+      if (strict) throw err;
+    }
+  }
+
+  /** Commit Goal metadata as one recoverable in-memory + on-disk transaction. */
+  private async _commitGoal(root: Session, goal: SessionGoal): Promise<void> {
+    const previous = root.metadata.goal;
+    root.setMetadata('goal', goal);
+    try {
+      await this._syncMeta(root.id, true);
+    } catch (err) {
+      root.setMetadata('goal', previous);
+      throw err;
+    }
   }
 
   static getInstance(): SessionManager {
@@ -600,42 +785,188 @@ export class SessionManager extends EventEmitter {
     return this._messageCounts.get(sessionId) || 0;
   }
 
-  async setGoal(sessionId: string, objective: string): Promise<SessionGoal> {
+  async setGoal(sessionId: string, input: string | GoalContractInput): Promise<SessionGoal> {
     const root = this.getRootSession(sessionId);
-    const now = new Date().toISOString();
-    const previous = root.metadata.goal as Partial<SessionGoal> | undefined;
-    const canContinuePrevious = previous?.status !== 'deleted';
-    const goal: SessionGoal = {
-      objective,
-      status: 'active',
-      createdAt: canContinuePrevious && typeof previous?.createdAt === 'string' ? previous.createdAt : now,
-      updatedAt: now,
-      runCount: canContinuePrevious && typeof previous?.runCount === 'number' ? previous.runCount : 0,
-      lastRunAt: canContinuePrevious && typeof previous?.lastRunAt === 'string' ? previous.lastRunAt : undefined,
-      lastWorkspace: canContinuePrevious && typeof previous?.lastWorkspace === 'string' ? previous.lastWorkspace : undefined,
-      lastPermissionMode: canContinuePrevious && typeof previous?.lastPermissionMode === 'string' ? previous.lastPermissionMode : undefined,
-      lastEffort: canContinuePrevious && (previous?.lastEffort === 'HIGH' || previous?.lastEffort === 'NORMAL') ? previous.lastEffort : undefined,
-      lastUserMode: canContinuePrevious && typeof previous?.lastUserMode === 'string' ? previous.lastUserMode : undefined,
-    };
-    root.setMetadata('goal', goal);
-    await this._syncMeta(root.id);
-    return goal;
+    return this._withLock(root.id, async () => {
+      const now = new Date().toISOString();
+      const contract = typeof input === 'string' ? { objective: input } : input;
+      const objective = contract.objective.trim();
+      if (!objective) throw new Error('Goal objective is required');
+
+      const previous = normalizeSessionGoal(root.metadata.goal, root.workspace, root.metadata.permissionMode);
+      const canContinuePrevious = !!previous && previous.status !== 'deleted' && previous.status !== 'completed';
+      const replacedRun = canContinuePrevious && previous.currentRunId ? {
+        runId: previous.currentRunId,
+        startedAt: previous.currentRunStartedAt || now,
+        finishedAt: now,
+        outcome: 'paused' as const,
+        error: 'Goal contract changed before this run completed.',
+      } satisfies GoalRunRecord : null;
+      const goal: SessionGoal = {
+        ...(canContinuePrevious ? previous : createGoalDefaults(root.workspace, root.metadata.permissionMode, now)),
+        goalId: canContinuePrevious ? previous.goalId : randomUUID(),
+        version: canContinuePrevious ? previous.version + 1 : 1,
+        objective,
+        acceptanceCriteria: normalizeGoalText(contract.acceptanceCriteria, canContinuePrevious ? previous.acceptanceCriteria : ''),
+        workspace: normalizeGoalText(contract.workspace, canContinuePrevious ? previous.workspace : root.workspace),
+        permissionMode: normalizePermissionMode(contract.permissionMode ?? (canContinuePrevious ? previous.permissionMode : root.metadata.permissionMode), 'Auto'),
+        maxRuns: clampInteger(contract.maxRuns, canContinuePrevious ? previous.maxRuns : DEFAULT_GOAL_MAX_RUNS, 1, 1000),
+        maxConsecutiveFailures: clampInteger(
+          contract.maxConsecutiveFailures,
+          canContinuePrevious ? previous.maxConsecutiveFailures : DEFAULT_GOAL_MAX_FAILURES,
+          1,
+          20,
+        ),
+        wakeIntervalMs: clampInteger(
+          contract.wakeIntervalMs,
+          canContinuePrevious ? previous.wakeIntervalMs : DEFAULT_GOAL_WAKE_INTERVAL_MS,
+          MIN_GOAL_WAKE_INTERVAL_MS,
+          MAX_GOAL_WAKE_INTERVAL_MS,
+        ),
+        completionMode: contract.completionMode === 'automatic' ? 'automatic' : (canContinuePrevious ? previous.completionMode : 'review'),
+        status: 'active',
+        statusReason: undefined,
+        updatedAt: now,
+        completedAt: undefined,
+        deletedAt: undefined,
+        nextRunAt: undefined,
+        lastError: undefined,
+        currentRunId: undefined,
+        currentRunStartedAt: undefined,
+        ...(replacedRun ? { recentRuns: replaceRecentGoalRun(previous!.recentRuns, replacedRun) } : {}),
+      };
+      await this._commitGoal(root, goal);
+      return goal;
+    });
   }
 
-  async updateGoalStatus(sessionId: string, status: 'active' | 'paused' | 'deleted'): Promise<SessionGoal | null> {
+  async updateGoalStatus(sessionId: string, status: GoalStatus, reason?: string): Promise<SessionGoal | null> {
     const root = this.getRootSession(sessionId);
-    const existing = root.metadata.goal as SessionGoal | undefined;
-    if (!existing || !existing.objective) return null;
-    const now = new Date().toISOString();
-    const goal: SessionGoal = {
-      ...existing,
-      status,
-      updatedAt: now,
-      ...(status === 'deleted' ? { deletedAt: now } : {}),
-    };
-    root.setMetadata('goal', goal);
-    await this._syncMeta(root.id);
-    return goal;
+    return this._withLock(root.id, async () => {
+      const existing = normalizeSessionGoal(root.metadata.goal, root.workspace, root.metadata.permissionMode);
+      if (!existing) return null;
+      if (existing.status === status) return existing;
+      if (!isGoalTransitionAllowed(existing.status, status)) {
+        throw new Error(`Invalid goal transition: ${existing.status} -> ${status}`);
+      }
+      const now = new Date().toISOString();
+      const resumeInFlightRun = status === 'active'
+        && (existing.status === 'waiting_confirmation' || existing.status === 'waiting_user')
+        && !!existing.currentRunId;
+      const closesCurrentRun = !!existing.currentRunId
+        && !['active', 'waiting_confirmation', 'waiting_user'].includes(status);
+      const closedRun = closesCurrentRun ? {
+        runId: existing.currentRunId!,
+        startedAt: existing.currentRunStartedAt || now,
+        finishedAt: now,
+        outcome: status === 'paused' ? 'paused' as const : status === 'blocked' ? 'blocked' as const : 'unreported' as const,
+        error: normalizeOptionalGoalText(reason),
+      } satisfies GoalRunRecord : null;
+      const goal: SessionGoal = {
+        ...existing,
+        version: existing.version + 1,
+        status,
+        statusReason: normalizeOptionalGoalText(reason),
+        updatedAt: now,
+        ...(closesCurrentRun ? {
+          currentRunId: undefined,
+          currentRunStartedAt: undefined,
+          recentRuns: replaceRecentGoalRun(existing.recentRuns, closedRun!),
+        } : {}),
+        ...(status === 'active' && !resumeInFlightRun ? {
+          consecutiveFailures: 0,
+          nextRunAt: undefined,
+          currentRunId: undefined,
+          currentRunStartedAt: undefined,
+          lastError: undefined,
+        } : {}),
+        ...(status === 'completed' ? { completedAt: now } : {}),
+        ...(status === 'deleted' ? { deletedAt: now } : {}),
+      };
+      await this._commitGoal(root, goal);
+      return goal;
+    });
+  }
+
+  async beginGoalRun(
+    sessionId: string,
+    context: {
+      workspace?: string;
+      permissionMode?: string;
+      effort?: 'HIGH' | 'NORMAL';
+      userMode?: string;
+    } = {},
+  ): Promise<SessionGoal | null> {
+    const root = this.getRootSession(sessionId);
+    return this._withLock(root.id, async () => {
+      const existing = normalizeSessionGoal(root.metadata.goal, root.workspace, root.metadata.permissionMode);
+      if (!existing || existing.status !== 'active') return null;
+      let base = existing;
+      if (existing.currentRunId) {
+        const interruptedAt = new Date().toISOString();
+        const interruptedFailures = existing.consecutiveFailures + 1;
+        const interruptedRun: GoalRunRecord = {
+          runId: existing.currentRunId,
+          startedAt: existing.currentRunStartedAt || interruptedAt,
+          finishedAt: interruptedAt,
+          outcome: 'unreported',
+          error: 'Previous Goal run ended before submitting GoalReport.',
+        };
+        base = {
+          ...existing,
+          consecutiveFailures: interruptedFailures,
+          lastError: interruptedRun.error,
+          currentRunId: undefined,
+          currentRunStartedAt: undefined,
+          recentRuns: replaceRecentGoalRun(existing.recentRuns, interruptedRun),
+        };
+        if (interruptedFailures >= existing.maxConsecutiveFailures) {
+          const failed: SessionGoal = {
+            ...base,
+            version: existing.version + 1,
+            status: 'failed',
+            statusReason: 'Stopped after repeated interrupted or unreported runs',
+            updatedAt: interruptedAt,
+          };
+          await this._commitGoal(root, failed);
+          return failed;
+        }
+      }
+      if (base.runCount >= base.maxRuns) {
+        const exhausted: SessionGoal = {
+          ...base,
+          version: base.version + 1,
+          status: 'budget_exhausted',
+          statusReason: `Maximum run limit reached (${base.maxRuns})`,
+          updatedAt: new Date().toISOString(),
+          currentRunId: undefined,
+          currentRunStartedAt: undefined,
+        };
+        await this._commitGoal(root, exhausted);
+        return exhausted;
+      }
+
+      const now = new Date().toISOString();
+      const runId = randomUUID();
+      const recentRuns = appendRecentGoalRun(base.recentRuns, { runId, startedAt: now });
+      const goal: SessionGoal = {
+        ...base,
+        version: base.version + 1,
+        runCount: base.runCount + 1,
+        currentRunId: runId,
+        currentRunStartedAt: now,
+        lastRunAt: now,
+        lastWorkspace: context.workspace || base.workspace || root.workspace,
+        lastPermissionMode: normalizePermissionMode(context.permissionMode || base.permissionMode),
+        lastEffort: context.effort || (root.metadata.effortMode === false ? 'NORMAL' : 'HIGH'),
+        lastUserMode: context.userMode || (typeof root.metadata.userMode === 'string' ? root.metadata.userMode : undefined),
+        nextRunAt: undefined,
+        recentRuns,
+        updatedAt: now,
+      };
+      await this._commitGoal(root, goal);
+      return goal;
+    });
   }
 
   async touchGoalRun(
@@ -647,27 +978,113 @@ export class SessionManager extends EventEmitter {
       userMode?: string;
     } = {},
   ): Promise<SessionGoal | null> {
+    return this.beginGoalRun(sessionId, context);
+  }
+
+  async reportGoalRun(sessionId: string, report: GoalRunReport): Promise<SessionGoal | null> {
     const root = this.getRootSession(sessionId);
-    const existing = root.metadata.goal as SessionGoal | undefined;
-    if (!existing || existing.status !== 'active') return null;
-    const goal: SessionGoal = {
-      ...existing,
-      runCount: (typeof existing.runCount === 'number' ? existing.runCount : 0) + 1,
-      lastRunAt: new Date().toISOString(),
-      lastWorkspace: context.workspace || root.workspace,
-      lastPermissionMode: normalizePermissionMode(context.permissionMode || root.metadata.permissionMode),
-      lastEffort: context.effort || (root.metadata.effortMode === false ? 'NORMAL' : 'HIGH'),
-      lastUserMode: context.userMode || (typeof root.metadata.userMode === 'string' ? root.metadata.userMode : undefined),
-    };
-    root.setMetadata('goal', goal);
-    await this._syncMeta(root.id);
-    return goal;
+    return this._withLock(root.id, async () => {
+      const existing = normalizeSessionGoal(root.metadata.goal, root.workspace, root.metadata.permissionMode);
+      if (!existing) return null;
+      if (existing.status !== 'active') throw new Error(`Goal is not running (status: ${existing.status})`);
+      if (!existing.currentRunId || report.runId !== existing.currentRunId) {
+        throw new Error('Goal run report does not match the active run');
+      }
+
+      const now = new Date().toISOString();
+      const evidence = normalizeGoalEvidence(report.evidence);
+      const requestedStatus = goalStatusForReport(report.outcome, existing.completionMode);
+      const run: GoalRunRecord = {
+        runId: report.runId,
+        startedAt: existing.currentRunStartedAt || now,
+        finishedAt: now,
+        outcome: report.outcome,
+        summary: normalizeGoalText(report.summary, ''),
+        nextStep: normalizeOptionalGoalText(report.nextStep),
+        evidence,
+        error: report.outcome === 'failed' ? normalizeOptionalGoalText(report.reason) : undefined,
+      };
+      const isFailure = report.outcome === 'failed';
+      const nextFailures = isFailure ? existing.consecutiveFailures + 1 : 0;
+      const terminalFailure = isFailure && nextFailures >= existing.maxConsecutiveFailures;
+      const status = isFailure ? (terminalFailure ? 'failed' : 'active') : requestedStatus;
+      const failureDelayMs = Math.min(
+        MAX_GOAL_BACKOFF_MS,
+        existing.wakeIntervalMs * (2 ** Math.max(0, nextFailures - 1)),
+      );
+      const goal: SessionGoal = {
+        ...existing,
+        version: existing.version + 1,
+        status,
+        statusReason: isFailure
+          ? (terminalFailure
+            ? `Stopped after ${nextFailures} consecutive failures`
+            : 'Run failed; retry scheduled with backoff')
+          : normalizeOptionalGoalText(report.reason),
+        progress: normalizeGoalProgress(report.progress, existing.progress),
+        lastSummary: run.summary,
+        nextStep: run.nextStep,
+        evidence,
+        lastReportedRunId: report.runId,
+        currentRunId: undefined,
+        currentRunStartedAt: undefined,
+        consecutiveFailures: nextFailures,
+        lastError: isFailure ? run.error : undefined,
+        nextRunAt: status === 'active'
+          ? new Date(Date.now() + (isFailure ? failureDelayMs : existing.wakeIntervalMs)).toISOString()
+          : undefined,
+        recentRuns: replaceRecentGoalRun(existing.recentRuns, run),
+        updatedAt: now,
+        ...(status === 'completed' ? { completedAt: now } : {}),
+      };
+      await this._commitGoal(root, goal);
+      return goal;
+    });
+  }
+
+  async failGoalRun(sessionId: string, error: string, runId?: string): Promise<SessionGoal | null> {
+    const root = this.getRootSession(sessionId);
+    return this._withLock(root.id, async () => {
+      const existing = normalizeSessionGoal(root.metadata.goal, root.workspace, root.metadata.permissionMode);
+      if (!existing) return null;
+      if (existing.status !== 'active') return existing;
+      if (runId && existing.currentRunId && runId !== existing.currentRunId) return existing;
+
+      const now = new Date().toISOString();
+      const failures = existing.consecutiveFailures + 1;
+      const terminal = failures >= existing.maxConsecutiveFailures;
+      const delayMs = Math.min(MAX_GOAL_BACKOFF_MS, existing.wakeIntervalMs * (2 ** Math.max(0, failures - 1)));
+      const effectiveRunId = existing.currentRunId || runId || randomUUID();
+      const run: GoalRunRecord = {
+        runId: effectiveRunId,
+        startedAt: existing.currentRunStartedAt || now,
+        finishedAt: now,
+        outcome: 'unreported',
+        error: normalizeGoalText(error, 'Goal run failed'),
+      };
+      const goal: SessionGoal = {
+        ...existing,
+        version: existing.version + 1,
+        status: terminal ? 'failed' : 'active',
+        statusReason: terminal ? `Stopped after ${failures} consecutive failures` : 'Run failed; retry scheduled with backoff',
+        consecutiveFailures: failures,
+        lastError: run.error,
+        currentRunId: undefined,
+        currentRunStartedAt: undefined,
+        nextRunAt: terminal ? undefined : new Date(Date.now() + delayMs).toISOString(),
+        recentRuns: replaceRecentGoalRun(existing.recentRuns, run),
+        updatedAt: now,
+      };
+      await this._commitGoal(root, goal);
+      return goal;
+    });
   }
 
   getGoal(sessionId: string): SessionGoal | null {
     const root = this.getRootSession(sessionId);
-    const goal = root.metadata.goal as SessionGoal | undefined;
+    const goal = normalizeSessionGoal(root.metadata.goal, root.workspace, root.metadata.permissionMode);
     if (!goal || !goal.objective || goal.status === 'deleted') return null;
+    if (root.metadata.goal !== goal) root.setMetadata('goal', goal);
     return goal;
   }
 

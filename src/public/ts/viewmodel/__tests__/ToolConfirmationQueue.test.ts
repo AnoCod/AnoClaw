@@ -8,38 +8,12 @@ afterEach(() => {
 });
 
 describe('ToolConfirmationQueue', () => {
-  it('auto-approves confirmations when the current goal policy allows it', () => {
+  it('does not honor legacy auto-approval hints for Goal confirmations', async () => {
     const queue = ToolConfirmationQueue.getInstance();
     const send = vi.fn();
-    const showSpy = vi.spyOn(ToolConfirmDialog, 'show');
+    const showSpy = vi.spyOn(ToolConfirmDialog, 'show').mockResolvedValue(false);
 
     queue.setSender(send);
-    queue.setAutoApprover((request) => request.sessionId === 'goal-session');
-
-    queue.enqueue({
-      sessionId: 'goal-session',
-      toolCallId: 'tc-bash',
-      toolName: 'Bash',
-      displayName: 'Bash',
-      riskLevel: 'High',
-      params: { command: 'npm test' },
-    });
-
-    expect(showSpy).not.toHaveBeenCalled();
-    expect(send).toHaveBeenCalledWith({
-      type: 'tool_confirm_response',
-      toolCallId: 'tc-bash',
-      approved: true,
-    });
-  });
-
-  it('auto-approves confirmations when the server already marked the request safe for goal mode', () => {
-    const queue = ToolConfirmationQueue.getInstance();
-    const send = vi.fn();
-    const showSpy = vi.spyOn(ToolConfirmDialog, 'show');
-
-    queue.setSender(send);
-    queue.setAutoApprover(() => false);
 
     queue.enqueue({
       sessionId: 'goal-session',
@@ -49,13 +23,16 @@ describe('ToolConfirmationQueue', () => {
       riskLevel: 'High',
       params: { command: 'npm test' },
       autoApprove: true,
-    });
+    } as any);
 
-    expect(showSpy).not.toHaveBeenCalled();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(showSpy).toHaveBeenCalledOnce();
     expect(send).toHaveBeenCalledWith({
       type: 'tool_confirm_response',
       toolCallId: 'tc-auto-approved-bash',
-      approved: true,
+      approved: false,
     });
   });
 
@@ -65,7 +42,6 @@ describe('ToolConfirmationQueue', () => {
     const showSpy = vi.spyOn(ToolConfirmDialog, 'show').mockResolvedValue(false);
 
     queue.setSender(send);
-    queue.setAutoApprover((request) => request.sessionId === 'goal-session');
 
     queue.enqueue({
       sessionId: 'regular-session',

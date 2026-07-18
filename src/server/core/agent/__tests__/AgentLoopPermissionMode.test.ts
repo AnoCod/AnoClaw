@@ -2,9 +2,30 @@ import { describe, expect, it, vi } from 'vitest';
 import { AgentLoop } from '../AgentLoop.js';
 import { SessionManager } from '../../session/SessionManager.js';
 import { RiskLevel } from '../../../../shared/types/tool.js';
+import type { SessionGoal } from '../../../../shared/types/session.js';
+
+function activeGoal(permissionMode = 'Auto'): SessionGoal {
+  return {
+    goalId: 'goal-1',
+    version: 1,
+    objective: 'keep working',
+    acceptanceCriteria: 'verified result',
+    workspace: 'F:/workspace',
+    permissionMode,
+    maxRuns: 20,
+    maxConsecutiveFailures: 3,
+    wakeIntervalMs: 15000,
+    completionMode: 'review',
+    status: 'active',
+    createdAt: '2026-07-09T00:00:00.000Z',
+    updatedAt: '2026-07-09T00:00:00.000Z',
+    runCount: 0,
+    consecutiveFailures: 0,
+  };
+}
 
 describe('AgentLoop permission mode', () => {
-  it('treats active goal sessions as AutoEdit before showing tool confirmations', () => {
+  it('honors the Goal contract and keeps high-risk confirmation gates', () => {
     const loop = new AgentLoop({
       agentId: 'agent-1',
       sessionId: 'session-1',
@@ -14,12 +35,7 @@ describe('AgentLoop permission mode', () => {
       permissionMode: 'Auto',
     });
     const sessionManager = SessionManager.getInstance();
-    const getGoalSpy = vi.spyOn(sessionManager, 'getGoal').mockReturnValue({
-      objective: 'keep working',
-      status: 'active',
-      createdAt: '2026-07-09T00:00:00.000Z',
-      updatedAt: '2026-07-09T00:00:00.000Z',
-    });
+    const getGoalSpy = vi.spyOn(sessionManager, 'getGoal').mockReturnValue(activeGoal());
 
     try {
       const mode = (loop as unknown as { _permissionMode(): string })._permissionMode();
@@ -30,14 +46,14 @@ describe('AgentLoop permission mode', () => {
         riskLevel: () => RiskLevel.High,
       }, mode);
 
-      expect(mode).toBe('AutoEdit');
-      expect(needsConfirmation).toBe(false);
+      expect(mode).toBe('Auto');
+      expect(needsConfirmation).toBe(true);
     } finally {
       getGoalSpy.mockRestore();
     }
   });
 
-  it('server-side auto-approves confirmation gates for active goal sessions', () => {
+  it('uses an explicit Goal permission instead of the loop or global default', () => {
     const loop = new AgentLoop({
       agentId: 'agent-1',
       sessionId: 'session-1',
@@ -46,22 +62,13 @@ describe('AgentLoop permission mode', () => {
       contextWindow: 128000,
       permissionMode: 'Auto',
     });
-    const sessionManager = SessionManager.getInstance();
-    const getGoalSpy = vi.spyOn(sessionManager, 'getGoal').mockReturnValue({
-      objective: 'keep working',
-      status: 'active',
-      createdAt: '2026-07-09T00:00:00.000Z',
-      updatedAt: '2026-07-09T00:00:00.000Z',
-    });
+    const getGoalSpy = vi.spyOn(SessionManager.getInstance(), 'getGoal').mockReturnValue(activeGoal('Ask'));
 
     try {
-      const autoApprove = (loop as unknown as {
-        _autoApproveConfirmation(mode: string): boolean;
-      })._autoApproveConfirmation('Auto');
-
-      expect(autoApprove).toBe(true);
+      expect((loop as unknown as { _permissionMode(): string })._permissionMode()).toBe('Ask');
     } finally {
       getGoalSpy.mockRestore();
     }
   });
+
 });

@@ -208,6 +208,7 @@ export class WorkspacePage implements Page {
       if (this._loadingSessionId !== sid) return;
       if (this._sessionId && this._currentGroup?.hasTabs) { this._tabCache.set(this._sessionId, this._currentGroup); }
       this._sessionId = sid; this._workspacePath = newPath;
+      App.getInstance().sessionVM?.updateSessionWorkspace(sid, newPath);
       this._toolbarPath.textContent = newPath || 'Default workspace';
       await this._fileTree.loadRoot(sid);
       if (this._currentGroup) { this._currentGroup.element.remove(); }
@@ -255,12 +256,17 @@ export class WorkspacePage implements Page {
     const result = await dlg.show(this._workspacePath);
     if (!result || !this._sessionId) return;
     try {
-      await fetch(`/api/v1/sessions/${encodeURIComponent(this._sessionId)}/bind-workspace`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: result.path }) });
-      this._workspacePath = result.path; this._toolbarPath.textContent = result.path || 'Default workspace';
+      const resp = await fetch(`/api/v1/sessions/${encodeURIComponent(this._sessionId)}/bind-workspace`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: result.path }) });
+      if (!resp.ok) throw new Error(`Workspace binding failed (HTTP ${resp.status})`);
+      const payload = await resp.json() as { workspace?: string };
+      const boundPath = payload.workspace || result.path;
+      this._workspacePath = boundPath;
+      App.getInstance().sessionVM?.updateSessionWorkspace(this._sessionId, boundPath);
+      this._toolbarPath.textContent = boundPath || 'Default workspace';
       this._tabCache.get(this._sessionId)?.dispose(); this._tabCache.delete(this._sessionId); this._currentGroup = null;
       this._tabMount.innerHTML = '';
       const fresh = new WorkspaceSplitContainer(); fresh.setSessionId(this._sessionId);
-      fresh.setWorkspacePath(result.path);
+      fresh.setWorkspacePath(boundPath);
       fresh.onOpenFile = (path, name) => this._openFile(path, name);
       this._tabCache.set(this._sessionId, fresh); this._currentGroup = fresh;
       this._tabMount.appendChild(fresh.element);

@@ -264,12 +264,12 @@ export type WsTypedMessage =
   | { type: WsMessageType.Wake; content?: string; [key: string]: unknown }
   | { type: WsMessageType.Pong; [key: string]: unknown }
   | { type: WsMessageType.ToolConfirmRequest; toolCallId: string; toolName: string; riskLevel: string; params: Record<string, unknown>; [key: string]: unknown }
-  | { type: WsMessageType.SendMessage; content?: string; mode?: string; effort?: boolean; [key: string]: unknown }
+  | { type: WsMessageType.SendMessage; content?: string; mode?: string; effort?: boolean; internal?: 'goal'; [key: string]: unknown }
   | { type: WsMessageType.Stop; [key: string]: unknown }
   | { type: WsMessageType.Ping; [key: string]: unknown }
   | { type: WsMessageType.RunCommand; command?: string; args?: Record<string, string>; [key: string]: unknown }
   | { type: WsMessageType.SetSessionMode; mode?: string; effort?: boolean; [key: string]: unknown }
-  | { type: WsMessageType.SetGoal; action?: string; objective?: string; [key: string]: unknown }
+  | { type: WsMessageType.SetGoal; action?: string; objective?: string; acceptanceCriteria?: string; workspace?: string; permissionMode?: string; maxRuns?: number; maxConsecutiveFailures?: number; wakeIntervalMs?: number; completionMode?: 'review' | 'automatic'; [key: string]: unknown }
   | { type: WsMessageType.QualityScore; score?: number; [key: string]: unknown }
   | { type: WsMessageType.EditorContext; openFiles?: string[]; [key: string]: unknown }
   | { type: WsMessageType.ToolConfirmResponse; toolCallId: string; approved: boolean; [key: string]: unknown }

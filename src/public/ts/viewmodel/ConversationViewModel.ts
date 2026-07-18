@@ -5,7 +5,7 @@
 import { EventEmitter } from '../EventEmitter.js';
 import { SessionAgent } from './SessionAgent.js';
 import type { SessionViewModel } from './SessionViewModel.js';
-import type { GoalState } from '../components/conversation/types.js';
+import type { GoalContractDraft, GoalState } from '../components/conversation/types.js';
 import { ClientLogger } from '../ClientLogger.js';
 import type { SessionNode } from '../types.js';
 
@@ -18,6 +18,8 @@ export class ConversationViewModel extends EventEmitter {
   /** Controls tool execution gate: ask user, auto-edit, plan-only, or full auto. */
   permissionMode: PermissionModeUi = 'auto';
   goal: GoalState | null = null;
+  goalPending: boolean = false;
+  goalError: string | null = null;
   /** Whether the AI is allowed to put in extra effort on this turn. */
   effortMode: boolean = true;
   /** Files attached by the user before sending a message. */
@@ -32,38 +34,66 @@ export class ConversationViewModel extends EventEmitter {
   private _activeSessionId: string | null = null;
   /** Track sessions that had active streaming so connectionLost can notify them. */
   private _activeStreamingIds: Set<string> = new Set();
+  private _goalKickWaiters: Set<string> = new Set();
+  private _pendingGoalMessageId: string | null = null;
+  private _goalRequestTimer: ReturnType<typeof setTimeout> | null = null;
 
   setSessionVM(vm: SessionViewModel): void {
     this._sessionVM = vm;
     vm.getWSClient().on('goal_changed', (data: unknown) => {
-      const d = data as { sessionId?: string; goal?: GoalState | null };
+      const d = data as { sessionId?: string; messageId?: string; goal?: GoalState | null };
       if (!d.sessionId) return;
       const node = vm.sessions.getById(d.sessionId);
       if (node) {
         node.metadata = { ...(node.metadata || {}), goal: d.goal || null };
         vm.sessions.updateSession({ id: node.id, metadata: node.metadata });
       }
+      if (d.sessionId === this._activeRootSession()?.id) this.goalError = null;
+      if (this._pendingGoalMessageId && d.messageId === this._pendingGoalMessageId) {
+        if (this._goalRequestTimer) clearTimeout(this._goalRequestTimer);
+        this._goalRequestTimer = null;
+        this._pendingGoalMessageId = null;
+        this.goalPending = false;
+        this.goalError = null;
+        this.emit('goalPendingChanged', false);
+      }
       if (this._activeSessionId) this._syncGoalFromActiveSession();
+      if (d.goal?.status === 'active' && (data as { action?: string }).action && node) {
+        this._kickGoalIfIdle(node).catch((err) => {
+          ClientLogger.vm.error('Failed to kick acknowledged Goal', { error: (err as Error).message });
+        });
+      }
     });
     vm.getWSClient().on('session_mode_changed', (data: unknown) => {
       const d = data as { sessionId?: string; mode?: string; effort?: boolean; locked?: boolean };
       if (!d.sessionId) return;
       const node = vm.sessions.getById(d.sessionId);
-      const activeGoalLocked = this._hasActiveGoal(node || null);
       if (node) {
         node.metadata = {
           ...(node.metadata || {}),
-          permissionMode: activeGoalLocked ? 'AutoEdit' : this._toCanonicalMode(this._fromCanonicalMode(d.mode)),
+          permissionMode: this._toCanonicalMode(this._fromCanonicalMode(d.mode)),
           effortMode: d.effort !== false,
         };
         vm.sessions.updateSession({ id: node.id, metadata: node.metadata });
       }
       if (d.sessionId === this._activeSessionId || node?.id === this._activeRootSession()?.id) {
-        this.permissionMode = activeGoalLocked ? 'auto-edit' : d.locked ? 'auto' : this._fromCanonicalMode(d.mode);
+        this.permissionMode = d.locked ? 'auto' : this._fromCanonicalMode(d.mode);
         this.effortMode = d.locked ? true : d.effort !== false;
         this.emit('permissionModeChanged', this.permissionMode);
         this.emit('effortModeChanged', this.effortMode);
       }
+    });
+    vm.getWSClient().on('error', (data: unknown) => {
+      const d = data as { code?: string; messageId?: string; errorMessage?: string };
+      if (!d.code?.startsWith('GOAL_') && d.code !== 'INVALID_GOAL_ACTION') return;
+      if (this._pendingGoalMessageId && d.messageId !== this._pendingGoalMessageId) return;
+      if (this._goalRequestTimer) clearTimeout(this._goalRequestTimer);
+      this._goalRequestTimer = null;
+      this._pendingGoalMessageId = null;
+      this.goalPending = false;
+      this.goalError = d.errorMessage || 'Goal update failed';
+      this.emit('goalPendingChanged', false);
+      this.emit('goalError', this.goalError);
     });
   }
   getSessionVM(): SessionViewModel | null { return this._sessionVM; }
@@ -100,6 +130,10 @@ export class ConversationViewModel extends EventEmitter {
   reconcileAfterReconnect(): void {
     if (this._activeSessionId) this.getAgent(this._activeSessionId);
     for (const agent of this._agents.values()) agent.requestHistoryReconcile();
+    const root = this._activeRootSession();
+    if (root && this._hasActiveGoal(root)) {
+      this._kickGoalIfIdle(root).catch(() => {});
+    }
   }
 
   /** Destroy and remove a SessionAgent — cleans up emitter + state. */
@@ -109,6 +143,7 @@ export class ConversationViewModel extends EventEmitter {
       agent.destroy();
       this._agents.delete(sessionId);
       this._activeStreamingIds.delete(sessionId);
+      this._goalKickWaiters.delete(sessionId);
     }
   }
 
@@ -151,8 +186,6 @@ export class ConversationViewModel extends EventEmitter {
     const active = this._sessionVM?.activeSession;
     if (active && !this._isRootSession(active)) {
       mode = 'auto';
-    } else if (active && this._hasActiveGoal(active)) {
-      mode = 'auto-edit';
     }
     console.log('[ConvVM] Permission mode changed', { mode });
     this.permissionMode = mode;
@@ -187,50 +220,47 @@ export class ConversationViewModel extends EventEmitter {
     }
   }
 
-  setGoal(action: 'start' | 'pause' | 'resume' | 'edit' | 'delete', objective?: string): void {
+  setGoal(
+    action: 'start' | 'pause' | 'resume' | 'edit' | 'complete' | 'delete',
+    input?: string | GoalContractDraft,
+  ): void {
     const root = this._activeRootSession();
     if (!root || !this._sessionVM) return;
-    if ((action === 'start' || action === 'edit') && !objective?.trim()) return;
+    const contract: GoalContractDraft | undefined = typeof input === 'string'
+      ? { objective: input }
+      : input;
+    if ((action === 'start' || action === 'edit') && !contract?.objective?.trim()) return;
+    const messageId = `goal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    if (this._goalRequestTimer) clearTimeout(this._goalRequestTimer);
+    this._pendingGoalMessageId = messageId;
+    this.goalPending = true;
+    this.goalError = null;
+    this.emit('goalPendingChanged', true);
+    this._goalRequestTimer = setTimeout(() => {
+      if (this._pendingGoalMessageId !== messageId) return;
+      this._pendingGoalMessageId = null;
+      this._goalRequestTimer = null;
+      this.goalPending = false;
+      this.goalError = 'Goal update timed out. Check the connection and try again.';
+      this.emit('goalPendingChanged', false);
+      this.emit('goalError', this.goalError);
+    }, 15_000);
     this._sessionVM.getWSClient().send({
       type: 'set_goal',
       sessionId: root.id,
+      messageId,
       action,
-      objective: objective?.trim(),
+      ...(contract ? {
+        objective: contract.objective.trim(),
+        acceptanceCriteria: contract.acceptanceCriteria?.trim(),
+        workspace: contract.workspace,
+        permissionMode: contract.permissionMode,
+        maxRuns: contract.maxRuns,
+        maxConsecutiveFailures: contract.maxConsecutiveFailures,
+        wakeIntervalMs: contract.wakeIntervalMs,
+        completionMode: contract.completionMode,
+      } : {}),
     });
-
-    const now = new Date().toISOString();
-    let activatedGoalMode = false;
-    if (action === 'start' || action === 'edit') {
-      const next: GoalState = {
-        ...(this.goal || { createdAt: now }),
-        objective: objective!.trim(),
-        status: 'active',
-        updatedAt: now,
-      };
-      root.metadata = { ...(root.metadata || {}), goal: next, permissionMode: 'AutoEdit' };
-      this.goal = next;
-      this.permissionMode = 'auto-edit';
-      activatedGoalMode = true;
-    } else if (this.goal) {
-      const status = action === 'pause' ? 'paused' : action === 'resume' ? 'active' : 'deleted';
-      const next = { ...this.goal, status, updatedAt: now } as GoalState;
-      activatedGoalMode = status === 'active';
-      root.metadata = {
-        ...(root.metadata || {}),
-        goal: next,
-        ...(activatedGoalMode ? { permissionMode: 'AutoEdit' } : {}),
-      };
-      this.goal = status === 'deleted' ? null : next;
-      if (activatedGoalMode) this.permissionMode = 'auto-edit';
-    }
-    this._sessionVM.sessions.updateSession({ id: root.id, metadata: root.metadata });
-    this.emit('goalChanged', this.goal);
-    if (activatedGoalMode) this.emit('permissionModeChanged', this.permissionMode);
-    if (action === 'start' || action === 'resume' || action === 'edit') {
-      this._kickGoalIfIdle(root).catch((err) => {
-        ClientLogger.vm.error('Failed to kick goal loop', { error: (err as Error).message });
-      });
-    }
   }
 
   private _syncModeFromActiveSession(): void {
@@ -244,14 +274,6 @@ export class ConversationViewModel extends EventEmitter {
     }
 
     const nextEffort = active.metadata?.effortMode === false ? false : true;
-    if (this._hasActiveGoal(active)) {
-      this.permissionMode = 'auto-edit';
-      this.effortMode = nextEffort;
-      this.emit('permissionModeChanged', this.permissionMode);
-      this.emit('effortModeChanged', nextEffort);
-      return;
-    }
-
     const nextMode = this._fromCanonicalMode(active.metadata?.permissionMode);
     this.permissionMode = nextMode;
     this.effortMode = nextEffort;
@@ -291,17 +313,33 @@ export class ConversationViewModel extends EventEmitter {
   }
 
   private async _kickGoalIfIdle(root: SessionNode): Promise<void> {
-    if (!this._sessionVM || !this.goal || this.goal.status !== 'active') return;
+    if (!this._sessionVM) return;
+    const goal = root.metadata?.goal as GoalState | null | undefined;
+    if (!goal || goal.status !== 'active') return;
     const agent = this.getAgent(root.id);
-    if (agent.state.isStreaming) return;
-    const mode = 'auto-edit';
+    if (agent.state.isStreaming) {
+      if (this._goalKickWaiters.has(root.id)) return;
+      this._goalKickWaiters.add(root.id);
+      const onStopped = () => {
+        agent.off('streamingStopped', onStopped);
+        this._goalKickWaiters.delete(root.id);
+        const latest = this._sessionVM?.sessions.getById(root.id);
+        if (!latest) return;
+        this._kickGoalIfIdle(latest).catch((err) => {
+          ClientLogger.vm.error('Failed to restart acknowledged Goal', { error: (err as Error).message });
+        });
+      };
+      agent.on('streamingStopped', onStopped);
+      return;
+    }
+    const mode = this._fromCanonicalMode(goal.permissionMode || root.metadata?.permissionMode);
     const effort = root.metadata?.effortMode === false ? false : true;
     const content = [
       'Start or continue working toward this active session goal.',
       '',
       '# Active Goal',
-      `Objective: ${this.goal.objective}`,
-      `Run count: ${this.goal.runCount || 0}`,
+      `Objective: ${goal.objective}`,
+      `Run count: ${goal.runCount || 0}`,
       '',
       '# Current Execution Context',
       `Workspace: ${root.workspace || '(default workspace)'}`,
@@ -310,7 +348,7 @@ export class ConversationViewModel extends EventEmitter {
       '',
       'Use the current workspace as the primary context. Advance the next useful step; if the goal is already complete or blocked, say so clearly.',
     ].join('\n');
-    await agent.sendMessage(content, mode, effort, []);
+    await agent.sendMessage(content, mode, effort, [], { internalGoal: true });
   }
 
   private _fromCanonicalMode(value: unknown): PermissionModeUi {

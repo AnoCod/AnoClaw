@@ -111,7 +111,14 @@ export class WSClient {
   }
 
   /** Send a chat message for a given session. Includes permission mode, effort, and attachments. */
-  sendMessage(sessionId: string, content: string, mode?: string, effortMode?: boolean, attachments?: Array<Record<string, unknown>>): void {
+  sendMessage(
+    sessionId: string,
+    content: string,
+    mode?: string,
+    effortMode?: boolean,
+    attachments?: Array<Record<string, unknown>>,
+    internal?: 'goal',
+  ): void {
     console.log('[WS] sendMessage — sessionId:', sessionId);
     this._gw.send({
       type: 'send_message',
@@ -121,6 +128,7 @@ export class WSClient {
       effort: effortMode !== undefined ? effortMode : true,
       messageId: `cli-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       attachments,
+      ...(internal ? { internal } : {}),
     });
   }
 

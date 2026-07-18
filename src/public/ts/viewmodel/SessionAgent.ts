@@ -512,7 +512,13 @@ export class SessionAgent extends EventEmitter {
 
   /** Build the user message, wire attachments, send via WS, start streaming.
    *  Auto-generates a session title for unnamed sessions. Guarded by _sendingLock. */
-  async sendMessage(inputValue: string, permissionMode: string, effortMode: boolean, attachments: { name: string; path: string; type: string; size: number; content?: string }[]): Promise<void> {
+  async sendMessage(
+    inputValue: string,
+    permissionMode: string,
+    effortMode: boolean,
+    attachments: { name: string; path: string; type: string; size: number; content?: string }[],
+    options: { internalGoal?: boolean } = {},
+  ): Promise<void> {
     if (!inputValue.trim() && attachments.length === 0) return;
     if (this._sendingLock) return;
 
@@ -541,7 +547,7 @@ export class SessionAgent extends EventEmitter {
       await vm.ensureRunnableAgentForSession(targetSessionId);
 
 
-      if (node && (node.title === 'New Session' || !node.title || node.title === content.slice(0, 30))) {
+      if (!options.internalGoal && node && (node.title === 'New Session' || !node.title || node.title === content.slice(0, 30))) {
         this._generateSessionTitle(targetSessionId, content).then(title => {
           if (title) vm.renameSession(targetSessionId, title).catch(() => {});
         });
@@ -554,17 +560,24 @@ export class SessionAgent extends EventEmitter {
         throw new Error('WebSocket is not connected. Please wait for reconnection or refresh the page.');
       }
 
-      this.state.messages.appendMessage(userMsg);
+      if (!options.internalGoal) this.state.messages.appendMessage(userMsg);
 
 
       finalizeThink(this);
       this.state.streamMsgId = null;
       this.state.currentStreamMessage = '';
 
-      wsClient.sendMessage(this.sessionId, content, permissionMode, effortMode, attachments);
+      wsClient.sendMessage(
+        this.sessionId,
+        content,
+        permissionMode,
+        effortMode,
+        attachments,
+        options.internalGoal ? 'goal' : undefined,
+      );
       ClientLogger.vm.debug('Message sent via WS', { sid: this.sessionId, mode: permissionMode, contentLen: effectiveContent.length });
 
-      this.emit('messageAdded', userMsg);
+      if (!options.internalGoal) this.emit('messageAdded', userMsg);
       this.state.isStreaming = true;
       this.state.generationSeq++;
       this.emit('streamingStarted');

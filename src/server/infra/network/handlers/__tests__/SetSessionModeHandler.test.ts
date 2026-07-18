@@ -25,9 +25,9 @@ describe('SetSessionModeHandler', () => {
     }
   });
 
-  it('keeps active goals on Auto Edit even when Safe Auto is requested', async () => {
+  it('keeps the active Goal execution contract when another mode is requested', async () => {
     const session = await manager.createMainSession('agent-main', 'Goal Session', tmpDir);
-    await manager.setGoal(session.id, 'keep going');
+    await manager.setGoal(session.id, { objective: 'keep going', permissionMode: 'AutoEdit' });
     const sends: Array<{ sessionId: string; event: Record<string, unknown> }> = [];
     const ws = {
       send: (sessionId: string, event: Record<string, unknown>) => {
@@ -44,7 +44,7 @@ describe('SetSessionModeHandler', () => {
     await setSessionModeHandler({
       sessionId: session.id,
       type: 'set_session_mode',
-      data: { mode: 'auto', effort: true },
+      data: { mode: 'ask', effort: true },
       ws,
     });
 

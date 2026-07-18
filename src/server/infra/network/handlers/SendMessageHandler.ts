@@ -72,10 +72,15 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
   const runtime = AgentRuntime.getInstance();
   const registry = AgentRegistry.getInstance();
   const sessionManager = SessionManager.getInstance();
+  const isGoalKick = msg.internal === 'goal';
 
   // Ensure session exists — use mutable var so auto-creation updates it
   let effectiveSessionId = ctx.sessionId;
   let session = sessionManager.session(effectiveSessionId);
+  if (isGoalKick && !session) {
+    ctx.ws.send(effectiveSessionId, { type: WsMessageType.Done });
+    return;
+  }
   if (!session) {
     const agentSelection = selectRunnableAgent();
     if (!agentSelection.ok || !agentSelection.agentId) {
@@ -132,6 +137,18 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
     }
   }
 
+  if (isGoalKick) {
+    const kickGoal = sessionManager.getGoal(effectiveSessionId);
+    if (!session.isRoot() || kickGoal?.status !== 'active') {
+      ctx.ws.send(effectiveSessionId, {
+        type: WsMessageType.StatusInfo,
+        content: '(Goal is no longer active)',
+      });
+      ctx.ws.send(effectiveSessionId, { type: WsMessageType.Done });
+      return;
+    }
+  }
+
   const agentSelection = selectRunnableAgent(session.agentId);
   if (!agentSelection.ok || !agentSelection.agentId) {
     ctx.ws.send(effectiveSessionId, {
@@ -149,15 +166,35 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
   }
 
   // Store permission mode + effort so AgentLoop picks them up (frontend→server bridge)
-  const effectivePermissionMode = resolveSessionPermissionMode(sessionManager, effectiveSessionId, msg.mode);
+  let goal = sessionManager.getGoal(effectiveSessionId);
+  const resumesWaitingGoal = !isGoalKick
+    && goal?.status === 'waiting_user'
+    && !runtime.isSessionActive(effectiveSessionId);
+  if (!isGoalKick && goal?.status === 'waiting_user') {
+    if (resumesWaitingGoal) {
+      await sessionManager.updateGoalStatus(effectiveSessionId, 'paused', 'Resuming after the previous Goal runner stopped');
+    }
+    goal = await sessionManager.updateGoalStatus(effectiveSessionId, 'active', 'User response received');
+    const root = sessionManager.getRootSession(effectiveSessionId);
+    ctx.ws.send(root.id, {
+      type: WsMessageType.GoalChanged,
+      sessionId: root.id,
+      action: 'user_response',
+      goal,
+    });
+  }
+  const effectivePermissionMode = isGoalKick && goal
+    ? resolveSessionPermissionMode(sessionManager, effectiveSessionId, goal.permissionMode)
+    : resolveSessionPermissionMode(sessionManager, effectiveSessionId, msg.mode);
   const effectiveEffort = resolveSessionEffort(sessionManager, effectiveSessionId, msg.effort);
-  if (session.isRoot()) {
+  if (session.isRoot() && !isGoalKick) {
     await sessionManager.setSessionPermissionMode(effectiveSessionId, effectivePermissionMode);
     await sessionManager.setSessionEffortMode(effectiveSessionId, effectiveEffort === 'HIGH');
   }
   const loopOptions = {
     permissionMode: effectivePermissionMode,
     effort: effectiveEffort,
+    goalKick: isGoalKick || resumesWaitingGoal,
   };
 
   const rawContent = typeof msg.content === 'string' ? msg.content.trim() : '';
@@ -169,6 +206,14 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
   // Must return BEFORE touching StreamPersister/event-buffer to avoid corrupting
   // the first handler's state.
   if (runtime.isSessionActive(effectiveSessionId)) {
+    if (isGoalKick) {
+      ctx.ws.send(effectiveSessionId, {
+        type: WsMessageType.StatusInfo,
+        content: '(Goal runner is already active)',
+      });
+      ctx.ws.send(effectiveSessionId, { type: WsMessageType.Done });
+      return;
+    }
     const userMsg: Message = {
       id: `ws-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       sessionId: effectiveSessionId,
@@ -208,7 +253,7 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
 
   // Append user message
   try {
-    await sessionManager.appendMessage(effectiveSessionId, userMessage, { notify: false });
+    if (!isGoalKick) await sessionManager.appendMessage(effectiveSessionId, userMessage, { notify: false });
   } catch (err) {
     log.error('Failed to persist user message', { sid: effectiveSessionId, error: (err as Error).message });
   }

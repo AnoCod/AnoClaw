@@ -1,7 +1,7 @@
 ﻿
 // Slash command popup, attachment chips, file upload, mode selector.
 
-import type { Attachment, GoalState } from './types.js';
+import { goalPermissionModeToUi, type Attachment, type GoalContractDraft, type GoalState } from './types.js';
 import { SlashCommandPanel } from './SlashCommandPanel.js';
 import { loadCommandsFromApi, INIT_PROTOCOL_PROMPT } from './SlashCommands.js';
 import { ModeSelector } from './ModeSelector.js';
@@ -11,6 +11,8 @@ import { ConfirmDialog } from '../ConfirmDialog.js';
 import type { CommandDefinition } from '../../types.js';
 import { App } from '../../app.js';
 import { ClientLogger } from '../../ClientLogger.js';
+import { ToastManager } from '../../ToastManager.js';
+import { handlePathClick } from '../../utils/ClickablePathHandler.js';
 
 const SVG_ATTACH = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M9.5 4v7a3 3 0 1 1-6 0V4.5a2 2 0 0 1 4 0v6a1 1 0 0 1-2 0V4"/></svg>`;
 const SVG_ATTACHMENT_FILE = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`;
@@ -26,11 +28,13 @@ export class InputPanel {
   private _modeSelector: ModeSelector;
   private _attachmentsBar: HTMLElement;
   private _goalCard: HTMLElement;
+  private _goalDetailsDialog: Dialog | null = null;
   private _slashPanel: SlashCommandPanel;
   private _commands: CommandDefinition[] = [];
   private _attachments: Attachment[] = [];
   private _goal: GoalState | null = null;
-  private _goalExpanded = false;
+  private _goalPending = false;
+  private _goalError: string | null = null;
   private _currentMode: string = 'auto';
   isStreaming = false;
 
@@ -51,6 +55,19 @@ export class InputPanel {
 
     // Wire mode selector to ConversationViewModel permission + running mode state
     const convVM = App.getInstance().conversationVM;
+    this._goal = convVM.goal;
+    this._goalPending = convVM.goalPending;
+    this._goalError = convVM.goalError;
+    this._currentMode = convVM.permissionMode;
+    this._modeSelector.setMode(this._currentMode as any, false);
+    this._modeSelector.setGoal(this._goal as any);
+    this._goalCard.addEventListener('click', (event) => {
+      handlePathClick(
+        event as MouseEvent,
+        this._goal?.workspace || this._goal?.lastWorkspace || '',
+        convVM.getActiveSessionId(),
+      );
+    });
     this._modeSelector.onModeChange = (mode) => {
       console.log('[Input] Mode changed', { mode });
       this._currentMode = mode;
@@ -73,13 +90,24 @@ export class InputPanel {
     });
     convVM.on('goalChanged', (goal: unknown) => {
       this._goal = goal as GoalState | null;
+      this._goalError = null;
       this._modeSelector.setGoal(this._goal as any);
-      if (this._goal?.status === 'active') {
-        this._currentMode = 'auto-edit';
-        this._modeSelector.setMode('auto-edit' as any, false);
+      if ((!this._goal || this._goal.status === 'deleted') && this._goalDetailsDialog) {
+        this._closeGoalDetails();
       }
       this._renderGoalCard();
     });
+    convVM.on('goalPendingChanged', (pending: boolean) => {
+      this._goalPending = pending;
+      this._renderGoalCard();
+    });
+    convVM.on('goalError', (message: string) => {
+      this._goalError = message;
+      ClientLogger.ui.warn('Goal update failed', { message });
+      ToastManager.getInstance().error(message);
+      this._renderGoalCard();
+    });
+    this._renderGoalCard();
 
     // Load slash command definitions from API, wire selection to textarea insertion
     loadCommandsFromApi().then(cmds => { this._commands = cmds; }).catch(() => {});
@@ -93,8 +121,8 @@ export class InputPanel {
     const area = document.createElement('div');
     area.className = 'cinema-input-area';
 
-    // Goal state and attachments (above textarea)
-    area.appendChild(this._goalCard);
+    // Goal is intentionally not rendered above the textarea. Its single entry
+    // lives in the Mode menu and opens an on-demand details dialog.
     area.appendChild(this._attachmentsBar);
 
     // Textarea (fills remaining space, grows with content)
@@ -322,18 +350,16 @@ export class InputPanel {
   }
 
   private _renderGoalCard(): void {
-    this._goalCard.innerHTML = '';
+    this._goalCard.replaceChildren();
     if (!this._goal || this._goal.status === 'deleted') {
-      this._goalCard.classList.remove('visible', 'expanded', 'paused', 'active');
-      this._goalExpanded = false;
+      this._goalCard.className = 'input-goal-card';
       return;
     }
 
     const isActive = this._goal.status === 'active';
-    this._goalCard.classList.add('visible');
-    this._goalCard.classList.toggle('expanded', this._goalExpanded);
-    this._goalCard.classList.toggle('active', isActive);
-    this._goalCard.classList.toggle('paused', !isActive);
+    this._goalCard.className = `input-goal-card visible goal-${this._goal.status}`;
+    this._goalCard.setAttribute('role', 'status');
+    this._goalCard.setAttribute('aria-live', 'polite');
 
     const main = document.createElement('div');
     main.className = 'input-goal-card-main';
@@ -342,56 +368,72 @@ export class InputPanel {
     status.className = 'input-goal-status';
     const dot = document.createElement('span');
     dot.className = 'input-goal-dot';
+    dot.setAttribute('aria-hidden', 'true');
     const statusText = document.createElement('span');
-    statusText.textContent = `${isActive ? 'Goal active' : 'Goal paused'}${this._goal.runCount ? ` · #${this._goal.runCount}` : ''}`;
+    statusText.textContent = `${this._goalStatusLabel(this._goal.status)}${this._goalPending ? ' · Updating…' : ''}`;
     status.appendChild(dot);
     status.appendChild(statusText);
 
-    const summary = document.createElement('button');
-    summary.type = 'button';
+    const summary = document.createElement('div');
     summary.className = 'input-goal-summary';
     summary.textContent = this._goalSummary(this._goal.objective);
     summary.title = this._goal.objective;
-    summary.addEventListener('click', () => {
-      this._goalExpanded = !this._goalExpanded;
-      this._renderGoalCard();
-    });
 
     const actions = document.createElement('div');
     actions.className = 'input-goal-actions';
-    const toggleBtn = this._makeGoalActionBtn(isActive ? 'Pause' : 'Resume', isActive ? 'pause' : 'resume');
-    const editBtn = this._makeGoalActionBtn('Edit', 'edit');
-    const deleteBtn = this._makeGoalActionBtn('Delete', 'delete');
-    const expandBtn = document.createElement('button');
-    expandBtn.type = 'button';
-    expandBtn.className = 'cinema-tool-btn input-goal-action-btn';
-    expandBtn.textContent = this._goalExpanded ? 'Less' : 'Details';
-    expandBtn.title = this._goalExpanded ? 'Collapse goal details' : 'Show goal details';
-    expandBtn.addEventListener('click', () => {
-      this._goalExpanded = !this._goalExpanded;
-      this._renderGoalCard();
-    });
-    actions.appendChild(toggleBtn);
-    actions.appendChild(editBtn);
-    actions.appendChild(deleteBtn);
-    actions.appendChild(expandBtn);
-
+    if (isActive || this._goal.status === 'waiting_confirmation' || this._goal.status === 'waiting_user') {
+      actions.appendChild(this._makeGoalActionBtn('Pause', 'pause'));
+    } else if (this._goal.status === 'waiting_review') {
+      actions.appendChild(this._makeGoalActionBtn('Accept', 'complete', true));
+      actions.appendChild(this._makeGoalActionBtn('Continue', 'resume'));
+    } else if (this._goal.status === 'budget_exhausted') {
+      actions.appendChild(this._makeGoalActionBtn('Edit limits', 'edit', true));
+    } else if (this._goal.status !== 'completed') {
+      actions.appendChild(this._makeGoalActionBtn('Resume', 'resume'));
+    } else {
+      actions.appendChild(this._makeGoalActionBtn('Reopen', 'resume'));
+    }
     main.appendChild(status);
     main.appendChild(summary);
     main.appendChild(actions);
     this._goalCard.appendChild(main);
+    if (this._goalError) {
+      const error = document.createElement('div');
+      error.className = 'input-goal-inline-error';
+      error.textContent = this._goalError;
+      this._goalCard.appendChild(error);
+    }
 
-    if (this._goalExpanded) {
+    if (typeof this._goal.progress === 'number') {
+      const progress = document.createElement('div');
+      progress.className = 'input-goal-progress';
+      progress.setAttribute('role', 'progressbar');
+      progress.setAttribute('aria-valuemin', '0');
+      progress.setAttribute('aria-valuemax', '100');
+      progress.setAttribute('aria-valuenow', String(this._goal.progress));
+      const bar = document.createElement('span');
+      bar.style.width = `${Math.max(0, Math.min(100, this._goal.progress))}%`;
+      progress.appendChild(bar);
+      this._goalCard.appendChild(progress);
+    }
+
+    {
       const detail = document.createElement('div');
-      detail.className = 'input-goal-detail';
-      detail.textContent = this._goal.objective;
+      detail.className = 'input-goal-detail-grid';
+      this._appendGoalDetail(detail, 'Outcome', this._goal.objective);
+      this._appendGoalDetail(detail, 'Done when', this._goal.acceptanceCriteria || 'Not specified');
+      if (this._goal.lastSummary) this._appendGoalDetail(detail, 'Latest result', this._goal.lastSummary);
+      if (this._goal.nextStep) this._appendGoalDetail(detail, 'Next step', this._goal.nextStep);
+      if (this._goal.statusReason) this._appendGoalDetail(detail, 'Status reason', this._goal.statusReason);
+      if (this._goal.lastError) this._appendGoalDetail(detail, 'Last error', this._goal.lastError, true);
       this._goalCard.appendChild(detail);
 
       const contextItems = [
-        this._goal.lastPermissionMode ? `Mode ${this._modeLabel(this._goal.lastPermissionMode)}` : '',
+        `Mode ${this._modeLabel(this._goal.permissionMode || this._goal.lastPermissionMode || 'Auto')}`,
         this._goal.lastEffort ? `Effort ${this._goal.lastEffort}` : '',
-        this._goal.lastUserMode ? `User ${this._goal.lastUserMode}` : '',
-        this._goal.lastWorkspace ? `Workspace ${this._shortPath(this._goal.lastWorkspace)}` : '',
+        `Workspace ${this._shortPath(this._goal.workspace || this._goal.lastWorkspace || '')}`,
+        `Runs ${this._goal.runCount || 0}/${this._goal.maxRuns || 20}`,
+        this._goal.consecutiveFailures ? `Failures ${this._goal.consecutiveFailures}/${this._goal.maxConsecutiveFailures}` : '',
       ].filter(Boolean);
       if (contextItems.length > 0) {
         const context = document.createElement('div');
@@ -400,11 +442,55 @@ export class InputPanel {
           const chip = document.createElement('span');
           chip.className = 'input-goal-context-chip';
           chip.textContent = item;
-          if (item.startsWith('Workspace ') && this._goal.lastWorkspace) chip.title = this._goal.lastWorkspace;
+          if (item.startsWith('Workspace ')) chip.title = this._goal.workspace || this._goal.lastWorkspace || '';
           context.appendChild(chip);
         }
         this._goalCard.appendChild(context);
       }
+
+      if (this._goal.evidence?.length) {
+        const evidence = document.createElement('div');
+        evidence.className = 'input-goal-evidence';
+        const heading = document.createElement('div');
+        heading.className = 'input-goal-evidence-title';
+        heading.textContent = 'Evidence';
+        evidence.appendChild(heading);
+        for (const item of this._goal.evidence) {
+          if (item.type === 'image' && item.path) {
+            const preview = document.createElement('img');
+            preview.className = 'input-goal-evidence-preview';
+            preview.alt = item.label;
+            preview.loading = 'lazy';
+            preview.src = `/api/v1/workspace/read?path=${encodeURIComponent(item.path)}&sessionId=${encodeURIComponent(App.getInstance().conversationVM.getActiveSessionId() || '')}&raw=1`;
+            preview.title = 'Click to preview';
+            preview.setAttribute('data-file-path', item.path);
+            preview.addEventListener('error', () => { preview.style.display = 'none'; });
+            evidence.appendChild(preview);
+          }
+          const row = document.createElement(item.url ? 'a' : 'button');
+          row.className = `input-goal-evidence-item evidence-${item.type}`;
+          if (row instanceof HTMLButtonElement) row.type = 'button';
+          row.textContent = item.label;
+          row.title = item.detail || item.path || item.url || item.label;
+          if (item.path) {
+            row.classList.add('clickable-path');
+            row.setAttribute('data-file-path', item.path);
+          } else if (item.url && row instanceof HTMLAnchorElement) {
+            row.href = item.url;
+            row.target = '_blank';
+            row.rel = 'noopener noreferrer';
+            row.setAttribute('data-external-url', '');
+          }
+          evidence.appendChild(row);
+        }
+        this._goalCard.appendChild(evidence);
+      }
+
+      const footerActions = document.createElement('div');
+      footerActions.className = 'input-goal-footer-actions';
+      footerActions.appendChild(this._makeGoalActionBtn('Edit contract', 'edit'));
+      footerActions.appendChild(this._makeGoalActionBtn('Delete', 'delete'));
+      this._goalCard.appendChild(footerActions);
 
       const meta = document.createElement('div');
       meta.className = 'input-goal-meta';
@@ -413,10 +499,36 @@ export class InputPanel {
       meta.textContent = [
         updated ? `Updated ${updated}` : '',
         lastRun ? `Last run ${lastRun}` : '',
-        this._goal.runCount ? `Runs ${this._goal.runCount}` : '',
       ].filter(Boolean).join(' / ');
       if (meta.textContent) this._goalCard.appendChild(meta);
     }
+  }
+
+  private _goalStatusLabel(status: GoalState['status']): string {
+    switch (status) {
+      case 'active': return 'Goal running';
+      case 'paused': return 'Goal paused';
+      case 'waiting_user': return 'Needs your input';
+      case 'waiting_confirmation': return 'Approval required';
+      case 'waiting_review': return 'Ready for review';
+      case 'blocked': return 'Goal blocked';
+      case 'failed': return 'Goal stopped after failures';
+      case 'budget_exhausted': return 'Run limit reached';
+      case 'completed': return 'Goal completed';
+      default: return 'Goal';
+    }
+  }
+
+  private _appendGoalDetail(container: HTMLElement, labelText: string, value: string, isError = false): void {
+    const row = document.createElement('div');
+    row.className = `input-goal-detail-row${isError ? ' is-error' : ''}`;
+    const label = document.createElement('span');
+    label.textContent = labelText;
+    const content = document.createElement('div');
+    content.textContent = value;
+    row.appendChild(label);
+    row.appendChild(content);
+    container.appendChild(row);
   }
 
   private _modeLabel(value: string): string {
@@ -436,11 +548,46 @@ export class InputPanel {
     return `.../${parts.slice(-2).join('/')}`;
   }
 
-  private _makeGoalActionBtn(label: string, action: 'pause' | 'resume' | 'edit' | 'delete'): HTMLButtonElement {
+  private _showGoalDetails(): void {
+    if (!this._goal || this._goal.status === 'deleted') {
+      this._showGoalDialog('start');
+      return;
+    }
+    this._closeGoalDetails();
+    this._renderGoalCard();
+    const body = document.createElement('div');
+    body.className = 'goal-details-body';
+    body.appendChild(this._goalCard);
+
+    let detailsDialog: Dialog;
+    detailsDialog = new Dialog({
+      title: 'Goal',
+      body,
+      width: 'min(720px, calc(100vw - 32px))',
+      onClose: () => {
+        if (this._goalDetailsDialog === detailsDialog) this._goalDetailsDialog = null;
+      },
+    });
+    this._goalDetailsDialog = detailsDialog;
+    detailsDialog.show();
+  }
+
+  private _closeGoalDetails(): void {
+    const dialog = this._goalDetailsDialog;
+    this._goalDetailsDialog = null;
+    dialog?.close();
+  }
+
+  private _makeGoalActionBtn(
+    label: string,
+    action: 'start' | 'pause' | 'resume' | 'edit' | 'complete' | 'delete',
+    primary = false,
+  ): HTMLButtonElement {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'cinema-tool-btn input-goal-action-btn';
+    btn.className = `cinema-tool-btn input-goal-action-btn${primary ? ' is-primary' : ''}`;
     btn.textContent = label;
+    btn.disabled = this._goalPending;
     btn.addEventListener('click', () => {
       this._handleGoalAction(action).catch((err) => {
         ClientLogger.ui.error('Goal action failed', { error: (err as Error).message });
@@ -449,42 +596,139 @@ export class InputPanel {
     return btn;
   }
 
-  private async _handleGoalAction(action: 'start' | 'pause' | 'resume' | 'edit' | 'delete'): Promise<void> {
+  private async _handleGoalAction(action: 'start' | 'view' | 'pause' | 'resume' | 'edit' | 'complete' | 'delete'): Promise<void> {
     const convVM = App.getInstance().conversationVM;
-    if (action === 'start' || action === 'edit') {
-      this._showGoalDialog(action, action === 'edit' ? this._goal?.objective || '' : '');
+    if (action === 'view') {
+      this._showGoalDetails();
       return;
+    }
+    if (action === 'start' || action === 'edit') {
+      if (action === 'edit') this._closeGoalDetails();
+      this._showGoalDialog(action);
+      return;
+    }
+    if (action === 'complete') {
+      const ok = await ConfirmDialog.show('Accept the evidence and mark this Goal complete?', 'Complete Goal');
+      if (!ok) return;
     }
     if (action === 'delete') {
       const ok = await ConfirmDialog.show('Delete this goal?', 'Delete Goal');
       if (!ok) return;
-      this._goalExpanded = false;
+      this._closeGoalDetails();
     }
     convVM.setGoal(action);
   }
 
-  private _showGoalDialog(action: 'start' | 'edit', initialObjective: string): void {
+  private _showGoalDialog(action: 'start' | 'edit'): void {
     const convVM = App.getInstance().conversationVM;
     const body = document.createElement('div');
     body.className = 'goal-dialog-body';
+    const idPrefix = `goal-contract-${Date.now()}`;
+    const activeWorkspace = convVM.getSessionVM()?.activeSession?.workspace || '';
+    // A new Goal always binds to the current session workspace. Editing keeps
+    // the existing Goal workspace unless it is missing (legacy migrations).
+    const currentWorkspace = action === 'edit'
+      ? (this._goal?.workspace || activeWorkspace)
+      : activeWorkspace;
 
-    const field = document.createElement('div');
-    field.className = 'ui-form-field goal-dialog-field';
-    const label = document.createElement('label');
-    label.textContent = 'Goal objective';
-    const textarea = document.createElement('textarea');
-    textarea.className = 'ui-textarea goal-dialog-textarea';
-    textarea.rows = 6;
-    textarea.placeholder = 'Describe the outcome AnoClaw should keep working toward.';
-    textarea.value = initialObjective;
-    field.appendChild(label);
-    field.appendChild(textarea);
-    body.appendChild(field);
+    const addField = (labelText: string, control: HTMLElement, hintText?: string): HTMLElement => {
+      const field = document.createElement('div');
+      field.className = 'ui-form-field goal-dialog-field';
+      const label = document.createElement('label');
+      label.textContent = labelText;
+      if (control.id) label.htmlFor = control.id;
+      field.appendChild(label);
+      field.appendChild(control);
+      if (hintText) {
+        const hint = document.createElement('div');
+        hint.className = 'goal-dialog-hint';
+        hint.textContent = hintText;
+        field.appendChild(hint);
+      }
+      return field;
+    };
 
-    const hint = document.createElement('div');
-    hint.className = 'goal-dialog-hint';
-    hint.textContent = 'Keep it specific enough that the agent can choose the next useful step.';
-    body.appendChild(hint);
+    const objective = document.createElement('textarea');
+    objective.id = `${idPrefix}-objective`;
+    objective.className = 'ui-textarea goal-dialog-textarea';
+    objective.rows = 4;
+    objective.placeholder = 'What concrete result should AnoClaw deliver?';
+    objective.value = this._goal?.objective || '';
+    body.appendChild(addField('Outcome', objective, 'Describe the result, not only the activity.'));
+
+    const criteria = document.createElement('textarea');
+    criteria.id = `${idPrefix}-criteria`;
+    criteria.className = 'ui-textarea goal-dialog-criteria';
+    criteria.rows = 3;
+    criteria.placeholder = 'How can AnoClaw and you verify that this is done?';
+    criteria.value = this._goal?.acceptanceCriteria || '';
+    body.appendChild(addField('Done when', criteria, 'Use observable evidence such as files, tests, reports, or a reviewed result.'));
+
+    const workspace = document.createElement('input');
+    workspace.id = `${idPrefix}-workspace`;
+    workspace.className = 'ui-input';
+    workspace.type = 'text';
+    workspace.value = currentWorkspace;
+    workspace.readOnly = true;
+    workspace.title = currentWorkspace;
+    body.appendChild(addField('Workspace', workspace, 'This Goal stays bound to this Workspace until you edit its contract.'));
+
+    const controls = document.createElement('div');
+    controls.className = 'goal-dialog-grid';
+
+    const permission = document.createElement('select');
+    permission.id = `${idPrefix}-permission`;
+    permission.className = 'ui-select';
+    for (const [value, label] of [
+      ['Auto', 'Safe Auto'],
+      ['AutoEdit', 'Auto Edit'],
+      ['Ask', 'Ask before changes'],
+      ['Plan', 'Plan only'],
+    ]) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      permission.appendChild(option);
+    }
+    permission.value = this._goal?.permissionMode || 'Auto';
+    controls.appendChild(addField('Permission', permission));
+
+    const maxRuns = document.createElement('input');
+    maxRuns.id = `${idPrefix}-runs`;
+    maxRuns.className = 'ui-input';
+    maxRuns.type = 'number';
+    maxRuns.min = '1';
+    maxRuns.max = '1000';
+    maxRuns.value = String(this._goal?.maxRuns || 20);
+    controls.appendChild(addField('Maximum runs', maxRuns));
+
+    const failures = document.createElement('input');
+    failures.id = `${idPrefix}-failures`;
+    failures.className = 'ui-input';
+    failures.type = 'number';
+    failures.min = '1';
+    failures.max = '20';
+    failures.value = String(this._goal?.maxConsecutiveFailures || 3);
+    controls.appendChild(addField('Failure limit', failures));
+
+    const cadence = document.createElement('select');
+    cadence.id = `${idPrefix}-cadence`;
+    cadence.className = 'ui-select';
+    for (const [value, label] of [['15000', '15 seconds'], ['60000', '1 minute'], ['300000', '5 minutes'], ['900000', '15 minutes']]) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      cadence.appendChild(option);
+    }
+    cadence.value = String(this._goal?.wakeIntervalMs || 15000);
+    controls.appendChild(addField('Between runs', cadence));
+
+    body.appendChild(controls);
+
+    const safety = document.createElement('div');
+    safety.className = 'goal-dialog-safety';
+    safety.textContent = 'High-risk and critical actions still require approval. The Goal stops on completion review, blockers, repeated failures, or the run limit.';
+    body.appendChild(safety);
 
     const footer = document.createElement('div');
     footer.className = 'goal-dialog-actions';
@@ -494,19 +738,29 @@ export class InputPanel {
       label: action === 'edit' ? 'Change' : 'Start',
       variant: 'primary',
       onClick: () => {
-        const objective = textarea.value.trim();
-        if (!objective) return;
-        convVM.setGoal(action, objective);
-        this._goalExpanded = action === 'edit' ? this._goalExpanded : false;
+        if (!objective.value.trim() || !criteria.value.trim()) return;
+        const contract: GoalContractDraft = {
+          objective: objective.value.trim(),
+          acceptanceCriteria: criteria.value.trim(),
+          workspace: currentWorkspace,
+          permissionMode: permission.value,
+          maxRuns: Number(maxRuns.value),
+          maxConsecutiveFailures: Number(failures.value),
+          wakeIntervalMs: Number(cadence.value),
+          completionMode: 'review',
+        };
+        convVM.setGoal(action, contract);
         dialog?.close();
       },
     });
-    submitBtn.disabled = !textarea.value.trim();
-    textarea.addEventListener('input', () => {
-      submitBtn.disabled = !textarea.value.trim();
-    });
-    textarea.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && textarea.value.trim()) {
+    const updateSubmit = () => {
+      submitBtn.disabled = !objective.value.trim() || !criteria.value.trim();
+    };
+    updateSubmit();
+    objective.addEventListener('input', updateSubmit);
+    criteria.addEventListener('input', updateSubmit);
+    objective.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !submitBtn.disabled) {
         e.preventDefault();
         submitBtn.element.click();
       }
@@ -518,10 +772,10 @@ export class InputPanel {
       title: action === 'edit' ? 'Edit Goal' : 'Start Goal',
       body,
       footer,
-      width: '520px',
+      width: '660px',
     });
     dialog.show();
-    setTimeout(() => textarea.focus(), 0);
+    setTimeout(() => objective.focus(), 0);
   }
 
   private _goalSummary(objective: string): string {
@@ -625,7 +879,10 @@ export class InputPanel {
   clearAttachments(): void { this._attachments = []; this._renderAttachments(); }
 
   private _effectiveSendMode(): string {
-    return this._goal?.status === 'active' ? 'auto-edit' : this._currentMode;
+    if (this._goal?.status === 'active') {
+      return goalPermissionModeToUi(this._goal.permissionMode, this._currentMode as 'ask' | 'auto-edit' | 'plan' | 'auto');
+    }
+    return this._currentMode;
   }
 }
 

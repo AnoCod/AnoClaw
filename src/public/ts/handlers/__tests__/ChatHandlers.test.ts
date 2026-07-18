@@ -74,7 +74,7 @@ describe('registerChatHandlers', () => {
     expect(removeSpy).toHaveBeenCalledWith('cleanup-plugin');
   });
 
-  it('forwards tool confirmations with the explicit backend session and auto-approve flag', () => {
+  it('forwards tool confirmations with the explicit backend session without auto-approval', () => {
     const router = new WSMessageRouter();
     const queue = ToolConfirmationQueue.getInstance();
     const enqueueSpy = vi.spyOn(queue, 'enqueue').mockImplementation(() => {});
@@ -98,7 +98,7 @@ describe('registerChatHandlers', () => {
     expect(enqueueSpy).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'goal-root-session',
       toolCallId: 'tc-bash',
-      autoApprove: true,
     }));
+    expect(enqueueSpy).not.toHaveBeenCalledWith(expect.objectContaining({ autoApprove: true }));
   });
 });

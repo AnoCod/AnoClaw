@@ -9,7 +9,6 @@ export interface ToolConfirmRequest {
   riskLevel: string;
   params: Record<string, unknown>;
   sessionId?: string;
-  autoApprove?: boolean;
 }
 
 export class ToolConfirmDialog {

@@ -48,14 +48,12 @@ export function defaultPermissionMode(): PermissionMode {
   }
 }
 
-export function activeGoalPermissionMode(): PermissionMode {
-  return 'AutoEdit';
+export function activeGoalPermissionMode(value?: unknown): PermissionMode {
+  return normalizePermissionMode(value, 'Auto');
 }
 
-export function goalContinuationPermissionMode(): PermissionMode {
-  // Goal wakeups run without a waiting user, so avoid confirmation dialogs
-  // pausing autonomous progress.
-  return activeGoalPermissionMode();
+export function goalContinuationPermissionMode(value?: unknown): PermissionMode {
+  return activeGoalPermissionMode(value);
 }
 
 export function hasActiveSessionGoal(sessionManager: SessionManager, sessionId: string): boolean {
@@ -74,7 +72,8 @@ export function resolveSessionPermissionMode(
   const session = sessionManager.session(sessionId);
   if (!session) return normalizePermissionMode(requested, defaultPermissionMode());
   if (!session.isRoot()) return 'AutoEdit';
-  if (hasActiveSessionGoal(sessionManager, sessionId)) return activeGoalPermissionMode();
+  const goal = sessionManager.getGoal(sessionId);
+  if (goal?.status === 'active') return activeGoalPermissionMode(goal.permissionMode);
 
   const requestedMode = parsePermissionMode(requested);
   if (requestedMode) return requestedMode;

@@ -301,6 +301,10 @@ export function handleListSessions(
       canWrite: s.type === 'Main',
       createdAt: s.createdAt,
       lastActiveAt: s.lastActiveAt,
+      // Session-scoped product state (Goal, permission/effort mode, etc.) must
+      // survive a renderer reload. Real-time events keep this current while the
+      // app is open, but the list response is the cold-start source of truth.
+      metadata: s.metadata,
     })),
     total: sessions.length,
   });

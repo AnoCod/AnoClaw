@@ -467,6 +467,18 @@ body.panel-open .helper-panel {
 .goal-card[data-status="blocked"] {
   border-color: rgba(255, 197, 51, 0.34);
 }
+.goal-card[data-status="waiting_user"],
+.goal-card[data-status="waiting_confirmation"],
+.goal-card[data-status="waiting_review"],
+.goal-card[data-status="budget_exhausted"] {
+  border-color: rgba(255, 197, 51, 0.45);
+}
+.goal-card[data-status="failed"] {
+  border-color: rgba(255, 97, 97, 0.5);
+}
+.goal-card[data-status="completed"] {
+  border-color: rgba(89, 212, 153, 0.45);
+}
 
 .goal-card[data-status="paused"] {
   border-color: rgba(255,255,255,0.1);

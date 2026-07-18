@@ -22,6 +22,14 @@ export interface WsClientMessage {
   mode?: string;          // send_message / set_session_mode: ask / auto-edit / plan / auto
   action?: string;        // set_goal: start / pause / resume / edit / delete
   objective?: string;     // set_goal
+  acceptanceCriteria?: string;
+  workspace?: string;
+  permissionMode?: string;
+  maxRuns?: number;
+  maxConsecutiveFailures?: number;
+  wakeIntervalMs?: number;
+  completionMode?: 'review' | 'automatic';
+  internal?: 'goal';      // send_message: transient Goal runner kick, never shown or persisted as user text
   effort?: boolean;       // send_message
   score?: number;         // quality_score
   attachments?: Array<{ name: string; path: string; type?: string; size?: number; content?: string }>; // send_message

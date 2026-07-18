@@ -51,7 +51,6 @@ import { SharedContextStore } from './SharedContextStore.js';
 import { createAgentLoopSummarizer } from './AgentLoopSummarizer.js';
 import {
   activeGoalPermissionMode,
-  hasActiveSessionGoal,
   normalizePermissionMode,
   type PermissionMode,
 } from './PermissionModePolicy.js';
@@ -70,6 +69,7 @@ export interface AgentLoopConfig {
   permissionMode?: string;
   effort?: string;
   extraAllowedTools?: string[];
+  workspace?: string;
 }
 
 
@@ -85,6 +85,7 @@ export class AgentLoop {
   readonly permissionMode?: string;
   readonly effort?: string;
   readonly extraAllowedTools: string[];
+  readonly workspace?: string;
 
   private stallDetector: StallDetector;
   private toolCallHistory: Array<{ name: string; result: string; ts: number }> = [];
@@ -98,6 +99,7 @@ export class AgentLoop {
     this.permissionMode = config.permissionMode;
     this.effort = config.effort;
     this.extraAllowedTools = uniqueToolNames(config.extraAllowedTools || []);
+    this.workspace = config.workspace;
     this.stallDetector = new StallDetector();
   }
 
@@ -728,10 +730,14 @@ export class AgentLoop {
 
       let allDeferred = true;
       let anyUserInteraction = false;
+      let goalReportSucceeded = false;
+      let goalStoppedByConfirmation = false;
       const completedToolIds = new Set<string>();
 
       // Read session workspace for tool execution context
-      const sessionWorkspace = SessionManager.getInstance().session(this.sessionId)?.workspace || process.cwd();
+      const sessionWorkspace = this.workspace
+        || SessionManager.getInstance().session(this.sessionId)?.workspace
+        || process.cwd();
 
       try {
       for (const tc of toolCalls) {
@@ -752,7 +758,24 @@ export class AgentLoop {
 
 
         let userRejected = false;
-        if (tool && this._needsConfirmation(tool, permissionMode) && !this._autoApproveConfirmation(permissionMode)) {
+        const needsConfirmation = !!tool && this._needsConfirmation(tool, permissionMode);
+        let userConfirmed = !needsConfirmation;
+        if (tool && needsConfirmation) {
+          const sessionManager = SessionManager.getInstance();
+          const activeGoal = sessionManager.getGoal(this.sessionId);
+          if (activeGoal?.status === 'active') {
+            const waiting = await sessionManager.updateGoalStatus(
+              this.sessionId,
+              'waiting_confirmation',
+              `Approval required for ${tool.displayName?.() ?? tool.name()}`,
+            );
+            WsServer.getInstance().send(this.sessionId, {
+              type: 'goal_changed',
+              sessionId: this.sessionId,
+              action: 'waiting_confirmation',
+              goal: waiting,
+            });
+          }
           WsServer.getInstance().send(this.sessionId, {
             type: 'tool_confirm_request',
             sessionId: this.sessionId,
@@ -765,16 +788,39 @@ export class AgentLoop {
           const approved = await ConfirmationRegistry.getInstance().waitForConfirmation(tc.id, 60000, signal);
           if (!approved) {
             userRejected = true;
+            const currentGoal = activeGoal ? sessionManager.getGoal(this.sessionId) : null;
+            if (currentGoal?.status === 'waiting_confirmation') {
+              const blocked = await sessionManager.updateGoalStatus(
+                this.sessionId,
+                'blocked',
+                `Approval was not granted for ${tool.displayName?.() ?? tool.name()}`,
+              );
+              WsServer.getInstance().send(this.sessionId, {
+                type: 'goal_changed',
+                sessionId: this.sessionId,
+                action: 'blocked',
+                goal: blocked,
+              });
+              goalStoppedByConfirmation = true;
+            }
+          } else {
+            userConfirmed = true;
+            const currentGoal = activeGoal ? sessionManager.getGoal(this.sessionId) : null;
+            if (currentGoal?.status === 'waiting_confirmation') {
+              const resumed = await sessionManager.updateGoalStatus(this.sessionId, 'active');
+              WsServer.getInstance().send(this.sessionId, {
+                type: 'goal_changed',
+                sessionId: this.sessionId,
+                action: 'resume_after_confirmation',
+                goal: resumed,
+              });
+            }
           }
         }
 
         if (tool && !tool.shouldDefer()) {
           allDeferred = false;
         }
-        if (tool?.requiresUserInteraction()) {
-          anyUserInteraction = true;
-        }
-
         const t0 = Date.now();
         let result: { success: boolean; content: string; errorMessage?: string; structured?: unknown };
         if (userRejected) {
@@ -785,7 +831,7 @@ export class AgentLoop {
             sessionId: this.sessionId,
             agentId: this.agentId,
             workspace: sessionWorkspace,
-            userConfirmed: true,
+            userConfirmed,
             mode: this._toolExecutionMode(),
             callerRole: agent.role,
             signal: signal,
@@ -798,6 +844,26 @@ export class AgentLoop {
 
         const resultContent = result.success ? result.content : `Error: ${result.errorMessage || 'Unknown error'}`;
         toolResults.push(resultContent);
+        const startsUserInteraction = result.success && tool?.requiresUserInteraction() === true;
+        if (startsUserInteraction) {
+          anyUserInteraction = true;
+          const sessionManager = SessionManager.getInstance();
+          const currentGoal = sessionManager.getGoal(this.sessionId);
+          if (currentGoal?.status === 'active') {
+            const waiting = await sessionManager.updateGoalStatus(
+              this.sessionId,
+              'waiting_user',
+              `User input requested by ${tool.displayName?.() ?? tool.name()}`,
+            );
+            const root = sessionManager.getRootSession(this.sessionId);
+            WsServer.getInstance().send(root.id, {
+              type: 'goal_changed',
+              sessionId: root.id,
+              action: 'waiting_user',
+              goal: waiting,
+            });
+          }
+        }
 
         const displayResult = resultContent.slice(0, MAX_TOOL_RESULT_CHARS);
         yield {
@@ -829,6 +895,12 @@ export class AgentLoop {
           tool_call_id: tc.id,
         });
         completedToolIds.add(tc.id);
+        if (toolName === 'GoalReport' && result.success) {
+          goalReportSucceeded = true;
+          break;
+        }
+        if (goalStoppedByConfirmation) break;
+        if (startsUserInteraction) break;
       }
       } finally {
 
@@ -855,6 +927,11 @@ export class AgentLoop {
 
       if (signal?.aborted) continue;
 
+      if (goalStoppedByConfirmation) {
+        yield { type: SSEEventType.StatusInfo, content: '(Goal blocked after approval was not granted)' };
+        break;
+      }
+
       agent.setSessionStatus(this.sessionId, AgentStatus.Working);
       // Bridge the dead zone: tell frontend agent is now processing results
       yield {
@@ -874,6 +951,7 @@ export class AgentLoop {
         const WAIT_POLL_MS = 500;
         const WAIT_TIMEOUT_MS = 5 * 60_000;
         const waitStartedAt = Date.now();
+        let interactionTimedOut = false;
         yield { type: SSEEventType.StatusInfo, content: '(Waiting for user response...)' };
 
         while (true) {
@@ -910,11 +988,17 @@ export class AgentLoop {
           }
 
           if (Date.now() - waitStartedAt > WAIT_TIMEOUT_MS) {
-            yield { type: SSEEventType.StatusInfo, content: '(User response timeout - continuing)' };
+            yield { type: SSEEventType.StatusInfo, content: '(User response timeout)' };
+            interactionTimedOut = true;
             break;
           }
 
           await new Promise(resolve => setTimeout(resolve, WAIT_POLL_MS));
+        }
+
+        if (interactionTimedOut && SessionManager.getInstance().getGoal(this.sessionId)?.status === 'waiting_user') {
+          yield { type: SSEEventType.StatusInfo, content: '(Goal remains paused for user input)' };
+          break;
         }
       }
 
@@ -927,6 +1011,15 @@ export class AgentLoop {
       }
       if (this.toolCallHistory.length > 50) {
         this.toolCallHistory = this.toolCallHistory.slice(-40);
+      }
+
+      if (goalReportSucceeded) {
+        const reportedGoal = SessionManager.getInstance().getGoal(this.sessionId);
+        yield {
+          type: SSEEventType.StatusInfo,
+          content: `(Goal run reported: ${reportedGoal?.status || 'stopped'})`,
+        };
+        break;
       }
 
 
@@ -999,8 +1092,9 @@ export class AgentLoop {
   private _permissionMode(): PermissionMode {
     try {
       const sessionManager = SessionManager.getInstance();
-      if (hasActiveSessionGoal(sessionManager, this.sessionId)) {
-        return activeGoalPermissionMode();
+      const goal = sessionManager.getGoal(this.sessionId);
+      if (goal?.status === 'active') {
+        return activeGoalPermissionMode(goal.permissionMode);
       }
       return normalizePermissionMode(
         this.permissionMode || SettingsManager.getInstance().get<string>('ui.permissionMode', 'Auto'),
@@ -1028,19 +1122,11 @@ export class AgentLoop {
       case 'Auto':
         return risk === RiskLevel.High || risk === RiskLevel.Critical;
       case 'AutoEdit':
+        return risk === RiskLevel.High || risk === RiskLevel.Critical;
       case 'Plan':
         return false;
       default:
         return risk === RiskLevel.High || risk === RiskLevel.Critical;
-    }
-  }
-
-  private _autoApproveConfirmation(mode: PermissionMode): boolean {
-    if (mode === 'AutoEdit') return true;
-    try {
-      return hasActiveSessionGoal(SessionManager.getInstance(), this.sessionId);
-    } catch {
-      return false;
     }
   }
 

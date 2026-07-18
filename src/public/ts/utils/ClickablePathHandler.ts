@@ -146,10 +146,9 @@ export function handlePathClick(e: MouseEvent, workspacePath: string, sessionId?
       if (/^https?:\/\//i.test(href)) {
         if (api?.openExternal) {
           api.openExternal(href).catch(() => {});
+        } else {
+          window.open(href, '_blank', 'noopener,noreferrer');
         }
-        // Fallback: if no API, let Electron's default behavior handle it
-        // by opening in a new window. Don't show a toast — it's a URL,
-        // the browser may handle it fine.
       }
       return;
     }

@@ -13,18 +13,63 @@ export type AgentStatus = 'working' | 'idle' | 'paused' | 'error' | 'Active' | '
 /** Input mode */
 export type InputMode = 'ask' | 'auto-edit' | 'plan' | 'auto';
 
+export function goalPermissionModeToUi(permissionMode: unknown, fallback: InputMode = 'auto'): InputMode {
+  switch (permissionMode) {
+    case 'Ask': return 'ask';
+    case 'AutoEdit': return 'auto-edit';
+    case 'Plan': return 'plan';
+    case 'Auto': return 'auto';
+    default: return fallback;
+  }
+}
+
 /** Running mode — how long the agent stays alive */
 export interface GoalState {
+  goalId: string;
+  version: number;
   objective: string;
-  status: 'active' | 'paused' | 'deleted';
+  acceptanceCriteria: string;
+  workspace: string;
+  permissionMode: string;
+  maxRuns: number;
+  maxConsecutiveFailures: number;
+  wakeIntervalMs: number;
+  completionMode: 'review' | 'automatic';
+  status: 'active' | 'paused' | 'waiting_user' | 'waiting_confirmation' | 'waiting_review' | 'blocked' | 'failed' | 'budget_exhausted' | 'completed' | 'deleted';
+  statusReason?: string;
   createdAt?: string;
   updatedAt?: string;
-  runCount?: number;
+  runCount: number;
+  consecutiveFailures: number;
+  nextRunAt?: string;
+  currentRunId?: string;
+  progress?: number;
+  lastSummary?: string;
+  nextStep?: string;
+  evidence?: Array<{
+    type: 'file' | 'image' | 'test' | 'url' | 'note';
+    label: string;
+    path?: string;
+    url?: string;
+    detail?: string;
+  }>;
+  lastError?: string;
   lastRunAt?: string;
   lastWorkspace?: string;
   lastPermissionMode?: string;
   lastEffort?: 'HIGH' | 'NORMAL';
   lastUserMode?: string;
+}
+
+export interface GoalContractDraft {
+  objective: string;
+  acceptanceCriteria?: string;
+  workspace?: string;
+  permissionMode?: string;
+  maxRuns?: number;
+  maxConsecutiveFailures?: number;
+  wakeIntervalMs?: number;
+  completionMode?: 'review' | 'automatic';
 }
 
 /** Todo status */

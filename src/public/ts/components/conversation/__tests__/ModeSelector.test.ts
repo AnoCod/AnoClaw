@@ -236,4 +236,38 @@ describe('ModeSelector', () => {
     expect(fakeDocument.body.children.some((child) => child.classList.contains('mode-dropdown'))).toBe(false);
     expect(selector.element.getAttribute('aria-expanded')).toBe('false');
   });
+
+  it('uses the Mode menu Goal item as the single start entry', async () => {
+    const selector = await createSelector();
+    const actions: string[] = [];
+    selector.onGoalAction = (action) => actions.push(action);
+
+    const dropdown = openDropdown(selector as unknown as { element: FakeElement });
+    const goalEntry = dropdown.children[5];
+    expect(goalEntry.classList.contains('mode-goal-entry')).toBe(true);
+
+    goalEntry.dispatchEvent(new FakeDomEvent('click', goalEntry));
+
+    expect(actions).toEqual(['start']);
+    expect(fakeDocument.body.children.some((child) => child.classList.contains('mode-dropdown'))).toBe(false);
+  });
+
+  it('opens existing Goal details from the same Mode menu item', async () => {
+    const selector = await createSelector();
+    selector.setGoal({
+      goalId: 'goal-1',
+      status: 'completed',
+      objective: 'Keep the composer clear',
+      runCount: 2,
+      maxRuns: 5,
+    } as never);
+    const actions: string[] = [];
+    selector.onGoalAction = (action) => actions.push(action);
+
+    const dropdown = openDropdown(selector as unknown as { element: FakeElement });
+    const goalEntry = dropdown.children[5];
+    goalEntry.dispatchEvent(new FakeDomEvent('click', goalEntry));
+
+    expect(actions).toEqual(['view']);
+  });
 });

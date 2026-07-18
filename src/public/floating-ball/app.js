@@ -91,12 +91,13 @@ function currentGoal(state = currentState) {
 
 function phaseForState(state) {
   const goal = currentGoal(state);
-  if (state.waitingCount > 0 || goal?.status === 'blocked') return 'waiting';
+  if (state.waitingCount > 0 || ['blocked', 'waiting_user', 'waiting_confirmation', 'waiting_review'].includes(goal?.status)) return 'waiting';
   if (state.connection === 'disconnected') return 'disconnected';
   if (goal?.status === 'active') return 'goal';
   if (state.runningCount > 0) return 'running';
   if (goal?.status === 'paused') return 'paused';
   if (goal?.status === 'completed') return 'done';
+  if (goal?.status === 'failed' || goal?.status === 'budget_exhausted') return 'failed';
   if (state.currentTask?.phase === 'failed') return 'failed';
   if (state.currentTask?.phase === 'done') return 'done';
   return 'idle';
@@ -118,6 +119,11 @@ function phaseLabel(phase) {
 function goalBadgeText(status) {
   switch (status) {
     case 'blocked': return 'Waiting';
+    case 'waiting_user': return 'Input';
+    case 'waiting_confirmation': return 'Approve';
+    case 'waiting_review': return 'Review';
+    case 'budget_exhausted': return 'Limit';
+    case 'failed': return 'Failed';
     case 'paused': return 'Paused';
     case 'completed': return 'Done';
     case 'active':
@@ -133,7 +139,7 @@ function statusCount(value) {
 
 function ballStatusForState(state, phase) {
   const goal = currentGoal(state);
-  if (state.waitingCount > 0 || goal?.status === 'blocked') {
+  if (state.waitingCount > 0 || ['blocked', 'waiting_user', 'waiting_confirmation', 'waiting_review'].includes(goal?.status)) {
     const count = statusCount(state.waitingCount || 1);
     return { text: count, kind: 'waiting', label: `${count} waiting` };
   }
@@ -143,6 +149,8 @@ function ballStatusForState(state, phase) {
   }
   if (goal?.status === 'active') return { text: 'G', kind: 'goal', label: 'Goal active' };
   if (goal?.status === 'paused') return { text: 'II', kind: 'paused', label: 'Goal paused' };
+  if (goal?.status === 'failed' || goal?.status === 'budget_exhausted') return { text: '!', kind: 'failed', label: 'Goal stopped' };
+  if (goal?.status === 'completed') return { text: 'OK', kind: 'done', label: 'Goal completed' };
   if (phase === 'failed') return { text: '!', kind: 'failed', label: 'Recent task failed' };
   if (phase === 'disconnected') return { text: '!', kind: 'failed', label: 'AnoClaw offline' };
   if (phase === 'done') return { text: 'OK', kind: 'done', label: 'Recent task completed' };
@@ -307,18 +315,27 @@ function renderGoalCard(goal) {
 
   const status = goal.status || 'active';
   const isPaused = status === 'paused';
-  const canToggle = status === 'active' || status === 'blocked' || status === 'paused';
+  const resumable = ['paused', 'blocked', 'failed'].includes(status);
+  const pausable = ['active', 'waiting_user', 'waiting_confirmation'].includes(status);
+  const canToggle = resumable || pausable;
   const objective = cleanText(goal.objective || 'Active goal', 90);
   const meta = [
-    goal.runCount ? `Run #${goal.runCount}` : '',
-    goal.lastRunAt ? 'Recently active' : '',
+    `Runs ${goal.runCount || 0}/${goal.maxRuns || 20}`,
+    typeof goal.progress === 'number' ? `${goal.progress}%` : '',
+    cleanText(goal.lastSummary || goal.statusReason, 70),
   ].filter(Boolean).join(' · ');
 
   els.goalBadge.textContent = goalBadgeText(status);
   els.goalTitle.textContent = objective;
   els.goalTitle.title = goal.objective || objective;
   els.goalDetail.textContent = meta || (isPaused ? 'Paused from FloatingBall' : 'Visible while AnoClaw is minimized');
-  els.goalToggle.textContent = isPaused ? 'Resume' : 'Pause';
+  els.goalToggle.textContent = status === 'waiting_review'
+    ? 'Review in app'
+    : status === 'budget_exhausted'
+      ? 'Edit in app'
+      : status === 'completed'
+        ? 'Completed'
+        : resumable ? 'Resume' : 'Pause';
   els.goalToggle.disabled = !canToggle;
 }
 

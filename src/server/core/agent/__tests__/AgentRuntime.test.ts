@@ -477,37 +477,49 @@ describe('AgentRuntime', () => {
   });
 
   describe('goal continuation context', () => {
-    it('runs autonomous goal continuations with AutoEdit loop permissions', async () => {
+    it('runs bounded Goal continuations with the contract permission and no persisted internal prompt', async () => {
       const runtime = AgentRuntime.getInstance();
       const goal = {
+        goalId: 'goal-1',
+        version: 1,
         objective: '持续修复构建问题',
+        acceptanceCriteria: '构建通过',
+        workspace: 'F:/Projects/AnoClaw',
+        permissionMode: 'Auto',
+        maxRuns: 20,
+        maxConsecutiveFailures: 3,
+        wakeIntervalMs: 5000,
+        completionMode: 'review',
         status: 'active',
         createdAt: '2026-07-07T00:00:00.000Z',
         updatedAt: '2026-07-07T00:01:00.000Z',
         runCount: 0,
+        consecutiveFailures: 0,
       };
-      const appended: Message[] = [];
       let loopPermissionMode: string | undefined;
+      let loopWorkspace: string | undefined;
+      let loopPrompt = '';
+      let extraAllowedTools: string[] = [];
+      const runningGoal = { ...goal, runCount: 1, currentRunId: 'run-1', currentRunStartedAt: '2026-07-07T00:02:00.000Z' };
+      const reviewGoal = { ...runningGoal, status: 'waiting_review', currentRunId: undefined, lastReportedRunId: 'run-1' };
 
       const sessionManager = {
         session: vi.fn(() => ({ isRoot: () => true, metadata: { permissionMode: 'Auto' } })),
         getGoal: vi.fn()
           .mockReturnValueOnce(goal)
           .mockReturnValueOnce(goal)
-          .mockReturnValueOnce(null),
+          .mockReturnValueOnce(reviewGoal),
         getRootSession: vi.fn(() => ({ id: 'session-1', workspace: 'F:/Projects/AnoClaw' })),
-        touchGoalRun: vi.fn(async (_sessionId: string, context: Record<string, unknown>) => ({
-          ...goal,
-          runCount: 1,
-          lastPermissionMode: context.permissionMode,
-        })),
-        appendMessage: vi.fn(async (_sessionId: string, message: Message) => {
-          appended.push(message);
-        }),
-        getHistory: vi.fn(async () => appended),
+        beginGoalRun: vi.fn(async () => runningGoal),
+        failGoalRun: vi.fn(),
+        updateGoalStatus: vi.fn(),
+        getHistory: vi.fn(async () => []),
       };
-      const runSpy = vi.spyOn(AgentLoop.prototype, 'run').mockImplementation(async function* (this: AgentLoop) {
+      const runSpy = vi.spyOn(AgentLoop.prototype, 'run').mockImplementation(async function* (this: AgentLoop, message: Message) {
         loopPermissionMode = this.permissionMode;
+        loopWorkspace = this.workspace;
+        extraAllowedTools = this.extraAllowedTools;
+        loopPrompt = message.content;
         yield { type: SSEEventType.Done };
       });
       const sendSpy = vi.spyOn(WsServer.getInstance(), 'send').mockImplementation(() => true);
@@ -532,11 +544,14 @@ describe('AgentRuntime', () => {
           events.push(event);
         }
 
-        expect(sessionManager.touchGoalRun).toHaveBeenCalledWith('session-1', expect.objectContaining({
-          permissionMode: 'AutoEdit',
+        expect(sessionManager.beginGoalRun).toHaveBeenCalledWith('session-1', expect.objectContaining({
+          permissionMode: 'Auto',
         }));
-        expect(appended[0]?.content).toContain('Permission mode: AutoEdit');
-        expect(loopPermissionMode).toBe('AutoEdit');
+        expect(loopPrompt).toContain('Permission mode: Auto');
+        expect(loopPrompt).toContain('Run ID: run-1');
+        expect(loopPermissionMode).toBe('Auto');
+        expect(loopWorkspace).toBe('F:/Projects/AnoClaw');
+        expect(extraAllowedTools).toContain('GoalReport');
         expect(events.some((event: any) => event.type === SSEEventType.Wake)).toBe(true);
       } finally {
         runSpy.mockRestore();
@@ -550,11 +565,21 @@ describe('AgentRuntime', () => {
       const content = buildGoalContinuationContent({
         sessionId: 'session-1',
         goal: {
+          goalId: 'goal-1',
+          version: 1,
           objective: '修复 workspace 中的构建错误',
+          acceptanceCriteria: '构建通过',
+          workspace: 'F:/Projects/AnoClaw',
+          permissionMode: 'Plan',
+          maxRuns: 20,
+          maxConsecutiveFailures: 3,
+          wakeIntervalMs: 15000,
+          completionMode: 'review',
           status: 'active',
           createdAt: '2026-07-07T00:00:00.000Z',
           updatedAt: '2026-07-07T00:01:00.000Z',
           runCount: 3,
+          consecutiveFailures: 0,
           lastRunAt: '2026-07-07T00:02:00.000Z',
         },
         workspace: 'F:/Projects/AnoClaw',

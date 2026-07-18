@@ -32,15 +32,17 @@ describe('PermissionModePolicy', () => {
     expect(permissionModeToUi('Auto')).toBe('auto');
   });
 
-  it('runs autonomous goal continuations with AutoEdit permissions', () => {
-    expect(goalContinuationPermissionMode()).toBe('AutoEdit');
+  it('uses Safe Auto by default and honors an explicit Goal contract mode', () => {
+    expect(goalContinuationPermissionMode()).toBe('Auto');
+    expect(goalContinuationPermissionMode('AutoEdit')).toBe('AutoEdit');
   });
 
-  it('promotes active root-session goals to AutoEdit permissions', () => {
+  it('uses the active Goal contract instead of silently promoting permissions', () => {
     const sessionManager = {
       session: () => ({ isRoot: () => true, metadata: { permissionMode: 'Ask' } }),
       getGoal: () => ({
         objective: 'keep working',
+        permissionMode: 'Ask',
         status: 'active',
         createdAt: '2026-07-09T00:00:00.000Z',
         updatedAt: '2026-07-09T00:00:00.000Z',
@@ -48,8 +50,8 @@ describe('PermissionModePolicy', () => {
     } as unknown as SessionManager;
 
     expect(hasActiveSessionGoal(sessionManager, 'session-1')).toBe(true);
-    expect(resolveSessionPermissionMode(sessionManager, 'session-1', 'ask')).toBe('AutoEdit');
-    expect(resolveSessionPermissionMode(sessionManager, 'session-1', 'plan')).toBe('AutoEdit');
+    expect(resolveSessionPermissionMode(sessionManager, 'session-1', 'auto-edit')).toBe('Ask');
+    expect(resolveSessionPermissionMode(sessionManager, 'session-1', 'plan')).toBe('Ask');
   });
 
   it('keeps paused goals on the requested or stored permission mode', () => {

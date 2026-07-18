@@ -26,7 +26,6 @@ export class ToolConfirmationQueue {
   private _activeRequest: ToolConfirmRequest | null = null;
   private _activeResolver: ((approved: boolean) => void) | null = null;
   private _sendFn: ((data: Record<string, unknown>) => void) | null = null;
-  private _autoApprover: ((request: ToolConfirmRequest) => boolean) | null = null;
   private _listeners = new Set<() => void>();
 
   static getInstance(): ToolConfirmationQueue {
@@ -42,10 +41,6 @@ export class ToolConfirmationQueue {
 
   setSender(fn: (data: Record<string, unknown>) => void): void {
     this._sendFn = fn;
-  }
-
-  setAutoApprover(fn: ((request: ToolConfirmRequest) => boolean) | null): void {
-    this._autoApprover = fn;
   }
 
   onChange(listener: () => void): () => void {
@@ -66,10 +61,6 @@ export class ToolConfirmationQueue {
   }
 
   enqueue(request: ToolConfirmRequest): void {
-    if (request.autoApprove === true || this._autoApprover?.(request)) {
-      this._sendResponse(request.toolCallId, true);
-      return;
-    }
     this._queue.push(request);
     this._notify();
     this._processNext();

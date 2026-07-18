@@ -59,13 +59,17 @@ interface FloatingBallActivityItem {
 
 type FloatingBallNoticeKind = 'info' | 'success' | 'error';
 type FloatingBallPhase = 'thinking' | 'tool' | 'waiting' | 'done' | 'failed' | 'idle' | 'goal' | 'paused';
-type FloatingBallGoalStatus = GoalState['status'] | 'blocked' | 'completed';
+type FloatingBallGoalStatus = GoalState['status'];
 
 interface FloatingBallGoalPulse {
   sessionId: string | null;
   status: FloatingBallGoalStatus;
   objective: string;
   runCount?: number;
+  maxRuns?: number;
+  progress?: number;
+  lastSummary?: string;
+  statusReason?: string;
   updatedAt?: string;
   lastRunAt?: string;
 }
@@ -653,7 +657,6 @@ class App {
     // Wire ToolConfirmationQueue to WS client
     const toolConfirmQueue = ToolConfirmationQueue.getInstance();
     toolConfirmQueue.setSender((data) => this._sseClient.send(data));
-    toolConfirmQueue.setAutoApprover((request) => this._conversationVM.hasActiveGoalForSession(request.sessionId));
     toolConfirmQueue.onChange(() => this._scheduleFloatingBallStateUpdate());
 
     // Every received WS message → dispatch by type. session-less events pass empty sessionId.
@@ -920,6 +923,10 @@ class App {
         status: blocked ? 'blocked' : goal.status,
         objective: goal.objective || 'Active goal',
         runCount: goal.runCount,
+        maxRuns: goal.maxRuns,
+        progress: goal.progress,
+        lastSummary: goal.lastSummary,
+        statusReason: goal.statusReason,
         updatedAt: goal.updatedAt,
         lastRunAt: goal.lastRunAt,
       };
@@ -1006,10 +1013,10 @@ class App {
         }
         if (target !== this._sessionVM.activeSessionId) this._sessionVM.selectSession(target);
         const status = goal?.status || data.status;
-        if (status === 'paused') {
+        if (status === 'paused' || status === 'blocked' || status === 'failed') {
           this._conversationVM.setGoal('resume');
           this._pushFloatingBallNotice('success', 'Goal resumed');
-        } else if (status === 'active' || status === 'blocked') {
+        } else if (status === 'active' || status === 'waiting_confirmation' || status === 'waiting_user') {
           this._conversationVM.setGoal('pause');
           this._pushFloatingBallNotice('success', 'Goal paused');
         } else {

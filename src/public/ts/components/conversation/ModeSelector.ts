@@ -11,7 +11,7 @@ export class ModeSelector {
   onModeChange: ((mode: InputMode) => void) | null = null;
   /** Fires when effort toggle changes */
   onEffortChange: ((enabled: boolean) => void) | null = null;
-  onGoalAction: ((action: 'start' | 'pause' | 'resume' | 'edit' | 'delete', objective?: string) => void) | null = null;
+  onGoalAction: ((action: 'start' | 'view' | 'pause' | 'resume' | 'edit' | 'delete', objective?: string) => void) | null = null;
 
   private mode: InputMode;
   private effortEnabled: boolean;
@@ -269,53 +269,62 @@ export class ModeSelector {
   }
 
   private _buildGoalRow(): HTMLElement {
-    const row = document.createElement('div');
-    row.className = 'mode-goal-row';
-    row.style.gap = '8px';
+    // Goal has one canonical entry point: the Mode menu. The composer itself
+    // stays focused on writing; opening this item either creates a Goal or
+    // shows its complete contract, evidence, and controls in a dialog.
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'mode-dropdown-item mode-goal-entry';
+    item.setAttribute('role', 'menuitem');
 
-    const label = document.createElement('span');
-    label.className = 'mode-goal-label';
-    label.textContent = this.goal
-      ? `Goal: ${this.goal.status}${this.goal.runCount ? ` · #${this.goal.runCount}` : ''}`
-      : 'Goal';
-    label.title = this.goal?.objective || 'No active goal';
-    row.appendChild(label);
+    const icon = document.createElement('span');
+    const statusClass = this.goal?.status.replace(/_/g, '-') || 'empty';
+    icon.className = `mode-goal-icon goal-${statusClass}`;
+    icon.setAttribute('aria-hidden', 'true');
 
-    const actions = document.createElement('div');
-    actions.style.cssText = 'display:flex;gap:4px;align-items:center;';
+    const textCol = document.createElement('div');
+    textCol.className = 'mode-dropdown-text';
+    const title = document.createElement('span');
+    title.className = 'mode-dropdown-title';
+    title.textContent = this.goal ? `Goal · ${this._goalStatusLabel(this.goal.status)}` : 'Goal';
+    const desc = document.createElement('span');
+    desc.className = 'mode-dropdown-desc';
+    desc.textContent = this.goal?.objective || 'Set a bounded, verifiable outcome for this Workspace.';
+    desc.title = this.goal?.objective || desc.textContent;
+    textCol.appendChild(title);
+    textCol.appendChild(desc);
 
-    const makeBtn = (text: string, action: 'start' | 'pause' | 'resume' | 'edit' | 'delete') => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.textContent = text;
-      btn.className = 'cinema-tool-btn';
-      btn.style.cssText = 'height:22px;padding:0 7px;font-size:10px;';
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.onGoalAction?.(action);
-        this._closeDropdown();
-      });
-      return btn;
-    };
+    const badge = document.createElement('span');
+    badge.className = 'mode-goal-badge';
+    badge.textContent = this.goal
+      ? `${this.goal.runCount || 0}/${this.goal.maxRuns || 20}`
+      : 'Set up';
 
-    if (!this.goal) {
-      actions.style.width = '100%';
-      const startBtn = makeBtn('Start Goal', 'start');
-      startBtn.classList.add('mode-goal-start-btn');
-      startBtn.style.width = '100%';
-      actions.appendChild(startBtn);
-    } else if (this.goal.status === 'active') {
-      actions.appendChild(makeBtn('Pause', 'pause'));
-      actions.appendChild(makeBtn('Edit', 'edit'));
-      actions.appendChild(makeBtn('Delete', 'delete'));
-    } else {
-      actions.appendChild(makeBtn('Resume', 'resume'));
-      actions.appendChild(makeBtn('Edit', 'edit'));
-      actions.appendChild(makeBtn('Delete', 'delete'));
+    item.appendChild(icon);
+    item.appendChild(textCol);
+    item.appendChild(badge);
+    item.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.onGoalAction?.(this.goal ? 'view' : 'start');
+      this._closeDropdown();
+    });
+    return item;
+  }
+
+  private _goalStatusLabel(status: GoalState['status']): string {
+    switch (status) {
+      case 'active': return 'Running';
+      case 'paused': return 'Paused';
+      case 'waiting_user': return 'Needs input';
+      case 'waiting_confirmation': return 'Needs approval';
+      case 'waiting_review': return 'Ready for review';
+      case 'blocked': return 'Blocked';
+      case 'failed': return 'Stopped';
+      case 'budget_exhausted': return 'Run limit reached';
+      case 'completed': return 'Completed';
+      default: return 'Unavailable';
     }
-
-    row.appendChild(actions);
-    return row;
   }
 }
 

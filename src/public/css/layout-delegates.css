@@ -286,12 +286,58 @@
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-hairline);
   display: block;
+  cursor: zoom-in;
 }
 
 .md-image-fallback {
   color: var(--color-text-secondary);
   font-style: italic;
   font-size: var(--font-size-caption-md);
+}
+
+.cinema-message-body img {
+  cursor: zoom-in;
+}
+
+.md-image-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(8px);
+}
+
+.md-image-preview__image {
+  max-width: min(94vw, 1600px);
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+}
+
+.md-image-preview__close {
+  position: fixed;
+  top: 20px;
+  right: 24px;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(20, 20, 20, 0.72);
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.md-image-preview__close:hover,
+.md-image-preview__close:focus-visible {
+  background: rgba(55, 55, 55, 0.92);
+  outline: 2px solid rgba(255, 255, 255, 0.45);
 }
 
 /* --- Clickable file paths (Ctrl+Click to open in explorer) --- */

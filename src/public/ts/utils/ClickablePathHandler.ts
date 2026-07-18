@@ -14,6 +14,53 @@ function getAPI(): ElectronAPI | undefined {
   return (window as any).electronAPI as ElectronAPI | undefined;
 }
 
+let activeImagePreview: HTMLElement | null = null;
+let activeImagePreviewKeyHandler: ((event: KeyboardEvent) => void) | null = null;
+
+function closeImagePreview(): void {
+  if (activeImagePreviewKeyHandler) {
+    document.removeEventListener('keydown', activeImagePreviewKeyHandler);
+    activeImagePreviewKeyHandler = null;
+  }
+  activeImagePreview?.remove();
+  activeImagePreview = null;
+}
+
+function showImagePreview(src: string, alt: string): void {
+  closeImagePreview();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'md-image-preview';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-label', alt ? `Image preview: ${alt}` : 'Image preview');
+
+  const image = document.createElement('img');
+  image.className = 'md-image-preview__image';
+  image.src = src;
+  image.alt = alt;
+
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'md-image-preview__close';
+  close.setAttribute('aria-label', 'Close image preview');
+  close.textContent = '×';
+
+  overlay.append(image, close);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay || event.target === close) closeImagePreview();
+  });
+  activeImagePreviewKeyHandler = (event: KeyboardEvent) => {
+    if (event.key !== 'Escape' || activeImagePreview !== overlay) return;
+    closeImagePreview();
+  };
+  document.addEventListener('keydown', activeImagePreviewKeyHandler);
+
+  document.body.appendChild(overlay);
+  activeImagePreview = overlay;
+  close.focus();
+}
+
 /** Resolve a file path: absolute paths stay as-is, relative paths join to workspace. */
 export function resolvePath(clickedPath: string, workspacePath: string): string | null {
   return resolveClickedFilePath(clickedPath, workspacePath);
@@ -34,6 +81,17 @@ export function handlePathClick(e: MouseEvent, workspacePath: string): void {
 
   // Walk up to find .clickable-path or a[data-external-url]
   while (target) {
+    // Images open in an in-app full-size preview. This works for remote URLs,
+    // data URLs, raw tool screenshots, and workspace images served by AnoClaw.
+    if (target.tagName === 'IMG') {
+      const image = target as HTMLImageElement;
+      const src = image.currentSrc || image.src;
+      if (!src || image.style.display === 'none') return;
+      e.preventDefault();
+      showImagePreview(src, image.alt || '');
+      return;
+    }
+
     // File path click
     if (target.classList?.contains('clickable-path')) {
       e.preventDefault();

@@ -17,7 +17,15 @@
  */
 
 import { highlightCode } from './components/tabs/FilePreview.js';
-import { linkifyFilePathsInHtml, markdownLinkHtml } from './utils/PathReferences.js';
+import {
+  linkifyFilePathsInHtml,
+  markdownLinkHtml,
+  parseFilePathReference,
+} from './utils/PathReferences.js';
+
+export interface MarkdownRenderOptions {
+  sessionId?: string;
+}
 
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -176,7 +184,50 @@ function linkifyPaths(html: string): string {
  * 2. Render inline markdown elements
  * 3. Render block-level elements (tables, lists, headings, blockquotes, etc.)
  */
-function processText(text: string): string {
+function decodeMarkdownToken(value: string): string {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+function renderImage(escapedAlt: string, escapedTarget: string, options: MarkdownRenderOptions): string {
+  const alt = decodeMarkdownToken(escapedAlt).trim();
+  const target = decodeMarkdownToken(escapedTarget).trim();
+  const fileRef = parseFilePathReference(target);
+  const sessionId = options.sessionId?.trim() || '';
+
+  let src = '';
+  let fileAttr = '';
+  if (fileRef && sessionId) {
+    const params = new URLSearchParams({
+      path: fileRef.path,
+      sessionId,
+      raw: '1',
+    });
+    src = `/api/v1/workspace/read?${params.toString()}`;
+    fileAttr = ` data-file-path="${esc(fileRef.path)}"`;
+  } else if (/^https?:\/\//i.test(target)) {
+    src = target;
+  } else if (/^data:image\/(?:png|jpe?g|gif|webp|bmp|avif);base64,/i.test(target)) {
+    src = target;
+  }
+
+  const fallbackLabel = alt || (fileRef?.path ?? target) || 'image';
+  if (!src) {
+    return `<span class="md-image-wrapper md-image-error"${fileAttr}><span class="md-image-fallback">Image unavailable: ${esc(fallbackLabel)}</span></span>`;
+  }
+
+  return `<span class="md-image-wrapper"${fileAttr}>`
+    + `<img src="${esc(src)}" alt="${esc(alt)}" class="md-inline-image" loading="lazy" tabindex="0" title="Click to preview" `
+    + `onerror="this.style.display='none';this.nextElementSibling.style.display='block'">`
+    + `<span class="md-image-fallback" style="display:none">Image unavailable: ${esc(fallbackLabel)}</span>`
+    + `</span>`;
+}
+
+function processText(text: string, options: MarkdownRenderOptions = {}): string {
   // If the text contains raw HTML, run our sanitizer first
   let html = hasHtmlTags(text) ? sanitizeHtml(text) : text;
 
@@ -202,7 +253,7 @@ function processText(text: string): string {
   // ── Inline markdown (on already-safe HTML) ──
   // Images
   html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g,
-    '<span class="md-image-wrapper"><img src="$2" alt="$1" class="md-inline-image" loading="lazy" onerror="this.style.display=\'none\'"></span>');
+    (_match, alt, target) => renderImage(alt, target, options));
   // Links — only where NOT inside <a> tags
   html = html.replace(/(?<!href=")(?<!>)(?<!")(?<!')\[([^\]]+)\]\(([^)]+)\)/g,
     (_match, label, target) => markdownLinkHtml(label, target));
@@ -305,7 +356,7 @@ function processText(text: string): string {
  * Render markdown to safe HTML.
  * Code blocks are extracted first and never pass through the escaping pipeline.
  */
-export function renderMarkdown(text: string): string {
+export function renderMarkdown(text: string, options: MarkdownRenderOptions = {}): string {
   interface Slot { index: number; html: string }
   const slots: Slot[] = [];
   let match: RegExpExecArray | null;
@@ -327,7 +378,7 @@ export function renderMarkdown(text: string): string {
     });
   }
 
-  if (slots.length === 0) return processText(text);
+  if (slots.length === 0) return processText(text, options);
 
   const parts: string[] = [];
   let cursor = 0;
@@ -336,13 +387,13 @@ export function renderMarkdown(text: string): string {
   let slotIdx = 0;
   while ((match = CODE_BLOCK_RE.exec(text)) !== null && slotIdx < slots.length) {
     const before = text.slice(cursor, match.index);
-    parts.push(processText(before));
+    parts.push(processText(before, options));
     parts.push(slots[slotIdx].html);
     cursor = CODE_BLOCK_RE.lastIndex;
     slotIdx++;
   }
   if (cursor < text.length) {
-    parts.push(processText(text.slice(cursor)));
+    parts.push(processText(text.slice(cursor), options));
   }
 
   return parts.join('\n');

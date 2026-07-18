@@ -38,7 +38,7 @@ export class AgentMessageDelegate {
     // Markdown body — full render with code highlighting and image support
     const body = document.createElement('div');
     body.className = 'cinema-message-body';
-    body.innerHTML = renderMarkdown(this._msg.content || '');
+    body.innerHTML = renderMarkdown(this._msg.content || '', { sessionId: this._msg.sessionId });
     block.appendChild(body);
 
     // Star rating footer — skip for system notifications and trivial content

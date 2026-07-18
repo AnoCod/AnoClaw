@@ -53,4 +53,24 @@ describe('PathReferences', () => {
     expect(html).toContain('data-file-path="package.json"');
     expect(html).toContain('data-file-path=".gitignore"');
   });
+
+  it('serves workspace images through the session-scoped raw file endpoint', () => {
+    const html = renderMarkdown('![Chart](output/chart.png)', { sessionId: 'session 1' });
+
+    expect(html).toContain('class="md-inline-image"');
+    expect(html).toContain('data-file-path="output/chart.png"');
+    expect(html).toContain('/api/v1/workspace/read?path=output%2Fchart.png&amp;sessionId=session+1&amp;raw=1');
+    expect(html).toContain('tabindex="0"');
+  });
+
+  it('renders remote and bitmap data images while rejecting unsafe image schemes', () => {
+    const remote = renderMarkdown('![Remote](https://example.com/image.png)');
+    const data = renderMarkdown('![Inline](data:image/png;base64,AAAA)');
+    const unsafe = renderMarkdown('![Unsafe](javascript:alert(1))');
+
+    expect(remote).toContain('src="https://example.com/image.png"');
+    expect(data).toContain('src="data:image/png;base64,AAAA"');
+    expect(unsafe).not.toContain('<img');
+    expect(unsafe).toContain('Image unavailable');
+  });
 });

@@ -40,6 +40,34 @@ interface OpenAIChunk {
   };
 }
 
+const OPENAI_TOOL_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+
+function stableToolNameHash(value: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+/**
+ * Convert an internal AnoClaw tool name to the portable subset accepted by
+ * OpenAI-compatible APIs. Plugin names intentionally use namespaces such as
+ * `office.create_pptx`; those names stay unchanged inside AnoClaw and are only
+ * aliased at the provider boundary.
+ */
+export function toOpenAIToolName(name: string): string {
+  if (OPENAI_TOOL_NAME_RE.test(name)) return name;
+
+  const slug = name
+    .replace(/[^a-zA-Z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 44) || 'tool';
+  const alias = `anoclaw_${stableToolNameHash(name)}_${slug}`;
+  return alias.slice(0, 64);
+}
+
 export class OpenAICompatibleProvider extends LLMProvider {
   private _activeControllers = new Set<AbortController>();
   private _streamTimeoutMs = 120_000; // 2 min — abort if stream produces no data
@@ -67,20 +95,65 @@ export class OpenAICompatibleProvider extends LLMProvider {
 
     const url = `${options.apiUrl}/v1/chat/completions`;
 
-    // Build OpenAI-format messages
-    const openaiMessages = this._buildOpenAIMessages(messages, systemPrompt);
+    const originalToProvider = new Map<string, string>();
+    const providerToOriginal = new Map<string, string>();
+    const providerNameFor = (originalName: string): string => {
+      const existing = originalToProvider.get(originalName);
+      if (existing) return existing;
+
+      const base = toOpenAIToolName(originalName);
+      let candidate = base;
+      let collision = 1;
+      while (providerToOriginal.has(candidate) && providerToOriginal.get(candidate) !== originalName) {
+        const suffix = `_${collision++}`;
+        candidate = `${base.slice(0, 64 - suffix.length)}${suffix}`;
+      }
+      originalToProvider.set(originalName, candidate);
+      providerToOriginal.set(candidate, originalName);
+      return candidate;
+    };
+
+    // Reserve already-valid names first so a generated alias can never shadow
+    // a real tool with the same name.
+    const toolNames = tools.map((raw) => {
+      const tool = raw as Record<string, unknown>;
+      const fn = tool.function as Record<string, unknown> | undefined;
+      return typeof fn?.name === 'string'
+        ? fn.name
+        : typeof tool.name === 'string' ? tool.name : '';
+    }).filter(Boolean);
+    for (const name of toolNames.filter((name) => OPENAI_TOOL_NAME_RE.test(name))) {
+      providerNameFor(name);
+    }
+    for (const name of toolNames.filter((name) => !OPENAI_TOOL_NAME_RE.test(name))) {
+      providerNameFor(name);
+    }
+
+    // Build OpenAI-format messages, including historical tool calls, with the
+    // same aliases advertised in the current tool definitions.
+    const openaiMessages = this._buildOpenAIMessages(messages, systemPrompt, providerNameFor);
 
     // Convert tools to OpenAI format if needed
     const openaiTools = tools.length > 0
       ? tools.map((t: unknown) => {
           const tool = t as Record<string, unknown>;
-          // If already in OpenAI format {type: "function", function: {...}}, pass through
-          if (tool.type === 'function' && tool.function) return tool;
+          // If already in OpenAI format {type: "function", function: {...}},
+          // clone it so the registry-owned descriptor is never mutated.
+          if (tool.type === 'function' && tool.function) {
+            const fn = tool.function as Record<string, unknown>;
+            return {
+              ...tool,
+              function: {
+                ...fn,
+                name: typeof fn.name === 'string' ? providerNameFor(fn.name) : fn.name,
+              },
+            };
+          }
           // If in Anthropic format {name, description, input_schema}, convert
           return {
             type: 'function',
             function: {
-              name: tool.name,
+              name: typeof tool.name === 'string' ? providerNameFor(tool.name) : tool.name,
               description: tool.description,
               parameters: tool.input_schema,
             },
@@ -279,7 +352,7 @@ export class OpenAICompatibleProvider extends LLMProvider {
                 yield {
                   type: 'tool_use',
                   toolId: acc.id,
-                  toolName: acc.name,
+                  toolName: providerToOriginal.get(acc.name) || acc.name,
                   toolInput,
                 };
               }
@@ -311,6 +384,7 @@ export class OpenAICompatibleProvider extends LLMProvider {
   private _buildOpenAIMessages(
     messages: Array<{ role: string; content: string; tool_calls?: unknown[]; tool_call_id?: string }>,
     systemPrompt: string,
+    providerNameFor: (name: string) => string = toOpenAIToolName,
   ): Array<Record<string, unknown>> {
     const result: Array<Record<string, unknown>> = [];
 
@@ -328,12 +402,21 @@ export class OpenAICompatibleProvider extends LLMProvider {
       if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
         openaiMsg.tool_calls = (msg.tool_calls as Array<Record<string, unknown>>).map((tc) => {
           // Normalize to OpenAI tool_calls format
-          if (tc.function) return tc;
+          if (tc.function) {
+            const fn = tc.function as Record<string, unknown>;
+            return {
+              ...tc,
+              function: {
+                ...fn,
+                name: typeof fn.name === 'string' ? providerNameFor(fn.name) : fn.name,
+              },
+            };
+          }
           return {
             id: tc.id,
             type: 'function',
             function: {
-              name: tc.name,
+              name: typeof tc.name === 'string' ? providerNameFor(tc.name) : tc.name,
               arguments: typeof tc.input === 'string' ? tc.input : JSON.stringify(tc.input),
             },
           };

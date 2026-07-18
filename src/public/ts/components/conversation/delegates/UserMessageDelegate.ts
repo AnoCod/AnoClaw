@@ -23,7 +23,7 @@ export class UserMessageDelegate {
 
     const text = document.createElement('div');
     text.className = isSystem ? 'cinema-system-text' : 'cinema-user-text';
-    text.innerHTML = renderMarkdown(this._msg.content);
+    text.innerHTML = renderMarkdown(this._msg.content, { sessionId: this._msg.sessionId });
     block.appendChild(text);
 
     const label = document.createElement('div');

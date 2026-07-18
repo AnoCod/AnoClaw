@@ -12,6 +12,7 @@ interface StreamingMessage {
   id?: string;
   content?: string;
   agentName?: string;
+  sessionId?: string;
 }
 
 interface StreamingCallbacks {
@@ -57,7 +58,7 @@ export class StreamingMessageDelegate {
 
     const body = document.createElement('div');
     body.className = 'cinema-message-body streaming';
-    body.innerHTML = renderMarkdown(this._content);
+    body.innerHTML = this._renderMarkdown();
     this._body = body;
     block.appendChild(body);
 
@@ -96,7 +97,7 @@ export class StreamingMessageDelegate {
         return;
       }
       this._lastRenderAt = now;
-      this._body.innerHTML = renderMarkdown(this._content);
+      this._body.innerHTML = this._renderMarkdown();
       this._callbacks.onRender?.();
     });
   }
@@ -105,7 +106,7 @@ export class StreamingMessageDelegate {
   replaceContent(container: HTMLElement, text: string): void {
     this._content = text;
     if (this._body) {
-      this._body.innerHTML = renderMarkdown(this._content);
+      this._body.innerHTML = this._renderMarkdown();
       this._callbacks.onRender?.();
     }
   }
@@ -114,7 +115,7 @@ export class StreamingMessageDelegate {
   setContent(text: string): void {
     this._content = text;
     if (this._body) {
-      this._body.innerHTML = renderMarkdown(this._content);
+      this._body.innerHTML = this._renderMarkdown();
       this._callbacks.onRender?.();
     }
   }
@@ -128,8 +129,12 @@ export class StreamingMessageDelegate {
     }
     if (this._body) {
       this._lastRenderAt = performance.now();
-      this._body.innerHTML = renderMarkdown(this._content);
+      this._body.innerHTML = this._renderMarkdown();
       this._callbacks.onRender?.();
     }
+  }
+
+  private _renderMarkdown(): string {
+    return renderMarkdown(this._content, { sessionId: this._msg.sessionId });
   }
 }

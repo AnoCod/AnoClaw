@@ -757,9 +757,13 @@ export class WorkspaceTabGroup {
 
   // ── Open / close ──
 
-  async openFile(path: string, name: string): Promise<void> {
+  async openFile(path: string, name: string, line?: number, column?: number): Promise<void> {
     const existing = this._tabs.find(t => t.path === path);
-    if (existing) { this._activate(existing); return; }
+    if (existing) {
+      this._activate(existing);
+      if (existing.fileType === 'code') this._revealEditorLocation(line, column);
+      return;
+    }
     const ext = name.split('.').pop()?.toLowerCase() || '';
     const nameLower = name.toLowerCase();
 
@@ -831,10 +835,25 @@ export class WorkspaceTabGroup {
 
       const tab: OpenTab = { path, name, fileType, isDirty:false, language, model, viewState:null, originalContent: content };
       this._tabs.push(tab); this._renderTabBtn(tab); this._activate(tab);
+      if (fileType === 'code') this._revealEditorLocation(line, column);
     } catch {
       const tab: OpenTab = { path, name, fileType:'binary', isDirty:false, language:'', model:null, viewState:null };
       this._tabs.push(tab); this._renderTabBtn(tab); this._activate(tab);
     }
+  }
+
+  private _revealEditorLocation(line?: number, column?: number): void {
+    if (!this._editor || !line || line < 1) return;
+    const model = this._editor.getModel?.();
+    if (!model) return;
+
+    const lineNumber = Math.min(Math.max(1, Math.trunc(line)), model.getLineCount());
+    const maxColumn = model.getLineMaxColumn(lineNumber);
+    const safeColumn = Math.min(Math.max(1, Math.trunc(column || 1)), maxColumn);
+    const position = { lineNumber, column: safeColumn };
+    this._editor.setPosition(position);
+    this._editor.revealPositionInCenter(position);
+    this._editor.focus();
   }
 
   private _renderTabBtn(tab: OpenTab): void {

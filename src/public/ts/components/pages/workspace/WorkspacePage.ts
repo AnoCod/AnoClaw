@@ -21,6 +21,13 @@ interface AgentBrowserEvent {
   timestamp: number;
 }
 
+interface WorkspaceFileLinkEvent {
+  path: string;
+  sessionId?: string;
+  line?: number;
+  column?: number;
+}
+
 function openAgentBrowserInWorkspace(detail: Partial<AgentBrowserEvent>): void {
   const { url, viewId } = detail;
   if (!viewId) return;
@@ -40,6 +47,34 @@ function openAgentBrowserInWorkspace(detail: Partial<AgentBrowserEvent>): void {
 // Legacy renderer bridge kept for callers that dispatch this custom event.
 window.addEventListener('ws-open-browser-internal', (e: Event) => {
   openAgentBrowserInWorkspace((e as CustomEvent).detail || {});
+});
+
+function openFileLinkInWorkspace(detail: Partial<WorkspaceFileLinkEvent>): void {
+  const path = String(detail.path || '').trim();
+  if (!path) return;
+
+  const app = App.getInstance();
+  if (detail.sessionId && app.sessionVM?.activeSessionId !== detail.sessionId) {
+    app.sessionVM?.selectSession(detail.sessionId);
+  }
+  if (pageRegistry.currentPage !== 'workspace') pageRegistry.navigateTo('workspace');
+
+  let tries = 0;
+  const tryOpen = async () => {
+    const page = pageRegistry.getPage('workspace') as WorkspacePage | undefined;
+    if (page && await page.openLinkedFile({
+      path,
+      sessionId: detail.sessionId,
+      line: detail.line,
+      column: detail.column,
+    })) return;
+    if (++tries < 30) setTimeout(() => { void tryOpen(); }, 200);
+  };
+  setTimeout(() => { void tryOpen(); }, 0);
+}
+
+window.addEventListener('ws-open-workspace-file', (e: Event) => {
+  openFileLinkInWorkspace((e as CustomEvent).detail || {});
 });
 
 const electronApi = (window as any).electronAPI;
@@ -235,6 +270,20 @@ export class WorkspacePage implements Page {
 
   private _openFile(path: string, name: string): void {
     if (this._currentGroup) { void this._currentGroup.primaryGroup.openFile(path, name); }
+  }
+
+  async openLinkedFile(detail: WorkspaceFileLinkEvent): Promise<boolean> {
+    if (!this._currentGroup || !this._sessionId) return false;
+    if (detail.sessionId && detail.sessionId !== this._sessionId) return false;
+
+    await this._fileTree.revealPath(detail.path);
+    await this._currentGroup.primaryGroup.openFile(
+      detail.path,
+      detail.path.split('/').pop() || detail.path,
+      detail.line,
+      detail.column,
+    );
+    return true;
   }
 
   private async _revealWorkspacePath(path: string, open: boolean): Promise<void> {

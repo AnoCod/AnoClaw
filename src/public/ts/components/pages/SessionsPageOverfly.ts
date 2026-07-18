@@ -44,7 +44,7 @@ export class SessionsPageOverfly {
 
     // Click delegation for file paths and external URLs
     this._clickHandler = (e: MouseEvent) => {
-      handlePathClick(e, this._workspacePath);
+      handlePathClick(e, this._workspacePath, this._activeSessionId);
     };
     overfly.addEventListener('click', this._clickHandler);
 

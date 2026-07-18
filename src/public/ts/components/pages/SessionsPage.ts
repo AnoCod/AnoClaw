@@ -506,7 +506,7 @@ export class SessionsPage implements Page {
 
     // Click delegation for file paths and external URLs
     this._flowEl.addEventListener('click', (e: MouseEvent) => {
-      handlePathClick(e, this._workspacePath);
+      handlePathClick(e, this._workspacePath, this._activeSessionId);
     });
   }
 

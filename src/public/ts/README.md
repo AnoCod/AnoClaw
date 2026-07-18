@@ -87,7 +87,7 @@ class ToastManager {
 
 ### ClickablePathHandler
 
-Delegated click handler for file paths and external URLs. Workspace-relative paths resolved via `window.electronAPI.openPath()` / `openExternal()`.
+Delegated click handler for file paths and external URLs. Files inside the active session workspace open in the built-in Workspace IDE (including line/column navigation when provided); external files fall back to `window.electronAPI.openPath()`, and web links use `openExternal()`.
 
 ---
 

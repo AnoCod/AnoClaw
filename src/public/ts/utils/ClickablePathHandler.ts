@@ -3,7 +3,10 @@
 // on .clickable-path spans and a[data-external-url] links.
 
 import { ToastManager } from '../ToastManager.js';
-import { resolveClickedFilePath } from './PathReferences.js';
+import {
+  resolveClickedFilePath,
+  resolveWorkspaceRelativePath,
+} from './PathReferences.js';
 
 interface ElectronAPI {
   openExternal?: (url: string) => Promise<{ ok: boolean; error?: string }>;
@@ -72,8 +75,9 @@ export function resolvePath(clickedPath: string, workspacePath: string): string 
  *
  * @param e          The click event
  * @param workspacePath  Current session's workspace root (empty string if none)
+ * @param sessionId      Current session, used to open the matching Workspace IDE
  */
-export function handlePathClick(e: MouseEvent, workspacePath: string): void {
+export function handlePathClick(e: MouseEvent, workspacePath: string, sessionId?: string | null): void {
   let target = e.target as HTMLElement | null;
   if (!target) return;
 
@@ -103,6 +107,24 @@ export function handlePathClick(e: MouseEvent, workspacePath: string): void {
         ToastManager.getInstance().info('No workspace bound. Open Workspace and bind a folder first.', 4000);
         return;
       }
+
+      const workspaceRelativePath = resolveWorkspaceRelativePath(rawPath, workspacePath);
+      if (workspaceRelativePath) {
+        const line = Number.parseInt(target.getAttribute('data-file-line') || '', 10);
+        const column = Number.parseInt(target.getAttribute('data-file-column') || '', 10);
+        window.dispatchEvent(new CustomEvent('ws-open-workspace-file', {
+          detail: {
+            path: workspaceRelativePath,
+            sessionId: sessionId || undefined,
+            line: Number.isFinite(line) && line > 0 ? line : undefined,
+            column: Number.isFinite(column) && column > 0 ? column : undefined,
+          },
+        }));
+        return;
+      }
+
+      // Absolute paths outside the bound workspace cannot be read by the
+      // session-scoped IDE API. Preserve the desktop system-handler fallback.
       if (api?.openPath) {
         api.openPath(resolved).then((r) => {
           if (!r.ok && r.error) {

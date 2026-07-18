@@ -214,3 +214,39 @@ export function resolveClickedFilePath(clickedPath: string, workspacePath: strin
 
   return `${workspace.replace(/[\\/]+$/, '')}${sep}${normalizedRelative}`;
 }
+
+/**
+ * Convert a rendered file reference to a path that the session Workspace API
+ * can open. Absolute paths are accepted only when they remain inside the
+ * bound workspace; relative references are normalized and traversal outside
+ * the workspace is rejected.
+ */
+export function resolveWorkspaceRelativePath(clickedPath: string, workspacePath: string): string | null {
+  const workspace = workspacePath.trim();
+  if (!workspace) return null;
+
+  const resolved = resolveClickedFilePath(clickedPath, workspace);
+  if (!resolved) return null;
+
+  const normalizedWorkspace = workspace.replace(/\\/g, '/').replace(/\/+$/, '');
+  const normalizedResolved = resolved.replace(/\\/g, '/');
+  const caseInsensitive = /^[A-Za-z]:\//.test(normalizedWorkspace) || normalizedWorkspace.startsWith('//');
+  const comparableWorkspace = caseInsensitive ? normalizedWorkspace.toLowerCase() : normalizedWorkspace;
+  const comparableResolved = caseInsensitive ? normalizedResolved.toLowerCase() : normalizedResolved;
+
+  if (!comparableResolved.startsWith(`${comparableWorkspace}/`)) return null;
+
+  const relative = normalizedResolved.slice(normalizedWorkspace.length + 1);
+  const segments: string[] = [];
+  for (const segment of relative.split('/')) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..') {
+      if (segments.length === 0) return null;
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+
+  return segments.length > 0 ? segments.join('/') : null;
+}

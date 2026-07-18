@@ -3,6 +3,7 @@ import { renderMarkdown } from '../../MarkdownRenderer.js';
 import {
   parseFilePathReference,
   resolveClickedFilePath,
+  resolveWorkspaceRelativePath,
 } from '../PathReferences.js';
 
 describe('PathReferences', () => {
@@ -21,6 +22,28 @@ describe('PathReferences', () => {
     const resolved = resolveClickedFilePath('/src/server/main.ts:10', 'F:\\QoderSoft\\AnoClaw');
 
     expect(resolved).toBe('F:\\QoderSoft\\AnoClaw\\src\\server\\main.ts');
+  });
+
+  it('converts links inside the bound workspace to IDE-relative paths', () => {
+    expect(resolveWorkspaceRelativePath(
+      'src/server/main.ts:10',
+      'F:\\QoderSoft\\AnoClaw',
+    )).toBe('src/server/main.ts');
+    expect(resolveWorkspaceRelativePath(
+      'f:\\qodersoft\\anoclaw\\src\\public\\index.html',
+      'F:\\QoderSoft\\AnoClaw',
+    )).toBe('src/public/index.html');
+  });
+
+  it('rejects files outside the bound workspace and traversal escapes', () => {
+    expect(resolveWorkspaceRelativePath(
+      'D:\\outside\\notes.txt',
+      'F:\\QoderSoft\\AnoClaw',
+    )).toBeNull();
+    expect(resolveWorkspaceRelativePath(
+      '..\\outside.txt',
+      'F:\\QoderSoft\\AnoClaw',
+    )).toBeNull();
   });
 
   it('renders bare paths with line suffixes as clickable spans with clean data path', () => {

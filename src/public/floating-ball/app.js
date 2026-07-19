@@ -4,8 +4,8 @@
 const api = window.electronAPI;
 
 const CENTER = { x: 200, y: 200 };
-const ORBIT_RADIUS = 100;
-const HOVER_RADIUS = 105;
+const ORBIT_RADIUS = 112;
+const HOVER_RADIUS = 120;
 const CLIP_LIMIT = 4000;
 const AUTO_CAPTURE_INTERVAL_MS = 850;
 const NOTICE_TTL_MS = 8000;

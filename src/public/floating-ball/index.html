@@ -72,14 +72,11 @@
     <div id="recentList" class="recent-list"></div>
   </section>
 
-  <!-- The ball, centered. Outer ring drags the window; the core opens actions. -->
+  <!-- The companion, centered. Outer area drags the window; the pet opens actions. -->
   <div class="ball-wrap">
-    <div class="ball-drag-ring" title="拖动卫星球"></div>
-    <button class="ball" id="ballButton" aria-label="展开卫星球动作" title="展开动作">
-      <svg class="icon" viewBox="0 0 512 512">
-        <polygon points="370,44 52,460 468,460" fill="#FF2800"/>
-        <polygon points="370,44 52,460 260,460" fill="#FF4422" opacity="0.35"/>
-      </svg>
+    <div class="ball-drag-ring" title="拖动小爪"></div>
+    <button class="ball" id="ballButton" aria-label="展开小爪动作" title="展开动作">
+      <img class="pet-image" src="assets/anoclaw-pet.png" alt="" draggable="false">
       <span id="ballStatus" class="ball-status" aria-hidden="true"></span>
     </button>
   </div>

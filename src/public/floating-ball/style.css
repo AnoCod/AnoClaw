@@ -77,8 +77,8 @@ select {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 92px;
-  height: 92px;
+  width: 132px;
+  height: 122px;
   display: grid;
   place-items: center;
   transform: translate(-50%, -50%);
@@ -87,7 +87,8 @@ select {
 }
 
 body.panel-open .ball-wrap {
-  top: 56px;
+  top: 52px;
+  transform: translate(-50%, -50%) scale(0.72);
 }
 
 .ball-drag-ring {
@@ -101,28 +102,29 @@ body.panel-open .ball-wrap {
 .ball {
   position: relative;
   z-index: 1;
-  width: 58px;
-  height: 58px;
+  width: 124px;
+  height: 116px;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 50%;
+  border: 0;
+  border-radius: 44%;
   color: #f3f7fa;
   cursor: pointer;
-  background:
-    radial-gradient(circle at 34% 28%, rgba(255,255,255,0.12), transparent 32px),
-    radial-gradient(circle at 50% 50%, #272a2f, #0f1114);
-  box-shadow: 0 0 0 7px var(--phase-soft), 0 12px 30px rgba(0, 0, 0, 0.28);
+  background: transparent;
+  box-shadow: none;
   -webkit-app-region: no-drag;
-  transition: width 0.18s ease, height 0.18s ease, box-shadow 0.18s ease;
+  transition: transform 0.18s ease, filter 0.18s ease;
 }
 
 .ball::after {
   content: "";
   position: absolute;
-  inset: -5px;
+  z-index: 0;
+  inset: 17px 22px 13px;
   border: 2px solid var(--phase-color);
   border-radius: 50%;
-  opacity: 0.75;
+  opacity: 0.62;
+  box-shadow: 0 0 0 8px var(--phase-soft);
+  pointer-events: none;
 }
 
 body[data-phase="running"] .ball::after {
@@ -147,9 +149,56 @@ body.capture-pulse .ball::after {
 .ball:hover,
 body.hover .ball,
 body.panel-open .ball {
-  width: 66px;
-  height: 66px;
-  box-shadow: 0 0 0 9px var(--phase-soft), 0 18px 38px rgba(0, 0, 0, 0.34);
+  transform: scale(1.045);
+  filter: brightness(1.06);
+}
+
+.pet-image {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 124px;
+  height: 116px;
+  object-fit: contain;
+  transform-origin: 50% 78%;
+  pointer-events: none;
+  user-select: none;
+  filter: drop-shadow(0 12px 16px rgba(0, 0, 0, 0.44));
+  animation: pet-idle 3.8s ease-in-out infinite;
+}
+
+body[data-phase="running"] .pet-image {
+  animation: pet-working 1.15s ease-in-out infinite;
+}
+
+body[data-phase="goal"] .pet-image {
+  animation: pet-focus 2.2s ease-in-out infinite;
+}
+
+body[data-phase="waiting"] .pet-image {
+  animation: pet-attention 1.35s ease-in-out infinite;
+}
+
+body[data-phase="done"] .pet-image,
+body[data-notice-kind="success"] .pet-image {
+  animation: pet-celebrate 1.2s ease-in-out infinite;
+}
+
+body[data-phase="failed"] .pet-image,
+body[data-notice-kind="error"] .pet-image {
+  animation: pet-error 2.4s ease-in-out infinite;
+  filter: saturate(0.72) drop-shadow(0 12px 18px rgba(255, 97, 97, 0.2));
+}
+
+body[data-phase="paused"] .pet-image {
+  animation: pet-paused 4.8s ease-in-out infinite;
+  filter: saturate(0.55) brightness(0.82) drop-shadow(0 12px 16px rgba(0, 0, 0, 0.44));
+}
+
+body[data-phase="disconnected"] .pet-image {
+  animation: none;
+  opacity: 0.68;
+  filter: grayscale(0.78) brightness(0.66) drop-shadow(0 12px 16px rgba(0, 0, 0, 0.44));
 }
 
 @keyframes ring-spin {
@@ -162,28 +211,55 @@ body.panel-open .ball {
   100% { opacity: 0.44; transform: scale(0.96); }
 }
 
+@keyframes pet-idle {
+  0%, 100% { transform: translateY(1px) scale(0.985); }
+  50% { transform: translateY(-2px) scale(1); }
+}
+
+@keyframes pet-working {
+  0%, 100% { transform: translateY(1px) rotate(-1.2deg); }
+  50% { transform: translateY(-4px) rotate(1.2deg); }
+}
+
+@keyframes pet-focus {
+  0%, 100% { transform: translateY(0) scale(0.985); }
+  50% { transform: translateY(-3px) scale(1.015); }
+}
+
+@keyframes pet-attention {
+  0%, 62%, 100% { transform: translateY(0) rotate(0); }
+  72% { transform: translateY(-5px) rotate(-2deg); }
+  82% { transform: translateY(-1px) rotate(2deg); }
+  91% { transform: translateY(-3px) rotate(-1deg); }
+}
+
+@keyframes pet-celebrate {
+  0%, 100% { transform: translateY(0) scale(1); }
+  34% { transform: translateY(-8px) scale(1.03) rotate(-2deg); }
+  62% { transform: translateY(-2px) scale(1.01) rotate(2deg); }
+}
+
+@keyframes pet-error {
+  0%, 100% { transform: translateY(3px) rotate(-2deg) scaleY(0.98); }
+  50% { transform: translateY(1px) rotate(0deg) scaleY(1); }
+}
+
+@keyframes pet-paused {
+  0%, 100% { transform: translateY(2px) scale(0.985); }
+  50% { transform: translateY(0) scale(0.99); }
+}
+
 @keyframes capture-pulse {
   0% { opacity: 0.95; transform: scale(1); }
   70% { opacity: 0.18; transform: scale(1.35); }
   100% { opacity: 0.75; transform: scale(1); }
 }
 
-.icon {
-  display: block;
-  width: 28px;
-  height: 28px;
-  margin: 14px auto 0;
-  pointer-events: none;
-}
-
-body.panel-open .icon {
-  margin-top: 18px;
-}
-
 .ball-status {
   position: absolute;
-  right: -3px;
-  bottom: 1px;
+  z-index: 3;
+  right: 8px;
+  bottom: 7px;
   min-width: 19px;
   height: 19px;
   padding: 0 5px;
@@ -218,8 +294,8 @@ body.panel-open .icon {
 }
 
 body.panel-open .ball-status {
-  right: 0;
-  bottom: 3px;
+  right: 8px;
+  bottom: 7px;
 }
 
 .satellites {
@@ -826,4 +902,12 @@ body.panel-open .helper-panel {
 button:hover {
   border-color: rgba(255,255,255,0.2);
   filter: brightness(1.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pet-image,
+  .ball::after,
+  body.hover:not(.panel-open) .sat {
+    animation: none !important;
+  }
 }

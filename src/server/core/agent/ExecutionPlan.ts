@@ -12,6 +12,7 @@ import { AgentRuntime } from './AgentRuntime.js';
 import { TaskDAG, type TaskNode } from './TaskDAG.js';
 import { createLogger } from '../logger.js';
 import { TASK_TIMEOUT_SEC } from '../../../shared/constants.js';
+import { InterruptController, InterruptReason } from './supervision/InterruptController.js';
 
 export class ExecutionPlan {
   private _dag: TaskDAG;
@@ -115,7 +116,28 @@ export class ExecutionPlan {
         results.set(task.id, task.result || '');
       });
 
-      await Promise.allSettled(batchPromises);
+      const remainingMs = Math.max(1, ExecutionPlan.TIMEOUT_MS - (Date.now() - startedAt));
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<'timeout'>((resolve) => {
+        timeoutHandle = setTimeout(() => resolve('timeout'), remainingMs);
+      });
+      const outcome = await Promise.race([
+        Promise.allSettled(batchPromises).then(() => 'completed' as const),
+        deadline,
+      ]);
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (outcome === 'timeout') {
+        InterruptController.getInstance().requestInterrupt(parentSessionId, InterruptReason.Timeout);
+        for (const task of batch) {
+          if (task.status === 'running') {
+            task.status = 'failed';
+            task.result = 'Plan timeout';
+            task.completedAt = Date.now();
+            results.set(task.id, task.result);
+          }
+        }
+        break;
+      }
     }
 
     const elapsed = Date.now() - startedAt;

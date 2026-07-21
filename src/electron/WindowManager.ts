@@ -64,6 +64,12 @@ export class WindowManager {
 
     this.windows.add(win);
     if (!this.mainWindow) this.mainWindow = win;
+    win.once('closed', () => {
+      this.windows.delete(win);
+      if (this.mainWindow === win) {
+        this.mainWindow = [...this.windows].find(candidate => !candidate.isDestroyed()) || null;
+      }
+    });
     return win;
   }
 

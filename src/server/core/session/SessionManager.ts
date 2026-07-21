@@ -10,6 +10,7 @@ import { TokenCounter } from '../context/TokenCounter.js';
 import { ToolRegistry } from '../tools/ToolRegistry.js';
 import { AgentRegistry } from '../agent/AgentRegistry.js';
 import { PromptAssembler } from '../prompt/PromptAssembler.js';
+import { CacheScope } from '../prompt/PromptSection.js';
 import type {
   SessionNode,
   SessionType,
@@ -29,6 +30,7 @@ import { normalizePermissionMode } from '../agent/PermissionModePolicy.js';
 import { messageToJsonlEvents, jsonlEventsToMessages } from '../../../shared/serialization/jsonl-converters.js';
 import { createLogger } from '../logger.js';
 import { TypedEventBus } from '../events/TypedEventBus.js';
+import { SharedContextStore } from '../agent/SharedContextStore.js';
 import type { ILogger } from '../interfaces/ILogger.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -1163,7 +1165,7 @@ export class SessionManager extends EventEmitter {
 
     // Return in-memory cache when available (non-flat only)
     if (!flat && session.cachedMessages) {
-      return session.cachedMessages;
+      return [...session.cachedMessages];
     }
 
     const store = SessionStore.getInstance();
@@ -1175,7 +1177,17 @@ export class SessionManager extends EventEmitter {
       session.setCachedMessages(messages);
     }
 
-    return messages;
+    return [...messages];
+  }
+
+  /** Release all session-scoped in-memory resources. Hard deletion also removes
+   * the domain object itself; archive keeps the lightweight session node. */
+  releaseSessionResources(sessionId: string, remove = false): void {
+    this.sessions.get(sessionId)?.clearMessageCache();
+    this._messageCounts.delete(sessionId);
+    PromptAssembler.getInstance().invalidateCache(CacheScope.Session, undefined, sessionId);
+    SharedContextStore.getInstance().clearScope(sessionId);
+    if (remove) this.sessions.delete(sessionId);
   }
 
   /**
@@ -1239,9 +1251,7 @@ export class SessionManager extends EventEmitter {
       await this._syncMeta(session.parentSessionId);
     }
 
-    // Clean up per-session auxiliary maps to prevent memory leak
-    this._locks.delete(sessionId);
-    this._messageCounts.delete(sessionId);
+    this.releaseSessionResources(sessionId);
 
     // Notify EventSubscriptionManager (via TypedEventBus) to clean up subscriptions
     TypedEventBus.emit('session:archiving', { sessionId });

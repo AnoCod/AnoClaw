@@ -8,6 +8,7 @@
  */
 import type { ToolResult } from '../../../shared/types/tool.js';
 import type { ExecutionContext } from '../../../shared/types/session.js';
+import { TypedEventBus } from '../../core/events/TypedEventBus.js';
 
 interface ToolTrace {
   toolName: string;
@@ -45,13 +46,28 @@ const MAX_RECENT_TRACES_PER_TOOL = 10;
 export class ToolProfiler {
   private static _instance: ToolProfiler;
   private _traces: Map<string, ToolTrace[]> = new Map(); // keyed by sessionId
+  private _unsubscribers: Array<() => void>;
+
+  private constructor() {
+    this._unsubscribers = [
+      TypedEventBus.on('session:archiving', ({ sessionId }) => this.clearSession(sessionId)),
+      TypedEventBus.on('session:hard_deleted', ({ sessionId }) => this.clearSession(sessionId)),
+    ];
+  }
 
   static getInstance(): ToolProfiler {
     if (!ToolProfiler._instance) ToolProfiler._instance = new ToolProfiler();
     return ToolProfiler._instance;
   }
 
-  static resetInstance(): void { ToolProfiler._instance = null!; }
+  static resetInstance(): void {
+    ToolProfiler._instance?._unsubscribers.forEach(unsubscribe => unsubscribe());
+    ToolProfiler._instance = null!;
+  }
+
+  clearSession(sessionId: string): void {
+    this._traces.delete(sessionId);
+  }
 
   record(
     toolName: string,

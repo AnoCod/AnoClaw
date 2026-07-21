@@ -1,17 +1,17 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { WsServer } from '../WsServer.js';
+import { WsServer, isAllowedWsOrigin } from '../WsServer.js';
 
 type BufferedEntry = { event: Record<string, unknown>; ts: number; seq: number };
 
 function internals(server: WsServer): {
-  _conn: null;
+  _connections: Map<unknown, unknown>;
   _seqCounter: number;
   _eventBuffers: Map<string, BufferedEntry[]>;
 } {
   return server as unknown as {
-    _conn: null;
+    _connections: Map<unknown, unknown>;
     _seqCounter: number;
     _eventBuffers: Map<string, BufferedEntry[]>;
   };
@@ -22,7 +22,7 @@ describe('WsServer disconnected buffering', () => {
 
   beforeEach(() => {
     const state = internals(server);
-    state._conn = null;
+    state._connections.clear();
     state._seqCounter = 0;
     state._eventBuffers.clear();
   });
@@ -54,5 +54,28 @@ describe('WsServer disconnected buffering', () => {
       'utf8',
     );
     expect(source).not.toMatch(/clearEventBuffer\?\.\(effectiveSessionId\)/);
+  });
+
+  it('broadcasts an event to every open window connection', () => {
+    const first = { readyState: 1, send: vi.fn() };
+    const second = { readyState: 1, send: vi.fn() };
+    const state = internals(server);
+    state._connections.set(first, { ws: first, connectedAt: Date.now(), isAlive: true });
+    state._connections.set(second, { ws: second, connectedAt: Date.now(), isAlive: true });
+
+    expect(server.send('session-1', { type: 'status', content: 'ready' })).toBe(true);
+    expect(first.send).toHaveBeenCalledOnce();
+    expect(second.send).toHaveBeenCalledOnce();
+  });
+});
+
+describe('WebSocket origin policy', () => {
+  it('accepts the local AnoClaw UI origin on the target port', () => {
+    expect(isAllowedWsOrigin('http://localhost:3456', '127.0.0.1:3456')).toBe(true);
+  });
+
+  it('rejects remote webpages and missing origins', () => {
+    expect(isAllowedWsOrigin('https://example.com', '127.0.0.1:3456')).toBe(false);
+    expect(isAllowedWsOrigin(undefined, '127.0.0.1:3456')).toBe(false);
   });
 });

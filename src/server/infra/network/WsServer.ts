@@ -1,7 +1,7 @@
 /**
- * WsServer — single-connection WebSocket server
+ * WsServer — multi-window WebSocket transport
  *
- * One persistent WS connection for the entire app (no per-session binding).
+ * Multiple persistent WS connections are supported for Electron multi-window use.
  * Every outgoing message carries `_sessionId` so the frontend can route it
  * to the correct session's UI.
  *
@@ -23,11 +23,28 @@ export interface WsConnection {
   isAlive: boolean;
 }
 
+export function isAllowedWsOrigin(origin: string | undefined, hostHeader: string | undefined): boolean {
+  if (!origin || !hostHeader) return false;
+  try {
+    const parsed = new URL(origin);
+    const target = new URL(`http://${hostHeader}`);
+    const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    const targetHostname = target.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    const allowedHost = ['localhost', '127.0.0.1', '::1'].includes(hostname);
+    const targetIsLocal = ['localhost', '127.0.0.1', '::1'].includes(targetHostname);
+    return allowedHost && targetIsLocal
+      && (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+      && parsed.port === target.port;
+  } catch {
+    return false;
+  }
+}
+
 export class WsServer extends EventEmitter implements Transport {
   private static _instance: WsServer;
   private wss: WebSocketServer | null = null;
-  /** Single global connection (replaces old per-session Map) */
-  private _conn: WsConnection | null = null;
+  /** Active UI connections. Events are broadcast so every window stays current. */
+  private _connections: Map<WebSocket, WsConnection> = new Map();
   private _heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   /** Event buffers keyed by sessionId — survive brief disconnects */
   private _eventBuffers: Map<string, Array<{ event: Record<string, unknown>; ts: number; seq: number }>> = new Map();
@@ -48,20 +65,20 @@ export class WsServer extends EventEmitter implements Transport {
   private constructor() { super(); }
 
   attach(server: HttpServer): void {
-    this.wss = new WebSocketServer({ server });
+    this.wss = new WebSocketServer({
+      server,
+      maxPayload: 2 * 1024 * 1024,
+      verifyClient: ({ req }: { req: IncomingMessage }) => isAllowedWsOrigin(req.headers.origin, req.headers.host),
+    });
 
     this.wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
       const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
       const pathname = url.pathname;
       if (pathname !== '/ws') { ws.close(4000, 'Invalid path'); return; }
 
-      // Close any previous connection (duplicate tab / reconnect)
-      if (this._conn) {
-        try { this._conn.ws.close(1000, 'Replaced by new connection'); } catch {}
-      }
-
-      this._conn = { ws, connectedAt: Date.now(), isAlive: true };
-      ws.on('pong', () => { if (this._conn) this._conn.isAlive = true; });
+      const connection: WsConnection = { ws, connectedAt: Date.now(), isAlive: true };
+      this._connections.set(ws, connection);
+      ws.on('pong', () => { connection.isAlive = true; });
 
       ws.send(JSON.stringify({ type: 'serverEpoch', epoch: this.serverEpoch }));
       LogManager.getInstance().logger('anochat.core').info('WS client connected (global)');
@@ -82,10 +99,9 @@ export class WsServer extends EventEmitter implements Transport {
       });
 
       ws.on('close', () => {
-        if (this._conn && this._conn.ws === ws) {
+        if (this._connections.delete(ws)) {
           LogManager.getInstance().logger('anochat.core').info('WS client disconnected');
-          this._conn = null;
-          this.emit('clientDisconnected');
+          if (this._connections.size === 0) this.emit('clientDisconnected');
         }
       });
 
@@ -97,18 +113,19 @@ export class WsServer extends EventEmitter implements Transport {
     LogManager.getInstance().logger('anochat.core').info('WebSocket server attached');
 
     this._heartbeatTimer = setInterval(() => {
-      if (!this._conn) return;
-      if (!this._conn.isAlive) {
-        LogManager.getInstance().logger('anochat.core').warn('WS heartbeat lost, terminating');
-        try { this._conn.ws.terminate(); } catch {}
-        this._conn = null;
-        this.emit('clientDisconnected');
-        return;
+      let removedAny = false;
+      for (const [socket, connection] of this._connections) {
+        if (!connection.isAlive) {
+          LogManager.getInstance().logger('anochat.core').warn('WS heartbeat lost, terminating');
+          try { socket.terminate(); } catch {}
+          this._connections.delete(socket);
+          removedAny = true;
+          continue;
+        }
+        connection.isAlive = false;
+        try { socket.ping(); } catch {}
       }
-      this._conn.isAlive = false;
-      try {
-        this._conn.ws.ping();
-      } catch {}
+      if (removedAny && this._connections.size === 0) this.emit('clientDisconnected');
     }, WsServer.HEARTBEAT_INTERVAL_MS);
 
     // Periodic buffer cleanup: drop events older than TTL, remove empty buffers
@@ -120,7 +137,8 @@ export class WsServer extends EventEmitter implements Transport {
   /** Send message tagged with sessionId — the frontend routes by _sessionId.
    *  Never throws. Drops on serialization failure (logged). */
   send(sessionId: string, data: Record<string, unknown>): boolean {
-    if (!this._conn || this._conn.ws.readyState !== WebSocket.OPEN) {
+    const openSockets = [...this._connections.keys()].filter(ws => ws.readyState === WebSocket.OPEN);
+    if (openSockets.length === 0) {
       // Buffer for reconnect (with timestamp and sequence number)
       if (data.type !== 'ping') {
         this._bufferEvent(sessionId, data);
@@ -129,17 +147,22 @@ export class WsServer extends EventEmitter implements Transport {
     }
     try {
       const payload = JSON.stringify({ ...data, _sessionId: sessionId });
-      this._conn.ws.send(payload, (err?: Error) => {
+      let pending = openSockets.length;
+      let successful = 0;
+      for (const socket of openSockets) socket.send(payload, (err?: Error) => {
         if (err) {
           LogManager.getInstance().logger('anochat.core').warn('WS send error, re-buffering', {
             sid: sessionId, type: data.type, error: err.message,
           });
-          if (data.type !== 'ping') {
-            this._bufferEvent(sessionId, data);
-          }
-          try { this._conn?.ws.terminate(); } catch {}
-          this._conn = null;
-          this.emit('clientDisconnected');
+          try { socket.terminate(); } catch {}
+          this._connections.delete(socket);
+          if (this._connections.size === 0) this.emit('clientDisconnected');
+        } else {
+          successful++;
+        }
+        pending--;
+        if (pending === 0 && successful === 0 && data.type !== 'ping') {
+          this._bufferEvent(sessionId, data);
         }
       });
     } catch (e) {
@@ -157,14 +180,14 @@ export class WsServer extends EventEmitter implements Transport {
   }
 
   shutdownAll(): void {
-    if (this._conn) {
-      try { this._conn.ws.close(1012, 'Server restart'); } catch {}
-      this._conn = null;
+    for (const socket of this._connections.keys()) {
+      try { socket.close(1012, 'Server restart'); } catch {}
     }
+    this._connections.clear();
   }
 
   isConnected(_sessionId?: string): boolean {
-    return this._conn !== null && this._conn.ws.readyState === WebSocket.OPEN;
+    return [...this._connections.keys()].some(ws => ws.readyState === WebSocket.OPEN);
   }
 
   clearEventBuffer(sessionId: string): void {
@@ -172,11 +195,11 @@ export class WsServer extends EventEmitter implements Transport {
   }
 
   activeSessions(): string[] {
-    return this._conn ? ['*global*'] : [];
+    return this.isConnected() ? ['*global*'] : [];
   }
 
   get connectionCount(): number {
-    return this._conn ? 1 : 0;
+    return this._connections.size;
   }
 
   /**
@@ -268,7 +291,7 @@ export class WsServer extends EventEmitter implements Transport {
    *  When no client is connected, uses a shorter TTL to prevent unbounded
    *  memory growth from sessions that never reconnect. */
   private _sweepStaleBuffers(): void {
-    const connected = this._conn !== null && this._conn.ws.readyState === WebSocket.OPEN;
+    const connected = this.isConnected();
     const ttl = connected ? WsServer.BUFFER_TTL_MS : WsServer.BUFFER_TTL_DISCONNECTED_MS;
     const cutoff = Date.now() - ttl;
     for (const [sid, buf] of this._eventBuffers) {
@@ -290,7 +313,10 @@ export class WsServer extends EventEmitter implements Transport {
     return new Promise((resolve) => {
       if (this._bufferCleanupTimer) { clearInterval(this._bufferCleanupTimer); this._bufferCleanupTimer = null; }
       if (this._heartbeatTimer) { clearInterval(this._heartbeatTimer); this._heartbeatTimer = null; }
-      if (this._conn) { try { this._conn.ws.close(1001, 'Server shutting down'); } catch {} this._conn = null; }
+      for (const socket of this._connections.keys()) {
+        try { socket.close(1001, 'Server shutting down'); } catch {}
+      }
+      this._connections.clear();
       // Don't close this.wss — its upgrade handler on the HTTP server must
       // survive restart cycles (e.g., setup wizard shutdown → restart).
       resolve();

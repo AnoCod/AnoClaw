@@ -46,7 +46,10 @@ export class RpcDispatcher {
     private _hostManager: PluginHostManager,
   ) {}
 
-  async dispatch(method: string, params: unknown): Promise<unknown> {
+  async dispatch(authenticatedPluginName: string, method: string, params: unknown): Promise<unknown> {
+    if (params && typeof params === 'object' && !Array.isArray(params)) {
+      params = { ...(params as Record<string, unknown>), pluginName: authenticatedPluginName };
+    }
     switch (method) {
       case 'tools.register': {
         const p = params as {

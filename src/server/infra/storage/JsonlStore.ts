@@ -84,12 +84,16 @@ export class JsonlStore extends EventEmitter {
     const prev = this._metaLocks.get(sessionId) || Promise.resolve();
     let release: () => void = () => {};
     const next = new Promise<void>((resolve) => { release = resolve; });
-    this._metaLocks.set(sessionId, prev.then(() => next));
+    const chainTail = prev.then(() => next);
+    this._metaLocks.set(sessionId, chainTail);
     await prev;
     try {
       return await fn();
     } finally {
       release();
+      if (this._metaLocks.get(sessionId) === chainTail) {
+        this._metaLocks.delete(sessionId);
+      }
     }
   }
 
@@ -250,6 +254,18 @@ export class JsonlStore extends EventEmitter {
     });
   }
 
+  /** Merge lifecycle metadata into the shared session meta document without
+   * dropping derived statistics maintained by JsonlStore. */
+  async mergeMetaDocument(
+    sessionId: string,
+    updates: Record<string, unknown>,
+    targetPath?: string,
+  ): Promise<void> {
+    await this._withMetaLock(sessionId, async () => {
+      await this._atomicUpdateMeta(sessionId, (current) => ({ ...current, ...updates }), targetPath);
+    });
+  }
+
   /** Public: increment message count with its own lock (for callers outside appendEvent). */
   async incrementMetaMessageCount(sessionId: string): Promise<void> {
     await this._withMetaLock(sessionId, async () => {
@@ -276,8 +292,9 @@ export class JsonlStore extends EventEmitter {
   private async _atomicUpdateMeta(
     sessionId: string,
     transform: (current: Record<string, unknown>) => Record<string, unknown>,
+    targetPath?: string,
   ): Promise<void> {
-    const metaPath = path.join(sessionDir(sessionId), META_FILE);
+    const metaPath = targetPath || path.join(sessionDir(sessionId), META_FILE);
     let current: Record<string, unknown>;
     try {
       const raw = await fsp.readFile(metaPath, 'utf-8');
@@ -286,9 +303,16 @@ export class JsonlStore extends EventEmitter {
       current = {};
     }
     const updated = transform(current);
-    this.metaCache.set(sessionId, updated as unknown as SessionMeta);
-    await fsp.mkdir(sessionDir(sessionId), { recursive: true });
-    await fsp.writeFile(metaPath, JSON.stringify(updated, null, 2), 'utf-8');
+    await fsp.mkdir(path.dirname(metaPath), { recursive: true });
+    const tempPath = `${metaPath}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      await fsp.writeFile(tempPath, JSON.stringify(updated, null, 2), 'utf-8');
+      await fsp.rename(tempPath, metaPath);
+      this.metaCache.set(sessionId, updated as unknown as SessionMeta);
+    } catch (err) {
+      await fsp.rm(tempPath, { force: true }).catch(() => {});
+      throw err;
+    }
   }
 
   /** Invalidate the meta cache for a session (called after writeSessionMeta) */

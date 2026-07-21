@@ -240,7 +240,7 @@ export class PluginHostManager extends EventEmitter {
 
       // Handle worker→main RPC requests (same dispatch for all workers)
       try {
-        const result = await this._dispatchWorkerRPC(request.method, request.params);
+        const result = await this._dispatchWorkerRPC(pluginName, request.method, request.params);
         worker.postMessage({ id: request.id, result });
       } catch (err) {
         const msg2 = err instanceof Error ? err.message : String(err);
@@ -297,8 +297,8 @@ export class PluginHostManager extends EventEmitter {
   }
 
   /** Process a worker→main RPC method. Delegates to RpcDispatcher. */
-  private async _dispatchWorkerRPC(method: string, params: unknown): Promise<unknown> {
-    return this._rpcDispatcher.dispatch(method, params);
+  private async _dispatchWorkerRPC(pluginName: string, method: string, params: unknown): Promise<unknown> {
+    return this._rpcDispatcher.dispatch(pluginName, method, params);
   }
 
   private _cleanupPluginContributions(pluginName: string): void {

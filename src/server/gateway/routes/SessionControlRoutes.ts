@@ -156,6 +156,7 @@ export class HardDeleteSessionRoute implements RouteHandler {
       }
 
       await SessionStore.getInstance().deleteSession(sessionId);
+      mgr.releaseSessionResources(sessionId, true);
       TypedEventBus.emit('session:hard_deleted', { sessionId });
       sendJson(res, 200, { sessionId, deleted: true });
     } catch (err) { sendJson(res, 500, { error: (err as Error).message }); }

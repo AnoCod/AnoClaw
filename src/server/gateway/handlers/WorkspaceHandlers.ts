@@ -12,6 +12,23 @@ import { SessionManager } from '../../core/session/SessionManager.js';
 import { requireWs, requireWsAny } from '../WsRequired.js';
 import type { SendJson, ReadBody } from '../RouteHelpers.js';
 
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await mapper(items[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers — path resolution + gitignore filtering
 // ---------------------------------------------------------------------------
@@ -293,21 +310,22 @@ export async function handleBrowseWorkspace(
     try { absPath = resolveWorkspacePath(workspaceRoot, browsePath); }
     catch { sendJson(res, 403, { error: 'Forbidden', message: 'Path escapes workspace root' }); return; }
 
-    if (!fs.existsSync(absPath)) {
+    let rootStat: fs.Stats;
+    try { rootStat = await fsp.stat(absPath); }
+    catch {
       sendJson(res, 404, { error: 'Not Found', message: `Path '${browsePath}' not found` });
       return;
     }
-    if (!fs.statSync(absPath).isDirectory()) {
+    if (!rootStat.isDirectory()) {
       // Return single file info
-      const stat = fs.statSync(absPath);
       sendJson(res, 200, {
         path: browsePath,
         nodes: [{
           name: path.basename(absPath),
           path: browsePath,
           isDirectory: false,
-          size: stat.size,
-          modifiedAt: stat.mtime.toISOString(),
+          size: rootStat.size,
+          modifiedAt: rootStat.mtime.toISOString(),
         }],
       });
       return;
@@ -317,21 +335,20 @@ export async function handleBrowseWorkspace(
     const gitignorePatterns = loadGitignore(workspaceRoot);
 
     // Read directory (single level only — lazy loading)
-    const entries = fs.readdirSync(absPath, { withFileTypes: true });
-    const nodes = entries
-      .filter(entry => {
+    const entries = await fsp.readdir(absPath, { withFileTypes: true });
+    const visibleEntries = entries.filter(entry => {
         const relPath = browsePath === '/'
           ? entry.name
           : `${browsePath.replace(/\/$/, '')}/${entry.name}`;
         return !isGitignored(relPath, entry.isDirectory(), gitignorePatterns);
-      })
-      .map(entry => {
+      });
+    const nodes = (await mapWithConcurrency(visibleEntries, 32, async entry => {
         const fullPath = path.join(absPath, entry.name);
         const relPath = browsePath === '/'
           ? entry.name
           : `${browsePath.replace(/\/$/, '')}/${entry.name}`;
         let stat: fs.Stats | null = null;
-        try { stat = fs.statSync(fullPath); } catch { /* permission denied */ }
+        try { stat = await fsp.stat(fullPath); } catch { /* permission denied */ }
         return {
           name: entry.name,
           path: relPath,
@@ -339,8 +356,7 @@ export async function handleBrowseWorkspace(
           size: stat ? stat.size : 0,
           modifiedAt: stat ? stat.mtime.toISOString() : '',
         };
-      })
-      .sort((a, b) => {
+      })).sort((a, b) => {
         // Directories first, then alphabetical
         if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
         return a.name.localeCompare(b.name);

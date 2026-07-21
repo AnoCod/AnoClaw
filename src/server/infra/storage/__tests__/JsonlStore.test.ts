@@ -160,6 +160,24 @@ describe('JsonlStore', () => {
     expect(meta.messageCount).toBe(1);
   });
 
+  it('preserves derived statistics when lifecycle metadata is merged', async () => {
+    await store.appendEvent('s7-merge', makeEvent());
+    await store.updateMeta('s7-merge', {
+      tokenBreakdown: { systemPrompt: 1, systemTools: 2, skills: 3, messages: 4, freeSpace: 90, total: 10 },
+    });
+    await store.mergeMetaDocument('s7-merge', { title: 'Merged title', status: 'Idle' });
+
+    const meta = await store.getMeta('s7-merge');
+    expect(meta.messageCount).toBe(1);
+    expect(meta.tokenBreakdown.total).toBe(10);
+    expect((meta as any).title).toBe('Merged title');
+  });
+
+  it('releases completed per-session metadata locks', async () => {
+    await store.updateMeta('s7-lock', { lastActiveAt: new Date().toISOString() });
+    expect((store as any)._metaLocks.size).toBe(0);
+  });
+
   // -----------------------------------------------------------------------
   // 6. archiveSession
   // -----------------------------------------------------------------------

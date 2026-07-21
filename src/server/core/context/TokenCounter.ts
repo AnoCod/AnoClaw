@@ -30,19 +30,45 @@ function getTokenizer(): { encode: (text: string) => number[] } | null {
  * overflows the stack on very large inputs. Chunk at 100K chars to stay safe.
  */
 const TOKEN_COUNT_CHUNK_SIZE = 100_000;
+const TOKEN_CACHE_MAX_ENTRIES = 256;
+const TOKEN_CACHE_MAX_CHARS = 16 * 1024 * 1024;
+const _tokenCountCache = new Map<string, number>();
+let _tokenCountCacheChars = 0;
+
+function cacheTokenCount(text: string, count: number): void {
+  if (text.length > TOKEN_COUNT_CHUNK_SIZE * 2) return;
+  if (_tokenCountCache.has(text)) _tokenCountCache.delete(text);
+  _tokenCountCache.set(text, count);
+  _tokenCountCacheChars += text.length;
+  while (_tokenCountCache.size > TOKEN_CACHE_MAX_ENTRIES || _tokenCountCacheChars > TOKEN_CACHE_MAX_CHARS) {
+    const oldest = _tokenCountCache.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    _tokenCountCache.delete(oldest);
+    _tokenCountCacheChars -= oldest.length;
+  }
+}
 
 function countTokensReal(text: string): number {
   if (!text) return 0;
+  const cached = _tokenCountCache.get(text);
+  if (cached !== undefined) {
+    _tokenCountCache.delete(text);
+    _tokenCountCache.set(text, cached);
+    return cached;
+  }
   const tok = getTokenizer();
   if (!tok) return TokenCounter._heuristicEstimate(text);
   // Chunk large strings to avoid BPE stack overflow on recursive encoding
   if (text.length <= TOKEN_COUNT_CHUNK_SIZE) {
-    return tok.encode(text).length;
+    const count = tok.encode(text).length;
+    cacheTokenCount(text, count);
+    return count;
   }
   let total = 0;
   for (let i = 0; i < text.length; i += TOKEN_COUNT_CHUNK_SIZE) {
     total += tok.encode(text.slice(i, i + TOKEN_COUNT_CHUNK_SIZE)).length;
   }
+  cacheTokenCount(text, total);
   return total;
 }
 
@@ -84,12 +110,13 @@ let _cachedToolsKey = '';
 let _cachedToolsTokens = 0;
 
 function estimateToolsTokens(tools: unknown[]): number {
-  const key = tools.length + ':' + tools.map((t: any) => t?.name ?? '').sort().join(',');
+  const serialized = JSON.stringify(tools);
+  const key = serialized;
   if (key === _cachedToolsKey) return _cachedToolsTokens;
   const tok = getTokenizer();
   const total = tok
-    ? tok.encode(JSON.stringify(tools)).length
-    : Math.ceil(JSON.stringify(tools).length / TOOLS_PER_TOKEN);
+    ? countTokensReal(serialized)
+    : Math.ceil(serialized.length / TOOLS_PER_TOKEN);
   _cachedToolsKey = key;
   _cachedToolsTokens = total;
   return total;

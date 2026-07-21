@@ -3,7 +3,7 @@
 /** Application display name. */
 export const APP_NAME = 'AnoClaw';
 /** Application version string. */
-export const APP_VERSION = '2.0.0';
+export const APP_VERSION = '2.0.1';
 /** Default HTTP port for the main web server. */
 export const DEFAULT_PORT = 3456;
 /** REST API port, localhost-only for external agent control. */

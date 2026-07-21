@@ -10,8 +10,8 @@ AnoClaw is a Windows Electron desktop app.
 
 Open [Releases](https://github.com/AnoCod/AnoClaw/releases) and download one of these assets:
 
-- `AnoClaw.Setup.2.0.0.exe` — normal Windows installer. Recommended for most users.
-- `AnoClaw-2.0.0-win-unpacked.zip` — portable/unpacked build. Extract it, then double-click `AnoClaw.exe`.
+- `AnoClaw.Setup.2.0.1.exe` — normal Windows installer. Recommended for most users.
+- `AnoClaw-2.0.1-win-unpacked.zip` — portable/unpacked build. Extract it, then double-click `AnoClaw.exe`.
 
 The first launch opens a setup wizard to configure your LLM provider: API URL, model, and API key.
 
@@ -27,7 +27,7 @@ npx electron-builder --win
 
 Build output:
 
-- Installer: `release9/AnoClaw Setup 2.0.0.exe`
+- Installer: `release9/AnoClaw Setup 2.0.1.exe`
 - Unpacked app: `release9/win-unpacked/AnoClaw.exe`
 
 Do not use `npm run dev` unless you are on Windows `cmd.exe`; the project build path is `npm run build:all` followed by `npx electron-builder --win`.

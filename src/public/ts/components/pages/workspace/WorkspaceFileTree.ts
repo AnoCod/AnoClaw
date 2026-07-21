@@ -1,6 +1,7 @@
 // WorkspaceFileTree.ts — Recursive file tree component for Workspace page.
 
 import type { FileEntry } from '../../../types.js';
+import { ToastManager } from '../../../ToastManager.js';
 
 /** Local alias using isDirectory for convenience; maps from FileEntry type field. */
 type FileNode = FileEntry & { isDirectory?: boolean; modifiedAt?: string };
@@ -28,6 +29,10 @@ export class WorkspaceFileTree {
   private _expandedPaths = new Set<string>();
   private _lastExpandTime = 0;
   private _lastFileFingerprint = '';
+  private _loadGeneration = 0;
+  beforePathDelete: ((path: string) => Promise<boolean>) | null = null;
+  onPathRenamed: ((oldPath: string, newPath: string) => void) | null = null;
+  onPathDeleted: ((path: string) => void) | null = null;
 
   constructor(onFileOpen: (path:string, name:string)=>void) {
     this.element = document.createElement('div'); this.element.className = 'ws-file-tree-pane';
@@ -154,6 +159,8 @@ export class WorkspaceFileTree {
   }
 
   async loadRoot(sessionId: string): Promise<void> {
+    const generation = ++this._loadGeneration;
+    this._stopPolling();
     this._sessionId = sessionId; this._treeBody.innerHTML = ''; this._nodeMap.clear();
     this._rootNodes = [];
     this._expandedPaths.clear();
@@ -166,13 +173,14 @@ export class WorkspaceFileTree {
       return;
     }
     this._setUnavailable(false);
-    await this._doLoadRoot();
-    this._startPolling();
+    await this._doLoadRoot(generation, sessionId);
+    if (generation === this._loadGeneration && sessionId === this._sessionId) this._startPolling();
   }
 
-  private async _doLoadRoot(): Promise<void> {
+  private async _doLoadRoot(generation = this._loadGeneration, sessionId = this._sessionId): Promise<void> {
     try {
-      const resp = await fetch(`/api/v1/workspace/browse?sessionId=${encodeURIComponent(this._sessionId)}&path=/`);
+      const resp = await fetch(`/api/v1/workspace/browse?sessionId=${encodeURIComponent(sessionId)}&path=/`);
+      if (generation !== this._loadGeneration || sessionId !== this._sessionId) return;
       if (!resp.ok) {
         this._setUnavailable(true);
         this._updateTreeMeta(0, 0);
@@ -183,6 +191,7 @@ export class WorkspaceFileTree {
       this._treeBody.innerHTML = '';
       this._nodeMap.clear();
       const nodes = (await resp.json()).nodes || [];
+      if (generation !== this._loadGeneration || sessionId !== this._sessionId) return;
       this._lastFileFingerprint = nodes.map((n: FileNode) => `${n.path}|${n.modifiedAt||''}|${n.isDirectory?'d':'f'}`).sort().join(',');
       this._rootNodes = nodes;
       this._fileCount = nodes.length;
@@ -201,9 +210,12 @@ export class WorkspaceFileTree {
       try {
         // Cooldown: skip if user manually expanded a folder within last 2 seconds
         if (Date.now() - this._lastExpandTime < 2000) return;
-        const resp = await fetch(`/api/v1/workspace/browse?sessionId=${encodeURIComponent(this._sessionId)}&path=/`);
+        const sessionId = this._sessionId;
+        const generation = this._loadGeneration;
+        const resp = await fetch(`/api/v1/workspace/browse?sessionId=${encodeURIComponent(sessionId)}&path=/`);
         if (!resp.ok) return;
         const nodes = (await resp.json()).nodes || [];
+        if (generation !== this._loadGeneration || sessionId !== this._sessionId) return;
         // Fingerprint: path + mtime + type. Skip DOM update if nothing changed.
         const fingerprint = nodes.map((n: FileNode) => `${n.path}|${n.modifiedAt||''}|${n.isDirectory?'d':'f'}`).sort().join(',');
         if (fingerprint === this._lastFileFingerprint) return;
@@ -217,6 +229,11 @@ export class WorkspaceFileTree {
 
   private _stopPolling(): void {
     if (this._pollTimer) { clearInterval(this._pollTimer); this._pollTimer = 0; }
+  }
+
+  suspend(): void {
+    this._loadGeneration++;
+    this._stopPolling();
   }
 
   refreshAll(): void {
@@ -486,40 +503,82 @@ export class WorkspaceFileTree {
 
   private async _createFile(parentPath:string): Promise<void> {
     const name = await this._prompt('File name:', 'new-file.txt'); if (!name) return;
-    await fetch('/api/v1/workspace/create-file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,path:parentPath,name})}); this.refreshDirectory(parentPath);
+    try {
+      const resp = await fetch('/api/v1/workspace/create-file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,path:parentPath,name})});
+      if (!resp.ok) throw new Error(await this._responseError(resp, 'Create file failed'));
+      await this.refreshDirectory(parentPath);
+    } catch (err) { this._showMutationError(err, 'Create file failed'); }
   }
   private async _createFolder(parentPath:string): Promise<void> {
     const name = await this._prompt('Folder name:', 'new-folder'); if (!name) return;
-    await fetch('/api/v1/workspace/create-dir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,path:parentPath,name})}); this.refreshDirectory(parentPath);
+    try {
+      const resp = await fetch('/api/v1/workspace/create-dir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,path:parentPath,name})});
+      if (!resp.ok) throw new Error(await this._responseError(resp, 'Create folder failed'));
+      await this.refreshDirectory(parentPath);
+    } catch (err) { this._showMutationError(err, 'Create folder failed'); }
   }
   private async _rename(node:FileNode): Promise<void> {
     const newName = await this._prompt('New name:', node.name); if (!newName||newName===node.name) return;
-    await fetch('/api/v1/workspace/rename',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,path:node.path,newName})});
-    const parentPath = node.path.substring(0,node.path.lastIndexOf('/'))||'/'; this.refreshDirectory(parentPath);
+    try {
+      const resp = await fetch('/api/v1/workspace/rename',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,path:node.path,newName})});
+      if (!resp.ok) throw new Error(await this._responseError(resp, 'Rename failed'));
+      const payload = await resp.json() as { newPath?: string };
+      const newPath = payload.newPath || _joinTreePath(node.path.substring(0,node.path.lastIndexOf('/'))||'/', newName);
+      this.onPathRenamed?.(node.path, newPath);
+      const parentPath = node.path.substring(0,node.path.lastIndexOf('/'))||'/';
+      await this.refreshDirectory(parentPath);
+    } catch (err) { this._showMutationError(err, 'Rename failed'); }
   }
   private async _delete(node:FileNode): Promise<void> {
-    const ok = await this._confirm(`Delete ${node.name}?`); if (!ok) return;
     await this._deleteByName(node.path, node.name);
   }
 
   private async _deleteByName(filePath: string, name: string): Promise<void> {
-    await fetch(`/api/v1/workspace/file?path=${encodeURIComponent(filePath)}&sessionId=${encodeURIComponent(this._sessionId)}`,{method:'DELETE'});
-    const parentPath = filePath.substring(0,filePath.lastIndexOf('/'))||'/'; this.refreshDirectory(parentPath);
-    if (this._selectedPath === filePath) this._selectedPath = '';
+    const confirmed = await this._confirm(`Delete ${name}?`); if (!confirmed) return;
+    if (this.beforePathDelete && !await this.beforePathDelete(filePath)) return;
+    try {
+      const resp = await fetch(`/api/v1/workspace/file?path=${encodeURIComponent(filePath)}&sessionId=${encodeURIComponent(this._sessionId)}`,{method:'DELETE'});
+      if (!resp.ok) throw new Error(await this._responseError(resp, 'Delete failed'));
+      this.onPathDeleted?.(filePath);
+      const parentPath = filePath.substring(0,filePath.lastIndexOf('/'))||'/';
+      await this.refreshDirectory(parentPath);
+      if (this._selectedPath === filePath) this._selectedPath = '';
+    } catch (err) { this._showMutationError(err, 'Delete failed'); }
   }
 
   private async _renameByPath(filePath: string): Promise<void> {
     const name = filePath.split('/').pop() || '';
     const newName = await this._prompt('New name:', name); if (!newName||newName===name) return;
-    await fetch('/api/v1/workspace/rename',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,path:filePath,newName})});
-    const parentPath = filePath.substring(0,filePath.lastIndexOf('/'))||'/';
-    if (this._selectedPath === filePath) this._selectedPath = parentPath + '/' + newName;
-    this.refreshDirectory(parentPath);
+    try {
+      const resp = await fetch('/api/v1/workspace/rename',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,path:filePath,newName})});
+      if (!resp.ok) throw new Error(await this._responseError(resp, 'Rename failed'));
+      const payload = await resp.json() as { newPath?: string };
+      const parentPath = filePath.substring(0,filePath.lastIndexOf('/'))||'/';
+      const nextPath = payload.newPath || _joinTreePath(parentPath, newName);
+      this.onPathRenamed?.(filePath, nextPath);
+      if (this._selectedPath === filePath) this._selectedPath = nextPath;
+      await this.refreshDirectory(parentPath);
+    } catch (err) { this._showMutationError(err, 'Rename failed'); }
   }
 
   private async _moveFile(srcPath: string, destDir: string): Promise<void> {
-    await fetch('/api/v1/workspace/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,source:srcPath,destDir})});
-    this.refreshAll();
+    try {
+      const resp = await fetch('/api/v1/workspace/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,source:srcPath,destDir})});
+      if (!resp.ok) throw new Error(await this._responseError(resp, 'Move failed'));
+      const payload = await resp.json() as { destPath?: string };
+      const nextPath = payload.destPath || _joinTreePath(destDir, srcPath.split('/').pop() || '');
+      this.onPathRenamed?.(srcPath, nextPath);
+      this.refreshAll();
+    } catch (err) { this._showMutationError(err, 'Move failed'); }
+  }
+
+  private async _responseError(resp: Response, fallback: string): Promise<string> {
+    const body = await resp.json().catch(() => ({})) as { message?: string; error?: string };
+    return body.message || body.error || fallback;
+  }
+
+  private _showMutationError(err: unknown, fallback: string): void {
+    ToastManager.getInstance().error(err instanceof Error ? err.message : fallback);
   }
 
   private _prompt(title: string, defaultValue: string): Promise<string> {
@@ -565,6 +624,9 @@ function _fileIcon(name: string): string {
 }
 function _fmtSize(bytes:number):string { if (bytes<1024) return `${bytes}B`; if (bytes<1048576) return `${(bytes/1024).toFixed(1)}KB`; return `${(bytes/1048576).toFixed(1)}MB`; }
 function _esc(s:string):string { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function _joinTreePath(parentPath: string, name: string): string {
+  return parentPath === '/' ? name : `${parentPath.replace(/\/$/, '')}/${name}`;
+}
 
 const _SVG_FOLDER = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2.5h7.5A2.5 2.5 0 0 1 21 9v8.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5Z"/></svg>`;
 const _SVG_FILE = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 3.5H7A2 2 0 0 0 5 5.5v13A2 2 0 0 0 7 20.5h10a2 2 0 0 0 2-2V8Z"/><path d="M14.5 3.5V8H19"/></svg>`;

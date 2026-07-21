@@ -61,7 +61,44 @@ export function resolveWorkspacePath(base: string, rel: string): string {
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error('Path escapes workspace root');
   }
+  assertRealWorkspaceBoundary(absBase, absPath);
   return absPath;
+}
+
+function assertRealWorkspaceBoundary(absBase: string, absPath: string): void {
+  if (!canLstat(absBase)) return;
+  const realBase = fs.realpathSync.native(absBase);
+  const existingPath = nearestExistingPath(absPath);
+  let realExistingPath: string;
+  try {
+    realExistingPath = fs.realpathSync.native(existingPath);
+  } catch {
+    // A broken symlink/reparse point must not be treated as a safe new path.
+    throw new Error('Path escapes workspace root');
+  }
+  const realRelative = path.relative(realBase, realExistingPath);
+  if (realRelative.startsWith('..') || path.isAbsolute(realRelative)) {
+    throw new Error('Path escapes workspace root');
+  }
+}
+
+function nearestExistingPath(candidate: string): string {
+  let current = candidate;
+  while (!canLstat(current)) {
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return current;
+}
+
+function canLstat(candidate: string): boolean {
+  try {
+    fs.lstatSync(candidate);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Simple path resolution against cwd (legacy mutation handlers without session scope).

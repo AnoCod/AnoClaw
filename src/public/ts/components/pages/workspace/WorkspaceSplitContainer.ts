@@ -8,6 +8,8 @@ export class WorkspaceSplitContainer {
   private _secondary: WorkspaceTabGroup|null = null;
   private _grip: HTMLElement|null = null;
   private _workspacePath = '';
+  private _gripMouseMove: ((event: MouseEvent) => void) | null = null;
+  private _gripMouseUp: (() => void) | null = null;
 
   get primaryGroup(): WorkspaceTabGroup { return this._primary; }
   get secondaryGroup(): WorkspaceTabGroup|null { return this._secondary; }
@@ -26,6 +28,7 @@ export class WorkspaceSplitContainer {
     if (this._secondary) return;
     const tab = this._primary.activeTab;
     if (!tab) return;
+    if (tab.isDirty) return;
 
     this._secondary = new WorkspaceTabGroup();
     this._secondary.element.classList.add('ws-split-secondary');
@@ -55,6 +58,7 @@ export class WorkspaceSplitContainer {
   closeSplit(): void {
     if (!this._secondary) return;
     this._secondary.dispose(); this._secondary = null;
+    this._removeGripListeners();
     if (this._grip) { this._grip.remove(); this._grip = null; }
     this._primary.element.style.flex = '';
     this._primary.element.style.minWidth = '';
@@ -72,15 +76,25 @@ export class WorkspaceSplitContainer {
       document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none';
       e.preventDefault();
     });
-    window.addEventListener('mousemove', (e) => {
+    this._removeGripListeners();
+    this._gripMouseMove = (e: MouseEvent) => {
       if (!dragging) return;
       const w = Math.max(200, Math.min(this.element.getBoundingClientRect().width - 200, startLeftW + e.clientX - startX));
       left.style.flex = 'none'; left.style.width = w + 'px'; right.style.flex = '1';
-    });
-    window.addEventListener('mouseup', () => {
+    };
+    this._gripMouseUp = () => {
       dragging = false; grip.style.background = '';
       document.body.style.cursor = ''; document.body.style.userSelect = '';
-    });
+    };
+    window.addEventListener('mousemove', this._gripMouseMove);
+    window.addEventListener('mouseup', this._gripMouseUp);
+  }
+
+  private _removeGripListeners(): void {
+    if (this._gripMouseMove) window.removeEventListener('mousemove', this._gripMouseMove);
+    if (this._gripMouseUp) window.removeEventListener('mouseup', this._gripMouseUp);
+    this._gripMouseMove = null;
+    this._gripMouseUp = null;
   }
 
   // ── Delegation to primary / both groups ──
@@ -110,14 +124,49 @@ export class WorkspaceSplitContainer {
     return this._primary.getEditorContext();
   }
 
-  async saveActiveFile(): Promise<void> {
-    await this._primary.saveActiveFile();
-    if (this._secondary) await this._secondary.saveActiveFile();
+  async saveActiveFile(): Promise<boolean> {
+    if (!await this._primary.saveActiveFile()) return false;
+    return this._secondary ? this._secondary.saveActiveFile() : true;
+  }
+
+  get hasDirtyTabs(): boolean {
+    return this._primary.hasDirtyTabs || (this._secondary?.hasDirtyTabs ?? false);
+  }
+
+  async prepareToDiscardAll(actionLabel: string): Promise<boolean> {
+    if (!await this._primary.prepareToDiscardAll(actionLabel)) return false;
+    return this._secondary ? this._secondary.prepareToDiscardAll(actionLabel) : true;
+  }
+
+  async prepareForPathRemoval(path: string): Promise<boolean> {
+    if (!await this._primary.prepareForPathRemoval(path)) return false;
+    return this._secondary ? this._secondary.prepareForPathRemoval(path) : true;
+  }
+
+  handlePathRenamed(oldPath: string, newPath: string): void {
+    this._primary.handlePathRenamed(oldPath, newPath);
+    this._secondary?.handlePathRenamed(oldPath, newPath);
+  }
+
+  handlePathDeleted(path: string): void {
+    this._primary.handlePathDeleted(path);
+    this._secondary?.handlePathDeleted(path);
+  }
+
+  suspend(): void {
+    this._primary.suspend();
+    this._secondary?.suspend();
+  }
+
+  resume(): void {
+    this._primary.resume();
+    this._secondary?.resume();
   }
 
   dispose(): void {
     this._primary.dispose();
     if (this._secondary) { this._secondary.dispose(); this._secondary = null; }
+    this._removeGripListeners();
     if (this._grip) { this._grip.remove(); this._grip = null; }
   }
 

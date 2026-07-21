@@ -7,6 +7,7 @@ import { WorkspaceFileTree } from './WorkspaceFileTree.js';
 import { WorkspaceTabGroup } from './WorkspaceTabGroup.js';
 import { WorkspaceSplitContainer } from './WorkspaceSplitContainer.js';
 import { WorkspaceBindingDialog } from '../../WorkspaceBindingDialog.js';
+import { ToastManager } from '../../../ToastManager.js';
 
 interface AgentBrowserEvent {
   sessionId: string;
@@ -86,7 +87,8 @@ export class WorkspacePage implements Page {
   name = 'workspace';
   container: HTMLElement;
   private _sessionId = '';
-  private _loadingSessionId: string | null = null;
+  private _loadGeneration = 0;
+  private _loadAbortController: AbortController | null = null;
   private _workspacePath = '';
   private _toolbarPath!: HTMLElement;
   private _fileTree!: WorkspaceFileTree;
@@ -135,6 +137,9 @@ export class WorkspacePage implements Page {
     const content = document.createElement('div');
     content.className = 'ws-content';
     this._fileTree = new WorkspaceFileTree((path, name) => this._openFile(path, name));
+    this._fileTree.beforePathDelete = async path => this._currentGroup?.prepareForPathRemoval(path) ?? true;
+    this._fileTree.onPathRenamed = (oldPath, newPath) => this._currentGroup?.handlePathRenamed(oldPath, newPath);
+    this._fileTree.onPathDeleted = path => this._currentGroup?.handlePathDeleted(path);
     content.appendChild(this._fileTree.element);
     this._treeGrip = document.createElement('div');
     this._treeGrip.className = 'ws-resize-grip';
@@ -174,8 +179,11 @@ export class WorkspacePage implements Page {
       if (this._onRevealWorkspacePath) { window.removeEventListener('ws-reveal-workspace-path', this._onRevealWorkspacePath); this._onRevealWorkspacePath = null; }
       if (this._onWorkspaceDownloadComplete) { window.removeEventListener('ws-workspace-download-complete', this._onWorkspaceDownloadComplete); this._onWorkspaceDownloadComplete = null; }
       if (this._extChangeTimer) { clearInterval(this._extChangeTimer); this._extChangeTimer = 0; }
-      for (const g of this._tabCache.values()) { try { g.dispose(); } catch { console.debug('WorkspacePage: dispose tab group failed'); } }
-      this._tabCache.clear(); this._currentGroup = null;
+      this._loadGeneration++;
+      this._loadAbortController?.abort();
+      this._loadAbortController = null;
+      this._fileTree.suspend();
+      for (const group of this._tabCache.values()) group.suspend();
     } catch { console.debug('WorkspacePage: onExit cleanup failed'); }
   }
 
@@ -185,6 +193,7 @@ export class WorkspacePage implements Page {
       this._sessionId = '';
       this._workspacePath = '';
       this._toolbarPath.textContent = 'No workspace';
+      this._fileTree.suspend();
       this._showWorkspaceIdle();
       return;
     }
@@ -193,24 +202,21 @@ export class WorkspacePage implements Page {
   }
 
   private async _loadWorkspaceForSession(sid: string): Promise<void> {
-    // Guard against concurrent loads when rapidly switching sessions
-    if (this._loadingSessionId === sid) return;
-    if (this._loadingSessionId) {
-      // Another load is in progress; let it finish, then re-issue with the latest sid
-      return;
-    }
-    this._loadingSessionId = sid;
+    const generation = ++this._loadGeneration;
+    this._loadAbortController?.abort();
+    const controller = new AbortController();
+    this._loadAbortController = controller;
     try {
-      const resp = await fetch(`/api/v1/sessions/${encodeURIComponent(sid)}/workspace`);
+      const resp = await fetch(`/api/v1/sessions/${encodeURIComponent(sid)}/workspace`, { signal: controller.signal });
       if (!resp.ok) return;
       const newPath = (await resp.json()).workspace || '';
-      // Verify we're still loading the intended session (didn't get stale)
-      if (this._loadingSessionId !== sid) return;
+      if (generation !== this._loadGeneration || App.getInstance().sessionVM?.activeSessionId !== sid) return;
       if (this._sessionId && this._currentGroup?.hasTabs) { this._tabCache.set(this._sessionId, this._currentGroup); }
       this._sessionId = sid; this._workspacePath = newPath;
       App.getInstance().sessionVM?.updateSessionWorkspace(sid, newPath);
       this._toolbarPath.textContent = newPath || 'Default workspace';
       await this._fileTree.loadRoot(sid);
+      if (generation !== this._loadGeneration || App.getInstance().sessionVM?.activeSessionId !== sid) return;
       if (this._currentGroup) { this._currentGroup.element.remove(); }
       const cached = this._tabCache.get(sid);
       if (cached) { cached.setSessionId(sid); cached.setWorkspacePath(newPath); this._currentGroup = cached; }
@@ -223,14 +229,20 @@ export class WorkspacePage implements Page {
       this._currentGroup.onOpenFile = (path, name) => this._openFile(path, name);
       this._tabMount.innerHTML = '';
       this._tabMount.appendChild(this._currentGroup.element);
+      this._currentGroup.resume();
       // Wire editor context push
       this._currentGroup.onEditorContextChange = () => this._pushEditorContext();
       // Push initial context
       setTimeout(() => this._pushEditorContext(), 500);
       // Start polling for external changes (Agent edits)
       this._startExternalChangePolling();
-    } catch { console.debug('WorkspacePage: failed to load workspace for session', sid); }
-    finally { this._loadingSessionId = null; }
+    } catch (err) {
+      if (!(err instanceof DOMException && err.name === 'AbortError')) {
+        console.debug('WorkspacePage: failed to load workspace for session', sid);
+      }
+    } finally {
+      if (this._loadAbortController === controller) this._loadAbortController = null;
+    }
   }
 
   private _extChangeTimer = 0;
@@ -255,6 +267,7 @@ export class WorkspacePage implements Page {
     const dlg = new WorkspaceBindingDialog();
     const result = await dlg.show(this._workspacePath);
     if (!result || !this._sessionId) return;
+    if (this._currentGroup && !await this._currentGroup.prepareToDiscardAll('switching workspaces')) return;
     try {
       const resp = await fetch(`/api/v1/sessions/${encodeURIComponent(this._sessionId)}/bind-workspace`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: result.path }) });
       if (!resp.ok) throw new Error(`Workspace binding failed (HTTP ${resp.status})`);
@@ -268,10 +281,16 @@ export class WorkspacePage implements Page {
       const fresh = new WorkspaceSplitContainer(); fresh.setSessionId(this._sessionId);
       fresh.setWorkspacePath(boundPath);
       fresh.onOpenFile = (path, name) => this._openFile(path, name);
+      fresh.onEditorContextChange = () => this._pushEditorContext();
       this._tabCache.set(this._sessionId, fresh); this._currentGroup = fresh;
       this._tabMount.appendChild(fresh.element);
       await this._fileTree.loadRoot(this._sessionId);
-    } catch { console.debug('WorkspacePage: session switch cleanup failed'); }
+      this._startExternalChangePolling();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Workspace switch failed';
+      ToastManager.getInstance().error(message);
+      console.debug('WorkspacePage: session switch cleanup failed');
+    }
   }
 
   private _openFile(path: string, name: string): void {

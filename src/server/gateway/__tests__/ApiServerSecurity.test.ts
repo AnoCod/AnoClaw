@@ -148,6 +148,49 @@ describe('ApiServer security boundaries', () => {
     expect(resolveWorkspacePath(base, '/src/index.ts')).toBe(pathResolveForTest(expected));
   });
 
+  it('rejects workspace paths that escape through a symlink or junction', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'anoclaw-workspace-link-'));
+    const workspaceRoot = path.join(root, 'workspace');
+    const outsideRoot = path.join(root, 'outside');
+    fs.mkdirSync(workspaceRoot);
+    fs.mkdirSync(outsideRoot);
+    fs.writeFileSync(path.join(outsideRoot, 'secret.txt'), 'secret');
+
+    try {
+      fs.symlinkSync(outsideRoot, path.join(workspaceRoot, 'escape'), process.platform === 'win32' ? 'junction' : 'dir');
+      expect(() => resolveWorkspacePath(workspaceRoot, 'escape/secret.txt')).toThrow('Path escapes workspace root');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('marks oversized workspace reads as truncated', async () => {
+    const previousCwd = process.cwd();
+    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'anoclaw-large-read-'));
+    try {
+      fs.writeFileSync(path.join(workspaceRoot, 'large.txt'), 'x'.repeat(110 * 1024));
+      process.chdir(workspaceRoot);
+      const capture: Capture = { status: 0, headers: {}, body: {} };
+      await handleReadWorkspaceFile(
+        mockReq('/api/v1/workspace/read?path=large.txt', undefined, '127.0.0.1'),
+        mockRes(capture),
+        (_res, status, body) => {
+          capture.status = status;
+          capture.body = body as Record<string, unknown>;
+        },
+        '127.0.0.1',
+        15730,
+      );
+
+      expect(capture.status).toBe(200);
+      expect(capture.body.truncated).toBe(true);
+      expect(String(capture.body.content)).toHaveLength(100 * 1024);
+    } finally {
+      process.chdir(previousCwd);
+      fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
   it('filters nested workspace browse entries using root gitignore semantics', async () => {
     const previousCwd = process.cwd();
     const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'anoclaw-gitignore-'));

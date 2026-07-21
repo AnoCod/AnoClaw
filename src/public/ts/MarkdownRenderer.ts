@@ -77,7 +77,7 @@ function safeAttr(name: string, value: string): string {
  * Sanitize user-supplied HTML: allow whitelisted tags, strip dangerous attributes.
  * Content inside allowed tags is recursively processed for markdown.
  */
-function sanitizeHtml(raw: string): string {
+export function sanitizeHtml(raw: string): string {
   // Match any HTML tag-like token: <tagname ...> or </tagname>
   return raw.replace(/<\/?([a-zA-Z][a-zA-Z0-9]*)([^>]*)>/g, (_full: string, tag: string, attrsStr: string) => {
     const tagLower = tag.toLowerCase();

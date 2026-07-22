@@ -14,6 +14,7 @@ export const DEFAULT_CORE_TOOLS = [
   'Glob',
   'Grep',
   'Bash',
+  'RunProgram',
   'WebFetch',
   'WebSearch',
   'Browser',

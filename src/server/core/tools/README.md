@@ -1,6 +1,6 @@
 # Tool Framework — `src/server/core/tools/`
 
-The Tool Framework is the execution backbone for all 34 built-in tools and plugin tools. Every tool call flows through a standardized 5-stage pipeline: validation, security, execution, retry, and normalization. Tools are auto-discovered from the `builtin/` directory — no manual registration.
+The Tool Framework is the execution backbone for built-in and plugin tools. Every tool call flows through a standardized 5-stage pipeline: validation, security, execution, retry, and normalization. Tools are auto-discovered from the `builtin/` directory — no manual registration.
 
 ---
 
@@ -469,7 +469,7 @@ Choose one of the 8 existing categories (or a new one — new categories auto-cr
 | `Organization Management` | HireEmployee, ListEmployees, UpdateOrg |
 | `Memory & Skills` | MemorySave, MemorySearch, Skill, SkillList |
 | `Browser` | BrowserAgent |
-| `System` | ApiCall, RestartServer |
+| `System` | ApiCall, RunProgram, RestartServer |
 
 ---
 

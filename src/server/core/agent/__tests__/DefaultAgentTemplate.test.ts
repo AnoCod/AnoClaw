@@ -44,6 +44,7 @@ describe('buildDefaultAgentConfigs', () => {
     });
 
     expect(ceo.allowedTools).toEqual(expect.arrayContaining([
+      'RunProgram',
       'TaskAssign',
       'ListEmployees',
       'memory_save',
@@ -60,8 +61,10 @@ describe('buildDefaultAgentConfigs', () => {
       'files.organize',
     ]));
     expect(manager.allowedTools).toContain('TaskAssign');
+    expect(manager.allowedTools).toContain('RunProgram');
     expect(manager.allowedTools).toContain('HireEmployee');
     expect(member.allowedTools).toContain('SubAgentSpawn');
+    expect(member.allowedTools).toContain('RunProgram');
     expect(member.allowedTools).not.toContain('HireEmployee');
   });
 

@@ -7,6 +7,7 @@ import type { ExecutionContext } from '../../../../shared/types/session.js';
 import { InterruptController, InterruptReason } from '../../agent/supervision/InterruptController.js';
 import { BackgroundTaskManager } from '../../agent/supervision/BackgroundTaskManager.js';
 import { BashTool } from './BashTool.js';
+import { RunProgramTool } from './RunProgramTool.js';
 
 export class TaskStopTool extends Tool {
 
@@ -131,6 +132,8 @@ export class TaskStopTool extends Tool {
     let killedProcess = false;
     if (task.type === 'bash' && typeof task.pid === 'number') {
       killedProcess = BashTool.killBackgroundProcessByPid(task.pid);
+    } else if (task.type === 'program' && typeof task.pid === 'number') {
+      killedProcess = RunProgramTool.killBackgroundProcessByPid(task.pid);
     }
 
     if (killedProcess) {
@@ -163,7 +166,7 @@ export class TaskStopTool extends Tool {
 
     return this.makeResult(
       `Background task '${taskId}' has been stopped.` +
-      (task.type === 'bash'
+      (task.type === 'bash' || task.type === 'program'
         ? ` Process ${killedProcess ? 'was terminated' : 'was not found in the local process registry'}.`
         : ''),
       {

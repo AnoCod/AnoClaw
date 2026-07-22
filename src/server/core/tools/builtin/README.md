@@ -1,6 +1,6 @@
 # Built-in Tools — `src/server/core/tools/builtin/`
 
-36 built-in tools organized into 8 categories. Tools are auto-registered by `ToolRegistrar` scanning this directory at startup — simply place a new `.ts` file here and rebuild.
+Built-in tools are auto-registered by `ToolRegistrar` scanning this directory at startup — simply place a new `.ts` file here and rebuild.
 
 ---
 
@@ -42,6 +42,7 @@
 | `SkillInspectTool.ts` | `SkillInspect` | Memory & Skills | Safe | SubAgent |
 | `BrowserAgentTool.ts` | `Browser` | Browser | Medium | SubAgent |
 | `ApiCallTool.ts` | `ApiCall` | System | High | SubAgent |
+| `RunProgramTool.ts` | `RunProgram` | System | High | SubAgent |
 | `RestartServerTool.ts` | `RestartServer` | System | Critical | SubAgent |
 
 ---
@@ -534,7 +535,7 @@ Stops a running delegated sub-session or `bt-*` background task.
 | `task_id` | string | No | Alias for `taskId` |
 
 **Behavior notes:**
-- For `bt-*` Bash tasks, attempts to terminate the local process tree before marking the task killed.
+- For `bt-*` Bash and RunProgram tasks, attempts to terminate the local process tree before marking the task killed.
 - Already completed/failed/killed tasks return a clear failure result instead of pretending a stop happened.
 - Delegated session stops return structured status for both interrupted and already-not-running sessions.
 
@@ -840,7 +841,7 @@ Launches a browser automation agent for web interaction tasks. Supports navigati
 
 ---
 
-## 8. System (2 tools)
+## 8. System (3 tools)
 
 ### ApiCallTool — `ApiCall`
 
@@ -871,6 +872,35 @@ Makes bounded internal API calls to AnoClaw endpoints, with endpoint/tool discov
 | `limit` | number | | Discovery result limit; endpoints max 200, tools max 500 |
 | `timeout_ms` | number | | Internal API timeout, default 15000, max 60000 |
 | `max_response_chars` | number | | Max response chars before returning a JSON preview envelope, default 16000, max 100000 |
+
+---
+
+### RunProgramTool — `RunProgram`
+
+Launches native executables directly, without shell parsing. Desktop and long-running applications default to supervised background mode; command-line programs can use wait mode to capture output and exit status.
+
+| Property | Value |
+|---|---|
+| Risk | `High` |
+| InterruptBehavior | `Block` |
+| Retry | Disabled to prevent duplicate launches |
+
+**Parameters:**
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `program` | string | ✓ | Absolute/relative executable path, or command name available on PATH |
+| `args` | string[] | | Arguments passed directly without shell quoting or expansion |
+| `description` | string | ✓ | Reason for launching the program |
+| `cwd` | string | | Working directory; relative paths resolve from the workspace |
+| `mode` | string | | `background` (default) or `wait` |
+| `visible` | boolean | | Allow a Windows console window; default `true` |
+| `timeout` | integer | | Wait-mode timeout; default 30000, max 600000 |
+| `max_output_chars` | integer | | Wait-mode output limit; default 10000, max 100000 |
+
+**Behavior notes:**
+- Uses `spawn(program, args, { shell: false })`, so arguments cannot be reinterpreted as shell operators.
+- Background programs have no arbitrary lifetime cap, do not hold the parent conversation open, and are tracked by PID through TaskList, TaskOutput, and TaskStop.
+- Shell pipelines, redirection, batch files, and scripts remain Bash responsibilities.
 
 ---
 

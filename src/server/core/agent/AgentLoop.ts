@@ -640,12 +640,12 @@ export class AgentLoop {
         }
 
 
-        // If this agent dispatched background work (Bash run_in_background, TaskAssign,
-        // SubAgentSpawn), don't exit the loop. Subscribe to BackgroundTaskManager
-        // taskCompletedInSession events for instant wakeup instead of polling.
+        // If this agent dispatched blocking background work (Bash run_in_background,
+        // TaskAssign, SubAgentSpawn), don't exit the loop. Detached program launches
+        // remain trackable but do not hold the conversation open.
         const bgm = BackgroundTaskManager.getInstance();
         const pendingTasks = bgm.getTasksForParent(this.sessionId);
-        const hasRunning = pendingTasks.length > 0 && pendingTasks.some(t => t.status === 'running');
+        const hasRunning = pendingTasks.some(t => t.status === 'running' && t.awaitCompletion !== false);
         if (hasRunning) {
           const WAIT_MAX_MS = 5 * 60_000; // 5 min safety net
           const HEARTBEAT_MS = 5000; // Yield heartbeat every 5s for SupervisionManager

@@ -86,7 +86,7 @@ graph TB
         AL["AgentLoop<br/>(AsyncGenerator)"]
         SM["SessionManager<br/>(CRUD + Locks)"]
         PA["PromptAssembler<br/>(Sections)"]
-        TR["ToolRegistry<br/>(33 tools + plugins)"]
+        TR["ToolRegistry<br/>(built-in tools + plugins)"]
         CC["ContextCompressor"]
         AReg["AgentRegistry<br/>(Org Tree)"]
         PHM["PluginHostManager<br/>(Worker + RPC)"]
@@ -295,7 +295,7 @@ graph TB
 
 ### Tool System
 
-33 tools registered in `registerAllTools()` via directory scan of `builtin/`. Every tool extends the abstract `Tool` class (EventEmitter-based). Additional tools registered by plugins at runtime via `anoclaw.tools.register()` (RPC → PluginToolProxy → ToolRegistry). Each agent has an `allowedTools` whitelist. Key categories: File I/O (Read/Write/Edit/Glob/Grep), Bash, Web (Fetch/Search), Agent management (HireEmployee/SubAgentSpawn), Cross-agent communication (TaskAssign/AgentMessage), Plan mode, Memory, Skills, MCP, Gateway.
+Built-in tools are registered in `registerAllTools()` via directory scan of `builtin/`. Every tool extends the abstract `Tool` class (EventEmitter-based). Additional tools are registered by plugins at runtime via `anoclaw.tools.register()` (RPC → PluginToolProxy → ToolRegistry). Each agent has an `allowedTools` whitelist. Key categories: File I/O (Read/Write/Edit/Glob/Grep), shell execution (Bash), native program launch (RunProgram), Web (Fetch/Search), agent management (HireEmployee/SubAgentSpawn), cross-agent communication (TaskAssign/AgentMessage), Plan mode, Memory, Skills, MCP, and Gateway.
 
 ### Storage: JSONL Append-Only
 

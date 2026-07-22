@@ -395,7 +395,7 @@ Factory: `createLLMProvider(config)` in `provider-factory.ts` selects based on `
 - `ts/viewmodel/` — ViewModel layer with EventEmitter
 - `ts/components/` — UI components
 - `ts/ws-client.ts` — WebSocket communication layer
-- Navigation: 9-page PAGES menu — 5 kernel (Sessions, Agents, Skills, Memory, Settings) + divider + plugin pages (Plugins, MCP, Meeting, Workflow, Gateway)
+- Navigation: 9-page PAGES menu — 5 kernel (Sessions, Agents, Skills, Memory, Settings) + divider + plugin pages (Plugins, MCP, Meeting, Gateway)
 - Plugin pages loaded dynamically from plugin manifests via `PluginViewModel` → iframe sandbox + postMessage bridge
 - Streaming: `StreamingMessageDelegate` renders tokens in real-time from WS events
 

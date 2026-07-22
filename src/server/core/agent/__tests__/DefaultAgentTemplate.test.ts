@@ -53,12 +53,6 @@ describe('buildDefaultAgentConfigs', () => {
       'skill_matching',
       'Browser',
       'ApiCall',
-      'office.create_pptx',
-      'office.create_docx',
-      'office.analyze_spreadsheet',
-      'pdf.summarize',
-      'web.research',
-      'files.organize',
     ]));
     expect(manager.allowedTools).toContain('TaskAssign');
     expect(manager.allowedTools).toContain('RunProgram');

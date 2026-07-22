@@ -41,8 +41,7 @@
     "ExitPlanMode",
     "Plan",
     "AskUserQuestion",
-    "ApiCall",
-    "office.create_pptx"
+    "ApiCall"
   ],
   "enabledSkills": [],
   "mcpServers": [],

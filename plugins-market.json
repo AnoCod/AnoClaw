@@ -27,19 +27,6 @@
       "category": "Collaboration"
     },
     {
-      "name": "anoclaw-workflow",
-      "displayName": "Workflow Editor",
-      "version": "2.0.0",
-      "description": "Visual workflow editor and execution engine with 14 node types",
-      "publisher": "anoclaw",
-      "author": "AnoClaw Team",
-      "rating": 4.7,
-      "downloads": 0,
-      "tags": ["workflow", "official"],
-      "installUrl": "https://github.com/AnoCod/AnoClaw-Solo",
-      "category": "Automation"
-    },
-    {
       "name": "anoclaw-gateway",
       "displayName": "Gateway",
       "version": "2.0.0",

@@ -387,119 +387,11 @@ function buildCodingSuggestedToolCall(
 }
 
 function suggestParametersForCapability(
-  capabilityId: string,
-  query: string,
-  notes: string[],
+  _capabilityId: string,
+  _query: string,
+  _notes: string[],
 ): Record<string, unknown> {
-  const title = inferTaskTitle(query);
-  switch (capabilityId) {
-    case 'presentation.create':
-      return compactObject({
-        topic: title,
-        slideCount: inferSlideCount(query) || 8,
-        style: inferStyle(query),
-      });
-    case 'document.create':
-      return compactObject({
-        title,
-        documentType: inferDocumentType(query),
-        style: inferStyle(query),
-      });
-    case 'spreadsheet.analyze': {
-      const filePath = inferFilePath(query, ['.csv', '.tsv', '.xlsx', '.xls']);
-      if (!filePath) notes.push('No spreadsheet path was explicit; use an attached/current spreadsheet if available, otherwise ask for the file.');
-      return compactObject({
-        title,
-        filePath,
-      });
-    }
-    case 'pdf.summarize': {
-      const filePath = inferFilePath(query, ['.pdf']);
-      if (!filePath) notes.push('No PDF path was explicit; use an attached/current PDF if available, otherwise ask for the file.');
-      return compactObject({
-        title,
-        filePath,
-        pages: inferPageRange(query),
-      });
-    }
-    case 'files.organize': {
-      const folderPath = inferFolderPath(query);
-      if (!folderPath) notes.push('No folder path was explicit; use the current workspace folder as the default target.');
-      return compactObject({
-        folderPath,
-        recursive: /recursive|recursively|子文件夹|递归/.test(query.toLowerCase()),
-        apply: /apply|execute|move now|直接整理|直接移动|执行整理/.test(query.toLowerCase()),
-      });
-    }
-    case 'web.research': {
-      notes.push('Create a cited research artifact with source links; fetch top sources when possible.');
-      return compactObject({
-        query: inferResearchQuery(query),
-        title,
-        maxSources: inferSourceCount(query) || 5,
-        fetchPages: true,
-      });
-    }
-    default:
-      return {};
-  }
-}
-
-function inferTaskTitle(query: string): string {
-  return query
-    .replace(/^\s*(帮我|请|麻烦|please)\s*/i, '')
-    .replace(/\s*(做一个|做一份|制作|创建|生成|写一份|写一个|总结|分析|整理|create|make|generate|write|summarize|analyze|organize)\s*/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 120) || query.trim().slice(0, 120);
-}
-
-function inferSlideCount(query: string): number | undefined {
-  const arabic = query.match(/(\d{1,2})\s*(页|张|slides?|slide deck)/i)?.[1];
-  if (arabic) return clampNumber(Number(arabic), 1, 60, undefined);
-  const chineseNumber = query.match(/([一二三四五六七八九十]{1,3})\s*(页|张)/)?.[1];
-  return chineseNumber ? chineseNumeralToNumber(chineseNumber) : undefined;
-}
-
-function inferStyle(query: string): string | undefined {
-  const styles = [
-    ['商务', '简洁商务'],
-    ['简洁', '简洁'],
-    ['正式', '正式'],
-    ['专业', '专业'],
-    ['可爱', '轻松友好'],
-    ['business', 'clean business'],
-    ['professional', 'professional'],
-    ['concise', 'concise'],
-  ];
-  const normalized = query.toLowerCase();
-  return styles.find(([term]) => normalized.includes(term))?.[1];
-}
-
-function inferDocumentType(query: string): string | undefined {
-  const normalized = query.toLowerCase();
-  if (/合同|contract/.test(normalized)) return 'contract draft';
-  if (/报告|report/.test(normalized)) return 'report';
-  if (/方案|proposal/.test(normalized)) return 'proposal';
-  if (/简历|resume|cv/.test(normalized)) return 'resume';
-  if (/申请书|application/.test(normalized)) return 'application';
-  return undefined;
-}
-
-function inferResearchQuery(query: string): string {
-  return query
-    .replace(/^\s*(帮我|请|麻烦|please)\s*/i, '')
-    .replace(/\s*(查一下|搜索|调研|研究一下|找资料|整理资料|search for|search|research|look up|find sources for)\s*/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 200) || query.trim().slice(0, 200);
-}
-
-function inferSourceCount(query: string): number | undefined {
-  const arabic = query.match(/(\d{1,2})\s*(sources?|results?|links?|websites?|来源|资料|链接|网站)/i)?.[1];
-  if (arabic) return clampNumber(Number(arabic), 1, 10, undefined);
-  const chineseNumber = query.match(/([一二三四五六七八九十]{1,3})\s*(个)?\s*(来源|资料|链接|网站)/)?.[1];
-  return chineseNumber ? clampNumber(chineseNumeralToNumber(chineseNumber) || 0, 1, 10, undefined) : undefined;
+  return {};
 }
 
 function inferFilePath(query: string, extensions: string[]): string | undefined {
@@ -536,42 +428,8 @@ function inferCodeSearchPattern(query: string): string | undefined {
   return dottedSymbol ? escapeRegExp(dottedSymbol) : undefined;
 }
 
-function inferFolderPath(query: string): string | undefined {
-  const quoted = query.match(/["“']([^"”']+)["”']/)?.[1];
-  if (quoted && !/\.[A-Za-z0-9]{1,8}$/.test(quoted)) return quoted;
-  const windowsPath = query.match(/([A-Za-z]:[^\s"'“”，。]+)/)?.[1];
-  if (windowsPath) return windowsPath;
-  const relativePath = query.match(/((?:\.{1,2}[\\/])?[^\s"'“”，。]+[\\/][^\s"'“”，。]+)/)?.[1];
-  return relativePath;
-}
-
-function inferPageRange(query: string): string | undefined {
-  return query.match(/(?:pages?|第)\s*(\d+\s*(?:-|到|至)\s*\d+|\d+)/i)?.[1]?.replace(/[到至]/g, '-');
-}
-
-function compactObject(value: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined && entry !== ''));
-}
-
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function clampNumber(value: number, min: number, max: number, fallback: number | undefined): number | undefined {
-  if (!Number.isFinite(value)) return fallback;
-  return Math.max(min, Math.min(max, Math.round(value)));
-}
-
-function chineseNumeralToNumber(value: string): number | undefined {
-  const digits: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
-  if (value === '十') return 10;
-  const tenParts = value.split('十');
-  if (tenParts.length === 2) {
-    const tens = tenParts[0] ? digits[tenParts[0]] || 0 : 1;
-    const ones = tenParts[1] ? digits[tenParts[1]] || 0 : 0;
-    return tens * 10 + ones;
-  }
-  return digits[value];
 }
 
 function compareCandidates(a: TaskResolveCandidate, b: TaskResolveCandidate): number {

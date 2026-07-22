@@ -16,12 +16,22 @@ describe('capability API routes', () => {
 
     CapabilityRegistry.resetInstance();
     ToolRegistry.resetInstance();
+    CapabilityRegistry.getInstance().setCatalogCapabilities([{
+      id: 'widget.create',
+      title: 'Create a widget',
+      description: 'Create a widget artifact.',
+      domain: 'utility',
+      kind: 'artifact',
+      triggers: ['widget'],
+      requiredTools: ['widget.render'],
+      recommendedPlugins: ['widget-provider'],
+    }]);
     api.registerRoute(new ListCapabilitiesRoute());
     api.registerRoute(new ResolveTaskRoute());
   });
 
   it('lists and filters user-level capabilities', async () => {
-    const result = await api.callInternal('GET', '/api/v1/capabilities?q=ppt&limit=5');
+    const result = await api.callInternal('GET', '/api/v1/capabilities?q=widget&limit=5');
 
     expect(result.statusCode).toBe(200);
     const body = result.body as {
@@ -36,18 +46,18 @@ describe('capability API routes', () => {
     };
 
     expect(body.total).toBeGreaterThanOrEqual(1);
-    expect(body.filters).toEqual(expect.objectContaining({ search: 'ppt', limit: 5 }));
+    expect(body.filters).toEqual(expect.objectContaining({ search: 'widget', limit: 5 }));
     expect(body.capabilities[0]).toEqual(expect.objectContaining({
-      id: 'presentation.create',
-      status: 'disabled',
-      pluginName: 'anoclaw-office',
+      id: 'widget.create',
+      status: 'needs_plugin',
+      recommendedPlugins: ['widget-provider'],
     }));
-    expect(body.capabilities[0].missingTools).toContain('office.create_pptx');
+    expect(body.capabilities[0].missingTools).toContain('widget.render');
   });
 
   it('resolves natural-language requests through the API', async () => {
     const result = await api.callInternal('POST', '/api/v1/tasks/resolve', {
-      message: 'Please create a 10-page AI Agent intro PPT',
+      message: 'Please create a widget',
     });
 
     expect(result.statusCode).toBe(200);
@@ -59,6 +69,6 @@ describe('capability API routes', () => {
 
     expect(body.intent).toBe('capability');
     expect(body.nextAction).toBe('recommend_plugin');
-    expect(body.bestCapability?.id).toBe('presentation.create');
+    expect(body.bestCapability?.id).toBe('widget.create');
   });
 });

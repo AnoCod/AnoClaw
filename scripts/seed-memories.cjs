@@ -494,7 +494,6 @@ memory:read / memory:write, settings:read / settings:write。通过 ApiAuth toke
 
 ### 页面特定覆盖
 以下页面可以有独立的品牌：
-- Workflow editor (plugin): 节点画布需要独特的视觉语言
 - Meeting page (plugin): 协作空间，不同的氛围
 - Agents org chart: 可以有自己的外观`,
   },

@@ -289,6 +289,16 @@ describe('AgentRuntime', () => {
 
   describe('processMessage task routing', () => {
     it('short-circuits with a plugin recommendation when a daily capability is recognized but unavailable', async () => {
+      CapabilityRegistry.getInstance().setCatalogCapabilities([{
+        id: 'widget.create',
+        title: 'Create a widget',
+        description: 'Create a widget artifact.',
+        domain: 'utility',
+        kind: 'artifact',
+        triggers: ['widget'],
+        requiredTools: ['widget.render'],
+        recommendedPlugins: ['widget-provider'],
+      }]);
       const agent = makeAgent('main-1', 'MainAgent', AgentRole.MainAgent);
       AgentRegistry.getInstance().registerAgent(agent);
 
@@ -300,19 +310,19 @@ describe('AgentRuntime', () => {
       for await (const event of runtime.processMessage(
         'session-1',
         'main-1',
-        { id: 'm1', sessionId: 'session-1', role: 'user', content: '帮我做一个介绍太阳系的 PPT', tokenCount: 0, compressed: false, timestamp: new Date().toISOString() },
+        { id: 'm1', sessionId: 'session-1', role: 'user', content: 'Please create a widget', tokenCount: 0, compressed: false, timestamp: new Date().toISOString() },
       )) {
         events.push(event);
       }
 
       expect(loopSpy).not.toHaveBeenCalled();
       expect(events[0].type).toBe(SSEEventType.StatusInfo);
-      expect(events[0].taskResolution.bestCapability.id).toBe('presentation.create');
+      expect(events[0].taskResolution.bestCapability.id).toBe('widget.create');
       expect(events[0].agentMissingTools).toEqual([]);
       const taskResolutionEvent = events.find((event) => event.type === SSEEventType.TaskResolution);
-      expect(taskResolutionEvent?.taskResolution.bestCapability.id).toBe('presentation.create');
-      expect(taskResolutionEvent?.taskResolution.pluginRecommendations[0].pluginName).toBe('anoclaw-office');
-      expect(events.some((event) => event.type === SSEEventType.Text && String(event.content).includes('office'))).toBe(true);
+      expect(taskResolutionEvent?.taskResolution.bestCapability.id).toBe('widget.create');
+      expect(taskResolutionEvent?.taskResolution.pluginRecommendations[0].pluginName).toBe('widget-provider');
+      expect(events.some((event) => event.type === SSEEventType.Text && String(event.content).includes('widget-provider'))).toBe(true);
       expect(events.at(-1)?.type).toBe(SSEEventType.Done);
     });
 

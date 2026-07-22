@@ -40,7 +40,7 @@ describe('artifact API routes', () => {
       sessionId: 'session-1',
       title: 'Solar System PPT',
       kind: 'presentation',
-      capabilityId: 'presentation.create',
+      capabilityId: 'artifact.create',
       preview: { type: 'markdown', content: '# Solar System' },
     });
 

@@ -1,9 +1,0 @@
-{
-  "name": "anoclaw-plugin-qrcode",
-  "version": "1.0.0",
-  "private": true,
-  "description": "QR Code generator for AnoClaw",
-  "dependencies": {
-    "qrcode": "^1.5.4"
-  }
-}

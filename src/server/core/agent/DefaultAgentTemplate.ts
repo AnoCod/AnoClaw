@@ -45,12 +45,6 @@ export const DEFAULT_CEO_TOOLS = [
   'SubAgentSpawn',
   'SubAgentDelete',
   'ApiCall',
-  'office.create_pptx',
-  'office.create_docx',
-  'office.analyze_spreadsheet',
-  'pdf.summarize',
-  'web.research',
-  'files.organize',
 ];
 
 export const DEFAULT_MANAGER_TOOLS = [

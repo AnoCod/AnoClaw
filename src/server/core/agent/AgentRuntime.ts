@@ -14,7 +14,6 @@ import { SSEEventType, AgentRuntimeEvents } from '../../../shared/types/events.j
 import type { CapabilityRecord, TaskResolveResult } from '../../../shared/types/capability.js';
 import { InterruptController, InterruptReason } from './supervision/InterruptController.js';
 import { SessionManager } from '../session/index.js';
-import { SessionStore } from '../session/SessionStore.js';
 import { SessionLeaseManager } from '../session/SessionLeaseManager.js';
 import { createLogger } from '../logger.js';
 import { SupervisionManager, TaskStatus } from './supervision/SupervisionManager.js';
@@ -912,7 +911,32 @@ export class AgentRuntime extends EventEmitter {
     if (this.isSessionActive(subSessionId)) {
       try {
         await sessionManager.appendMessage(subSessionId, delegationMessage);
-      } catch { /* non-critical */ }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error('Failed to persist delegated task for active session', {
+          subSid: subSessionId,
+          targetAid: actualAgentId,
+          error: message,
+        });
+        return {
+          toolCallId: `delegate-${actualAgentId}`,
+          success: false,
+          content: `Task was not queued because it could not be persisted: ${message}`,
+          structured: {
+            status: 'persistence_failed',
+            type: 'subagent',
+            subSessionId,
+            targetAgentId: actualAgentId,
+            parentSessionId,
+            parentAgentId,
+          },
+          tokensUsed: 0,
+          startedAt,
+          finishedAt: Date.now(),
+          durationMs: Date.now() - startedAt,
+          wasTruncated: false,
+        };
+      }
       InterruptController.getInstance().setPendingUserMessage(
         subSessionId,
         `[New task from ${delegatorName}]:\n\n${task}`,
@@ -958,12 +982,10 @@ export class AgentRuntime extends EventEmitter {
     esm.subscribe(parentSessionId, parentAgentId, `task:completed:${taskId}`, { oneShot: true });
     esm.subscribe(parentSessionId, parentAgentId, `task:failed:${taskId}`, { oneShot: true });
 
-    // Per-event persistence via StreamPersister (unified with main.ts)
-    const store = SessionStore.getInstance();
+    // Per-event persistence through the shared turn recorder.
     const turnMsgId = `msg-sub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    const initialPrevUuid = '00000000-0000-0000-0000-000000000000';
-    const { StreamPersister } = await import('../../infra/StreamPersister.js');
-    const persister = new StreamPersister(store, subSessionId, turnMsgId, initialPrevUuid, actualAgentId);
+    const { SessionTurnRecorder } = await import('../../infra/SessionTurnRecorder.js');
+    const recorder = new SessionTurnRecorder(subSessionId, actualAgentId, turnMsgId);
 
 
     (async () => {
@@ -1019,9 +1041,10 @@ export class AgentRuntime extends EventEmitter {
           actualAgentId,
           task.slice(0, 60),
           startedAt,
-          persister,
+          recorder,
           state,
         );
+        await recorder.finalize();
 
         const durationMs = Date.now() - startedAt;
 
@@ -1053,6 +1076,11 @@ export class AgentRuntime extends EventEmitter {
 
         logger.info('Delegation completed (background)', { parentSid: parentSessionId, subSid: subSessionId, targetAid: actualAgentId, turnCount: state.turnCount, durationMs });
       } catch (err) {
+        await recorder.recordError(
+          err instanceof Error ? err.message : String(err),
+          'delegation',
+        ).catch(() => {});
+        await recorder.finalize().catch(() => {});
         const errorMessage = err instanceof Error ? err.message : String(err);
         const durationMs = Date.now() - startedAt;
 
@@ -1207,7 +1235,7 @@ export class AgentRuntime extends EventEmitter {
           return;
         }
 
-        sm.appendMessage(payload.parentSessionId, {
+        const persistNotification = sm.appendMessage(payload.parentSessionId, {
           id: `tn-${payload.taskId}`,
           sessionId: payload.parentSessionId,
           role: MessageRole.User,
@@ -1216,19 +1244,26 @@ export class AgentRuntime extends EventEmitter {
           compressed: false,
           timestamp,
           agentId: payload.parentAgentId,
-        }).catch(err => {
+        }).then(() => true).catch(err => {
           log.warn('Failed to inject task notification', { taskId: payload.taskId, error: (err as Error).message });
+          return false;
         });
 
         // Wake the agent so it sees the notification.
         // If session is idle (no active AgentLoop), start background processing.
         if (this.isSessionActive(payload.parentSessionId)) {
-          InterruptController.getInstance().requestSteerInterrupt(payload.parentSessionId);
+          void persistNotification.then((persisted) => {
+            if (persisted) {
+              InterruptController.getInstance().requestSteerInterrupt(payload.parentSessionId);
+            }
+          });
         } else {
 
           // so the user sees the CEO's streaming response via WebSocket.
           (async () => {
+            let recorder: import('../../infra/SessionTurnRecorder.js').SessionTurnRecorder | null = null;
             try {
+              if (!await persistNotification) return;
               const history = await sm.getHistory(payload.parentSessionId).catch(() => []);
               const wakeMessage: Message = {
                 id: `tn-msg-${payload.taskId}`,
@@ -1241,12 +1276,11 @@ export class AgentRuntime extends EventEmitter {
                 agentId: payload.parentAgentId,
               };
 
-              const { StreamPersister } = await import('../../infra/StreamPersister.js');
+              const { SessionTurnRecorder } = await import('../../infra/SessionTurnRecorder.js');
               const { StreamConsumer } = await import('../../infra/stream/StreamConsumer.js');
-              const store = SessionStore.getInstance();
               const turnMsgId = `msg-wake-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-              const persister = new StreamPersister(store, payload.parentSessionId, turnMsgId, '00000000-0000-0000-0000-000000000000', payload.parentAgentId);
-              const consumer = new StreamConsumer(WsServer.getInstance(), payload.parentSessionId, persister);
+              recorder = new SessionTurnRecorder(payload.parentSessionId, payload.parentAgentId, turnMsgId);
+              const consumer = new StreamConsumer(WsServer.getInstance(), payload.parentSessionId, recorder);
 
               for await (const event of this.processMessage(payload.parentSessionId, payload.parentAgentId, wakeMessage, history)) {
                 switch (event.type) {
@@ -1257,39 +1291,18 @@ export class AgentRuntime extends EventEmitter {
                     consumer.onDelta('think', event.content as string);
                     break;
                   case 'tool_call':
-                    await persister.flushDeltas();
                     await consumer.beforeToolEvent();
-                    await persister.persistEvent('tool_call', {
-                      id: (event.toolCallId || event.id || event.toolId || '') as string,
-                      name: (event.toolName || event.name || '') as string,
-                      input: (event.params || event.args || event.input || event.toolInput || {}) as Record<string, unknown>,
-                    });
+                    await recorder.record(event, 'task_notification');
                     consumer.sendDirect(event as unknown as Record<string, unknown>);
                     break;
                   case 'tool_result':
-                    await persister.flushDeltas();
                     await consumer.beforeToolEvent();
-                    const structured = (event as Record<string, unknown>).structured as Record<string, unknown> | undefined;
-                    const todosPayload = structured?.todos as Array<{ content: string; status: string; activeForm: string }> | undefined;
-                    await persister.persistEvent('tool_result', {
-                      toolCallId: (event.toolCallId || event.toolId || '') as string,
-                      is_error: event.success === false,
-                      content: (event.result || event.content || '') as string,
-                      ...(todosPayload ? { todos: todosPayload } : {}),
-                    });
-                    if (todosPayload && Array.isArray(todosPayload)) {
-                      await persister.persistEvent('todo_write', {
-                        todos: todosPayload.map(t => ({ content: t.content, status: t.status, activeForm: t.activeForm })),
-                      });
-                    }
+                    await recorder.record(event, 'task_notification');
                     consumer.sendDirect(event as unknown as Record<string, unknown>);
                     break;
                   case 'error':
                     await consumer.beforeToolEvent();
-                    await persister.persistEvent('error', {
-                      error: (event.errorMessage || event.message || event.content || 'Unknown error') as string,
-                      source: 'task_notification',
-                    });
+                    await recorder.record(event, 'task_notification');
                     consumer.sendDirect(event as unknown as Record<string, unknown>);
                     break;
                   default:
@@ -1300,6 +1313,11 @@ export class AgentRuntime extends EventEmitter {
               sm.rebuildMessageCache(payload.parentSessionId).catch(() => {});
               log.info('Task notification processed by idle agent', { taskId: payload.taskId, sid: payload.parentSessionId });
             } catch (err) {
+              await recorder?.recordError(
+                err instanceof Error ? err.message : String(err),
+                'task_notification',
+              ).catch(() => {});
+              await recorder?.finalize().catch(() => {});
               log.warn('Task notification background processing error', { taskId: payload.taskId, error: (err as Error).message });
             }
           })();

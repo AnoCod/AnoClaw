@@ -26,6 +26,8 @@ import { createLogger } from '../logger.js';
 import { TypedEventBus } from '../events/index.js';
 import { WsServer } from '../../infra/network/WsServer.js';
 import { TokenCounter } from '../context/index.js';
+import { messageToJsonlEvents } from '../../../shared/serialization/jsonl-converters.js';
+import type { SessionTurnRecorder } from '../../infra/SessionTurnRecorder.js';
 
 // ── SubAgent tool filtering ──
 
@@ -175,7 +177,7 @@ export async function handleSubAgentOutput(
   subAgentId: string,
   taskSummary: string,
   startedAt: number,
-  persister: { persistEvent: (...args: any[]) => Promise<any> },
+  recorder: Pick<SessionTurnRecorder, 'record'>,
   state: DelegationState,
 ): Promise<void> {
   let errorMessage = '';
@@ -209,25 +211,7 @@ export async function handleSubAgentOutput(
     }
 
     // ── 2. Per-event persistence to sub-session JSONL ──
-    if (event.type === 'text') {
-      await persister.persistEvent('text', { content: event.content || '' });
-    } else if (event.type === 'think') {
-      await persister.persistEvent('think', { content: event.content || '' });
-    } else if (event.type === 'tool_call') {
-      await persister.persistEvent('tool_call', {
-        id: (event.toolCallId || event.toolId || '') as string,
-        name: (event.toolName || event.name || '') as string,
-        input: (event.params || event.args || event.input || event.toolInput || {}) as Record<string, unknown>,
-      });
-    } else if (event.type === 'tool_result') {
-      await persister.persistEvent('tool_result', {
-        toolCallId: (event.toolCallId || event.toolId || '') as string,
-        is_error: (event as Record<string, unknown>).success === false,
-        content: (event.result || event.content || '') as string,
-      });
-    } else if (event.type === SSEEventType.Error) {
-      await persister.persistEvent('error', { error: errorMessage || 'Unknown error', source: 'delegation' });
-    }
+    await recorder.record(event, 'delegation');
 
     // ── 3. Bubble to parent WS ──
     bubbleEventToParent(runtime, parentSessionId, subSessionId, subAgentId, event);
@@ -320,27 +304,29 @@ export async function spawnSubAgent(
 
   // ── Create session — persist creates disk-only record, no in-memory tree ──
   let subSessionId = `temp-${tempId}`;
-  let persister: { persistEvent: (...args: any[]) => Promise<any> } | null = null;
+  let recorder: SessionTurnRecorder | null = null;
 
   if (config.persist && parentSessionId) {
     try {
-      const { StreamPersister } = await import('../../infra/StreamPersister.js');
+      const { SessionTurnRecorder } = await import('../../infra/SessionTurnRecorder.js');
       const { SessionStore } = await import('../session/SessionStore.js');
       const store = SessionStore.getInstance();
       const diskSessionId = `sub-${parentSessionId}-${Date.now().toString(36)}`;
+      const parentLevel = SessionManager.getInstance().session(parentSessionId)?.level ?? 0;
+      const createdAt = new Date().toISOString();
 
       // Write minimal session meta to disk (discoverable via SessionStore, no UI tree)
       await store.writeSessionMeta(diskSessionId, {
         sessionId: diskSessionId,
         parentSessionId,
-        level: 0,
+        level: parentLevel + 1,
         agentId: tempId,
         type: 'Sub' as SessionType,
         status: 'Active' as SessionStatus,
         title: `SubAgent: ${config.description?.slice(0, 60) || config.subagent_type}`,
         workspace: SessionManager.getInstance().session(parentSessionId)?.workspace || '',
-        createdAt: new Date().toISOString(),
-        lastActiveAt: new Date().toISOString(),
+        createdAt,
+        lastActiveAt: createdAt,
         subSessionIds: [],
         metadata: {
           subagentType: config.subagent_type,
@@ -349,12 +335,21 @@ export async function spawnSubAgent(
           tempAgentId: tempId,
         },
       } as SessionNode);
+      await store.appendEvents(diskSessionId, [{
+        type: 'session_created',
+        uuid: `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        parentUuid: null,
+        sessionId: diskSessionId,
+        agentId: tempId,
+        parentSessionId,
+        timestamp: createdAt,
+      }], { messageDelta: 0 });
 
       subSessionId = diskSessionId;
 
-      // Create StreamPersister for per-event JSONL persistence
+      // Create the shared turn recorder for per-event JSONL persistence.
       const turnMsgId = `msg-sub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      persister = new StreamPersister(store, subSessionId, turnMsgId, '00000000-0000-0000-0000-000000000000', tempId);
+      recorder = new SessionTurnRecorder(subSessionId, tempId, turnMsgId);
 
       logger.debug('SubAgent persistent session created', { subSessionId, parentSessionId, tempId });
     } catch (err) {
@@ -384,6 +379,15 @@ export async function spawnSubAgent(
     compressed: false,
     timestamp: new Date().toISOString(),
   };
+  if (recorder) {
+    const { SessionStore } = await import('../session/SessionStore.js');
+    const store = SessionStore.getInstance();
+    await store.appendEvents(
+      subSessionId,
+      messageToJsonlEvents(taskMessage, '00000000-0000-0000-0000-000000000000'),
+      { messageDelta: 1 },
+    );
+  }
 
   let fullContent = '';
   let turnCount = 0;
@@ -407,31 +411,11 @@ export async function spawnSubAgent(
         bubbleEventToParent(runtime, parentSessionId, subSessionId, tempId, event);
       }
       // ── Persist events to JSONL if session is real ──
-      if (persister) {
-        if (event.type === 'text') {
-          await persister.persistEvent('text', { content: event.content || '' });
-        } else if (event.type === 'think') {
-          await persister.persistEvent('think', { content: event.content || '' });
-        } else if (event.type === 'tool_call') {
-          await persister.persistEvent('tool_call', {
-            id: (event.toolCallId || event.toolId || '') as string,
-            name: (event.toolName || event.name || '') as string,
-            input: (event.params || event.args || event.input || event.toolInput || {}) as Record<string, unknown>,
-          });
-        } else if (event.type === 'tool_result') {
-          await persister.persistEvent('tool_result', {
-            toolCallId: (event.toolCallId || event.toolId || '') as string,
-            is_error: (event as Record<string, unknown>).success === false,
-            content: (event.result || event.content || '') as string,
-          });
-        } else if (event.type === SSEEventType.Error) {
-          await persister.persistEvent('error', {
-            error: ((event as Record<string, unknown>).errorMessage || (event as Record<string, unknown>).message || 'Unknown error') as string,
-            source: 'subagent',
-          });
-        }
+      if (recorder) {
+        await recorder.record(event, 'subagent');
       }
     }
+    await recorder?.finalize();
 
     const durationMs = Date.now() - startedAt;
     logger.debug('SubAgent completed', { tempId, type: config.subagent_type, contentLen: fullContent.length, durationMs });
@@ -457,6 +441,11 @@ export async function spawnSubAgent(
       wasTruncated: false,
     };
   } catch (err) {
+    await recorder?.recordError(
+      err instanceof Error ? err.message : String(err),
+      'subagent',
+    ).catch(() => {});
+    await recorder?.finalize().catch(() => {});
     const errorMessage = err instanceof Error ? err.message : String(err);
     const durationMs = Date.now() - startedAt;
     logger.error('SubAgent failed', { tempId, type: config.subagent_type, error: errorMessage.slice(0, 200) });

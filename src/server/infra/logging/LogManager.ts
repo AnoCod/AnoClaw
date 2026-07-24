@@ -399,14 +399,29 @@ export class LogManager extends EventEmitter {
   /** Flush and close streams (call during shutdown) */
   async shutdown(): Promise<void> {
     if (this._apiCallsStream) {
-      this._apiCallsStream.end();
+      const stream = this._apiCallsStream;
       this._apiCallsStream = null;
+      await new Promise<void>((resolve, reject) => {
+        const onError = (error: Error): void => {
+          stream.off('finish', onFinish);
+          reject(error);
+        };
+        const onFinish = (): void => {
+          stream.off('error', onError);
+          resolve();
+        };
+        stream.once('error', onError);
+        stream.once('finish', onFinish);
+        stream.end();
+      });
     }
 
     // Flush pino rotating-file loggers
-    this._pinoLoggers.forEach((logger) => {
-      logger.flush();
-    });
+    await Promise.all([...this._pinoLoggers.values()].map((logger) => (
+      new Promise<void>((resolve, reject) => {
+        logger.flush((error?: Error) => error ? reject(error) : resolve());
+      })
+    )));
     this._pinoLoggers.clear();
 
     this._initialized = false;

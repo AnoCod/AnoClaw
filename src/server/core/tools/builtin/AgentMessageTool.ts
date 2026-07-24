@@ -17,9 +17,8 @@ import { AgentChannel } from '../../agent/AgentChannel.js';
 import { InterruptController } from '../../agent/supervision/InterruptController.js';
 import { BackgroundTaskManager } from '../../agent/supervision/BackgroundTaskManager.js';
 import { bubbleEventToParent } from '../../agent/AgentDelegation.js';
-import { SessionStore } from '../../session/SessionStore.js';
 import { WsServer } from '../../../infra/network/WsServer.js';
-import type { StreamPersister } from '../../../infra/StreamPersister.js';
+import type { SessionTurnRecorder } from '../../../infra/SessionTurnRecorder.js';
 
 const MAX_TARGET_AGENT_ID_CHARS = 200;
 const MAX_MESSAGE_CONTENT_CHARS = 20000;
@@ -232,7 +231,7 @@ export class AgentMessageTool extends Tool {
     }
 
     // Target is idle - start a background AgentLoop that persists events.
-    // Uses StreamPersister for JSONL durability + bubbleEventToParent for
+    // Uses SessionTurnRecorder for JSONL durability + bubbleEventToParent for
     // the parent session's delegation activity card.
     // Registered with BackgroundTaskManager so UI panel can track it.
     logger.debug('AgentMessage starting background processing', { from: ctx.agentId, to: targetAgentId, sid: targetSession.id });
@@ -247,40 +246,22 @@ export class AgentMessageTool extends Tool {
     const bgStartMs = Date.now();
     const targetSessionId = targetSession.id;
     (async () => {
-      let persister: StreamPersister | null = null;
+      let recorder: SessionTurnRecorder | null = null;
       try {
-        const { StreamPersister: StreamPersisterCtor } = await import('../../../infra/StreamPersister.js');
-        const store = SessionStore.getInstance();
-        persister = new StreamPersisterCtor(store, targetSessionId,
+        const { SessionTurnRecorder: SessionTurnRecorderCtor } = await import('../../../infra/SessionTurnRecorder.js');
+        recorder = new SessionTurnRecorderCtor(targetSessionId, targetAgentId,
           `msg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-          '00000000-0000-0000-0000-000000000000',
-          targetAgentId);
-        const activePersister = persister;
+        );
+        const activeRecorder = recorder;
 
         for await (const event of runtime.processMessage(targetSessionId, targetAgentId, message)) {
           // ── Persist to JSONL ──
-          if (event.type === 'text') {
-            await activePersister.persistEvent('text', { content: event.content || '' });
-          } else if (event.type === 'think') {
-            await activePersister.persistEvent('think', { content: event.content || '' });
-          } else if (event.type === 'tool_call') {
-            await activePersister.persistEvent('tool_call', {
-              id: (event.toolCallId || event.toolId || '') as string,
-              name: (event.toolName || event.name || '') as string,
-              input: (event.params || event.args || event.input || event.toolInput || {}) as Record<string, unknown>,
-            });
-          } else if (event.type === 'tool_result') {
-            await activePersister.persistEvent('tool_result', {
-              toolCallId: (event.toolCallId || event.toolId || '') as string,
-              is_error: (event as Record<string, unknown>).success === false,
-              content: (event.result || event.content || '') as string,
-            });
-          }
+          await activeRecorder.record(event, 'agent_message');
           // ── Bubble to parent for live delegation card ──
           bubbleEventToParent(null as any, parentSessionId, targetSessionId, targetAgentId, event);
           WsServer.getInstance().send(targetSessionId, event as unknown as Record<string, unknown>);
         }
-        await activePersister.flushDeltas();
+        await activeRecorder.finalize();
         SessionManager.getInstance().rebuildMessageCache(targetSessionId).catch(() => {});
         bgManager.complete(bgTaskId, { content: 'Message processed', durationMs: Date.now() - bgStartMs }).catch(() => {});
         logger.debug('AgentMessage processed by recipient', { from: ctx.agentId, to: targetAgentId, sid: targetSessionId });
@@ -288,7 +269,8 @@ export class AgentMessageTool extends Tool {
         const msg = err instanceof Error ? err.message : String(err);
         logger.warn('AgentMessage background processing error', { from: ctx.agentId, to: targetAgentId, error: msg });
         try {
-          await persister?.flushDeltas();
+          await recorder?.recordError(msg, 'agent_message');
+          await recorder?.finalize();
         } catch { /* best-effort before failure notification */ }
         bgManager.fail(bgTaskId, msg, Date.now() - bgStartMs).catch(() => {});
       }

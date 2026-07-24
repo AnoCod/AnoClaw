@@ -22,12 +22,20 @@ export class StreamConsumer {
   private _firstTokenAt = 0;
   private _freshFinalSent = false;
   private _options: Required<StreamConsumerOptions>;
-  private _persister: { bufferDelta: (type: 'text' | 'think', content: string) => void; flushDeltas: () => Promise<void> };
+  private _persister: {
+    bufferDelta: (type: 'text' | 'think', content: string) => void;
+    flushDeltas: () => Promise<void>;
+    finalize?: () => Promise<void>;
+  };
 
   constructor(
     private _transport: Transport,
     private _sessionId: string,
-    persister: { bufferDelta: (type: 'text' | 'think', content: string) => void; flushDeltas: () => Promise<void> },
+    persister: {
+      bufferDelta: (type: 'text' | 'think', content: string) => void;
+      flushDeltas: () => Promise<void>;
+      finalize?: () => Promise<void>;
+    },
     options?: StreamConsumerOptions,
   ) {
     this._options = {
@@ -104,6 +112,10 @@ export class StreamConsumer {
   /** Flush everything on turn end and persist remaining deltas. */
   async flushAndFinalize(): Promise<void> {
     this._flush();
-    await this._persister.flushDeltas();
+    if (this._persister.finalize) {
+      await this._persister.finalize();
+    } else {
+      await this._persister.flushDeltas();
+    }
   }
 }

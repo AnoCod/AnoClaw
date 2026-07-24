@@ -14,7 +14,7 @@ describe('SessionStore agent fallback', () => {
 
   beforeEach(async () => {
     tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'anoclaw-session-store-'));
-    (SessionStore as any)._instance = undefined;
+    SessionStore.resetInstance();
     AgentRegistry.resetInstance();
     store = SessionStore.getInstance();
     await store.initialize(path.join(tmpDir, 'sessions'));
@@ -36,11 +36,16 @@ describe('SessionStore agent fallback', () => {
       path.join(sessionDir, 'meta.json'),
       JSON.stringify({
         sessionId,
+        parentSessionId: null,
+        level: 0,
         type: 'Main',
         status: 'Idle',
         title: 'Legacy Session',
+        workspace: '',
         createdAt: '2026-07-05T00:00:00.000Z',
         lastActiveAt: '2026-07-05T00:00:00.000Z',
+        subSessionIds: [],
+        metadata: {},
       }),
       'utf-8',
     );

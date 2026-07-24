@@ -292,6 +292,11 @@ export class SessionManager extends EventEmitter {
     return SessionManager._instance;
   }
 
+  /** Test/restart hook. Call only after active session operations have stopped. */
+  static resetInstance(): void {
+    SessionManager._instance = undefined as unknown as SessionManager;
+  }
+
   // -----------------------------------------------------------------------
   // Initialization (called once at startup)
   // -----------------------------------------------------------------------
@@ -304,6 +309,9 @@ export class SessionManager extends EventEmitter {
    * @param sessionsDir — absolute path to data/sessions/
    */
   async initialize(sessionsDir: string): Promise<void> {
+    this.sessions.clear();
+    this._messageCounts.clear();
+    this.activeSessionId = '';
     const store = SessionStore.getInstance();
     await store.initialize(sessionsDir);
 
@@ -317,13 +325,11 @@ export class SessionManager extends EventEmitter {
       }
     }
 
-    // Set the first non-archived main session as active
-    for (const session of recovered) {
-      if (session.isMain() && !session.isArchived()) {
-        this.activeSessionId = session.id;
-        break;
-      }
-    }
+    // Restore the most recently active main session deterministically.
+    const latestMain = recovered
+      .filter((session) => session.isMain() && !session.isArchived())
+      .sort((a, b) => Date.parse(b.lastActiveAt) - Date.parse(a.lastActiveAt))[0];
+    this.activeSessionId = latestMain?.id || '';
   }
 
   // -----------------------------------------------------------------------
@@ -368,21 +374,26 @@ export class SessionManager extends EventEmitter {
     };
 
     const session = new Session(node);
+    const store = SessionStore.getInstance();
+    try {
+      await store.writeSessionMeta(sessionId, node);
+      session.lastEventUuid = await store.appendEvents(sessionId, [{
+        type: 'session_created',
+        uuid: `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        parentUuid: null,
+        sessionId,
+        agentId,
+        parentSessionId: null,
+        timestamp: now,
+      }], { messageDelta: 0 });
+    } catch (error) {
+      await store.deleteSession(sessionId).catch(() => {});
+      throw error;
+    }
     this.sessions.set(sessionId, session);
 
     const logger = this.log;
     logger.info('Main session created', { sid: sessionId, aid: agentId });
-    const store = SessionStore.getInstance();
-    await store.writeSessionMeta(sessionId, node);
-    await store.persistEvent(sessionId, {
-      type: 'session_created',
-      uuid: `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-      parentUuid: null,
-      sessionId,
-      agentId,
-      parentSessionId: null,
-      timestamp: now,
-    });
 
     this.emit('sessionCreated', session);
     TypedEventBus.emit('session:created', { sessionId, agentId });
@@ -434,47 +445,68 @@ export class SessionManager extends EventEmitter {
     };
 
     const session = new Session(node);
-    this.sessions.set(sessionId, session);
-
-    const logger = this.log;
-    logger.info('Sub-session created', { sid: sessionId, parentSid: parentSessionId, aid: agentId });
-    parent.addSubSession(sessionId);
-    // ── Sync parent meta to disk so subSessionIds survives restart ──
-    await this._syncMeta(parentSessionId);
-
-    // ── Notify parent session: inject a system message so the parent agent knows a child was spawned ──
+    const store = SessionStore.getInstance();
+    const evUuid = `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const parentEventUuid = `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     const agentName = AgentRegistry.getInstance().agent(agentId)?.name || agentId;
-    this.appendMessage(parentSessionId, {
+    const notificationMessage: Message = {
       id: `sub-created-${sessionId}`,
       sessionId: parentSessionId,
       role: MessageRole.System,
       content: `[Sub-session created] Agent "${agentName}" (${agentId}) assigned: ${title || 'task'}. Sub-session ID: ${sessionId}`,
-      tokenCount: 0, compressed: false,
+      tokenCount: 0,
+      compressed: false,
       timestamp: now,
-    }).catch(() => { /* non-critical */ });
+    };
+    try {
+      await store.writeSessionMeta(sessionId, node);
+      session.lastEventUuid = await store.appendEvents(sessionId, [{
+        type: 'session_created',
+        uuid: evUuid,
+        parentUuid: null,
+        sessionId,
+        agentId,
+        parentSessionId,
+        timestamp: now,
+      }], { messageDelta: 0 });
 
-    // Persist
-    const store = SessionStore.getInstance();
-    await store.writeSessionMeta(sessionId, node);
-    const evUuid = `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-    await store.persistEvent(sessionId, {
-      type: 'session_created',
-      uuid: evUuid,
-      parentUuid: null,
-      sessionId,
-      agentId,
-      parentSessionId,
-      timestamp: now,
-    });
-    await store.persistEvent(parentSessionId, {
-      type: 'subsession_created',
-      uuid: `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-      parentUuid: evUuid,
+      parent.addSubSession(sessionId);
+      await this._syncMeta(parentSessionId, true);
+      const parentLifecycleEvent: JsonlEvent = {
+        type: 'subsession_created',
+        uuid: parentEventUuid,
+        parentUuid: parent.lastEventUuid,
+        sessionId: parentSessionId,
+        subSessionId: sessionId,
+        agentId,
+        timestamp: now,
+      };
+      parent.lastEventUuid = await store.appendEvents(
+        parentSessionId,
+        [
+          parentLifecycleEvent,
+          ...messageToJsonlEvents(notificationMessage, parentEventUuid),
+        ],
+        { messageDelta: 1 },
+      );
+    } catch (error) {
+      parent.removeSubSession(sessionId);
+      await this._syncMeta(parentSessionId).catch(() => {});
+      await store.deleteSession(sessionId).catch(() => {});
+      throw error;
+    }
+    this.sessions.set(sessionId, session);
+    this._messageCounts.set(parentSessionId, (this._messageCounts.get(parentSessionId) || 0) + 1);
+    if (parent.cachedMessages) parent.cachedMessages.push(notificationMessage);
+    this.emit('messageAppended', parentSessionId, notificationMessage);
+    TypedEventBus.emit('session:message_appended', {
       sessionId: parentSessionId,
-      subSessionId: sessionId,
-      agentId,
-      timestamp: now,
+      messageId: notificationMessage.id,
+      role: notificationMessage.role,
     });
+
+    const logger = this.log;
+    logger.info('Sub-session created', { sid: sessionId, parentSid: parentSessionId, aid: agentId });
 
     this.emit('sessionCreated', session);
     TypedEventBus.emit('session:created', { sessionId, agentId });
@@ -746,21 +778,20 @@ export class SessionManager extends EventEmitter {
     // Token breakdown is deferred — reading full history on every append is O(n²).
     // The breakdown is recalculated when AgentLoop starts anyway.
 
-    // Convert to Claude-style JSONL events and persist each one
-    const prevUuid = session.lastEventUuid || null;
-    const events = messageToJsonlEvents(message, prevUuid || '00000000-0000-0000-0000-000000000000');
-    for (const ev of events) {
-      await store.persistEvent(sessionId, ev);
-    }
-    // Track last event uuid for chaining
-    if (events.length > 0) {
-      const lastEv = events[events.length - 1];
-      session.lastEventUuid = (lastEv as Record<string, unknown>).uuid as string;
-    }
+    // Persist the complete logical message as one ordered JSONL batch.
+    const events = messageToJsonlEvents(
+      message,
+      session.lastEventUuid || '00000000-0000-0000-0000-000000000000',
+    );
+    session.lastEventUuid = await store.appendEvents(
+      sessionId,
+      events,
+      { messageDelta: 1 },
+    );
 
     session.touch();
     // ── Sync meta to disk: lastEventUuid + lastActiveAt ──
-    await this._syncMeta(sessionId);
+    await this._syncMeta(sessionId, true);
     // Increment external message counter for AgentLoop inter-turn check
     const currentCount = this._messageCounts.get(sessionId) || 0;
     this._messageCounts.set(sessionId, currentCount + 1);
@@ -1106,23 +1137,23 @@ export class SessionManager extends EventEmitter {
       if (!session) throw new Error(`Session '${sessionId}' not found`);
 
       const store = SessionStore.getInstance();
-      await store.truncateSession(sessionId);
-
-      // Reset event chaining — fresh start for compacted history
-      session.lastEventUuid = null;
       session.touch();
 
+      const replacementEvents: JsonlEvent[] = [];
+      let replacementHead = '00000000-0000-0000-0000-000000000000';
       for (const message of messages) {
-        const prevUuid = session.lastEventUuid || '00000000-0000-0000-0000-000000000000';
-        const events = messageToJsonlEvents(message, prevUuid);
-        for (const ev of events) {
-          await store.persistEvent(sessionId, ev);
-        }
+        const events = messageToJsonlEvents(message, replacementHead);
+        replacementEvents.push(...events);
         if (events.length > 0) {
           const lastEv = events[events.length - 1];
-          session.lastEventUuid = (lastEv as Record<string, unknown>).uuid as string;
+          replacementHead = (lastEv as Record<string, unknown>).uuid as string;
         }
       }
+      session.lastEventUuid = await store.replaceHistory(
+        sessionId,
+        replacementEvents,
+        messages.length,
+      );
 
       // Compute and persist token breakdown after rewrite
       try {
@@ -1148,7 +1179,7 @@ export class SessionManager extends EventEmitter {
         this.log.warn('Token breakdown after rewrite failed', { sid: sessionId, error: (err as Error).message });
       }
 
-      await this._syncMeta(sessionId);
+      await this._syncMeta(sessionId, true);
       session.setCachedMessages(messages);
       this._messageCounts.set(sessionId, messages.length);
     });
@@ -1243,13 +1274,13 @@ export class SessionManager extends EventEmitter {
     session.archive();
 
     const store = SessionStore.getInstance();
-    await store.persistEvent(sessionId, {
+    session.lastEventUuid = await store.appendEvents(sessionId, [{
       type: 'session_archived',
       uuid: `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       parentUuid: session.lastEventUuid,
       sessionId,
       timestamp: new Date().toISOString(),
-    });
+    }], { messageDelta: 0 });
     await store.archiveSession(sessionId);
     // ── Sync parent meta (its subSessionIds may include this now-archived child) ──
     if (session.parentSessionId) {
@@ -1283,16 +1314,16 @@ export class SessionManager extends EventEmitter {
     session.updateTitle(title);
 
     const store = SessionStore.getInstance();
-    await store.persistEvent(sessionId, {
+    session.lastEventUuid = await store.appendEvents(sessionId, [{
       type: 'title_change',
       uuid: `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       parentUuid: session.lastEventUuid,
       sessionId,
       newTitle: title,
       timestamp: new Date().toISOString(),
-    });
+    }], { messageDelta: 0 });
     // ── Sync meta to disk: title + lastActiveAt ──
-    await this._syncMeta(sessionId);
+    await this._syncMeta(sessionId, true);
 
     this.emit('titleChanged', sessionId, title);
     TypedEventBus.emit('session:title_changed', { sessionId, title });
@@ -1321,16 +1352,16 @@ export class SessionManager extends EventEmitter {
     session.setWorkspace(workspace);
 
     const store = SessionStore.getInstance();
-    await store.persistEvent(sessionId, {
+    session.lastEventUuid = await store.appendEvents(sessionId, [{
       type: 'workspace_change',
       uuid: `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       parentUuid: session.lastEventUuid,
       sessionId,
       path: workspace,
       timestamp: new Date().toISOString(),
-    });
+    }], { messageDelta: 0 });
     // ── Sync meta to disk: workspace + lastActiveAt ──
-    await this._syncMeta(sessionId);
+    await this._syncMeta(sessionId, true);
 
     this.emit('workspaceChanged', sessionId, workspace);
     TypedEventBus.emit('session:workspace_changed', { sessionId, workspace });
@@ -1340,15 +1371,15 @@ export class SessionManager extends EventEmitter {
         if (child.workspace === workspace) continue;
 
         child.setWorkspace(workspace);
-        await store.persistEvent(child.id, {
+        child.lastEventUuid = await store.appendEvents(child.id, [{
           type: 'workspace_change',
           uuid: `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
           parentUuid: child.lastEventUuid,
           sessionId: child.id,
           path: workspace,
           timestamp: new Date().toISOString(),
-        });
-        await this._syncMeta(child.id);
+        }], { messageDelta: 0 });
+        await this._syncMeta(child.id, true);
 
         this.emit('workspaceChanged', child.id, workspace);
         TypedEventBus.emit('session:workspace_changed', { sessionId: child.id, workspace });
@@ -1378,7 +1409,9 @@ export class SessionManager extends EventEmitter {
   /** Remove ALL sessions from memory. Does NOT touch disk — call deleteAllSessions() separately. */
   clearAll(): void {
     this._locks.clear();
+    this._messageCounts.clear();
     this.sessions.clear();
+    this.activeSessionId = '';
     this.log.info('All sessions cleared from memory');
   }
 }

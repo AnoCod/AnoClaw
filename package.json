@@ -15,6 +15,7 @@
     "build:all": "npm run build:electron",
     "dev": "npm run build:electron && start-electron.bat",
     "start": "start-electron.bat",
+    "sessions:audit": "node scripts/audit-session-recovery.cjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },

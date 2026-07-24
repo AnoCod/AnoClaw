@@ -71,6 +71,13 @@ export class InterruptController {
     }
   }
 
+  /** Abort every active controller during process shutdown. */
+  interruptAll(reason: InterruptReason = InterruptReason.UserStop): void {
+    for (const sessionId of [...this._controllers.keys()]) {
+      this._interruptOne(sessionId, reason);
+    }
+  }
+
   /** Wake an idle agent session — interrupts ONLY this session, never cascades to children. */
   requestSteerInterrupt(sessionId: string): void {
     this.setPendingUserMessage(sessionId,

@@ -321,7 +321,33 @@ export async function createApp(electron: typeof import('electron')) {
   });
 
   app.on('window-all-closed', () => { app.quit(); });
-  app.on('before-quit', async () => { globalThis._quitting = true; await shutdown(); });
+  let gracefulQuitStarted = false;
+  let gracefulQuitComplete = false;
+  app.on('before-quit', (event) => {
+    globalThis._quitting = true;
+    if (gracefulQuitComplete) return;
+    event.preventDefault();
+    if (gracefulQuitStarted) return;
+    gracefulQuitStarted = true;
+    void (async () => {
+      try {
+        try {
+          await shutdown();
+        } catch (error) {
+          console.error('[shutdown] Server drain failed', error);
+        }
+        try {
+          const { LogManager } = await import('../server/infra/logging/LogManager.js');
+          await LogManager.getInstance().shutdown();
+        } catch (error) {
+          console.error('[shutdown] Log flush failed', error);
+        }
+      } finally {
+        gracefulQuitComplete = true;
+        app.quit();
+      }
+    })();
+  });
   app.on('certificate-error', (event: any, webContents: any, url: string, error: string, _certificate: unknown, callback: (allowed: boolean) => void) => {
     if (!bvm.handleCertificateError(webContents, url, error)) return;
     event.preventDefault();

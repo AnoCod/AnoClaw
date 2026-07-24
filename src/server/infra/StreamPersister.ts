@@ -19,6 +19,10 @@ export class StreamPersister {
   private turnMsgId: string;
   private agentId: string;
   private logger: MinimalLogger;
+  private _initialized = false;
+  private _hasAssistantContent = false;
+  private _finalized = false;
+  private _finalizePromise: Promise<void> | null = null;
 
   constructor(
     store: SessionStore,
@@ -63,10 +67,12 @@ export class StreamPersister {
     evType: 'text' | 'think' | 'tool_call' | 'tool_result' | 'todo_write' | 'compacted' | 'error' | 'plan_enter' | 'plan_exit',
     payload: Record<string, unknown>,
   ): Promise<string> {
+    await this.ensureInitialized();
     const evUuid = this.mkUuid();
     let jsonlEvent: Record<string, unknown>;
 
     if (evType === 'text') {
+      this._hasAssistantContent = true;
       jsonlEvent = {
         type: 'assistant', uuid: evUuid, parentUuid: this._prevUuid,
         sessionId: this.sessionId, timestamp: this.ts(),
@@ -74,6 +80,7 @@ export class StreamPersister {
         agentId: this.agentId || undefined,
       };
     } else if (evType === 'think') {
+      this._hasAssistantContent = true;
       jsonlEvent = {
         type: 'assistant', uuid: evUuid, parentUuid: this._prevUuid,
         sessionId: this.sessionId, timestamp: this.ts(),
@@ -81,6 +88,7 @@ export class StreamPersister {
         agentId: this.agentId || undefined,
       };
     } else if (evType === 'tool_call') {
+      this._hasAssistantContent = true;
       jsonlEvent = {
         type: 'assistant', uuid: evUuid, parentUuid: this._prevUuid,
         sessionId: this.sessionId, timestamp: this.ts(),
@@ -128,14 +136,25 @@ export class StreamPersister {
     }
 
     try {
-      await this.store.persistEvent(this.sessionId, jsonlEvent, { skipMetaUpdate: true });
+      const persistedHead = await this.store.persistEvent(
+        this.sessionId,
+        jsonlEvent,
+        { skipMetaUpdate: true, sync: true },
+      );
+      this._prevUuid = persistedHead || evUuid;
     } catch (err) {
       this.logger.error('Failed to persist stream event', { sid: this.sessionId, error: (err as Error).message });
       throw err;
     }
 
-    this._prevUuid = evUuid;
-    return evUuid;
+    return this._prevUuid;
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    if (this._initialized) return;
+    const durableHead = await this.store.loadHeadEventUuid(this.sessionId);
+    if (durableHead) this._prevUuid = durableHead;
+    this._initialized = true;
   }
 
   // ── Delta buffering (think/text only — tool events flush immediately) ──
@@ -166,6 +185,26 @@ export class StreamPersister {
     // original promise so explicit callers still observe the failure.
     this._flushChain = flush.catch(() => {});
     return flush;
+  }
+
+  /** Finalize one streamed assistant turn and update its logical message count once. */
+  async finalize(): Promise<void> {
+    if (this._finalized) return;
+    if (this._finalizePromise) return this._finalizePromise;
+    const attempt = (async () => {
+      await this.flushDeltas();
+      if (this._hasAssistantContent) {
+        await this.store.incrementMessageCount(this.sessionId);
+      }
+      this._finalized = true;
+    })();
+    this._finalizePromise = attempt;
+    try {
+      await attempt;
+    } catch (error) {
+      if (this._finalizePromise === attempt) this._finalizePromise = null;
+      throw error;
+    }
   }
 
   /** Snapshot buffers before awaiting I/O; requeue failed chunks ahead of newer deltas. */

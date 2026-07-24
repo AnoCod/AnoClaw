@@ -80,9 +80,9 @@ function makeAgent(id: string, name: string, role: AgentRole): Agent {
   });
 }
 
-function createPersisterMock() {
+function createRecorderMock() {
   return {
-    persistEvent: vi.fn().mockResolvedValue(undefined),
+    record: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -307,9 +307,9 @@ describe('handleSubAgentOutput', () => {
     }
 
     const state: DelegationState = { fullContent: '', thinking: '', turnCount: 0, currentTool: undefined };
-    const persister = createPersisterMock();
+    const recorder = createRecorderMock();
 
-    await handleSubAgentOutput(runtime, stream(), 'parent-1', 'sub-1', 'agent-1', 'task', Date.now(), persister, state);
+    await handleSubAgentOutput(runtime, stream(), 'parent-1', 'sub-1', 'agent-1', 'task', Date.now(), recorder, state);
 
     expect(state.fullContent).toBe('Hello world!');
   });
@@ -321,9 +321,9 @@ describe('handleSubAgentOutput', () => {
     }
 
     const state: DelegationState = { fullContent: '', thinking: '', turnCount: 0, currentTool: undefined };
-    const persister = createPersisterMock();
+    const recorder = createRecorderMock();
 
-    await handleSubAgentOutput(runtime, stream(), 'parent-1', 'sub-1', 'agent-1', 'task', Date.now(), persister, state);
+    await handleSubAgentOutput(runtime, stream(), 'parent-1', 'sub-1', 'agent-1', 'task', Date.now(), recorder, state);
 
     expect(state.thinking).toBe('Thinking step 1...Thinking step 2...');
   });
@@ -335,9 +335,9 @@ describe('handleSubAgentOutput', () => {
     }
 
     const state: DelegationState = { fullContent: '', thinking: '', turnCount: 0, currentTool: undefined };
-    const persister = createPersisterMock();
+    const recorder = createRecorderMock();
 
-    await handleSubAgentOutput(runtime, stream(), 'parent-1', 'sub-1', 'agent-1', 'task', Date.now(), persister, state);
+    await handleSubAgentOutput(runtime, stream(), 'parent-1', 'sub-1', 'agent-1', 'task', Date.now(), recorder, state);
 
     expect(state.turnCount).toBe(2);
     expect(state.currentTool).toBe('Write');
@@ -350,15 +350,15 @@ describe('handleSubAgentOutput', () => {
     }
 
     const state: DelegationState = { fullContent: '', thinking: '', turnCount: 0, currentTool: 'Read' };
-    const persister = createPersisterMock();
+    const recorder = createRecorderMock();
 
-    await handleSubAgentOutput(runtime, stream(), 'parent-1', 'sub-1', 'agent-1', 'task', Date.now(), persister, state);
+    await handleSubAgentOutput(runtime, stream(), 'parent-1', 'sub-1', 'agent-1', 'task', Date.now(), recorder, state);
 
     expect(state.turnCount).toBe(1);
     expect(state.currentTool).toBeUndefined();
   });
 
-  it('calls persister.persistEvent for each relevant event type', async () => {
+  it('sends each relevant event through the shared turn recorder', async () => {
     async function* stream(): AsyncGenerator<SSEEvent> {
       yield { type: SSEEventType.Text, content: 'Hello' };
       yield { type: SSEEventType.Think, content: 'Hmm' };
@@ -367,15 +367,15 @@ describe('handleSubAgentOutput', () => {
     }
 
     const state: DelegationState = { fullContent: '', thinking: '', turnCount: 0, currentTool: undefined };
-    const persister = createPersisterMock();
+    const recorder = createRecorderMock();
 
-    await handleSubAgentOutput(runtime, stream(), 'parent-1', 'sub-1', 'agent-1', 'task', Date.now(), persister, state);
+    await handleSubAgentOutput(runtime, stream(), 'parent-1', 'sub-1', 'agent-1', 'task', Date.now(), recorder, state);
 
-    expect(persister.persistEvent).toHaveBeenCalledTimes(4);
-    expect(persister.persistEvent).toHaveBeenCalledWith('text', { content: 'Hello' });
-    expect(persister.persistEvent).toHaveBeenCalledWith('think', { content: 'Hmm' });
-    expect(persister.persistEvent).toHaveBeenCalledWith('tool_call', expect.objectContaining({ name: 'Read', id: 'tc-1' }));
-    expect(persister.persistEvent).toHaveBeenCalledWith('tool_result', expect.objectContaining({ toolCallId: 'tc-1', content: 'output' }));
+    expect(recorder.record).toHaveBeenCalledTimes(4);
+    expect(recorder.record).toHaveBeenNthCalledWith(1, expect.objectContaining({ type: SSEEventType.Text, content: 'Hello' }), 'delegation');
+    expect(recorder.record).toHaveBeenNthCalledWith(2, expect.objectContaining({ type: SSEEventType.Think, content: 'Hmm' }), 'delegation');
+    expect(recorder.record).toHaveBeenNthCalledWith(3, expect.objectContaining({ type: SSEEventType.ToolCall, toolCallId: 'tc-1' }), 'delegation');
+    expect(recorder.record).toHaveBeenNthCalledWith(4, expect.objectContaining({ type: SSEEventType.ToolResult, toolCallId: 'tc-1' }), 'delegation');
   });
 });
 

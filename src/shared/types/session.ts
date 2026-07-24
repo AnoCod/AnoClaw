@@ -134,7 +134,19 @@ export interface SessionMeta {
   createdAt: string;
   lastActiveAt: string;
   messageCount: number;
+  /** Number of physical JSONL events. Lifecycle events are not messages. */
+  eventCount?: number;
+  /** UUID of the last durably appended JSONL event. */
+  headEventUuid?: string | null;
   tokenBreakdown: TokenBreakdown;
+}
+
+/** Canonical on-disk meta.json document. Legacy documents omit schemaVersion
+ * and the derived counters, but must still contain the complete SessionNode. */
+export interface PersistedSessionMeta extends SessionNode, SessionMeta {
+  schemaVersion: 1;
+  eventCount: number;
+  headEventUuid: string | null;
 }
 
 export interface TokenBreakdown {
@@ -208,8 +220,8 @@ export type JsonlEvent =
   | (EventBase & { type: 'session_archived' })
 
   // Messages — user
-  | (EventBase & { type: 'user'; message: { role: 'user'; content: ContentBlock[] }; agentId?: string; agentName?: string })
-  | (EventBase & { type: 'system'; message: { role: 'system'; content: ContentBlock[] }; agentId?: string; agentName?: string })
+  | (EventBase & { type: 'user'; message: { id?: string; role: 'user'; content: ContentBlock[] }; agentId?: string; agentName?: string })
+  | (EventBase & { type: 'system'; message: { id?: string; role: 'system'; content: ContentBlock[] }; agentId?: string; agentName?: string })
 
   // Messages — assistant (one content block per event, shared message.id)
   | (EventBase & { type: 'assistant'; message: { id: string; role: 'assistant'; model?: string; content: [ContentBlock] }; agentId?: string; agentName?: string })

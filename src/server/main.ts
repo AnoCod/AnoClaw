@@ -10,8 +10,10 @@ import { WsServer } from './infra/network/WsServer.js';
 import { WsMessageRouter } from './infra/network/WsMessageRouter.js';
 import { registerAllWsHandlers } from './infra/network/handlers/registerAllHandlers.js';
 import { AgentRegistry } from './core/agent/AgentRegistry.js';
+import { AgentRuntime } from './core/agent/AgentRuntime.js';
 import { loadAgentConfig } from './core/agent/AgentConfig.js';
 import { SessionManager } from './core/session/SessionManager.js';
+import { recoverRestartCheckpoint } from './core/session/RestartCheckpointRecovery.js';
 import { ToolRegistry } from './core/tools/ToolRegistry.js';
 import { ToolProfiler } from './infra/supervision/ToolProfiler.js';
 import { PromptAssembler } from './core/prompt/PromptAssembler.js';
@@ -514,59 +516,29 @@ async function initialize(): Promise<void> {
     await sessionManager.initialize(ensureWritableDir('data', 'sessions'));
     logManager.logger('anochat.core').info('SessionManager initialized');
   } catch (err) {
-    logManager.logger('anochat.core').warn('SessionManager init skipped', { error: (err as Error).message });
+    logManager.logger('anochat.core').error('SessionManager initialization failed', { error: (err as Error).message });
+    throw err;
   }
 
   // 4.5 Initialize API auth tokens
   await initAuthStore('config');
 
 
-  // Don't try to wake the agent directly (AgentLoop needs agent registry, session cache,
-  // and WS connection all ready). Instead, inject a system message into the session's
-  // JSONL. When the user sends their first message after restart, the agent naturally
-  // sees it in history and resumes where it left off.
+  // Restore a restart checkpoint as an idempotent system message. The restartId
+  // survives a crash between transcript commit and checkpoint deletion.
   try {
     const checkpointPath = writablePath('data', 'restart-checkpoint.json');
-    if (fs.existsSync(checkpointPath)) {
-      const raw = fs.readFileSync(checkpointPath, 'utf-8');
-      const checkpoint = JSON.parse(raw);
-      const age = Date.now() - (checkpoint.timestamp || 0);
-      const MAX_AGE = 5 * 60 * 1000; // 5 minutes
-      if (age < MAX_AGE && checkpoint.sessionId && checkpoint.resumeMessage) {
-        const { SessionStore } = await import('./core/session/SessionStore.js');
-        const store = SessionStore.getInstance();
-
-        const sessDir = path.join(store.getSessionsDir(), checkpoint.sessionId);
-        if (fs.existsSync(sessDir)) {
-
-          const now = new Date().toISOString();
-          const evId = () => `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-          await store.persistEvent(checkpoint.sessionId, {
-            type: 'user',
-            uuid: evId(),
-            sessionId: checkpoint.sessionId,
-            message: {
-              role: 'user',
-              content: [{ type: 'text', text: `[Server restarted]\n\nBefore restart I was working on:\n${checkpoint.resumeMessage}\n\nNow continuing.` }],
-            },
-            timestamp: now,
-            agentId: 'system',
-          });
-          logManager.logger('anochat.core').info('Restart checkpoint injected into session JSONL', {
-            sid: checkpoint.sessionId, ageMs: age,
-          });
-          // Only delete checkpoint after successful injection
-          fs.unlinkSync(checkpointPath);
-        } else {
-          logManager.logger('anochat.core').warn('Restart checkpoint skipped - session not found on disk', {
-            sid: checkpoint.sessionId, ageMs: age,
-          });
-          fs.unlinkSync(checkpointPath);
-        }
-      } else {
-
-        fs.unlinkSync(checkpointPath);
-      }
+    const result = await recoverRestartCheckpoint(checkpointPath, { sessionManager });
+    if (result.status === 'recovered' || result.status === 'deduplicated') {
+      logManager.logger('anochat.core').info(
+        'Restart checkpoint recovered',
+        result as unknown as Record<string, unknown>,
+      );
+    } else if (result.status === 'retained_failed') {
+      logManager.logger('anochat.core').warn(
+        'Restart checkpoint retained for diagnostics',
+        result as unknown as Record<string, unknown>,
+      );
     }
   } catch (err) {
     logManager.logger('anochat.core').warn('Restart checkpoint recovery failed', { error: (err as Error).message });
@@ -714,8 +686,51 @@ export async function startServer(): Promise<http.Server> {
   });
 }
 
+let shutdownPromise: Promise<void> | null = null;
+
 export async function shutdown(): Promise<void> {
-  LogManager.getInstance().logger('anochat.core').info('Server shutting down');
-  await wsServer.shutdown();
-  server.close();
+  if (shutdownPromise) return shutdownPromise;
+  shutdownPromise = (async () => {
+    const logger = LogManager.getInstance().logger('anochat.core');
+    logger.info('Server shutting down');
+    const httpClosePromise = server.listening
+      ? new Promise<void>((resolve, reject) => {
+        server.close((error?: Error) => error ? reject(error) : resolve());
+      })
+      : Promise.resolve();
+    await wsServer.shutdown();
+
+    const { InterruptController, InterruptReason } = await import(
+      './core/agent/supervision/InterruptController.js'
+    );
+    InterruptController.getInstance().interruptAll(InterruptReason.UserStop);
+    const runtime = AgentRuntime.getInstance();
+    const deadline = Date.now() + 5_000;
+    while (runtime.activeSessionCount > 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+
+    const { SessionTurnRecorder } = await import('./infra/SessionTurnRecorder.js');
+    await SessionTurnRecorder.drainAll();
+    const { SessionStore } = await import('./core/session/SessionStore.js');
+    await SessionStore.getInstance().drain();
+    const { SessionLeaseManager } = await import('./core/session/SessionLeaseManager.js');
+    SessionLeaseManager.getInstance().stop();
+    SettingsManager.getInstance().stopWatching();
+    const { ExtensionManager } = await import('./core/extensible/ExtensionManager.js');
+    await ExtensionManager.getInstance().stopAll();
+    const { PluginHostManager } = await import('./core/plugin-host/PluginHostManager.js');
+    await PluginHostManager.getInstance().stop();
+    const { ApiServer } = await import('./gateway/ApiServer.js');
+    await ApiServer.getInstance().stop();
+    await httpClosePromise;
+    logger.info('Server shutdown complete', {
+      remainingActiveSessions: runtime.activeSessionCount,
+    });
+  })();
+  try {
+    await shutdownPromise;
+  } finally {
+    shutdownPromise = null;
+  }
 }

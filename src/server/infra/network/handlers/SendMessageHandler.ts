@@ -207,7 +207,7 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
 
   // Soft interrupt: if session already has an active AgentLoop, queue the message
   // without creating a second loop. The running AgentLoop handles it mid-turn.
-  // Must return BEFORE touching StreamPersister/event-buffer to avoid corrupting
+  // Must return BEFORE touching the turn recorder/event buffer to avoid corrupting
   // the first handler's state.
   if (runtime.isSessionActive(effectiveSessionId)) {
     if (isGoalKick) {
@@ -260,16 +260,23 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
     if (!isGoalKick) await sessionManager.appendMessage(effectiveSessionId, userMessage, { notify: false });
   } catch (err) {
     log.error('Failed to persist user message', { sid: effectiveSessionId, error: (err as Error).message });
+    ctx.ws.send(effectiveSessionId, {
+      type: WsMessageType.Error,
+      errorMessage: `Message was not saved: ${(err as Error).message}`,
+      code: 'SESSION_PERSISTENCE_ERROR',
+    });
+    ctx.ws.send(effectiveSessionId, { type: WsMessageType.Done });
+    return;
   }
 
   // Stream agent response via WebSocket
   const store = SessionStore.getInstance();
   const turnMsgId = `msg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const initialPrevUuid = session.lastEventUuid || '00000000-0000-0000-0000-000000000000';
-  const { StreamPersister } = await import('../../../infra/StreamPersister.js');
-  const persister = new StreamPersister(store, effectiveSessionId, turnMsgId, initialPrevUuid, agentId);
+  const { SessionTurnRecorder } = await import('../../../infra/SessionTurnRecorder.js');
+  const recorder = new SessionTurnRecorder(effectiveSessionId, agentId, turnMsgId);
   const { StreamConsumer } = await import('../../../infra/stream/StreamConsumer.js');
-  const consumer = new StreamConsumer(ctx.ws, effectiveSessionId, persister, {
+  const consumer = new StreamConsumer(ctx.ws, effectiveSessionId, recorder, {
     editIntervalMs: 20,
     bufferThreshold: 1,
     freshFinalAfterMs: 30000,
@@ -293,50 +300,26 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
           consumer.onDelta('think', event.content as string);
           break;
         case 'tool_call':
-          await persister.flushDeltas();
           await consumer.beforeToolEvent();
-          await persister.persistEvent('tool_call', {
-            id: event.toolCallId || event.id || event.toolId || '',
-            name: event.toolName || event.name || '',
-            input: (event.params || event.args || event.input || event.toolInput || {}) as Record<string, unknown>,
-          });
+          await recorder.record(event);
           consumer.sendDirect(event as unknown as Record<string, unknown>);
           break;
         case 'tool_result':
-          await persister.flushDeltas();
           await consumer.beforeToolEvent();
-          // Persist structured TodoWrite data so the todo list survives page refresh
-          const structured = (event as Record<string, unknown>).structured as Record<string, unknown> | undefined;
-          const todosPayload = structured?.todos as Array<{ content: string; status: string; activeForm: string }> | undefined;
-          await persister.persistEvent('tool_result', {
-            toolCallId: event.toolCallId || event.id || event.toolId || '',
-            is_error: event.success === false,
-            content: event.result || event.content || '',
-            ...(todosPayload ? { todos: todosPayload } : {}),
-          });
-          if (todosPayload && Array.isArray(todosPayload)) {
-            await persister.persistEvent('todo_write', {
-              todos: todosPayload.map(t => ({ content: t.content, status: t.status, activeForm: t.activeForm })),
-            });
-          }
+          await recorder.record(event);
           consumer.sendDirect(event as unknown as Record<string, unknown>);
           break;
         case 'error':
           await consumer.beforeToolEvent();
-          await persister.persistEvent('error', {
-            error: event.errorMessage || event.message || event.content || 'Unknown error',
-            source: 'agent_loop',
-          });
+          await recorder.record(event, 'agent_loop');
           consumer.sendDirect(event as unknown as Record<string, unknown>);
           break;
         case 'plan_enter':
-          await persister.flushDeltas();
-          await persister.persistEvent('plan_enter', {});
+          await recorder.record(event);
           consumer.sendDirect(event as unknown as Record<string, unknown>);
           break;
         case 'plan_exit':
-          await persister.flushDeltas();
-          await persister.persistEvent('plan_exit', {});
+          await recorder.record(event);
           consumer.sendDirect(event as unknown as Record<string, unknown>);
           break;
         default:
@@ -351,8 +334,8 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
   } catch (err) {
     if (statusInterval) clearInterval(statusInterval);
     const errorMessage = `Agent error: ${(err as Error).message}`;
-    await persister.flushDeltas();
-    await persister.persistEvent('error', { error: errorMessage, source: 'send_message_handler' });
+    await recorder.recordError(errorMessage, 'send_message_handler').catch(() => {});
+    await recorder.finalize().catch(() => {});
     ctx.ws.send(effectiveSessionId, {
       type: WsMessageType.Error,
       errorMessage,
@@ -362,7 +345,7 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
 
   // Update session UUID chain and touch meta after turn completes
   if (statusInterval) clearInterval(statusInterval);
-  session.lastEventUuid = persister.prevUuid;
+  session.lastEventUuid = recorder.headEventUuid || initialPrevUuid;
   session.touch();
   try {
     await store.updateMeta(effectiveSessionId, { lastActiveAt: session.lastActiveAt });

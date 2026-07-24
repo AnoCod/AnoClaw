@@ -18,251 +18,15 @@ import { TypedEventBus } from '../../core/events/TypedEventBus.js';
 import { requireWs, requireWsAny } from '../WsRequired.js';
 import { LogManager } from '../../infra/logging/LogManager.js';
 import { createLLMProvider } from '../../infra/llm/provider-factory.js';
-import type { Message, TokenBreakdown } from '../../../shared/types/session.js';
-import { MessageRole, SessionStatus } from '../../../shared/types/session.js';
-import type { SSEEvent } from '../../../shared/types/events.js';
-import { SSEEventType } from '../../../shared/types/events.js';
+import { SessionStatus } from '../../../shared/types/session.js';
 import type { LLMOptions } from '../../../shared/types/llm.js';
 import { ToolProfiler } from '../../infra/supervision/ToolProfiler.js';
 import { MemoryManager } from '../../core/memory/MemoryManager.js';
 import { MemoryScope } from '../../core/memory/MemoryEntry.js';
 import { extensionPoints } from '../../core/plugin-host/ExtensionPoints.js';
-import { TokenCounter } from '../../core/context/TokenCounter.js';
 import type { Session } from '../../core/session/index.js';
 import type { SendJson, ReadBody } from '../RouteHelpers.js';
 import { selectRunnableAgent } from '../../core/agent/AgentSelection.js';
-
-// ---------------------------------------------------------------------------
-// Internal helpers for send-message flow
-// ---------------------------------------------------------------------------
-
-/**
- * Collect agent output and return as single JSON response (non-streaming mode).
- *
- * Iterates the agent's async generator for the given session, accumulating all
- * text, thinking, and events. Once the stream completes, persists the assistant
- * message to the session store and returns the collected content as a JSON body.
- *
- * @param sessionId   - Target session ID.
- * @param agentId     - Agent to run.
- * @param userMessage - User message to submit.
- * @param history     - Conversation history (already persisted).
- * @param res         - HTTP response object.
- * @param sendJson    - JSON response helper.
- */
-async function collectAndRespond(
-  sessionId: string,
-  agentId: string,
-  userMessage: Message,
-  history: Message[],
-  res: http.ServerResponse,
-  sendJson: SendJson,
-): Promise<void> {
-  const runtime = AgentRuntime.getInstance();
-  const registry = AgentRegistry.getInstance();
-  const agent = registry.agent(agentId);
-
-  if (!agent) {
-    sendJson(res, 404, { error: 'Not Found', message: `Agent '${agentId}' not found` });
-    return;
-  }
-
-  let fullText = '';
-  let thinkContent = '';
-  const events: SSEEvent[] = [];
-
-  try {
-    for await (const event of runtime.processMessage(
-      sessionId,
-      agentId,
-      userMessage,
-      history,
-    )) {
-      events.push(event);
-      if (event.type === SSEEventType.Text) {
-        fullText += (event.content as string) || '';
-      }
-      if (event.type === SSEEventType.Think) {
-        thinkContent += (event.content as string) || '';
-      }
-      if (event.type === SSEEventType.Error) {
-        fullText += `[Error: ${event.errorMessage as string}]`;
-      }
-    }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    sendJson(res, 500, { error: 'Agent Error', message });
-    return;
-  }
-
-  // For reasoning models: if there is thinking content but no final text, use the last part of thinking as answer
-  const responseContent = fullText || (thinkContent ? thinkContent.split('\n').slice(-10).join('\n') : '');
-
-  // Persist assistant message
-  if (responseContent.trim() || events.length > 0) {
-    const sessionManager = SessionManager.getInstance();
-    const assistantMessage: Message = {
-      id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      sessionId,
-      role: MessageRole.Assistant,
-      content: responseContent.trim() || '(tool calls)',
-      tokenCount: 0,
-      compressed: false,
-      timestamp: new Date().toISOString(),
-      thinking: thinkContent.trim() || undefined,
-    };
-    await sessionManager.appendMessage(sessionId, assistantMessage).catch(err => {
-      LogManager.getInstance().logger('anochat.api').error('Failed to persist API assistant message', { sid: sessionId, error: (err as Error).message });
-    });
-  }
-
-  sendJson(res, 200, {
-    sessionId,
-    agentId,
-    content: responseContent,
-    think: thinkContent || undefined,
-    events: events.length,
-    timestamp: new Date().toISOString(),
-  });
-}
-
-/** Stream agent output — WebSocket primary channel, HTTP SSE fallback */
-async function streamResponse(
-  sessionId: string,
-  agentId: string,
-  userMessage: Message,
-  history: Message[],
-  res: http.ServerResponse,
-  sendJson: SendJson,
-): Promise<void> {
-  const runtime = AgentRuntime.getInstance();
-  const registry = AgentRegistry.getInstance();
-  const agent = registry.agent(agentId);
-
-  if (!agent) {
-    sendJson(res, 404, { error: 'Not Found', message: `Agent '${agentId}' not found` });
-    return;
-  }
-
-  const wsServer = WsServer.getInstance();
-  const useWS = wsServer.isConnected(sessionId);
-
-  // If using WebSocket, immediately return accepted status
-  if (useWS) {
-    sendJson(res, 202, {
-      status: 'accepted',
-      sessionId,
-      agentId,
-      message: 'Streaming via WebSocket',
-    });
-  } else {
-    // HTTP SSE fallback (for REST API callers without WebSocket)
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache, no-transform',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-  }
-
-  const sendFrame = (data: Record<string, unknown>): void => {
-    if (useWS) {
-      wsServer.send(sessionId, data);
-    } else {
-      res.write(`data: ${JSON.stringify(data)}\n\n`);
-    }
-  };
-
-  let assistantText = '';
-  let thinkContent = '';
-  let lastTokenUsage: TokenBreakdown | null = null;
-
-  try {
-    for await (const event of runtime.processMessage(
-      sessionId,
-      agentId,
-      userMessage,
-      history,
-    )) {
-      const payload: Record<string, unknown> = { type: event.type };
-
-      switch (event.type) {
-        case SSEEventType.Think:
-          thinkContent += (event.content as string) || '';
-          payload.content = event.content as string;
-          break;
-        case SSEEventType.Text:
-          assistantText += (event.content as string) || '';
-          payload.content = event.content as string;
-          break;
-        case SSEEventType.ToolCall:
-          payload.toolName = event.toolName as string;
-          payload.params = event.params as Record<string, unknown>;
-          break;
-        case SSEEventType.ToolResult:
-          payload.toolName = event.toolName as string;
-          payload.content = event.content as string;
-          payload.success = event.success as boolean;
-          payload.durationMs = event.durationMs as number;
-          break;
-        case SSEEventType.TodoWrite:
-          payload.todos = event.todos as unknown[];
-          break;
-        case SSEEventType.Error:
-          payload.errorMessage = event.errorMessage as string;
-          payload.code = event.code as string;
-          break;
-        case SSEEventType.Done:
-          payload.turnCount = event.turnCount as number;
-          payload.tokenUsage = event.tokenUsage;
-          lastTokenUsage = event.tokenUsage as TokenBreakdown;
-          break;
-        default:
-          for (const [k, v] of Object.entries(event)) {
-            if (k !== 'type') payload[k] = v;
-          }
-          break;
-      }
-
-      sendFrame(payload);
-    }
-
-    // Persist tokenUsage to session meta so page refresh loads correct stats
-    if (lastTokenUsage) {
-      const store = JsonlStore.getInstance();
-      await store.updateMeta(sessionId, { tokenBreakdown: lastTokenUsage }).catch(err => {
-        LogManager.getInstance().logger('anochat.api').error('Failed to persist token breakdown', { sid: sessionId, error: (err as Error).message });
-      });
-    }
-
-    // Final done frame
-    sendFrame({ type: 'done', session_id: sessionId, agent_id: agentId });
-
-    // Persist assistant message
-    if (assistantText.trim() || thinkContent.trim()) {
-      const sessionManager = SessionManager.getInstance();
-      const content = assistantText.trim() || '(reasoning only)';
-      const assistantMessage: Message = {
-        id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        sessionId,
-        role: MessageRole.Assistant,
-        content,
-        tokenCount: TokenCounter.estimate(content),
-        compressed: false,
-        timestamp: new Date().toISOString(),
-        thinking: thinkContent.trim() || undefined,
-      };
-      await sessionManager.appendMessage(sessionId, assistantMessage).catch(err => {
-        LogManager.getInstance().logger('anochat.api').error('Failed to persist API stream assistant message', { sid: sessionId, error: (err as Error).message });
-      });
-    }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    sendFrame({ type: 'error', errorMessage: message, code: 'AGENT_ERROR' });
-  } finally {
-    if (!useWS) res.end();
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Exported handler functions
@@ -617,7 +381,7 @@ export async function handleSendMessage(
 
   // ── Require WebSocket connection ──
   // All write operations go through WS to leverage the full pipeline:
-  // StreamPersister (JSONL persistence), auto-title, workspace, etc.
+  // SessionTurnRecorder (JSONL persistence), auto-title, workspace, etc.
   const wsServer = WsServer.getInstance();
   if (!wsServer.isConnected(sessionId)) {
     sendJson(res, 503, {
@@ -649,7 +413,7 @@ export async function handleSendMessage(
     } catch { /* best-effort */ }
   }
 
-  // ── Dispatch through WS handler (full pipeline: StreamPersister + streaming) ──
+  // ── Dispatch through WS handler (shared turn recorder + streaming) ──
   const dispatchResult = sendMessageHandler({
     sessionId: session.id,
     type: 'send_message',

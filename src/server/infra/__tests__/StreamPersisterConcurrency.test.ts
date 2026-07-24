@@ -16,6 +16,7 @@ describe('StreamPersister concurrency', () => {
     const persisted: Record<string, unknown>[] = [];
 
     const store = {
+      loadHeadEventUuid: vi.fn(async () => null),
       persistEvent: vi.fn(async (_sessionId: string, event: Record<string, unknown>) => {
         persisted.push(event);
         if (persisted.length === 1) {
@@ -45,6 +46,7 @@ describe('StreamPersister concurrency', () => {
     let attempt = 0;
     const persisted: Record<string, unknown>[] = [];
     const store = {
+      loadHeadEventUuid: vi.fn(async () => null),
       persistEvent: vi.fn(async (_sessionId: string, event: Record<string, unknown>) => {
         attempt++;
         persisted.push(event);
@@ -63,5 +65,22 @@ describe('StreamPersister concurrency', () => {
     expect(persisted.map(textFromEvent)).toEqual(['retry-me', 'retry-me']);
     expect(persister.prevUuid).toBe(persisted[1]?.uuid);
     expect(logger.error).toHaveBeenCalled();
+  });
+
+  it('finalizes one logical assistant message exactly once under concurrent drains', async () => {
+    const store = {
+      loadHeadEventUuid: vi.fn(async () => null),
+      persistEvent: vi.fn(async (_sessionId: string, event: Record<string, unknown>) => (
+        event.uuid as string
+      )),
+      incrementMessageCount: vi.fn(async () => {}),
+    } as unknown as SessionStore;
+    const persister = new StreamPersister(store, 'session-1', 'turn-1', 'root');
+    persister.bufferDelta('text', 'complete me');
+
+    await Promise.all([persister.finalize(), persister.finalize()]);
+
+    expect(store.persistEvent).toHaveBeenCalledTimes(1);
+    expect(store.incrementMessageCount).toHaveBeenCalledTimes(1);
   });
 });

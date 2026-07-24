@@ -453,10 +453,20 @@ describe('ToolPipeline.securityCheck', () => {
     expect(r!.errorMessage).toContain('readOnly');
   });
 
-  it('allows Ask mode writes (confirmation handled by AgentLoop)', () => {
+  it('blocks unconfirmed Ask mode writes', () => {
     const tool = mockTool({ name: 'Write', isReadOnly: false, riskLevel: RiskLevel.Medium });
     const r = ToolPipeline.securityCheck(tool, {}, ctx({ mode: 'ask' }));
-    expect(r).toBeNull();
+    expect(r).not.toBeNull();
+    expect(r!.errorMessage).toContain('confirmation');
+  });
+
+  it('allows confirmed Ask mode writes', () => {
+    const tool = mockTool({ name: 'Write', isReadOnly: false, riskLevel: RiskLevel.Medium });
+    expect(ToolPipeline.securityCheck(
+      tool,
+      {},
+      ctx({ mode: 'ask', userConfirmed: true }),
+    )).toBeNull();
   });
 
   it('allows low-risk edits in Safe Auto mode (confirmation handled by AgentLoop)', () => {
@@ -504,6 +514,31 @@ describe('ToolPipeline.securityCheck', () => {
       { command: 'npm test' },
       ctx({ mode: 'auto_edit', userConfirmed: false }),
     )).toBeNull();
+  });
+
+  it('passes Auto-Edit pre-authorization into the tool execution context', async () => {
+    const execute = vi.fn().mockResolvedValue(makeResult('ok'));
+    const tool = mockTool({
+      name: 'Bash',
+      isReadOnly: false,
+      riskLevel: RiskLevel.Critical,
+      requiresConfirmation: true,
+      _executeWithEvents: execute,
+    });
+
+    const result = await ToolPipeline.run(
+      tool,
+      { command: 'npm test' },
+      ctx({ mode: 'auto_edit', userConfirmed: false }),
+      'tc-auto-edit-context',
+    );
+
+    expect(result.success).toBe(true);
+    expect(execute).toHaveBeenCalledWith(
+      { command: 'npm test' },
+      expect.objectContaining({ mode: 'auto_edit', userConfirmed: true }),
+      'tc-auto-edit-context',
+    );
   });
 
   it('treats PlanTool as file-changing in read_only mode', () => {

@@ -389,7 +389,13 @@ export async function spawnSubAgent(
   let turnCount = 0;
 
   try {
-    for await (const event of runtime.processMessage(subSessionId, tempId, taskMessage)) {
+    for await (const event of runtime.processMessage(
+      subSessionId,
+      tempId,
+      taskMessage,
+      [],
+      { permissionMode: 'AutoEdit', effort: 'HIGH' },
+    )) {
       if (event.type === SSEEventType.Text) {
         fullContent += (event.content as string) || '';
       }

@@ -169,9 +169,11 @@ export class ModeSelector {
     ];
 
     for (const m of modes) {
+      const goalLocksMode = this.goal?.status === 'active';
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'mode-dropdown-item' + (m.mode === this.mode ? ' active' : '');
+      item.disabled = goalLocksMode;
       item.setAttribute('role', 'menuitemradio');
       item.setAttribute('aria-checked', String(m.mode === this.mode));
 
@@ -190,7 +192,9 @@ export class ModeSelector {
       title.textContent = m.label;
       const desc = document.createElement('span');
       desc.className = 'mode-dropdown-desc';
-      desc.textContent = m.desc;
+      desc.textContent = goalLocksMode
+        ? 'Goal is running in Auto Edit. This mode resumes after the Goal stops.'
+        : m.desc;
       textCol.appendChild(title);
       textCol.appendChild(desc);
 
@@ -200,6 +204,7 @@ export class ModeSelector {
       const chooseMode = (e: Event) => {
         e.preventDefault();
         e.stopPropagation();
+        if (goalLocksMode) return;
         this.setMode(m.mode);
         this._closeDropdown();
         ClientLogger.ui.debug('Input mode changed', { mode: m.mode });

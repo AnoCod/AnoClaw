@@ -46,6 +46,12 @@ export type GoalReportOutcome =
   | 'blocked'
   | 'failed';
 
+/** Canonical permission modes persisted on root sessions. `Auto` is Safe Auto. */
+export type PermissionMode = 'Ask' | 'AutoEdit' | 'Plan' | 'Auto';
+
+/** Internal execution constraints passed through the tool pipeline. */
+export type ToolExecutionMode = 'ask' | 'auto_edit' | 'read_only' | 'readOnly' | 'auto';
+
 export interface GoalEvidence {
   type: 'file' | 'image' | 'test' | 'url' | 'note';
   label: string;
@@ -69,6 +75,7 @@ export interface GoalContractInput {
   objective: string;
   acceptanceCriteria?: string;
   workspace?: string;
+  /** @deprecated Goal runs always use AutoEdit. Accepted for client compatibility. */
   permissionMode?: string;
   maxRuns?: number;
   maxConsecutiveFailures?: number;
@@ -92,7 +99,7 @@ export interface SessionGoal {
   objective: string;
   acceptanceCriteria: string;
   workspace: string;
-  permissionMode: string;
+  permissionMode: PermissionMode;
   maxRuns: number;
   maxConsecutiveFailures: number;
   wakeIntervalMs: number;
@@ -115,7 +122,7 @@ export interface SessionGoal {
   recentRuns?: GoalRunRecord[];
   lastRunAt?: string;
   lastWorkspace?: string;
-  lastPermissionMode?: string;
+  lastPermissionMode?: PermissionMode;
   lastEffort?: 'HIGH' | 'NORMAL';
   lastUserMode?: string;
   completedAt?: string;
@@ -237,6 +244,6 @@ export interface ExecutionContext {
   callerRole?: import('./agent.js').AgentRole;
   /** AbortSignal from InterruptController — tools kill long ops when aborted */
   signal?: AbortSignal;
-  /** Execution mode constraint (e.g. 'read_only', 'readOnly'). Set by AgentLoop / QA mode. */
-  mode?: string;
+  /** Execution mode constraint selected by the session permission policy. */
+  mode?: ToolExecutionMode;
 }

@@ -17,7 +17,7 @@ import { extensionPoints } from './ExtensionPoints.js';
 import { PluginToolProxy } from './PluginToolProxy.js';
 import type { PluginHostManager } from './PluginHostManager.js';
 import type { PluginLLMMessage, PluginLLMOptions, PluginMemorySearchOptions } from './PluginRPC.js';
-import type { ExecutionContext } from '../../../shared/types/session.js';
+import type { ExecutionContext, ToolExecutionMode } from '../../../shared/types/session.js';
 import type { LLMOptions } from '../../../shared/types/llm.js';
 
 const log = createLogger('anochat.plugins');
@@ -322,7 +322,7 @@ export class RpcDispatcher {
   }
 }
 
-function normalizeToolExecutionMode(value: unknown): string {
+function normalizeToolExecutionMode(value: unknown): ToolExecutionMode {
   if (typeof value !== 'string') return 'auto';
   switch (value) {
     case 'Ask':
@@ -341,6 +341,6 @@ function normalizeToolExecutionMode(value: unknown): string {
     case 'auto':
       return 'auto';
     default:
-      return value;
+      return 'auto';
   }
 }

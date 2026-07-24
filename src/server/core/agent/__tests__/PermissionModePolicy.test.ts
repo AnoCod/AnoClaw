@@ -6,8 +6,36 @@ import {
   parsePermissionMode,
   permissionModeToUi,
   resolveSessionPermissionMode,
+  toolRequiresConfirmation,
 } from '../PermissionModePolicy.js';
 import type { SessionManager } from '../../session/SessionManager.js';
+import { RiskLevel } from '../../../../shared/types/tool.js';
+import type { PermissionMode } from '../../../../shared/types/session.js';
+
+const permissionModes: PermissionMode[] = ['Ask', 'AutoEdit', 'Auto', 'Plan'];
+const riskLevels = [
+  RiskLevel.Safe,
+  RiskLevel.Low,
+  RiskLevel.Medium,
+  RiskLevel.High,
+  RiskLevel.Critical,
+];
+const confirmationTruthTable = permissionModes.flatMap(mode =>
+  [false, true].flatMap(readOnly =>
+    riskLevels.map(risk => ({
+      mode,
+      readOnly,
+      risk,
+      expected: readOnly
+        ? false
+        : mode === 'Ask'
+          ? true
+          : mode === 'Auto'
+            ? risk === RiskLevel.High || risk === RiskLevel.Critical
+            : false,
+    })),
+  ),
+);
 
 describe('PermissionModePolicy', () => {
   it('normalizes UI, API, and legacy mode spellings', () => {
@@ -32,12 +60,14 @@ describe('PermissionModePolicy', () => {
     expect(permissionModeToUi('Auto')).toBe('auto');
   });
 
-  it('uses Safe Auto by default and honors an explicit Goal contract mode', () => {
-    expect(goalContinuationPermissionMode()).toBe('Auto');
+  it('pins every Goal continuation to Auto Edit', () => {
+    expect(goalContinuationPermissionMode()).toBe('AutoEdit');
     expect(goalContinuationPermissionMode('AutoEdit')).toBe('AutoEdit');
+    expect(goalContinuationPermissionMode('Ask')).toBe('AutoEdit');
+    expect(goalContinuationPermissionMode('Plan')).toBe('AutoEdit');
   });
 
-  it('uses the active Goal contract instead of silently promoting permissions', () => {
+  it('promotes every active Goal to Auto Edit without changing stored session mode', () => {
     const sessionManager = {
       session: () => ({ isRoot: () => true, metadata: { permissionMode: 'Ask' } }),
       getGoal: () => ({
@@ -50,8 +80,8 @@ describe('PermissionModePolicy', () => {
     } as unknown as SessionManager;
 
     expect(hasActiveSessionGoal(sessionManager, 'session-1')).toBe(true);
-    expect(resolveSessionPermissionMode(sessionManager, 'session-1', 'auto-edit')).toBe('Ask');
-    expect(resolveSessionPermissionMode(sessionManager, 'session-1', 'plan')).toBe('Ask');
+    expect(resolveSessionPermissionMode(sessionManager, 'session-1', 'ask')).toBe('AutoEdit');
+    expect(resolveSessionPermissionMode(sessionManager, 'session-1', 'plan')).toBe('AutoEdit');
   });
 
   it('keeps paused goals on the requested or stored permission mode', () => {
@@ -69,4 +99,23 @@ describe('PermissionModePolicy', () => {
     expect(resolveSessionPermissionMode(sessionManager, 'session-1', 'ask')).toBe('Ask');
     expect(resolveSessionPermissionMode(sessionManager, 'session-1')).toBe('Auto');
   });
+
+  it('pins sub-sessions to Auto Edit', () => {
+    const sessionManager = {
+      session: () => ({ isRoot: () => false, metadata: { permissionMode: 'Plan' } }),
+      getGoal: () => null,
+    } as unknown as SessionManager;
+
+    expect(resolveSessionPermissionMode(sessionManager, 'child-session', 'ask')).toBe('AutoEdit');
+  });
+
+  it.each(confirmationTruthTable)(
+    '$mode mode confirmation policy for readOnly=$readOnly risk=$risk is $expected',
+    ({ mode, readOnly, risk, expected }) => {
+      expect(toolRequiresConfirmation(mode, {
+        isReadOnly: () => readOnly,
+        riskLevel: () => risk,
+      })).toBe(expected);
+    },
+  );
 });

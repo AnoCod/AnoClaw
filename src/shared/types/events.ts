@@ -269,7 +269,7 @@ export type WsTypedMessage =
   | { type: WsMessageType.Ping; [key: string]: unknown }
   | { type: WsMessageType.RunCommand; command?: string; args?: Record<string, string>; [key: string]: unknown }
   | { type: WsMessageType.SetSessionMode; mode?: string; effort?: boolean; [key: string]: unknown }
-  | { type: WsMessageType.SetGoal; action?: string; objective?: string; acceptanceCriteria?: string; workspace?: string; permissionMode?: string; maxRuns?: number; maxConsecutiveFailures?: number; wakeIntervalMs?: number; completionMode?: 'review' | 'automatic'; [key: string]: unknown }
+  | { type: WsMessageType.SetGoal; action?: string; objective?: string; acceptanceCriteria?: string; workspace?: string; /** @deprecated Goal always uses AutoEdit. */ permissionMode?: string; maxRuns?: number; maxConsecutiveFailures?: number; wakeIntervalMs?: number; completionMode?: 'review' | 'automatic'; [key: string]: unknown }
   | { type: WsMessageType.QualityScore; score?: number; [key: string]: unknown }
   | { type: WsMessageType.EditorContext; openFiles?: string[]; [key: string]: unknown }
   | { type: WsMessageType.ToolConfirmResponse; toolCallId: string; approved: boolean; [key: string]: unknown }
@@ -285,7 +285,7 @@ export type WsTypedMessage =
   | { type: WsMessageType.SessionCreated; sessionId?: string; [key: string]: unknown }
   | { type: WsMessageType.MessageAppended; sessionId?: string; [key: string]: unknown }
   | { type: WsMessageType.WorkspaceChanged; [key: string]: unknown }
-  | { type: WsMessageType.SessionModeChanged; sessionId?: string; mode?: string; effort?: boolean; locked?: boolean; [key: string]: unknown }
+  | { type: WsMessageType.SessionModeChanged; sessionId?: string; mode?: string; storedMode?: string; effort?: boolean; locked?: boolean; [key: string]: unknown }
   | { type: WsMessageType.GoalChanged; sessionId?: string; action?: string; goal?: unknown; [key: string]: unknown }
   | { type: WsMessageType.ToolExecutionStarted; toolName?: string; [key: string]: unknown }
   | { type: WsMessageType.ToolExecutionCompleted; toolName?: string; success?: boolean; durationMs?: number; tokensUsed?: number; [key: string]: unknown }

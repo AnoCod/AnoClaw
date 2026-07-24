@@ -64,7 +64,7 @@ describe('Goal lifecycle handlers', () => {
     expect(manager.getGoal(session.id)).toMatchObject({
       objective: 'Deliver a verified report',
       acceptanceCriteria: 'report.md exists and checks pass',
-      permissionMode: 'Auto',
+      permissionMode: 'AutoEdit',
       maxRuns: 9,
       status: 'active',
       workspace: tmpDir,

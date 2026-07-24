@@ -1,7 +1,19 @@
 import { SettingsManager } from '../../infra/storage/SettingsManager.js';
+import type { RiskLevel } from '../../../shared/types/tool.js';
+import type {
+  PermissionMode,
+  ToolExecutionMode,
+} from '../../../shared/types/session.js';
 import type { SessionManager } from '../session/SessionManager.js';
 
-export type PermissionMode = 'Ask' | 'AutoEdit' | 'Plan' | 'Auto';
+export type { PermissionMode, ToolExecutionMode } from '../../../shared/types/session.js';
+
+export const FULL_AUTO_PERMISSION_MODE: PermissionMode = 'AutoEdit';
+
+export interface ToolPermissionSubject {
+  isReadOnly(): boolean;
+  riskLevel(): RiskLevel | string;
+}
 
 function parsePermissionModeValue(value: unknown): PermissionMode | undefined {
   if (typeof value !== 'string') return undefined;
@@ -40,6 +52,64 @@ export function permissionModeToUi(mode: PermissionMode): 'ask' | 'auto-edit' | 
   }
 }
 
+export function permissionModeToExecutionMode(mode: PermissionMode): ToolExecutionMode {
+  switch (mode) {
+    case 'Ask': return 'ask';
+    case 'AutoEdit': return 'auto_edit';
+    case 'Plan': return 'read_only';
+    case 'Auto':
+    default:
+      return 'auto';
+  }
+}
+
+export function executionModeToPermissionMode(mode: unknown): PermissionMode | undefined {
+  if (typeof mode !== 'string') return undefined;
+  const key = mode.trim().toLowerCase().replace(/-/g, '_');
+  switch (key) {
+    case 'ask': return 'Ask';
+    case 'auto_edit':
+    case 'autoedit':
+      return 'AutoEdit';
+    case 'read_only':
+    case 'readonly':
+    case 'plan':
+      return 'Plan';
+    case 'auto':
+      return 'Auto';
+    default:
+      return undefined;
+  }
+}
+
+export function isAutoApprovedExecutionMode(mode: unknown): boolean {
+  return executionModeToPermissionMode(mode) === FULL_AUTO_PERMISSION_MODE;
+}
+
+/**
+ * Single confirmation truth table for session-driven tool calls.
+ * Plan-mode mutations are blocked by ToolPipeline instead of prompting.
+ */
+export function toolRequiresConfirmation(
+  mode: PermissionMode,
+  tool: ToolPermissionSubject,
+): boolean {
+  if (tool.isReadOnly()) return false;
+  switch (mode) {
+    case 'Ask':
+      return true;
+    case 'AutoEdit':
+    case 'Plan':
+      return false;
+    case 'Auto': {
+      const risk = String(tool.riskLevel());
+      return risk === 'High' || risk === 'Critical';
+    }
+    default:
+      return true;
+  }
+}
+
 export function defaultPermissionMode(): PermissionMode {
   try {
     return normalizePermissionMode(SettingsManager.getInstance().get<string>('ui.permissionMode', 'Auto'));
@@ -48,8 +118,8 @@ export function defaultPermissionMode(): PermissionMode {
   }
 }
 
-export function activeGoalPermissionMode(value?: unknown): PermissionMode {
-  return normalizePermissionMode(value, 'Auto');
+export function activeGoalPermissionMode(_value?: unknown): PermissionMode {
+  return FULL_AUTO_PERMISSION_MODE;
 }
 
 export function goalContinuationPermissionMode(value?: unknown): PermissionMode {
@@ -71,9 +141,9 @@ export function resolveSessionPermissionMode(
 ): PermissionMode {
   const session = sessionManager.session(sessionId);
   if (!session) return normalizePermissionMode(requested, defaultPermissionMode());
-  if (!session.isRoot()) return 'AutoEdit';
+  if (!session.isRoot()) return FULL_AUTO_PERMISSION_MODE;
   const goal = sessionManager.getGoal(sessionId);
-  if (goal?.status === 'active') return activeGoalPermissionMode(goal.permissionMode);
+  if (goal?.status === 'active') return FULL_AUTO_PERMISSION_MODE;
 
   const requestedMode = parsePermissionMode(requested);
   if (requestedMode) return requestedMode;

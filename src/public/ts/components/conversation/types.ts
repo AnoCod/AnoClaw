@@ -13,14 +13,8 @@ export type AgentStatus = 'working' | 'idle' | 'paused' | 'error' | 'Active' | '
 /** Input mode */
 export type InputMode = 'ask' | 'auto-edit' | 'plan' | 'auto';
 
-export function goalPermissionModeToUi(permissionMode: unknown, fallback: InputMode = 'auto'): InputMode {
-  switch (permissionMode) {
-    case 'Ask': return 'ask';
-    case 'AutoEdit': return 'auto-edit';
-    case 'Plan': return 'plan';
-    case 'Auto': return 'auto';
-    default: return fallback;
-  }
+export function goalPermissionModeToUi(_permissionMode: unknown, _fallback: InputMode = 'auto'): InputMode {
+  return 'auto-edit';
 }
 
 /** Running mode — how long the agent stays alive */
@@ -65,7 +59,6 @@ export interface GoalContractDraft {
   objective: string;
   acceptanceCriteria?: string;
   workspace?: string;
-  permissionMode?: string;
   maxRuns?: number;
   maxConsecutiveFailures?: number;
   wakeIntervalMs?: number;

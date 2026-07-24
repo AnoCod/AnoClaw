@@ -52,11 +52,13 @@ import { createAgentLoopSummarizer } from './AgentLoopSummarizer.js';
 import {
   activeGoalPermissionMode,
   normalizePermissionMode,
+  permissionModeToExecutionMode,
+  toolRequiresConfirmation,
   type PermissionMode,
+  type ToolExecutionMode,
 } from './PermissionModePolicy.js';
 import { ConfirmationRegistry } from './ConfirmationRegistry.js';
 import { WsServer } from '../../infra/network/WsServer.js';
-import { RiskLevel } from '../../../shared/types/tool.js';
 
 
 
@@ -1104,30 +1106,12 @@ export class AgentLoop {
     }
   }
 
-  private _toolExecutionMode(): string {
-    const mode = this._permissionMode();
-    if (mode === 'Plan') return 'read_only';
-    if (mode === 'Ask') return 'ask';
-    if (mode === 'AutoEdit') return 'auto_edit';
-    return 'auto';
+  private _toolExecutionMode(): ToolExecutionMode {
+    return permissionModeToExecutionMode(this._permissionMode());
   }
 
   private _needsConfirmation(tool: { isReadOnly(): boolean; riskLevel(): string }, mode: PermissionMode): boolean {
-    if (tool.isReadOnly()) return false;
-    const risk = tool.riskLevel();
-    if (risk === RiskLevel.Safe) return false;
-    switch (mode) {
-      case 'Ask':
-        return risk === RiskLevel.Low || risk === RiskLevel.Medium || risk === RiskLevel.High || risk === RiskLevel.Critical;
-      case 'Auto':
-        return risk === RiskLevel.High || risk === RiskLevel.Critical;
-      case 'AutoEdit':
-        return risk === RiskLevel.High || risk === RiskLevel.Critical;
-      case 'Plan':
-        return false;
-      default:
-        return risk === RiskLevel.High || risk === RiskLevel.Critical;
-    }
+    return toolRequiresConfirmation(mode, tool);
   }
 
   private _compressionTriggerRatio(): number {

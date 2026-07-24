@@ -310,7 +310,7 @@ interface ExecutionContext {
   sessionId: string;        // Current session identifier
   agentId: string;          // Calling agent identifier
   workspace: string;        // Agent's workspace directory
-  userConfirmed: boolean;   // Whether user approved this tool call
+  userConfirmed: boolean;   // User approval or Auto Edit pre-authorization
   callerRole?: AgentRole;   // Role for permission checks ('MainAgent' | 'Manager' | 'Member' | 'SubAgent')
   signal?: AbortSignal;     // From InterruptController — tools should abort when signaled
 }
@@ -328,7 +328,7 @@ enum RiskLevel {
   Low      = 'Low',        // Minor side effects
   Medium   = 'Medium',     // Moderate risk
   High     = 'High',       // Requires user confirmation (unless already given)
-  Critical = 'Critical',   // Always requires user confirmation
+  Critical = 'Critical',   // Requires confirmation except in Auto Edit
 }
 ```
 

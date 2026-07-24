@@ -95,11 +95,11 @@ Agent 不能直接把 Goal 标记为最终 completed；默认只能提交 `waiti
 
 ### 3.5 权限安全
 
-- Goal 不再强制修改根 Session 的权限模式。
-- Goal 使用创建合约中保存的权限模式，默认 Safe Auto。
-- Auto Edit 也不能自动批准 High/Critical 工具。
-- Goal 模式不得通过“active”状态绕过 Tool 自身的确认检查。
-- 未确认的高风险操作进入持久等待状态；超时不能自行猜测为批准。
+- Goal 不修改根 Session 持久化的权限偏好；运行期间使用 Auto Edit 覆盖层，结束后恢复原偏好。
+- Goal 创建、恢复和每次续跑固定使用 Auto Edit；旧客户端提交的 `permissionMode` 仅为兼容字段，服务端接受但忽略。
+- Auto Edit 是用户对所有已授权工具的预先批准，包括 High/Critical、破坏性 Bash 和外部副作用工具，不产生工具审批弹窗。
+- Auto Edit 不绕过工具白名单、Agent 角色/层级、参数校验、Workspace 边界、身份认证或中断控制。
+- 新 Goal 不进入 `waiting_confirmation`；该状态仅保留用于恢复旧数据。必要用户输入、完成复核、阻塞、连续失败和预算耗尽仍可暂停 Goal。
 
 ### 3.6 聊天与 Workspace
 
@@ -113,7 +113,7 @@ Agent 不能直接把 Goal 标记为最终 completed；默认只能提交 `waiti
 `SessionGoal` 计划包含：
 
 - 标识：`goalId`, `version`
-- 合约：`objective`, `acceptanceCriteria`, `workspace`, `permissionMode`
+- 合约：`objective`, `acceptanceCriteria`, `workspace`；`permissionMode` 作为旧客户端兼容字段固定规范化为 `AutoEdit`
 - 限制：`maxRuns`, `maxConsecutiveFailures`, `wakeIntervalMs`
 - 状态：`status`, `statusReason`, `createdAt`, `updatedAt`, `completedAt`, `deletedAt`
 - 使用量：`runCount`, `consecutiveFailures`, `nextRunAt`

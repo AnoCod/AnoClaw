@@ -555,11 +555,11 @@ describe('AgentRuntime', () => {
         }
 
         expect(sessionManager.beginGoalRun).toHaveBeenCalledWith('session-1', expect.objectContaining({
-          permissionMode: 'Auto',
+          permissionMode: 'AutoEdit',
         }));
-        expect(loopPrompt).toContain('Permission mode: Auto');
+        expect(loopPrompt).toContain('Permission mode: AutoEdit');
         expect(loopPrompt).toContain('Run ID: run-1');
-        expect(loopPermissionMode).toBe('Auto');
+        expect(loopPermissionMode).toBe('AutoEdit');
         expect(loopWorkspace).toBe('F:/Projects/AnoClaw');
         expect(extraAllowedTools).toContain('GoalReport');
         expect(events.some((event: any) => event.type === SSEEventType.Wake)).toBe(true);

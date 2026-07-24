@@ -188,7 +188,11 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
     : resolveSessionPermissionMode(sessionManager, effectiveSessionId, msg.mode);
   const effectiveEffort = resolveSessionEffort(sessionManager, effectiveSessionId, msg.effort);
   if (session.isRoot() && !isGoalKick) {
-    await sessionManager.setSessionPermissionMode(effectiveSessionId, effectivePermissionMode);
+    // An active Goal applies AutoEdit as a runtime overlay. Do not persist that
+    // overlay over the user's root-session preference; it must resume afterward.
+    if (goal?.status !== 'active') {
+      await sessionManager.setSessionPermissionMode(effectiveSessionId, effectivePermissionMode);
+    }
     await sessionManager.setSessionEffortMode(effectiveSessionId, effectiveEffort === 'HIGH');
   }
   const loopOptions = {

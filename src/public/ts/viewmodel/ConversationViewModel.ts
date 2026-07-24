@@ -58,6 +58,7 @@ export class ConversationViewModel extends EventEmitter {
         this.emit('goalPendingChanged', false);
       }
       if (this._activeSessionId) this._syncGoalFromActiveSession();
+      if (this._activeSessionId) this._syncModeFromActiveSession();
       if (d.goal?.status === 'active' && (data as { action?: string }).action && node) {
         this._kickGoalIfIdle(node).catch((err) => {
           ClientLogger.vm.error('Failed to kick acknowledged Goal', { error: (err as Error).message });
@@ -65,19 +66,20 @@ export class ConversationViewModel extends EventEmitter {
       }
     });
     vm.getWSClient().on('session_mode_changed', (data: unknown) => {
-      const d = data as { sessionId?: string; mode?: string; effort?: boolean; locked?: boolean };
+      const d = data as { sessionId?: string; mode?: string; storedMode?: string; effort?: boolean; locked?: boolean };
       if (!d.sessionId) return;
       const node = vm.sessions.getById(d.sessionId);
       if (node) {
         node.metadata = {
           ...(node.metadata || {}),
-          permissionMode: this._toCanonicalMode(this._fromCanonicalMode(d.mode)),
+          permissionMode: this._toCanonicalMode(this._fromCanonicalMode(d.storedMode ?? d.mode)),
           effortMode: d.effort !== false,
         };
         vm.sessions.updateSession({ id: node.id, metadata: node.metadata });
       }
       if (d.sessionId === this._activeSessionId || node?.id === this._activeRootSession()?.id) {
-        this.permissionMode = d.locked ? 'auto' : this._fromCanonicalMode(d.mode);
+        const goalIsActive = this._hasActiveGoal(this._rootForSession(node));
+        this.permissionMode = d.locked || goalIsActive ? 'auto-edit' : this._fromCanonicalMode(d.mode);
         this.effortMode = d.locked ? true : d.effort !== false;
         this.emit('permissionModeChanged', this.permissionMode);
         this.emit('effortModeChanged', this.effortMode);
@@ -185,7 +187,12 @@ export class ConversationViewModel extends EventEmitter {
   setPermissionMode(mode: PermissionModeUi): void {
     const active = this._sessionVM?.activeSession;
     if (active && !this._isRootSession(active)) {
-      mode = 'auto';
+      mode = 'auto-edit';
+    }
+    if (active && this._hasActiveGoal(this._rootForSession(active))) {
+      this.permissionMode = 'auto-edit';
+      this.emit('permissionModeChanged', this.permissionMode);
+      return;
     }
     console.log('[ConvVM] Permission mode changed', { mode });
     this.permissionMode = mode;
@@ -254,7 +261,6 @@ export class ConversationViewModel extends EventEmitter {
         objective: contract.objective.trim(),
         acceptanceCriteria: contract.acceptanceCriteria?.trim(),
         workspace: contract.workspace,
-        permissionMode: contract.permissionMode,
         maxRuns: contract.maxRuns,
         maxConsecutiveFailures: contract.maxConsecutiveFailures,
         wakeIntervalMs: contract.wakeIntervalMs,
@@ -266,7 +272,7 @@ export class ConversationViewModel extends EventEmitter {
   private _syncModeFromActiveSession(): void {
     const active = this._sessionVM?.activeSession;
     if (!active || !this._isRootSession(active)) {
-      this.permissionMode = 'auto';
+      this.permissionMode = 'auto-edit';
       this.effortMode = true;
       this.emit('permissionModeChanged', this.permissionMode);
       this.emit('effortModeChanged', this.effortMode);
@@ -274,7 +280,9 @@ export class ConversationViewModel extends EventEmitter {
     }
 
     const nextEffort = active.metadata?.effortMode === false ? false : true;
-    const nextMode = this._fromCanonicalMode(active.metadata?.permissionMode);
+    const nextMode = this._hasActiveGoal(active)
+      ? 'auto-edit'
+      : this._fromCanonicalMode(active.metadata?.permissionMode);
     this.permissionMode = nextMode;
     this.effortMode = nextEffort;
     this.emit('permissionModeChanged', nextMode);
@@ -332,7 +340,7 @@ export class ConversationViewModel extends EventEmitter {
       agent.on('streamingStopped', onStopped);
       return;
     }
-    const mode = this._fromCanonicalMode(goal.permissionMode || root.metadata?.permissionMode);
+    const mode: PermissionModeUi = 'auto-edit';
     const effort = root.metadata?.effortMode === false ? false : true;
     const content = [
       'Start or continue working toward this active session goal.',

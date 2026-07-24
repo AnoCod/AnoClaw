@@ -37,7 +37,11 @@ import {
   subAgentAllowedTools,
   type DelegationState,
 } from './AgentDelegation.js';
-import { normalizePermissionMode, resolveSessionEffort, resolveSessionPermissionMode } from './PermissionModePolicy.js';
+import {
+  activeGoalPermissionMode,
+  resolveSessionEffort,
+  resolveSessionPermissionMode,
+} from './PermissionModePolicy.js';
 import { TaskResolver } from '../capability/TaskResolver.js';
 
 export interface ProcessMessageOptions {
@@ -400,7 +404,7 @@ export class AgentRuntime extends EventEmitter {
       }
 
       try {
-        const freshPermissionMode = normalizePermissionMode(currentGoal.permissionMode, 'Auto');
+        const freshPermissionMode = activeGoalPermissionMode(currentGoal.permissionMode);
         const freshEffort = resolveSessionEffort(sessionManager, sessionId);
         const settings = SettingsManager.getInstance();
         const userMode = settings.get<string>('ui.userMode', 'simple');
@@ -1382,6 +1386,10 @@ export function buildGoalContinuationContent(ctx: GoalContinuationContext): stri
   } else if (ctx.permissionMode === 'Ask') {
     lines.push(
       '- Ask mode is active: request confirmation before file changes, command execution, or other side effects.',
+    );
+  } else if (ctx.permissionMode === 'AutoEdit') {
+    lines.push(
+      '- Auto Edit is active: all allowed tools are pre-authorized. Execute them directly without requesting approval.',
     );
   }
 

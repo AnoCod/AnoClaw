@@ -66,7 +66,8 @@ export const setGoalHandler: WsMessageHandler = async (ctx) => {
         // A Goal is pinned to the session's bound Workspace. Workspace changes
         // must go through the normal bind flow instead of a raw WS payload.
         workspace: root.workspace,
-        permissionMode: typeof ctx.data.permissionMode === 'string' ? ctx.data.permissionMode : undefined,
+        // permissionMode remains accepted on the wire for compatibility, but
+        // SessionManager pins every Goal to AutoEdit.
         maxRuns: typeof ctx.data.maxRuns === 'number' ? ctx.data.maxRuns : undefined,
         maxConsecutiveFailures: typeof ctx.data.maxConsecutiveFailures === 'number'
           ? ctx.data.maxConsecutiveFailures

@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { goalPermissionModeToUi } from '../types.js';
 
 describe('InputPanel active Goal mode', () => {
-  it('uses the Goal contract permission instead of forcing Auto Edit', () => {
-    expect(goalPermissionModeToUi('Ask', 'auto-edit')).toBe('ask');
-    expect(goalPermissionModeToUi('Plan', 'auto-edit')).toBe('plan');
-    expect(goalPermissionModeToUi('Auto', 'auto-edit')).toBe('auto');
+  it('forces every Goal contract to Auto Edit, including legacy values', () => {
+    expect(goalPermissionModeToUi('Ask', 'ask')).toBe('auto-edit');
+    expect(goalPermissionModeToUi('Plan', 'plan')).toBe('auto-edit');
+    expect(goalPermissionModeToUi('Auto', 'auto')).toBe('auto-edit');
   });
 });

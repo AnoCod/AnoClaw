@@ -9,7 +9,7 @@ import type { ApiToken } from '../ApiAuth.js';
 import { sendJson, readBody, sendRedirect } from '../RouteHelpers.js';
 import { ToolRegistry } from '../../core/tools/ToolRegistry.js';
 import { SessionManager } from '../../core/session/SessionManager.js';
-import type { ExecutionContext } from '../../../shared/types/session.js';
+import type { ExecutionContext, ToolExecutionMode } from '../../../shared/types/session.js';
 import { createLogger } from '../../core/logger.js';
 
 const log = createLogger('anochat.route.tool-exec');
@@ -68,7 +68,7 @@ export class ToolExecuteRoute implements RouteHandler {
   }
 }
 
-function normalizeToolExecutionMode(value: unknown): string | undefined {
+function normalizeToolExecutionMode(value: unknown): ToolExecutionMode | undefined {
   if (typeof value !== 'string') return undefined;
   switch (value) {
     case 'Ask':
@@ -87,7 +87,7 @@ function normalizeToolExecutionMode(value: unknown): string | undefined {
     case 'auto':
       return 'auto';
     default:
-      return value;
+      return undefined;
   }
 }
 

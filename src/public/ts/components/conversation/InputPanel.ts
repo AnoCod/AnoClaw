@@ -676,23 +676,6 @@ export class InputPanel {
     const controls = document.createElement('div');
     controls.className = 'goal-dialog-grid';
 
-    const permission = document.createElement('select');
-    permission.id = `${idPrefix}-permission`;
-    permission.className = 'ui-select';
-    for (const [value, label] of [
-      ['Auto', 'Safe Auto'],
-      ['AutoEdit', 'Auto Edit'],
-      ['Ask', 'Ask before changes'],
-      ['Plan', 'Plan only'],
-    ]) {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = label;
-      permission.appendChild(option);
-    }
-    permission.value = this._goal?.permissionMode || 'Auto';
-    controls.appendChild(addField('Permission', permission));
-
     const maxRuns = document.createElement('input');
     maxRuns.id = `${idPrefix}-runs`;
     maxRuns.className = 'ui-input';
@@ -727,7 +710,7 @@ export class InputPanel {
 
     const safety = document.createElement('div');
     safety.className = 'goal-dialog-safety';
-    safety.textContent = 'High-risk and critical actions still require approval. The Goal stops on completion review, blockers, repeated failures, or the run limit.';
+    safety.textContent = 'Goal always runs in Auto Edit: every allowed tool is pre-authorized and no tool approval pop-ups are shown. It can still stop for user input, completion review, blockers, repeated failures, or the run limit.';
     body.appendChild(safety);
 
     const footer = document.createElement('div');
@@ -743,7 +726,6 @@ export class InputPanel {
           objective: objective.value.trim(),
           acceptanceCriteria: criteria.value.trim(),
           workspace: currentWorkspace,
-          permissionMode: permission.value,
           maxRuns: Number(maxRuns.value),
           maxConsecutiveFailures: Number(failures.value),
           wakeIntervalMs: Number(cadence.value),

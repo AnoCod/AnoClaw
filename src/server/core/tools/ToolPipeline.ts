@@ -15,6 +15,11 @@ import type { Tool } from './Tool.js';
 import type { ToolResult } from '../../../shared/types/tool.js';
 import { InterruptBehavior, RiskLevel } from '../../../shared/types/tool.js';
 import type { ExecutionContext } from '../../../shared/types/session.js';
+import {
+  executionModeToPermissionMode,
+  isAutoApprovedExecutionMode,
+  toolRequiresConfirmation,
+} from '../agent/PermissionModePolicy.js';
 import { createLogger } from '../logger.js';
 import { makeError } from './ToolResult.js';
 import * as path from 'path';
@@ -128,21 +133,24 @@ export class ToolPipeline {
     ctx: ExecutionContext,
     toolCallId: string,
   ): Promise<ToolResult> {
+    const effectiveCtx = isAutoApprovedExecutionMode(ctx.mode) && !ctx.userConfirmed
+      ? { ...ctx, userConfirmed: true }
+      : ctx;
 
     // ── Stage 0: Schema Validation ──
     const validationError = ToolPipeline.validateParams(tool, params);
     if (validationError) return ToolPipeline.normalizeOutput(withToolCallId(validationError, toolCallId), tool);
 
     // ── Stage 1: Security Check ──
-    const securityBlock = ToolPipeline.securityCheck(tool, params, ctx);
+    const securityBlock = ToolPipeline.securityCheck(tool, params, effectiveCtx);
     if (securityBlock) return ToolPipeline.normalizeOutput(withToolCallId(securityBlock, toolCallId), tool);
 
     // ── Stage 2: Execute ──
-    let result = await ToolPipeline.execute(tool, params, ctx, toolCallId);
+    let result = await ToolPipeline.execute(tool, params, effectiveCtx, toolCallId);
 
     // ── Stage 3: Retry (only on transient errors) ──
     if (!result.success) {
-      result = await ToolPipeline.retry(tool, params, ctx, result);
+      result = await ToolPipeline.retry(tool, params, effectiveCtx, result);
     }
 
     // ── Stage 4: Output/Error Normalization ──
@@ -196,11 +204,21 @@ export class ToolPipeline {
     // when the concrete tool action exactly matches what the user approved.
     const allowed = ToolPipeline._allowedPrompts.get(ctx.sessionId);
     const hasApprovedPrompt = allowed ? matchesAllowedPrompt(tool, params, allowed) : false;
-    const hasAutoEditApproval = isAutoEditExecutionMode(mode);
+    const hasAutoEditApproval = isAutoApprovedExecutionMode(mode);
+    const permissionMode = executionModeToPermissionMode(mode);
+    const requiresModeConfirmation = permissionMode
+      ? toolRequiresConfirmation(permissionMode, tool)
+      : false;
+    const requiresToolConfirmation = tool.requiresConfirmation(ctx);
 
-    // Delegate to the tool's own requiresConfirmation() unless the execution
-    // mode itself is an explicit Auto Edit grant.
-    if (!hasApprovedPrompt && !hasAutoEditApproval && tool.requiresConfirmation(ctx)) {
+    // The selected mode and the tool's own safety policy both participate.
+    // Auto Edit is an explicit pre-authorization for both layers.
+    if (
+      !hasApprovedPrompt
+      && !hasAutoEditApproval
+      && !ctx.userConfirmed
+      && (requiresModeConfirmation || requiresToolConfirmation)
+    ) {
       return makeError(
         `Tool "${tool.name()}" requires user confirmation (risk: ${tool.riskLevel()}).`,
         { toolCallId: '' },
@@ -520,12 +538,6 @@ function waitForRetryDelay(
     timeout = setTimeout(() => settle(null), delayMs);
     signal?.addEventListener('abort', onAbort, { once: true });
   });
-}
-
-function isAutoEditExecutionMode(mode: unknown): boolean {
-  if (typeof mode !== 'string') return false;
-  const key = mode.trim().toLowerCase().replace(/-/g, '_');
-  return key === 'auto_edit' || key === 'autoedit';
 }
 
 function makePipelineFailure(

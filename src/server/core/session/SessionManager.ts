@@ -26,7 +26,10 @@ import type {
 } from '../../../shared/types/session.js';
 import { MessageRole } from '../../../shared/types/session.js';
 import type { PermissionMode } from '../agent/PermissionModePolicy.js';
-import { normalizePermissionMode } from '../agent/PermissionModePolicy.js';
+import {
+  FULL_AUTO_PERMISSION_MODE,
+  normalizePermissionMode,
+} from '../agent/PermissionModePolicy.js';
 import { messageToJsonlEvents, jsonlEventsToMessages } from '../../../shared/serialization/jsonl-converters.js';
 import { createLogger } from '../logger.js';
 import { TypedEventBus } from '../events/TypedEventBus.js';
@@ -56,14 +59,14 @@ const GOAL_STATUSES = new Set<GoalStatus>([
   'deleted',
 ]);
 
-function createGoalDefaults(workspace: string, permissionMode: unknown, now: string): SessionGoal {
+function createGoalDefaults(workspace: string, _permissionMode: unknown, now: string): SessionGoal {
   return {
     goalId: randomUUID(),
     version: 1,
     objective: '',
     acceptanceCriteria: '',
     workspace,
-    permissionMode: normalizePermissionMode(permissionMode, 'Auto'),
+    permissionMode: FULL_AUTO_PERMISSION_MODE,
     maxRuns: DEFAULT_GOAL_MAX_RUNS,
     maxConsecutiveFailures: DEFAULT_GOAL_MAX_FAILURES,
     wakeIntervalMs: DEFAULT_GOAL_WAKE_INTERVAL_MS,
@@ -96,7 +99,7 @@ function normalizeSessionGoal(raw: unknown, workspace: string, permissionMode: u
     objective,
     acceptanceCriteria: normalizeGoalText(value.acceptanceCriteria, ''),
     workspace: normalizeGoalText(value.workspace, workspace),
-    permissionMode: normalizePermissionMode(value.permissionMode ?? permissionMode, 'Auto'),
+    permissionMode: FULL_AUTO_PERMISSION_MODE,
     maxRuns: clampInteger(value.maxRuns, DEFAULT_GOAL_MAX_RUNS, 1, 1000),
     maxConsecutiveFailures: clampInteger(value.maxConsecutiveFailures, DEFAULT_GOAL_MAX_FAILURES, 1, 20),
     wakeIntervalMs: clampInteger(
@@ -509,10 +512,10 @@ export class SessionManager extends EventEmitter {
     await this._syncMeta(sessionId);
   }
 
-  /** Store permission mode only on root sessions. Sub-sessions always resolve to Auto. */
+  /** Store permission mode only on root sessions. Sub-sessions always resolve to AutoEdit. */
   async setSessionPermissionMode(sessionId: string, mode: PermissionMode): Promise<PermissionMode> {
     const root = this.getRootSession(sessionId);
-    const effectiveMode = root.id === sessionId ? normalizePermissionMode(mode) : 'Auto';
+    const effectiveMode = root.id === sessionId ? normalizePermissionMode(mode) : FULL_AUTO_PERMISSION_MODE;
     if (root.id === sessionId) {
       root.setMetadata('permissionMode', effectiveMode);
       await this._syncMeta(root.id);
@@ -523,7 +526,7 @@ export class SessionManager extends EventEmitter {
   getSessionPermissionMode(sessionId: string): PermissionMode {
     const session = this.sessions.get(sessionId);
     if (!session) return 'Auto';
-    if (!session.isRoot()) return 'AutoEdit';
+    if (!session.isRoot()) return FULL_AUTO_PERMISSION_MODE;
     return normalizePermissionMode(session.metadata.permissionMode);
   }
 
@@ -811,7 +814,9 @@ export class SessionManager extends EventEmitter {
         objective,
         acceptanceCriteria: normalizeGoalText(contract.acceptanceCriteria, canContinuePrevious ? previous.acceptanceCriteria : ''),
         workspace: normalizeGoalText(contract.workspace, canContinuePrevious ? previous.workspace : root.workspace),
-        permissionMode: normalizePermissionMode(contract.permissionMode ?? (canContinuePrevious ? previous.permissionMode : root.metadata.permissionMode), 'Auto'),
+        // Goal is an autonomous workflow, not a separate permission selector.
+        // Legacy clients may still submit permissionMode, but it is ignored.
+        permissionMode: FULL_AUTO_PERMISSION_MODE,
         maxRuns: clampInteger(contract.maxRuns, canContinuePrevious ? previous.maxRuns : DEFAULT_GOAL_MAX_RUNS, 1, 1000),
         maxConsecutiveFailures: clampInteger(
           contract.maxConsecutiveFailures,
@@ -959,7 +964,7 @@ export class SessionManager extends EventEmitter {
         currentRunStartedAt: now,
         lastRunAt: now,
         lastWorkspace: context.workspace || base.workspace || root.workspace,
-        lastPermissionMode: normalizePermissionMode(context.permissionMode || base.permissionMode),
+        lastPermissionMode: FULL_AUTO_PERMISSION_MODE,
         lastEffort: context.effort || (root.metadata.effortMode === false ? 'NORMAL' : 'HIGH'),
         lastUserMode: context.userMode || (typeof root.metadata.userMode === 'string' ? root.metadata.userMode : undefined),
         nextRunAt: undefined,

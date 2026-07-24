@@ -424,6 +424,13 @@ describe('spawnSubAgent — permission checks', () => {
     // Should succeed since Member can spawn
     expect(result.success).toBe(true);
     expect(result.content).toBe('');
+    expect(runtime.processMessage).toHaveBeenCalledWith(
+      expect.stringMatching(/^temp-subagent-/),
+      expect.stringMatching(/^subagent-/),
+      expect.any(Object),
+      [],
+      { permissionMode: 'AutoEdit', effort: 'HIGH' },
+    );
   });
 
   it('allows Manager role to spawn SubAgent', async () => {

@@ -74,6 +74,7 @@ describe('HireEmployeeTool', () => {
     let registeredAgent: Agent | null = null;
     vi.spyOn(AgentRegistry, 'getInstance').mockReturnValue({
       findAgent: vi.fn(() => parentAgent()),
+      agent: vi.fn(() => parentAgent()),
       registerAgent: vi.fn((agent: Agent) => { registeredAgent = agent; }),
       unregisterAgent: vi.fn(),
       saveAgent: vi.fn().mockResolvedValue(undefined),
@@ -119,5 +120,64 @@ describe('HireEmployeeTool', () => {
       mcpServers: ['local-rag'],
       inheritedModel: false,
     });
+  });
+
+  it('enforces caller ownership and the canonical CEO -> Manager -> Member hierarchy', async () => {
+    const manager = parentAgent();
+    const otherManager = { ...parentAgent(), id: 'other-manager', name: 'Other Manager' };
+    const ceo = {
+      ...parentAgent(),
+      id: 'ceo',
+      name: 'CEO',
+      role: AgentRole.MainAgent,
+      roleString: 'MainAgent',
+      parentAgentId: null,
+      level: 0,
+    };
+    const registry = {
+      findAgent: vi.fn((id: string) => {
+        if (id === manager.id) return manager;
+        if (id === otherManager.id) return otherManager;
+        if (id === ceo.id) return ceo;
+        return undefined;
+      }),
+      agent: vi.fn((id: string) => {
+        if (id === manager.id) return manager;
+        if (id === otherManager.id) return otherManager;
+        if (id === ceo.id) return ceo;
+        return undefined;
+      }),
+    } as unknown as AgentRegistry;
+    vi.spyOn(AgentRegistry, 'getInstance').mockReturnValue(registry);
+
+    const crossDepartment = await new HireEmployeeTool().execute({
+      name: 'QA Tester',
+      role: 'Member',
+      parentAgentId: 'other-manager',
+      agentPrompt: 'Test changes.',
+      reason: 'Coverage',
+    }, ctx);
+    expect(crossDepartment.success).toBe(false);
+    expect(crossDepartment.errorMessage).toContain('outside that management boundary');
+
+    const managerHiringManager = await new HireEmployeeTool().execute({
+      name: 'Nested Manager',
+      role: 'Manager',
+      parentAgentId: 'manager-agent',
+      agentPrompt: 'Manage another layer.',
+      reason: 'Extra management',
+    }, ctx);
+    expect(managerHiringManager.success).toBe(false);
+    expect(managerHiringManager.errorMessage).toContain('may only hire Member agents');
+
+    const ceoHiringMember = await new HireEmployeeTool().execute({
+      name: 'Direct Member',
+      role: 'Member',
+      parentAgentId: 'ceo',
+      agentPrompt: 'Work directly for the CEO.',
+      reason: 'Direct capacity',
+    }, { ...ctx, agentId: 'ceo' });
+    expect(ceoHiringMember.success).toBe(false);
+    expect(ceoHiringMember.errorMessage).toContain('Member agents must report to a Manager');
   });
 });

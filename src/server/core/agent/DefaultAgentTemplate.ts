@@ -66,7 +66,6 @@ export const DEFAULT_MANAGER_TOOLS = [
   ...DEFAULT_COORDINATION_TOOLS,
   'ListEmployees',
   'HireEmployee',
-  'UpdateOrg',
 ];
 
 export const DEFAULT_MEMBER_TOOLS = [
@@ -86,18 +85,22 @@ const LEGACY_COORDINATION_TOOLS = new Set([
 
 /**
  * One-time contract migration for agents that already opted into the legacy
- * delegation tool family. Explicitly restricted agents without those tools
- * remain restricted.
+ * delegation tool family, plus removal of organization-wide tools from roles
+ * that can no longer execute them. Other restricted allowlists remain narrow.
  */
 export function migrateCoordinationToolAllowlist(
   config: AgentConfigWithKey,
 ): { config: AgentConfigWithKey; changed: boolean } {
-  if (!config.allowedTools.some((name) => LEGACY_COORDINATION_TOOLS.has(name))) {
-    return { config, changed: false };
-  }
+  const hadLegacyCoordination = config.allowedTools.some(
+    (name) => LEGACY_COORDINATION_TOOLS.has(name),
+  );
+  const baseTools = config.allowedTools.filter((name) =>
+    name !== 'SubAgentDelete'
+    && (config.role === AgentRole.MainAgent || name !== 'UpdateOrg')
+  );
   const allowedTools = [...new Set([
-    ...config.allowedTools.filter((name) => name !== 'SubAgentDelete'),
-    ...DEFAULT_COORDINATION_TOOLS,
+    ...baseTools,
+    ...(hadLegacyCoordination ? DEFAULT_COORDINATION_TOOLS : []),
   ])];
   const changed = allowedTools.length !== config.allowedTools.length
     || allowedTools.some((name, index) => name !== config.allowedTools[index]);

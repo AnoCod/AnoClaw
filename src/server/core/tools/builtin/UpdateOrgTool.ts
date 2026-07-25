@@ -6,6 +6,7 @@ import type { ToolResult } from '../Tool.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
 import { AgentRegistry } from '../../agent/AgentRegistry.js';
 import { AgentRole } from '../../../../shared/types/agent.js';
+import { hierarchyValidationMessage } from '../../agent/AgentConstraints.js';
 
 const MAX_AGENT_ID_CHARS = 200;
 
@@ -18,18 +19,18 @@ export class UpdateOrgTool extends Tool {
   }
 
   description(): string {
-    return 'Reassign an agent to a new parent in the organization hierarchy. Validates that the move does not create circular references. Cannot move the MainAgent.';
+    return 'Reassign an agent to a new parent in the organization hierarchy. MainAgent only. Enforces role hierarchy and prevents circular references.';
   }
 
   prompt(): string {
     return '## UpdateOrg Usage\n' +
-      'Restructure your organization. Move an agent to a different manager.\n\n' +
+      'Restructure your organization as the MainAgent. Move an agent to a different valid manager.\n\n' +
       '**When to use:** Reorganizing teams. An agent\'s skills better fit another department. A manager has too many or too few direct reports.\n\n' +
       '**Constraints:** Cannot move the CEO (MainAgent). Cannot create circular reporting chains. The new parent must exist.\n\n' +
       'Use ListEmployees first to see the current structure.';
   }
 
-  minRole(): string { return 'Manager'; }
+  minRole(): string { return 'MainAgent'; }
 
   parametersSchema(): Record<string, unknown> {
     return {
@@ -78,9 +79,9 @@ export class UpdateOrgTool extends Tool {
     const registry = AgentRegistry.getInstance();
 
     const caller = registry.findAgent(ctx.agentId);
-    if (caller && !caller.isManagerRole()) {
+    if (!caller || !caller.isActive || caller.role !== AgentRole.MainAgent) {
       return this.makeError(
-        `Permission denied: agent '${caller.name}' (${caller.roleString}) cannot update the org tree.`,
+        'Permission denied: only the active MainAgent can update the organization tree.',
         { structured: { agentId, newParentId, status: 'permission_denied', callerAgentId: ctx.agentId } },
       );
     }
@@ -159,6 +160,14 @@ export class UpdateOrgTool extends Tool {
         `'${newParent.name}' is currently a subordinate of '${agent.name}'. ` +
         'This would create a circular reference in the org tree.',
         { structured: { agentId: agent.id, newParentId: newParent.id, status: 'circular_reference' } },
+      );
+    }
+
+    const hierarchyError = hierarchyValidationMessage(agent.id, agent.role, newParent.id);
+    if (hierarchyError) {
+      return this.makeError(
+        hierarchyError,
+        { structured: { agentId: agent.id, newParentId: newParent.id, status: 'invalid_hierarchy' } },
       );
     }
 

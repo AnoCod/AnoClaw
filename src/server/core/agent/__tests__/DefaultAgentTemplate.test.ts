@@ -63,6 +63,8 @@ describe('buildDefaultAgentConfigs', () => {
     expect(manager.allowedTools).toContain('TaskAssign');
     expect(manager.allowedTools).toContain('RunProgram');
     expect(manager.allowedTools).toContain('HireEmployee');
+    expect(manager.allowedTools).not.toContain('UpdateOrg');
+    expect(ceo.allowedTools).toContain('UpdateOrg');
     expect(member.allowedTools).toContain('SubAgentSpawn');
     expect(member.allowedTools).toContain('TeamCreate');
     expect(member.allowedTools).toContain('TaskClaim');
@@ -118,6 +120,16 @@ describe('buildDefaultAgentConfigs', () => {
     expect(migrateCoordinationToolAllowlist(restricted)).toEqual({
       config: restricted,
       changed: false,
+    });
+
+    const legacyManager = {
+      ...config,
+      role: AgentRole.Manager,
+      allowedTools: ['Read', 'UpdateOrg'],
+    };
+    expect(migrateCoordinationToolAllowlist(legacyManager)).toEqual({
+      config: { ...legacyManager, allowedTools: ['Read'] },
+      changed: true,
     });
   });
 });

@@ -7,6 +7,7 @@ import type { ToolResult } from '../Tool.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
 import { AgentRegistry } from '../../agent/AgentRegistry.js';
 import { Agent } from '../../agent/Agent.js';
+import { hierarchyValidationMessage } from '../../agent/AgentConstraints.js';
 import { AgentRole, AgentState } from '../../../../shared/types/agent.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -47,8 +48,8 @@ export class HireEmployeeTool extends Tool {
       '- Only the tools and skills needed for the role.',
       '',
       'Org rules:',
-      '- MainAgent may hire Managers or Members.',
-      '- Managers should hire Members, not other Managers.',
+      '- MainAgent hires Managers.',
+      '- Managers hire Members only under themselves.',
       '- Members execute work and should not receive organization-management tools.',
       '',
       'Tool allocation guidance:',
@@ -196,6 +197,12 @@ export class HireEmployeeTool extends Tool {
     const mcpServers = mcpServersResult.value ?? [];
 
     const registry = AgentRegistry.getInstance();
+    const caller = registry.findAgent(ctx.agentId);
+    if (!caller?.isActive || !caller.isManagerRole()) {
+      return this.makeError(
+        `Agent '${ctx.agentId}' is not an active MainAgent or Manager and cannot hire employees.`,
+      );
+    }
 
     // Validate parent exists
     const parent = registry.findAgent(parentAgentId);
@@ -221,12 +228,17 @@ export class HireEmployeeTool extends Tool {
       );
     }
 
-    // Manager->Manager restriction ──
-    // Only the CEO (MainAgent) can create Managers. Managers can only create Members.
-    if (roleStr === 'Manager' && parent.role !== AgentRole.MainAgent) {
+    // Managers may only hire Members into their own direct team. Only the
+    // root MainAgent may select another valid parent.
+    if (caller.role === AgentRole.Manager && parent.id !== caller.id) {
       return this.makeError(
-        `Only the CEO (MainAgent) can create Manager-level agents. ` +
-        `'${parent.name}' is a ${parent.roleString}, not the MainAgent.`,
+        `Manager '${caller.name}' may only hire employees under itself. ` +
+        `Requested parent '${parent.name}' is outside that management boundary.`,
+      );
+    }
+    if (caller.role === AgentRole.Manager && roleStr !== 'Member') {
+      return this.makeError(
+        `Manager '${caller.name}' may only hire Member agents. Only the MainAgent can hire Managers.`,
       );
     }
 
@@ -236,6 +248,10 @@ export class HireEmployeeTool extends Tool {
 
     // Generate a unique ID
     const agentId = `agent-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const hierarchyError = hierarchyValidationMessage(agentId, role, parent.id);
+    if (hierarchyError) {
+      return this.makeError(hierarchyError);
+    }
 
     // Determine level based on parent
     const level = parent.level + 1;
@@ -245,7 +261,7 @@ export class HireEmployeeTool extends Tool {
       id: agentId,
       name,
       role,
-      parentAgentId,
+      parentAgentId: parent.id,
       level,
       teamName: teamName || parent.teamName,
       provider: parent.provider,
@@ -310,7 +326,7 @@ export class HireEmployeeTool extends Tool {
           agentId,
           name,
           role: orgRoleLabel,
-          parentAgentId,
+          parentAgentId: parent.id,
           teamName: teamName || parent.teamName || '',
           allowedTools,
           enabledSkills,

@@ -134,6 +134,10 @@ export class AgentMessageTool extends Tool {
         if (runtime.isSessionActive(targetSession.id)) {
           InterruptController.getInstance().setPendingUserMessage(targetSession.id, rendered);
           InterruptController.getInstance().wakeOnly(targetSession.id);
+        } else {
+          // A mailbox-only sub-session has no running AgentLoop and must not
+          // remain visible as Active.
+          await SessionManager.getInstance().setRuntimeStatus(targetSession.id, 'Idle');
         }
         delivered.push({
           message: deliveredMessage,

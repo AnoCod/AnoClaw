@@ -7,9 +7,14 @@ import type { ExecutionContext } from '../../../../shared/types/session.js';
 
 const ctx: ExecutionContext = {
   sessionId: 'update-org-session',
-  agentId: 'manager-a',
+  agentId: 'ceo',
   workspace: process.cwd(),
   userConfirmed: true,
+};
+
+const managerCtx: ExecutionContext = {
+  ...ctx,
+  agentId: 'manager-a',
 };
 
 function makeAgent(
@@ -103,6 +108,35 @@ describe('UpdateOrgTool', () => {
       newParentId: 'manager-c',
       status: 'circular_reference',
     });
+  });
+
+  it('allows only MainAgent callers and rejects invalid role hierarchy moves', async () => {
+    const { registry } = setupRegistry();
+    const saveAgent = vi.spyOn(registry, 'saveAgent').mockResolvedValue(undefined);
+
+    const managerAttempt = await new UpdateOrgTool().execute({
+      agentId: 'member-1',
+      newParentId: 'manager-b',
+    }, managerCtx);
+    expect(managerAttempt.success).toBe(false);
+    expect(managerAttempt.errorMessage).toContain('only the active MainAgent');
+
+    const memberUnderCeo = await new UpdateOrgTool().execute({
+      agentId: 'member-1',
+      newParentId: 'ceo',
+    }, ctx);
+    expect(memberUnderCeo.success).toBe(false);
+    expect(memberUnderCeo.errorMessage).toContain('Member agents must report to a Manager');
+    expect(memberUnderCeo.structured).toMatchObject({ status: 'invalid_hierarchy' });
+
+    const managerUnderManager = await new UpdateOrgTool().execute({
+      agentId: 'manager-b',
+      newParentId: 'manager-a',
+    }, ctx);
+    expect(managerUnderManager.success).toBe(false);
+    expect(managerUnderManager.errorMessage).toContain('Manager agents must report directly');
+    expect(managerUnderManager.structured).toMatchObject({ status: 'invalid_hierarchy' });
+    expect(saveAgent).not.toHaveBeenCalled();
   });
 
   it('normalizes identifiers and returns structured metadata for successful moves', async () => {

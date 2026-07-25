@@ -21,6 +21,7 @@ describe('AgentMessageTool durable mailbox', () => {
   let dir = '';
   let service: CoordinationService;
   const appendMessage = vi.fn().mockResolvedValue(undefined);
+  const setRuntimeStatus = vi.fn().mockResolvedValue(undefined);
 
   beforeEach(async () => {
     dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'anoclaw-agent-message-'));
@@ -29,11 +30,13 @@ describe('AgentMessageTool durable mailbox', () => {
     service = CoordinationService.getInstance();
     await service.initialize(dir);
     appendMessage.mockClear();
+    setRuntimeStatus.mockClear();
     vi.spyOn(SessionManager, 'getInstance').mockReturnValue({
       getRootSession: vi.fn(() => ({ id: 'root-1', agentId: ctx.agentId })),
       session: vi.fn(() => ({ id: 'root-1', agentId: ctx.agentId, parentSessionId: null })),
       createSubSession: vi.fn().mockResolvedValue({ id: 'child-session', agentId: 'member-1' }),
       appendMessage,
+      setRuntimeStatus,
     } as unknown as SessionManager);
     vi.spyOn(AgentRegistry, 'getInstance').mockReturnValue({
       findAgent: vi.fn((id: string) => id === ctx.agentId
@@ -73,6 +76,7 @@ describe('AgentMessageTool durable mailbox', () => {
       role: 'user',
       content: expect.stringContaining('<coordination-message'),
     }));
+    expect(setRuntimeStatus).toHaveBeenCalledWith('child-session', 'Idle');
   });
 
   it('rejects steer for an idle recipient', async () => {

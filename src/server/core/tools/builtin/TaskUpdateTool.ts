@@ -53,6 +53,16 @@ export class TaskUpdateTool extends Tool {
       if (rawStatus && !STATUSES.has(rawStatus as CoordinationTaskStatus)) {
         throw new CoordinationError('validation', `Invalid status: ${rawStatus}`);
       }
+      if (
+        current.status === 'running'
+        && rawStatus
+        && ['completed', 'failed', 'cancelled'].includes(rawStatus)
+      ) {
+        throw new CoordinationError(
+          'conflict',
+          'A running task is finalized by its runtime after the AgentLoop exits; use TaskStop to cancel it',
+        );
+      }
       const task = await service.updateTask(rootSessionId, taskId, {
         status: rawStatus as CoordinationTaskStatus | undefined,
         progress: integerParam(params.progress, 'progress', { optional: true, min: 0, max: 100 }),

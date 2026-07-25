@@ -215,8 +215,15 @@ export class PatchCoordinationTaskRoute extends CoordinationRoute {
   async execute(match: RouteMatch, req: IncomingMessage): Promise<unknown> {
     const current = requireTask(match.params.taskId);
     const body = await readBody(req);
+    const requestedStatus = text(body.status) as CoordinationTaskStatus | undefined;
+    if (current.status === 'running' && requestedStatus && isTerminal(requestedStatus)) {
+      throw new CoordinationError(
+        'conflict',
+        'Running tasks must finish through their AgentLoop or the dedicated stop endpoint',
+      );
+    }
     const task = await CoordinationService.getInstance().updateTask(current.rootSessionId, current.id, {
-      status: text(body.status) as CoordinationTaskStatus | undefined,
+      status: requestedStatus,
       progress: integer(body.progress),
       blocker: text(body.blocker),
       resultSummary: text(body.resultSummary),
@@ -364,13 +371,16 @@ function requireActiveAgent(agentId: string): void {
 async function cancelTask(taskId: string, reason: string, actor: string) {
   const task = requireTask(taskId);
   if (isTerminal(task.status)) return task;
+  const updated = await CoordinationService.getInstance().requestTaskCancellation(
+    task.rootSessionId,
+    task.id,
+    actor,
+    reason.slice(0, 1_000),
+  );
   if (task.sessionId) {
-    InterruptController.getInstance().requestInterrupt(task.sessionId, InterruptReason.ParentStop);
+    InterruptController.getInstance().requestInterruptWhenAvailable(task.sessionId, InterruptReason.ParentStop);
   }
-  return CoordinationService.getInstance().updateTask(task.rootSessionId, task.id, {
-    status: 'cancelled',
-    error: reason.slice(0, 1_000),
-  }, actor);
+  return updated;
 }
 
 function isTerminal(status: CoordinationTaskStatus): boolean {

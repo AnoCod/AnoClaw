@@ -9,7 +9,7 @@ export class TaskStopTool extends Tool {
   static category = 'Task Coordination';
   static toolDescription = 'Cancels one durable task and cascades stop to its AgentLoop.';
   name(): string { return 'TaskStop'; }
-  description(): string { return 'Cancel a pending or running coordination task and release its workspace leases.'; }
+  description(): string { return 'Cancel a coordination task; running work keeps its lease until the AgentLoop stops.'; }
   minRole(): string { return 'Member'; }
   riskLevel(): RiskLevel { return RiskLevel.High; }
   parametersSchema(): Record<string, unknown> {
@@ -37,12 +37,14 @@ export class TaskStopTool extends Tool {
         || team?.leaderAgentId === ctx.agentId;
       if (!authorized) throw new CoordinationError('forbidden', 'Only the creator, assignee, or team leader may stop this task');
       if (isTerminal(task.status)) return this.makeResult(`Task ${task.id} is already ${task.status}.`, { structured: { task } });
-      if (task.sessionId) InterruptController.getInstance().requestInterrupt(task.sessionId, InterruptReason.ParentStop);
-      const cancelled = await service.updateTask(rootSessionId, task.id, {
-        status: 'cancelled',
-        error: reason,
-      }, ctx.agentId);
-      return this.makeResult(`Task ${task.id} cancelled.`, { structured: { task: cancelled } });
+      const updated = await service.requestTaskCancellation(rootSessionId, task.id, ctx.agentId, reason);
+      if (task.sessionId) {
+        InterruptController.getInstance().requestInterruptWhenAvailable(task.sessionId, InterruptReason.ParentStop);
+      }
+      const message = updated.status === 'running'
+        ? `Cancellation requested for running task ${task.id}.`
+        : `Task ${task.id} cancelled.`;
+      return this.makeResult(message, { structured: { task: updated } });
     } catch (error) {
       return toolFailure(this, error);
     }

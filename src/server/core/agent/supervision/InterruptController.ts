@@ -41,6 +41,7 @@ export class InterruptController {
   private _reasons: Map<string, InterruptReason> = new Map();
   private _parentMap: Map<string, string> = new Map();
   private _pendingMessages: Map<string, string[]> = new Map();
+  private _pendingInterrupts: Map<string, InterruptReason> = new Map();
 
   private constructor() {
   }
@@ -58,8 +59,23 @@ export class InterruptController {
     this._reasons.delete(sessionId);
     const controller = new AbortController();
     this._controllers.set(sessionId, controller);
+    const pendingReason = this._pendingInterrupts.get(sessionId);
+    if (pendingReason) {
+      this._pendingInterrupts.delete(sessionId);
+      controller.abort();
+      this._reasons.set(sessionId, pendingReason);
+    }
     log.debug('Interrupt controller created', { sid: sessionId });
     return controller;
+  }
+
+  /** Abort now, or persist the request until the session controller exists. */
+  requestInterruptWhenAvailable(sessionId: string, reason: InterruptReason): void {
+    if (!this._controllers.has(sessionId)) {
+      this._pendingInterrupts.set(sessionId, reason);
+      return;
+    }
+    this.requestInterrupt(sessionId, reason);
   }
 
   requestInterrupt(sessionId: string, reason: InterruptReason): void {
@@ -114,6 +130,7 @@ export class InterruptController {
     this._reasons.delete(sessionId);
     this._parentMap.delete(sessionId);
     this._pendingMessages.delete(sessionId);
+    this._pendingInterrupts.delete(sessionId);
 
     // Remove all descendant sessions recursively
     for (const childId of descendants) {
@@ -121,6 +138,7 @@ export class InterruptController {
       this._reasons.delete(childId);
       this._parentMap.delete(childId);
       this._pendingMessages.delete(childId);
+      this._pendingInterrupts.delete(childId);
     }
 
     log.debug('Interrupt controller removed', { sid: sessionId, descendants: descendants.size });

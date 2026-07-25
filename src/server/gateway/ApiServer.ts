@@ -13,6 +13,7 @@ import { validateToken, hasPermission } from './ApiAuth.js';
 import type { ApiToken } from './ApiAuth.js';
 import { ApiPermission } from '../../shared/types/gateway.js';
 import { LogManager } from '../infra/logging/LogManager.js';
+import { isTrustedUiRequest } from './TrustedUiAuth.js';
 
 // Route handler interface
 import type { RouteHandler, RouteMatch } from './RouteHandler.js';
@@ -55,10 +56,6 @@ const LOCAL_UI_TOKEN: ApiToken = {
   createdAt: '',
   lastUsedAt: null,
 };
-
-function isLoopbackAddress(addr: string): boolean {
-  return addr.startsWith('127.') || addr === '::1' || addr === '::ffff:127.0.0.1';
-}
 
 function isAllowedLocalOrigin(origin: string | undefined, host: string, port: number): boolean {
   if (!origin) return true;
@@ -211,6 +208,22 @@ export class ApiServer extends EventEmitter {
   // ── Request handler ──
 
   async handleApiRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    await this._handleApiRequest(req, res, false);
+  }
+
+  /**
+   * Handle a request forwarded by the same-process UI server.
+   * Only Electron requests carrying the ephemeral UI capability are trusted.
+   */
+  async handleTrustedUiRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    await this._handleApiRequest(req, res, isTrustedUiRequest(req));
+  }
+
+  private async _handleApiRequest(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    trustedUi: boolean,
+  ): Promise<void> {
     const method = req.method || 'GET';
     const url = new URL(req.url || '/', `http://${this.host}:${this.port}`);
     const pathname = url.pathname;
@@ -227,12 +240,10 @@ export class ApiServer extends EventEmitter {
 
     let token: ApiToken | null = null;
     if (pathname !== '/api/v1/health') {
-      const remoteAddress = req.socket.remoteAddress || '';
-      const isLocalhost = isLoopbackAddress(remoteAddress);
-      token = this._authenticate(req);
+      token = trustedUi ? LOCAL_UI_TOKEN : this._authenticate(req);
       if (!token) {
-        if (isLocalhost) token = LOCAL_UI_TOKEN;
-        else { this.sendJson(res, 401, { error: 'Unauthorized', message: 'Invalid or missing Bearer token' }); return; }
+        this.sendJson(res, 401, { error: 'Unauthorized', message: 'Invalid or missing Bearer token' });
+        return;
       }
     }
 
@@ -280,8 +291,10 @@ export class ApiServer extends EventEmitter {
       const match = matchRoute(handler.path, pathname);
       if (!match) continue;
       match.query = new URL(req.url || '/', `http://${this.host}:${this.port}`).searchParams;
-      if (handler.permission && (!token || !hasPermission(token, handler.permission as ApiPermission))) {
-        this.sendJson(res, 403, { error: 'Forbidden', message: `Missing permission: ${handler.permission}` });
+      const permission = handler.permission
+        ?? (handler.method === 'GET' && handler.path === '/api/v1/health' ? null : ApiPermission.Admin);
+      if (permission && (!token || !hasPermission(token, permission as ApiPermission))) {
+        this.sendJson(res, 403, { error: 'Forbidden', message: `Missing permission: ${permission}` });
         return true;
       }
       try {
@@ -369,8 +382,9 @@ export class ApiServer extends EventEmitter {
       if (method !== route.method) continue;
       const params = this._matchPluginPath(route.path, pathname);
       if (params === null) continue;
-      if (route.permission && (!token || !hasPermission(token, route.permission as ApiPermission))) {
-        this.sendJson(res, 403, { error: 'Forbidden', message: `Missing permission: ${route.permission}` });
+      const permission = route.permission ?? ApiPermission.Admin;
+      if (!token || !hasPermission(token, permission as ApiPermission)) {
+        this.sendJson(res, 403, { error: 'Forbidden', message: `Missing permission: ${permission}` });
         return true;
       }
       this._executePluginHandler(route.pluginName, route.handler, req, params).then(result => {

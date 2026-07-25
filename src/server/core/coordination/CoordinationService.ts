@@ -60,6 +60,8 @@ export interface CreateTaskInput {
   idempotencyKey?: string;
 }
 
+export const CANCELLATION_REQUESTED_BLOCKER = 'cancellation_requested';
+
 const TERMINAL_STATUSES = new Set<CoordinationTaskStatus>([
   'completed',
   'failed',
@@ -203,7 +205,9 @@ export class CoordinationService {
       const existing = this.requireTeam(scope, teamId);
       if (existing.state === 'disbanded') return cloneTeam(existing);
       const activeTasks = [...scope.tasks.values()].filter(
-        (task) => task.teamId === teamId && !TERMINAL_STATUSES.has(task.status),
+        (task) => task.teamId === teamId
+          && !TERMINAL_STATUSES.has(task.status)
+          && task.blocker !== CANCELLATION_REQUESTED_BLOCKER,
       );
       if (activeTasks.length > 0) {
         throw new CoordinationError('conflict', `Team has ${activeTasks.length} non-terminal task(s)`);
@@ -400,7 +404,42 @@ export class CoordinationService {
         updatedAt: now,
       };
       await this.commit(rootSessionId, 'task_updated', { task }, actorAgentId);
-      if (TERMINAL_STATUSES.has(task.status)) await this.releaseTaskLeasesUnlocked(scope, task, actorAgentId);
+      if (TERMINAL_STATUSES.has(task.status)) {
+        await this.releaseTaskLeasesUnlocked(scope, task, actorAgentId);
+      }
+      return cloneTask(task);
+    });
+  }
+
+  /**
+   * A running task remains running until its AgentLoop exits, so its workspace
+   * lease stays renewable. Other states can become cancelled immediately.
+   */
+  async requestTaskCancellation(
+    rootSessionId: string,
+    taskId: string,
+    actorAgentId: string,
+    reason: string,
+  ): Promise<CoordinationTask> {
+    return this.withScopeLock(rootSessionId, async () => {
+      const scope = await this.scope(rootSessionId);
+      const current = this.requireTask(scope, taskId);
+      if (TERMINAL_STATUSES.has(current.status)) return cloneTask(current);
+
+      const now = new Date().toISOString();
+      const waitsForLoopExit = current.status === 'running' && !!current.sessionId;
+      const task: CoordinationTask = {
+        ...current,
+        ...(waitsForLoopExit
+          ? { blocker: CANCELLATION_REQUESTED_BLOCKER, error: reason }
+          : { status: 'cancelled' as const, error: reason, completedAt: now }),
+        version: current.version + 1,
+        updatedAt: now,
+      };
+      await this.commit(rootSessionId, 'task_updated', { task }, actorAgentId);
+      if (!waitsForLoopExit) {
+        await this.releaseTaskLeasesUnlocked(scope, task, actorAgentId);
+      }
       return cloneTask(task);
     });
   }

@@ -5,7 +5,10 @@ import type { RouteHandler, RouteMatch } from '../RouteHandler.js';
 import type { ApiToken } from '../ApiAuth.js';
 import { readBody, sendJson } from '../RouteHelpers.js';
 import { ArtifactManager } from '../../core/artifacts/ArtifactManager.js';
+import { SessionManager } from '../../core/session/SessionManager.js';
+import { resolveWorkspacePath } from '../handlers/WorkspaceHandlers.js';
 import type {
+  ArtifactFile,
   ArtifactKind,
   ArtifactStatus,
   CreateArtifactInput,
@@ -27,6 +30,7 @@ export class ListArtifactsRoute implements RouteHandler {
   path = '/api/v1/artifacts';
   category = 'Artifacts';
   description = 'List generated artifacts, optionally filtered by session, kind, or status';
+  permission = 'workspace:read';
 
   constructor(private readonly _manager = ArtifactManager.getInstance()) {}
 
@@ -47,6 +51,7 @@ export class CreateArtifactRoute implements RouteHandler {
   path = '/api/v1/artifacts';
   category = 'Artifacts';
   description = 'Create an artifact record for a generated user-facing deliverable';
+  permission = 'workspace:write';
 
   constructor(private readonly _manager = ArtifactManager.getInstance()) {}
 
@@ -65,10 +70,11 @@ export class CreateArtifactRoute implements RouteHandler {
       metadata: isRecord(body.metadata) ? body.metadata : undefined,
     };
     try {
+      validateArtifactFiles(input.sessionId, input.files);
       const artifact = await this._manager.create(input);
       sendJson(res, 201, { artifact });
     } catch (err) {
-      sendJson(res, 400, { error: (err as Error).message });
+      sendArtifactError(res, err, 400);
     }
     return true;
   }
@@ -79,6 +85,7 @@ export class GetArtifactRoute implements RouteHandler {
   path = '/api/v1/artifacts/:sessionId/:artifactId';
   category = 'Artifacts';
   description = 'Get one artifact by session and artifact id';
+  permission = 'workspace:read';
 
   constructor(private readonly _manager = ArtifactManager.getInstance()) {}
 
@@ -98,6 +105,7 @@ export class DownloadArtifactFileRoute implements RouteHandler {
   path = '/api/v1/artifacts/:sessionId/:artifactId/files/:fileIndex';
   category = 'Artifacts';
   description = 'Download a file attached to an artifact';
+  permission = 'workspace:read';
 
   constructor(private readonly _manager = ArtifactManager.getInstance()) {}
 
@@ -111,7 +119,7 @@ export class DownloadArtifactFileRoute implements RouteHandler {
       }
 
       const file = artifact.files[index];
-      const filePath = path.resolve(file.path);
+      const filePath = resolveArtifactFilePath(artifact.sessionId, file.path);
       if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
         sendJson(res, 404, { error: 'Artifact file not found' });
         return true;
@@ -126,7 +134,7 @@ export class DownloadArtifactFileRoute implements RouteHandler {
       });
       fs.createReadStream(filePath).pipe(res);
     } catch (err) {
-      if (!res.headersSent) sendJson(res, 404, { error: (err as Error).message });
+      if (!res.headersSent) sendArtifactError(res, err, 404);
     }
     return true;
   }
@@ -137,6 +145,7 @@ export class UpdateArtifactRoute implements RouteHandler {
   path = '/api/v1/artifacts/:sessionId/:artifactId';
   category = 'Artifacts';
   description = 'Update an artifact record, preview, files, status, or version';
+  permission = 'workspace:write';
 
   constructor(private readonly _manager = ArtifactManager.getInstance()) {}
 
@@ -154,10 +163,11 @@ export class UpdateArtifactRoute implements RouteHandler {
       versionSummary: text(body.versionSummary),
     };
     try {
+      validateArtifactFiles(match.params.sessionId, input.files);
       const artifact = await this._manager.update(match.params.sessionId, match.params.artifactId, input);
       sendJson(res, 200, { artifact });
     } catch (err) {
-      sendJson(res, 404, { error: (err as Error).message });
+      sendArtifactError(res, err, 404);
     }
     return true;
   }
@@ -165,6 +175,24 @@ export class UpdateArtifactRoute implements RouteHandler {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function resolveArtifactFilePath(sessionId: string, filePath: string): string {
+  const session = SessionManager.getInstance().session(sessionId);
+  if (!session) throw new Error(`Session '${sessionId}' not found`);
+  return resolveWorkspacePath(session.workspace || process.cwd(), filePath);
+}
+
+function validateArtifactFiles(sessionId: string, files: ArtifactFile[] | undefined): void {
+  for (const file of files || []) {
+    resolveArtifactFilePath(sessionId, file.path);
+  }
+}
+
+function sendArtifactError(res: ServerResponse, err: unknown, fallbackStatus: number): void {
+  const message = err instanceof Error ? err.message : String(err);
+  const status = message === 'Path escapes workspace root' ? 403 : fallbackStatus;
+  sendJson(res, status, { error: message });
 }
 
 function downloadFileName(label: string | undefined, filePath: string): string {

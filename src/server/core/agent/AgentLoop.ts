@@ -809,7 +809,6 @@ export class AgentLoop {
         const tool = agentTools.find((t) => t.name() === toolName);
         const permissionMode = this._permissionMode();
 
-
         let userRejected = false;
         const needsConfirmation = !!tool && this._needsConfirmation(tool, permissionMode);
         let userConfirmed = !needsConfirmation;
@@ -871,12 +870,23 @@ export class AgentLoop {
           }
         }
 
-        if (tool && !tool.shouldDefer()) {
+        if (!tool || !tool.shouldDefer()) {
           allDeferred = false;
         }
         const t0 = Date.now();
         let result: { success: boolean; content: string; errorMessage?: string; structured?: unknown };
-        if (userRejected) {
+        if (!tool) {
+          result = {
+            success: false,
+            content: '',
+            errorMessage: `Tool "${toolName}" is not allowed for this agent in the current session.`,
+          };
+          createLogger('anochat.agent').warn('AgentLoop rejected tool outside effective allowlist', {
+            sid: this.sessionId,
+            aid: this.agentId,
+            toolName,
+          });
+        } else if (userRejected) {
           result = { success: false, content: '', errorMessage: `User rejected tool "${toolName}".` };
         } else {
         try {

@@ -20,7 +20,9 @@ import { ToolProfiler } from './infra/supervision/ToolProfiler.js';
 import { PromptAssembler } from './core/prompt/PromptAssembler.js';
 import { CommandRegistry } from './core/commands/CommandRegistry.js';
 import { LogManager } from './infra/logging/LogManager.js';
-import { initAuthStore } from './gateway/ApiAuth.js';
+import { hasPermission, initAuthStore, validateToken } from './gateway/ApiAuth.js';
+import { isTrustedUiRequest, TRUSTED_UI_HEADER } from './gateway/TrustedUiAuth.js';
+import { ApiPermission } from '../shared/types/gateway.js';
 import { SettingsManager } from './infra/storage/SettingsManager.js';
 import { serveStatic } from './infra/StaticFiles.js';
 import { writablePath, ensureWritableDir, appPath } from './infra/WritablePath.js';
@@ -57,7 +59,25 @@ function setCors(req: http.IncomingMessage, res: http.ServerResponse): void {
     res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', `Content-Type, Authorization, ${TRUSTED_UI_HEADER}`);
+}
+
+function authorizeLegacyAdminApi(req: http.IncomingMessage, res: http.ServerResponse): boolean {
+  if (isTrustedUiRequest(req)) return true;
+  const authorization = req.headers.authorization || '';
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  const token = match ? validateToken(match[1]) : null;
+  if (!token) {
+    res.writeHead(401, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Unauthorized', message: 'Invalid or missing Bearer token' }));
+    return false;
+  }
+  if (!hasPermission(token, ApiPermission.Admin)) {
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Forbidden', message: 'Missing permission: admin' }));
+    return false;
+  }
+  return true;
 }
 
 function safePathSegment(value: string, label: string): string {
@@ -108,6 +128,13 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       agents: AgentRegistry.getInstance().allAgents().length,
       tools: ToolRegistry.getInstance().allTools().length,
     }));
+    return;
+  }
+
+  if (
+    (url.startsWith('/api/v1/plugins') || url.startsWith('/api/skills'))
+    && !authorizeLegacyAdminApi(req, res)
+  ) {
     return;
   }
 
@@ -405,7 +432,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
 
   if (url.startsWith('/api/')) {
     const { ApiServer } = await import('./gateway/ApiServer.js');
-    await ApiServer.getInstance().handleApiRequest(req, res);
+    await ApiServer.getInstance().handleTrustedUiRequest(req, res);
     return;
   }
 

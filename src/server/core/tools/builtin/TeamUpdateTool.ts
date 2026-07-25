@@ -66,13 +66,15 @@ export class TeamUpdateTool extends Tool {
         throw new CoordinationError('conflict', `${activeForRemoved.length} active task(s) must finish or force=true must be used`);
       }
       for (const task of activeForRemoved) {
+        await service.requestTaskCancellation(
+          rootSessionId,
+          task.id,
+          ctx.agentId,
+          'Cancelled because the assigned member was forcibly removed from the team.',
+        );
         if (task.sessionId) {
-          InterruptController.getInstance().requestInterrupt(task.sessionId, InterruptReason.ParentStop);
+          InterruptController.getInstance().requestInterruptWhenAvailable(task.sessionId, InterruptReason.ParentStop);
         }
-        await service.updateTask(rootSessionId, task.id, {
-          status: 'cancelled',
-          error: 'Cancelled because the assigned member was forcibly removed from the team.',
-        }, ctx.agentId);
       }
 
       const maxMembers = SettingsManager.getInstance().get<number>('coordination.maxTeamMembers', 8);

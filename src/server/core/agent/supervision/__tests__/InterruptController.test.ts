@@ -87,6 +87,15 @@ describe('InterruptController', () => {
       expect(controller.isInterrupted('session-1')).toBe(false);
     });
 
+    it('can persist a stop request until the controller is created', () => {
+      controller.requestInterruptWhenAvailable('session-1', InterruptReason.ParentStop);
+
+      const created = controller.createController('session-1');
+
+      expect(created.signal.aborted).toBe(true);
+      expect(controller.reason('session-1')).toBe(InterruptReason.ParentStop);
+    });
+
     it('interrupts with different reasons', () => {
       controller.createController('session-1');
 

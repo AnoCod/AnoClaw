@@ -134,6 +134,11 @@ export function markdownLinkHtml(labelHtml: string, target: string): string {
   if (ref && !isHttpUrl(target)) {
     return clickablePathHtml(labelHtml, target);
   }
+  const compactTarget = target.replace(/[\u0000-\u0020\u007f]/g, '');
+  const scheme = compactTarget.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase();
+  if (scheme && !['http', 'https', 'mailto'].includes(scheme)) {
+    return labelHtml;
+  }
   return `<a href="${escAttr(target)}" data-external-url="true" rel="noopener noreferrer" class="md-link">${labelHtml}</a>`;
 }
 

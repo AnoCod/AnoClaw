@@ -32,7 +32,10 @@ import {
 } from './PermissionModePolicy.js';
 import { TaskResolver } from '../capability/TaskResolver.js';
 import type { CoordinationTask } from '../../../shared/types/coordination.js';
-import { CoordinationService } from '../coordination/CoordinationService.js';
+import {
+  CANCELLATION_REQUESTED_BLOCKER,
+  CoordinationService,
+} from '../coordination/CoordinationService.js';
 import { buildTaskPacket, renderTaskPacket } from '../coordination/TaskPacketBuilder.js';
 import { WorkspaceLeaseService } from '../coordination/WorkspaceLeaseService.js';
 
@@ -808,6 +811,12 @@ export class AgentRuntime extends EventEmitter {
       const latest = service.getTask(task.rootSessionId, task.id);
       if (!latest || latest.status !== 'running') return;
       void service.renewTaskLeases(task.rootSessionId, task.id, ttlMs, agent.id).catch(() => {});
+      if (latest.blocker === CANCELLATION_REQUESTED_BLOCKER && latest.sessionId) {
+        InterruptController.getInstance().requestInterruptWhenAvailable(
+          latest.sessionId,
+          InterruptReason.ParentStop,
+        );
+      }
       void service.updateTask(task.rootSessionId, task.id, {
         heartbeatAt: new Date().toISOString(),
         currentTool,
@@ -854,7 +863,27 @@ export class AgentRuntime extends EventEmitter {
     }
 
     const latest = service.getTask(task.rootSessionId, task.id);
-    if (!latest || latest.status === 'cancelled') return;
+    if (!latest) return;
+    if (latest.status === 'cancelled' || latest.status === 'completed' || latest.status === 'failed') {
+      await service.releaseTaskLeases(
+        latest.rootSessionId,
+        latest.id,
+        latest.assigneeAgentId || latest.creatorAgentId,
+      ).catch(() => {});
+      return;
+    }
+    if (latest.blocker === CANCELLATION_REQUESTED_BLOCKER) {
+      await service.updateTask(task.rootSessionId, task.id, {
+        status: 'cancelled',
+        blocker: undefined,
+        currentTool: undefined,
+        heartbeatAt: new Date().toISOString(),
+        resultSummary: content.trim().slice(0, 2_000) || undefined,
+        outputRef: `session:${session.id}`,
+        tokenUsage,
+      }, agent.id);
+      return;
+    }
     if (failure) {
       const failed = await service.updateTask(task.rootSessionId, task.id, {
         status: 'failed',

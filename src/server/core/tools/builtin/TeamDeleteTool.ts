@@ -47,11 +47,15 @@ export class TeamDeleteTool extends Tool {
         throw new CoordinationError('conflict', `Team has ${active.length} non-terminal task(s)`);
       }
       for (const task of active) {
-        if (task.sessionId) InterruptController.getInstance().requestInterrupt(task.sessionId, InterruptReason.ParentStop);
-        await service.updateTask(rootSessionId, task.id, {
-          status: 'cancelled',
-          error: 'Cancelled by forced team disband.',
-        }, ctx.agentId);
+        await service.requestTaskCancellation(
+          rootSessionId,
+          task.id,
+          ctx.agentId,
+          'Cancelled by forced team disband.',
+        );
+        if (task.sessionId) {
+          InterruptController.getInstance().requestInterruptWhenAvailable(task.sessionId, InterruptReason.ParentStop);
+        }
       }
       const disbanded = await service.disbandTeam(rootSessionId, teamId, ctx.agentId);
       return this.makeResult(`Team "${disbanded.name}" disbanded.`, { structured: { team: disbanded } });

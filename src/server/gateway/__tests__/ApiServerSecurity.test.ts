@@ -6,8 +6,11 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { ApiServer } from '../ApiServer.js';
+import { generateToken } from '../ApiAuth.js';
 import type { RouteHandler, RouteMatch } from '../RouteHandler.js';
 import { handleBrowseWorkspace, handleReadWorkspaceFile, resolveWorkspacePath } from '../handlers/WorkspaceHandlers.js';
+import { ApiPermission } from '../../../shared/types/gateway.js';
+import { getTrustedUiToken, TRUSTED_UI_HEADER } from '../TrustedUiAuth.js';
 
 interface Capture {
   status: number;
@@ -72,6 +75,7 @@ describe('ApiServer security boundaries', () => {
   beforeEach(() => {
     api = ApiServer.getInstance();
     (api as unknown as { _routeTable: RouteHandler[] })._routeTable = [];
+    (api as unknown as { _pluginRoutes: unknown[] })._pluginRoutes = [];
   });
 
   it('rejects permissioned routes when no token is present', async () => {
@@ -92,6 +96,121 @@ describe('ApiServer security boundaries', () => {
     expect(capture.body.error).toBe('Unauthorized');
   });
 
+  it('requires a Bearer token for direct loopback requests', async () => {
+    api.registerRoute({
+      method: 'GET',
+      path: '/api/v1/direct',
+      handle: (_match, _req, res) => {
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true }));
+        return true;
+      },
+    });
+
+    const capture: Capture = { status: 0, headers: {}, body: {} };
+    await api.handleApiRequest(mockReq('/api/v1/direct', undefined, '127.0.0.1'), mockRes(capture));
+
+    expect(capture.status).toBe(401);
+    expect(capture.body.error).toBe('Unauthorized');
+  });
+
+  it('rejects the trusted UI entry point without the ephemeral UI capability', async () => {
+    api.registerRoute({
+      method: 'GET',
+      path: '/api/v1/ui-only',
+      handle: (_match, _req, res) => {
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true }));
+        return true;
+      },
+    });
+
+    const capture: Capture = { status: 0, headers: {}, body: {} };
+    await api.handleTrustedUiRequest(mockReq('/api/v1/ui-only', undefined, '127.0.0.1'), mockRes(capture));
+
+    expect(capture.status).toBe(401);
+    expect(capture.body.error).toBe('Unauthorized');
+  });
+
+  it('allows the same-process UI entry point with the ephemeral UI capability', async () => {
+    api.registerRoute({
+      method: 'GET',
+      path: '/api/v1/ui-only',
+      handle: (_match, _req, res) => {
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true }));
+        return true;
+      },
+    });
+
+    const capture: Capture = { status: 0, headers: {}, body: {} };
+    await api.handleTrustedUiRequest(
+      mockReqWithHeaders('/api/v1/ui-only', { [TRUSTED_UI_HEADER]: getTrustedUiToken() }),
+      mockRes(capture),
+    );
+
+    expect(capture.status).toBe(200);
+    expect(capture.body.ok).toBe(true);
+  });
+
+  it('defaults declarative routes without a permission to admin', async () => {
+    api.registerRoute({
+      method: 'GET',
+      path: '/api/v1/default-admin',
+      handle: (_match, _req, res) => {
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true }));
+        return true;
+      },
+    });
+    const token = generateToken('read-only route test', [ApiPermission.SessionsRead]);
+    const capture: Capture = { status: 0, headers: {}, body: {} };
+
+    await api.handleApiRequest(
+      mockReqWithHeaders('/api/v1/default-admin', { authorization: `Bearer ${token.token}` }),
+      mockRes(capture),
+    );
+
+    expect(capture.status).toBe(403);
+    expect(capture.body.message).toBe('Missing permission: admin');
+  });
+
+  it('defaults plugin routes without a permission to admin', async () => {
+    api.registerPluginRoutes('default-admin-plugin', [{
+      method: 'GET',
+      path: '/api/v1/plugin-default-admin',
+      handler: 'handleRequest',
+    }]);
+    const token = generateToken('read-only plugin route test', [ApiPermission.SessionsRead]);
+    const capture: Capture = { status: 0, headers: {}, body: {} };
+
+    await api.handleApiRequest(
+      mockReqWithHeaders('/api/v1/plugin-default-admin', { authorization: `Bearer ${token.token}` }),
+      mockRes(capture),
+    );
+
+    expect(capture.status).toBe(403);
+    expect(capture.body.message).toBe('Missing permission: admin');
+  });
+
+  it('keeps the health route public when it has no explicit permission', async () => {
+    api.registerRoute({
+      method: 'GET',
+      path: '/api/v1/health',
+      handle: (_match, _req, res) => {
+        res.writeHead(200);
+        res.end(JSON.stringify({ status: 'ok' }));
+        return true;
+      },
+    });
+    const capture: Capture = { status: 0, headers: {}, body: {} };
+
+    await api.handleApiRequest(mockReq('/api/v1/health'), mockRes(capture));
+
+    expect(capture.status).toBe(200);
+    expect(capture.body.status).toBe('ok');
+  });
+
   it('passes query parameters into declarative route matches', async () => {
     let seen: string | null = null;
     api.registerRoute({
@@ -105,7 +224,10 @@ describe('ApiServer security boundaries', () => {
     });
 
     const capture: Capture = { status: 0, headers: {}, body: {} };
-    await api.handleApiRequest(mockReq('/api/v1/items?groupId=alpha', undefined, '127.0.0.1'), mockRes(capture));
+    await api.handleTrustedUiRequest(
+      mockReqWithHeaders('/api/v1/items?groupId=alpha', { [TRUSTED_UI_HEADER]: getTrustedUiToken() }),
+      mockRes(capture),
+    );
 
     expect(seen).toBe('alpha');
   });

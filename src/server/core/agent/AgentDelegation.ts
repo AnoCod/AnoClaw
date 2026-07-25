@@ -26,7 +26,10 @@ import { TypedEventBus } from '../events/index.js';
 import { WsServer } from '../../infra/network/WsServer.js';
 import { TokenCounter } from '../context/index.js';
 import type { SessionTurnRecorder } from '../../infra/SessionTurnRecorder.js';
-import { CoordinationService } from '../coordination/CoordinationService.js';
+import {
+  CANCELLATION_REQUESTED_BLOCKER,
+  CoordinationService,
+} from '../coordination/CoordinationService.js';
 import { SettingsManager } from '../../infra/storage/SettingsManager.js';
 import { PromptAssembler } from '../prompt/PromptAssembler.js';
 import {
@@ -401,6 +404,12 @@ export async function spawnSubAgent(
           if (current?.status !== 'running') return;
           void service.renewTaskLeases(current.rootSessionId, current.id, leaseTtlMs, tempId)
             .catch(() => {});
+          if (current.blocker === CANCELLATION_REQUESTED_BLOCKER && current.sessionId) {
+            InterruptController.getInstance().requestInterruptWhenAvailable(
+              current.sessionId,
+              InterruptReason.ParentStop,
+            );
+          }
           void service.updateTask(current.rootSessionId, current.id, {
             heartbeatAt: new Date().toISOString(),
           }, tempId).catch(() => {});
@@ -529,10 +538,17 @@ export async function spawnSubAgent(
     if (coordinationTask) {
       const latest = CoordinationService.getInstance().getTask(coordinationTask.rootSessionId, coordinationTask.id);
       if (latest?.status === 'running') {
+        const cancellationRequested = latest.blocker === CANCELLATION_REQUESTED_BLOCKER;
         coordinationTask = await CoordinationService.getInstance().updateTask(
           latest.rootSessionId,
           latest.id,
-          {
+          cancellationRequested ? {
+            status: 'cancelled',
+            blocker: undefined,
+            resultSummary: fullContent.trim().slice(0, 2_000) || undefined,
+            outputRef: `session:${subSessionId}`,
+            tokenUsage,
+          } : {
             status: 'completed',
             progress: 100,
             resultSummary: fullContent.trim().slice(0, 2_000) || 'SubAgent completed without text output.',
@@ -579,10 +595,18 @@ export async function spawnSubAgent(
     if (coordinationTask) {
       const latest = CoordinationService.getInstance().getTask(coordinationTask.rootSessionId, coordinationTask.id);
       if (latest?.status === 'running') {
+        const cancellationRequested = latest.blocker === CANCELLATION_REQUESTED_BLOCKER;
         await CoordinationService.getInstance().updateTask(
           latest.rootSessionId,
           latest.id,
-          {
+          cancellationRequested ? {
+            status: 'cancelled',
+            blocker: undefined,
+            error: latest.error || errorMessage.slice(0, 2_000),
+            resultSummary: fullContent.trim().slice(0, 2_000) || undefined,
+            outputRef: `session:${subSessionId}`,
+            tokenUsage,
+          } : {
             status: 'failed',
             error: errorMessage.slice(0, 2_000),
             resultSummary: fullContent.trim().slice(0, 2_000) || undefined,

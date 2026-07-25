@@ -12,6 +12,8 @@ import { init as initSetup, needsSetup, runSetupWizard } from './SetupWizard.js'
 import { startServer, shutdown } from '../server/main.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { DEFAULT_PORT } from '../shared/constants.js';
+import { getTrustedUiToken, TRUSTED_UI_HEADER } from '../server/gateway/TrustedUiAuth.js';
 
 function normalizeOpenPathInput(filePath: string): string {
   let normalized = filePath.trim().replace(/^[`'"]+|[`'"]+$/g, '');
@@ -33,7 +35,7 @@ function normalizeOpenPathInput(filePath: string): string {
 }
 
 export async function createApp(electron: typeof import('electron')) {
-  const { app, ipcMain, BrowserWindow: BW, WebContentsView, dialog, Tray, Menu, nativeImage, shell, Notification } = electron;
+  const { app, ipcMain, BrowserWindow: BW, WebContentsView, dialog, Tray, Menu, nativeImage, shell, Notification, session } = electron;
 
   // Init singletons with Electron deps
   WindowManager.init(BW);
@@ -308,6 +310,19 @@ export async function createApp(electron: typeof import('electron')) {
   // ── Lifecycle ──
   app.whenReady().then(async () => {
     try {
+      const trustedUiToken = getTrustedUiToken();
+      session.defaultSession.webRequest.onBeforeSendHeaders(
+        {
+          urls: [
+            `http://localhost:${DEFAULT_PORT}/api/*`,
+            `http://127.0.0.1:${DEFAULT_PORT}/api/*`,
+          ],
+        },
+        (details, callback) => {
+          details.requestHeaders[TRUSTED_UI_HEADER] = trustedUiToken;
+          callback({ requestHeaders: details.requestHeaders });
+        },
+      );
       await startServer();
 
       // Check if first-run setup is needed

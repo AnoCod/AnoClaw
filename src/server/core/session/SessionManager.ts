@@ -272,6 +272,16 @@ export class SessionManager extends EventEmitter {
     }
   }
 
+  /**
+   * Serialize topology and inherited-workspace mutations across one session
+   * tree. The callback must not recursively acquire the same tree lock.
+   */
+  async withSessionTreeLock<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+    const session = this.sessions.get(sessionId);
+    const treeLockId = session ? this.getRootSession(session.id).id : sessionId;
+    return this._withLock(treeLockId, fn);
+  }
+
   /** Commit Goal metadata as one recoverable in-memory + on-disk transaction. */
   private async _commitGoal(root: Session, goal: SessionGoal): Promise<void> {
     const previous = root.metadata.goal;
@@ -412,9 +422,13 @@ export class SessionManager extends EventEmitter {
       metadata?: Record<string, unknown>;
     },
   ): Promise<Session> {
+    return this.withSessionTreeLock(parentSessionId, async () => {
     const parent = this.sessions.get(parentSessionId);
     if (!parent) {
       throw new Error(`Parent session '${parentSessionId}' not found`);
+    }
+    if (parent.isArchived()) {
+      throw new Error(`Cannot create sub-session under archived parent '${parentSessionId}'`);
     }
 
     // Generate sub-session ID
@@ -428,7 +442,7 @@ export class SessionManager extends EventEmitter {
     if (existing && !existing.isArchived()) {
       // Sync workspace in case parent was rebound after sub-session creation
       if (existing.workspace !== parent.workspace) {
-        await this.setWorkspace(sessionId, parent.workspace);
+        await this._setWorkspaceUnlocked(sessionId, parent.workspace);
         this.log.debug('Sub-session workspace synced from parent', { sid: sessionId, workspace: parent.workspace });
       }
       return existing;
@@ -517,6 +531,7 @@ export class SessionManager extends EventEmitter {
     this.emit('sessionCreated', session);
     TypedEventBus.emit('session:created', { sessionId, agentId });
     return session;
+    });
   }
 
   /** Persist the runtime lifecycle state used by task/session projections. */
@@ -1372,7 +1387,14 @@ export class SessionManager extends EventEmitter {
     workspace: string,
     options: { cascade?: boolean } = {},
   ): Promise<void> {
-    return this._withLock(sessionId, async () => {
+    return this.withSessionTreeLock(sessionId, () => this._setWorkspaceUnlocked(sessionId, workspace, options));
+  }
+
+  private async _setWorkspaceUnlocked(
+    sessionId: string,
+    workspace: string,
+    options: { cascade?: boolean } = {},
+  ): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw new Error(`Session '${sessionId}' not found`);
@@ -1414,7 +1436,6 @@ export class SessionManager extends EventEmitter {
         TypedEventBus.emit('session:workspace_changed', { sessionId: child.id, workspace });
       }
     }
-    });
   }
 
   // -----------------------------------------------------------------------

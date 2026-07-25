@@ -65,7 +65,19 @@ function safeAttr(name: string, value: string): string {
     const clean = value.replace(/expression\s*\(/gi, '').replace(/-moz-binding/gi, '');
     return ` style="${esc(clean)}"`;
   }
-  if ((lower === 'src' || lower === 'href') && /^\s*javascript:/i.test(value)) return '';
+  if (lower === 'src' || lower === 'href') {
+    // URL parsers ignore embedded ASCII control characters in schemes, so
+    // `java\nscript:` must be checked in its compact form as well.
+    const compact = value.replace(/[\u0000-\u0020\u007f]/g, '');
+    const scheme = compact.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase();
+    if (scheme) {
+      const safeNetworkScheme = scheme === 'http' || scheme === 'https';
+      const safeHrefScheme = lower === 'href' && scheme === 'mailto';
+      const safeImageData = lower === 'src'
+        && /^data:image\/(?:png|jpe?g|gif|webp|bmp|avif);base64,/i.test(compact);
+      if (!safeNetworkScheme && !safeHrefScheme && !safeImageData) return '';
+    }
+  }
   // Allow class, id, title, alt, src, href, target, rel, type, lang, dir, etc.
   if (/^(class|id|title|alt|src|href|target|rel|type|lang|dir|width|height|loading|open|start|reversed|colspan|rowspan|scope|align)$/i.test(lower)) {
     return ` ${lower}="${esc(value)}"`;

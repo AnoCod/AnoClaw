@@ -13,3 +13,4 @@ export * from './talent-pool.js';
 export * from './ws-protocol.js';
 export * from './capability.js';
 export * from './artifact.js';
+export * from './coordination.js';

@@ -1,5 +1,6 @@
 import type { SystemPromptSection, PromptContext } from '../PromptSection.js';
 import { BackgroundTaskManager } from '../../agent/supervision/BackgroundTaskManager.js';
+import { CoordinationService } from '../../coordination/CoordinationService.js';
 import { SessionManager } from '../../session/index.js';
 
 export const sectionMeta = {
@@ -15,6 +16,15 @@ export function createActiveTaskSection(): SystemPromptSection {
     compute: (ctx: PromptContext) => {
       const sm = SessionManager.getInstance();
       const bgm = BackgroundTaskManager.getInstance();
+      const coordination = CoordinationService.getInstance();
+      const rootSessionId = (() => {
+        try { return sm.getRootSession(ctx.sessionId).id; } catch { return ctx.sessionId; }
+      })();
+      const coordinated = coordination.isInitialized()
+        ? coordination.listTasks(rootSessionId).filter((task) =>
+          task.creatorAgentId === ctx.agentId
+          && !['completed', 'failed', 'cancelled'].includes(task.status))
+        : [];
       const myTasks = bgm.getTasksForParent(ctx.sessionId);
       const subs = sm.subsessionsOf(ctx.sessionId);
 
@@ -25,15 +35,18 @@ export function createActiveTaskSection(): SystemPromptSection {
       }
 
       const running = myTasks.filter(t => t.status === 'running');
-      if (running.length === 0) return '';
+      if (running.length === 0 && coordinated.length === 0) return '';
 
       const lines: string[] = [
-        '# Active Background Tasks',
+        '# Active Coordination Tasks and Process Jobs',
         '',
-        `Running tasks: ${running.length}. You will receive an automatic notification when each task completes or fails.`,
+        `Durable coordination tasks: ${coordinated.length}; running process jobs: ${running.length}.`,
         '',
       ];
 
+      for (const task of coordinated) {
+        lines.push(`- ${task.id} [${task.status}] ${task.subject} | assignee: ${task.assigneeAgentId || 'unassigned'} | progress: ${task.progress ?? 0}%`);
+      }
       for (const task of running) {
         const elapsed = Math.round((Date.now() - task.startedAt) / 1000);
         const elapsedStr = elapsed > 60 ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s` : `${elapsed}s`;
@@ -47,8 +60,9 @@ export function createActiveTaskSection(): SystemPromptSection {
         'Active task rules:',
         '- Do not duplicate equivalent running work.',
         '- Use AgentMessage to amend or clarify an active child task.',
-        '- Use TaskAssign only for a separate new task with distinct acceptance criteria.',
+        '- Use TaskCreate for separate work, then TaskAssign to select a worker.',
         '- Use TaskList or TaskOutput when coordinating many tasks or when progress appears stuck.',
+        '- JobList/JobOutput/JobStop manage only Bash and RunProgram background processes.',
       );
 
       return lines.join('\n');

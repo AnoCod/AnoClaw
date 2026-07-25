@@ -58,6 +58,20 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
     root: 'company-workspace',
   },
 
+  coordination: {
+    autoSwarm: {
+      enabled: true,
+      minParallelTasks: 2,
+    },
+    maxConcurrentTasksPerRoot: 4,
+    maxTeamMembers: 8,
+    maxTaskRuntimeMs: 600000,
+    maxAutomaticRetries: 2,
+    autoDisbandGraceMs: 30000,
+    messageBatchSize: 20,
+    workspaceLeaseTtlMs: 30000,
+  },
+
   // Features
   features: {
     enableMCP: true,

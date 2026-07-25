@@ -44,7 +44,7 @@ export function createSessionGuidanceSection(): SystemPromptSection {
 
       lines.push(
         '',
-        'Coordination tools: TaskAssign starts durable child work; AgentMessage updates active child work; TaskList and TaskOutput inspect delegated task status; TaskStop cancels running tasks.',
+        'Coordination tools: TaskCreate defines durable work; TaskAssign or TaskClaim selects a worker; AgentMessage updates active work; TaskList, TaskGet, and TaskOutput inspect state and results; TaskStop cancels work.',
       );
 
       return lines.join('\n');

@@ -13,10 +13,10 @@ import { createToolUsageSection, sectionMeta as toolUseMeta } from './ToolUsageS
 import { createOutputEfficiencySection, sectionMeta as outputMeta } from './OutputEfficiencySection.js';
 import { createOrgContextSection, sectionMeta as orgMeta } from './OrgContextSection.js';
 import { createActiveTaskSection, sectionMeta as activeTaskMeta } from './ActiveTaskSection.js';
+import { createCoordinationSection, sectionMeta as coordinationMeta } from './CoordinationSection.js';
 import { createUserAwarenessSection, sectionMeta as userAwareMeta } from './UserAwarenessSection.js';
 import { createEditorContextSection, sectionMeta as editorCtxMeta } from './EditorContextSection.js';
 import { createSessionGuidanceSection, sectionMeta as guidanceMeta } from './SessionGuidanceSection.js';
-import { createDelegationContextSection, sectionMeta as delegationMeta } from './DelegationContextSection.js';
 import { createMemorySection, sectionMeta as memoryMeta } from './MemorySection.js';
 import { createEnvironmentSection, sectionMeta as envMeta } from './EnvironmentSection.js';
 import { createLanguageSection, sectionMeta as langMeta } from './LanguageSection.js';
@@ -41,11 +41,11 @@ const SECTIONS: SectionEntry[] = [
   { meta: toolUseMeta, factory: createToolUsageSection },
   { meta: outputMeta, factory: createOutputEfficiencySection },
   { meta: orgMeta, factory: createOrgContextSection },
+  { meta: coordinationMeta, factory: createCoordinationSection },
   { meta: activeTaskMeta, factory: createActiveTaskSection },
   { meta: userAwareMeta, factory: createUserAwarenessSection },
   { meta: editorCtxMeta, factory: createEditorContextSection },
   { meta: guidanceMeta, factory: createSessionGuidanceSection },
-  { meta: delegationMeta, factory: createDelegationContextSection },
   { meta: memoryMeta, factory: createMemorySection },
   { meta: envMeta, factory: createEnvironmentSection },
   { meta: langMeta, factory: createLanguageSection },

@@ -8,6 +8,12 @@
  */
 
 import type { ArtifactPreview, ArtifactRecord } from './artifact.js';
+import type {
+  CoordinationMessage,
+  CoordinationTask,
+  TeamRecord,
+  WorkspaceLease,
+} from './coordination.js';
 
 /** Events emitted by individual Agent instances. */
 export const AgentEvents = {
@@ -150,6 +156,19 @@ export interface CoreEventMap {
   'task:failed': { taskId: string; parentSessionId: string; parentAgentId: string; type: string; summary: string; durationMs: number; error: string };
   'task:registry_update': { task: { id: string; type: string; parentSessionId: string; parentAgentId: string; summary: string; status: string; startedAt: number; turnCount?: number; currentTool?: string; durationMs?: number; error?: string; pid?: number; command?: string } };
 
+  // durable multi-agent coordination
+  'coordination:team_changed': { rootSessionId: string; revision: number; team: TeamRecord };
+  'coordination:task_changed': { rootSessionId: string; revision: number; task: CoordinationTask };
+  'coordination:message': { rootSessionId: string; revision: number; message: CoordinationMessage };
+  'coordination:workspace_conflict': {
+    rootSessionId: string;
+    revision: number;
+    taskId: string;
+    requestedScopes: string[];
+    holder: WorkspaceLease;
+  };
+  'coordination:snapshot_required': { rootSessionId: string; revision: number; reason: string };
+
   // subscription
   'subscription:delivered': { sessionId: string; agentId: string; topic: string; subscriberCount: number }; // @internal — emitted by EventSubscriptionManager.publish() for observability
 
@@ -232,6 +251,12 @@ export enum WsMessageType {
   AgentConfigUpdated = 'agent_config_updated',
   PluginLoadFailed = 'plugin_load_failed',
   TaskListUpdate = 'task_list_update',
+  TeamChanged = 'team_changed',
+  CoordinationTaskChanged = 'task_changed',
+  CoordinationTaskProgress = 'task_progress',
+  CoordinationMessage = 'coordination_message',
+  WorkspaceConflict = 'workspace_conflict',
+  CoordinationSnapshotRequired = 'coordination_snapshot_required',
   QualityScoreAck = 'quality_score_ack',
   QualityScoreError = 'quality_score_error',
   ArtifactCreated = 'artifact_created',

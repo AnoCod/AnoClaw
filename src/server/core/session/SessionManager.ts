@@ -33,7 +33,6 @@ import {
 import { messageToJsonlEvents, jsonlEventsToMessages } from '../../../shared/serialization/jsonl-converters.js';
 import { createLogger } from '../logger.js';
 import { TypedEventBus } from '../events/TypedEventBus.js';
-import { SharedContextStore } from '../agent/SharedContextStore.js';
 import type { ILogger } from '../interfaces/ILogger.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -408,6 +407,10 @@ export class SessionManager extends EventEmitter {
     parentSessionId: string,
     agentId: string,
     title?: string,
+    options?: {
+      scopeId?: string;
+      metadata?: Record<string, unknown>;
+    },
   ): Promise<Session> {
     const parent = this.sessions.get(parentSessionId);
     if (!parent) {
@@ -415,7 +418,10 @@ export class SessionManager extends EventEmitter {
     }
 
     // Generate sub-session ID
-    const sessionId = `${parentSessionId}-${agentId}`;
+    const scopeSegment = options?.scopeId
+      ? `-${options.scopeId.replace(/[^a-zA-Z0-9_.-]/g, '-').slice(0, 120)}`
+      : '';
+    const sessionId = `${parentSessionId}${scopeSegment}-${agentId}`;
 
     // Check for duplicates — only one active sub-session per agent per parent
     const existing = this.sessions.get(sessionId);
@@ -441,7 +447,7 @@ export class SessionManager extends EventEmitter {
       createdAt: now,
       lastActiveAt: now,
       subSessionIds: [],
-      metadata: {},
+      metadata: { ...(options?.metadata || {}) },
     };
 
     const session = new Session(node);
@@ -511,6 +517,30 @@ export class SessionManager extends EventEmitter {
     this.emit('sessionCreated', session);
     TypedEventBus.emit('session:created', { sessionId, agentId });
     return session;
+  }
+
+  /** Persist the runtime lifecycle state used by task/session projections. */
+  async setRuntimeStatus(sessionId: string, status: 'Active' | 'Idle'): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.isArchived()) return;
+    if (status === 'Active') session.setActive();
+    else session.setIdle();
+    await this._syncMeta(sessionId, true);
+  }
+
+  /**
+   * Runtime loops do not survive a process restart. Any persisted Active state
+   * is therefore stale until a new AgentLoop explicitly marks the session active.
+   */
+  async reconcileRuntimeStatuses(): Promise<number> {
+    const stale = [...this.sessions.values()].filter(
+      (session) => !session.isArchived() && session.status === 'Active',
+    );
+    for (const session of stale) {
+      session.setIdle();
+      await this._syncMeta(session.id, true);
+    }
+    return stale.length;
   }
 
   // -----------------------------------------------------------------------
@@ -1222,7 +1252,6 @@ export class SessionManager extends EventEmitter {
     this.sessions.get(sessionId)?.clearMessageCache();
     this._messageCounts.delete(sessionId);
     PromptAssembler.getInstance().invalidateCache(CacheScope.Session, undefined, sessionId);
-    SharedContextStore.getInstance().clearScope(sessionId);
     if (remove) this.sessions.delete(sessionId);
   }
 

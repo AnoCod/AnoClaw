@@ -405,7 +405,10 @@ export type StreamEventType =
   | 'quality_score_ack' | 'quality_score_error'
   | 'task_notification'
   | 'task_resolution'
-  | 'task_list_update';
+  | 'task_list_update'
+  | 'team_changed' | 'task_changed' | 'task_progress'
+  | 'coordination_message' | 'workspace_conflict'
+  | 'coordination_snapshot_required';
 
 // ── Talent Pool types (frontend copy) ──
 

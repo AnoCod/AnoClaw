@@ -11,7 +11,8 @@ import { WsMessageRouter } from './infra/network/WsMessageRouter.js';
 import { registerAllWsHandlers } from './infra/network/handlers/registerAllHandlers.js';
 import { AgentRegistry } from './core/agent/AgentRegistry.js';
 import { AgentRuntime } from './core/agent/AgentRuntime.js';
-import { loadAgentConfig } from './core/agent/AgentConfig.js';
+import { loadAgentConfig, saveAgentConfig } from './core/agent/AgentConfig.js';
+import { migrateCoordinationToolAllowlist } from './core/agent/DefaultAgentTemplate.js';
 import { SessionManager } from './core/session/SessionManager.js';
 import { recoverRestartCheckpoint } from './core/session/RestartCheckpointRecovery.js';
 import { ToolRegistry } from './core/tools/ToolRegistry.js';
@@ -453,9 +454,14 @@ async function initialize(): Promise<void> {
   for (const file of files) {
     const agentId = file.replace('.json', '');
     try {
-      const config = await loadAgentConfig(agentId);
+      const loaded = await loadAgentConfig(agentId);
+      const migration = migrateCoordinationToolAllowlist(loaded);
+      if (migration.changed) {
+        await saveAgentConfig(migration.config);
+        logManager.logger('anochat.core').info('Agent coordination tools migrated', { aid: agentId });
+      }
       const { Agent } = await import('./core/agent/Agent.js');
-      const agent = new Agent(config);
+      const agent = new Agent(migration.config);
       registry.registerAgent(agent);
       logManager.logger('anochat.core').info('Agent loaded', { aid: agent.id, name: agent.name });
     } catch (err) {
@@ -472,7 +478,6 @@ async function initialize(): Promise<void> {
     } else {
       logManager.logger('anochat.core').info('First run - creating default agent organization');
       const { Agent } = await import('./core/agent/Agent.js');
-      const { saveAgentConfig } = await import('./core/agent/AgentConfig.js');
       const { buildDefaultAgentConfigs } = await import('./core/agent/DefaultAgentTemplate.js');
       const defaultId = DEFAULT_MAIN_AGENT_ID;
       const existingCfg = await loadAgentConfig(defaultId).catch(() => null);
@@ -514,9 +519,26 @@ async function initialize(): Promise<void> {
   const sessionManager = SessionManager.getInstance();
   try {
     await sessionManager.initialize(ensureWritableDir('data', 'sessions'));
-    logManager.logger('anochat.core').info('SessionManager initialized');
+    const reconciledStatuses = await sessionManager.reconcileRuntimeStatuses();
+    logManager.logger('anochat.core').info('SessionManager initialized', { reconciledStatuses });
   } catch (err) {
     logManager.logger('anochat.core').error('SessionManager initialization failed', { error: (err as Error).message });
+    throw err;
+  }
+
+  // 4.2 Initialize the durable multi-agent coordination event log and scheduler.
+  try {
+    const { CoordinationService } = await import('./core/coordination/CoordinationService.js');
+    const { CoordinationScheduler } = await import('./core/coordination/CoordinationScheduler.js');
+    await CoordinationService.getInstance().initialize(ensureWritableDir('data', 'coordination'));
+    CoordinationScheduler.getInstance().start(
+      (task) => AgentRuntime.getInstance().runCoordinationTask(task),
+    );
+    logManager.logger('anochat.core').info('CoordinationService and scheduler initialized');
+  } catch (err) {
+    logManager.logger('anochat.core').error('Coordination initialization failed', {
+      error: (err as Error).message,
+    });
     throw err;
   }
 
@@ -716,6 +738,8 @@ export async function shutdown(): Promise<void> {
     await SessionStore.getInstance().drain();
     const { SessionLeaseManager } = await import('./core/session/SessionLeaseManager.js');
     SessionLeaseManager.getInstance().stop();
+    const { CoordinationScheduler } = await import('./core/coordination/CoordinationScheduler.js');
+    CoordinationScheduler.getInstance().stop();
     SettingsManager.getInstance().stopWatching();
     const { ExtensionManager } = await import('./core/extensible/ExtensionManager.js');
     await ExtensionManager.getInstance().stopAll();

@@ -420,6 +420,69 @@ export function installWsForwarding(): void {
     }
   });
 
+  // ═══════════════════════════════════════════════════════════════
+  // Durable Agent Team coordination
+  // ═══════════════════════════════════════════════════════════════
+
+  TypedEventBus.on('coordination:team_changed', (payload) => {
+    if (ws.isConnected(payload.rootSessionId)) {
+      ws.send(payload.rootSessionId, {
+        type: WsMessageType.TeamChanged,
+        rootSessionId: payload.rootSessionId,
+        revision: payload.revision,
+        team: payload.team,
+      });
+    }
+  });
+
+  TypedEventBus.on('coordination:task_changed', (payload) => {
+    if (ws.isConnected(payload.rootSessionId)) {
+      ws.send(payload.rootSessionId, {
+        type: payload.task.status === 'running'
+          ? WsMessageType.CoordinationTaskProgress
+          : WsMessageType.CoordinationTaskChanged,
+        rootSessionId: payload.rootSessionId,
+        revision: payload.revision,
+        task: payload.task,
+      });
+    }
+  });
+
+  TypedEventBus.on('coordination:message', (payload) => {
+    if (ws.isConnected(payload.rootSessionId)) {
+      ws.send(payload.rootSessionId, {
+        type: WsMessageType.CoordinationMessage,
+        rootSessionId: payload.rootSessionId,
+        revision: payload.revision,
+        coordinationMessage: payload.message,
+      });
+    }
+  });
+
+  TypedEventBus.on('coordination:workspace_conflict', (payload) => {
+    if (ws.isConnected(payload.rootSessionId)) {
+      ws.send(payload.rootSessionId, {
+        type: WsMessageType.WorkspaceConflict,
+        rootSessionId: payload.rootSessionId,
+        revision: payload.revision,
+        taskId: payload.taskId,
+        requestedScopes: payload.requestedScopes,
+        lease: payload.holder,
+      });
+    }
+  });
+
+  TypedEventBus.on('coordination:snapshot_required', (payload) => {
+    if (ws.isConnected(payload.rootSessionId)) {
+      ws.send(payload.rootSessionId, {
+        type: WsMessageType.CoordinationSnapshotRequired,
+        rootSessionId: payload.rootSessionId,
+        revision: payload.revision,
+        reason: payload.reason,
+      });
+    }
+  });
+
   TypedEventBus.on('artifact:created', (payload) => {
     const rootId = resolveRootSessionId(payload.sessionId);
     if (ws.isConnected(rootId)) {

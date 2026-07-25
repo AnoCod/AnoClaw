@@ -16,6 +16,7 @@ export class SessionsPageOverfly {
   private _workspacePath: string = '';
   private _clickHandler: ((e: MouseEvent) => void) | null = null;
   private _artifactPanel: ArtifactPanel | null = null;
+  private _tasksPanel: BackgroundTasksTab | null = null;
 
   get isOpen(): boolean { return this._panel !== null; }
 
@@ -82,6 +83,7 @@ export class SessionsPageOverfly {
   close(): void {
     console.log('[Overfly] close');
     if (this._artifactPanel) { this._artifactPanel.dispose(); this._artifactPanel = null; }
+    if (this._tasksPanel) { this._tasksPanel.destroy(); this._tasksPanel = null; }
     if (this._panel) { this._panel.remove(); this._panel = null; }
     this._currentPanel = null;
     this._activeSessionId = null;
@@ -183,13 +185,13 @@ export class SessionsPageOverfly {
   private _renderTasksPanel(overfly: HTMLElement, activeSessionId: string | null): void {
     const title = document.createElement('div');
     title.className = 'cinema-overfly-title';
-    title.textContent = 'Background Tasks';
+    title.textContent = 'Team Cockpit';
     overfly.appendChild(title);
 
     const container = document.createElement('div');
     overfly.appendChild(container);
 
-    new BackgroundTasksTab(container, activeSessionId || '');
+    this._tasksPanel = new BackgroundTasksTab(container, activeSessionId || '');
   }
 }
 

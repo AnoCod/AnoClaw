@@ -5,6 +5,7 @@ import {
   buildDefaultAgentConfigs,
   DEFAULT_ENGINEERING_MANAGER_ID,
   DEFAULT_IMPLEMENTATION_MEMBER_ID,
+  migrateCoordinationToolAllowlist,
 } from '../DefaultAgentTemplate.js';
 
 describe('buildDefaultAgentConfigs', () => {
@@ -45,7 +46,12 @@ describe('buildDefaultAgentConfigs', () => {
 
     expect(ceo.allowedTools).toEqual(expect.arrayContaining([
       'RunProgram',
+      'TeamCreate',
+      'TaskCreate',
       'TaskAssign',
+      'TaskClaim',
+      'TaskUpdate',
+      'JobList',
       'ListEmployees',
       'memory_save',
       'memory_search',
@@ -58,7 +64,10 @@ describe('buildDefaultAgentConfigs', () => {
     expect(manager.allowedTools).toContain('RunProgram');
     expect(manager.allowedTools).toContain('HireEmployee');
     expect(member.allowedTools).toContain('SubAgentSpawn');
+    expect(member.allowedTools).toContain('TeamCreate');
+    expect(member.allowedTools).toContain('TaskClaim');
     expect(member.allowedTools).toContain('RunProgram');
+    expect(member.allowedTools).not.toContain('SubAgentDelete');
     expect(member.allowedTools).not.toContain('HireEmployee');
   });
 
@@ -81,5 +90,34 @@ describe('buildDefaultAgentConfigs', () => {
       'test-driven-development',
       'code-review',
     ]));
+  });
+
+  it('migrates legacy delegation allowlists without widening unrelated restricted agents', () => {
+    const [config] = buildDefaultAgentConfigs({
+      provider: 'openai-compatible',
+      apiUrl: 'https://api.example.test/v1',
+      apiKey: 'sk-test',
+      model: 'test-model',
+    });
+    const legacy = {
+      ...config,
+      allowedTools: ['Read', 'TaskAssign', 'SubAgentDelete'],
+    };
+    const migrated = migrateCoordinationToolAllowlist(legacy);
+    expect(migrated.changed).toBe(true);
+    expect(migrated.config.allowedTools).toEqual(expect.arrayContaining([
+      'Read',
+      'TeamCreate',
+      'TaskCreate',
+      'TaskClaim',
+      'JobList',
+    ]));
+    expect(migrated.config.allowedTools).not.toContain('SubAgentDelete');
+
+    const restricted = { ...config, allowedTools: ['Read'] };
+    expect(migrateCoordinationToolAllowlist(restricted)).toEqual({
+      config: restricted,
+      changed: false,
+    });
   });
 });

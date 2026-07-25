@@ -3,8 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { BashTool } from '../builtin/BashTool.js';
-import { TaskOutputTool } from '../builtin/TaskOutputTool.js';
-import { TaskStopTool } from '../builtin/TaskStopTool.js';
+import { JobOutputTool } from '../builtin/JobOutputTool.js';
+import { JobStopTool } from '../builtin/JobStopTool.js';
 import { BackgroundTaskManager, type BackgroundTaskResultSnapshot } from '../../agent/supervision/BackgroundTaskManager.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
 
@@ -257,7 +257,7 @@ describe('BashTool', () => {
     expect(recent.error).toContain('bad stderr');
   });
 
-  it('preserves partial background output when TaskStop kills a bash task', async () => {
+  it('preserves partial background output when JobStop kills a bash job', async () => {
     const workspace = await makeWorkspace();
 
     const result = await new BashTool().execute(
@@ -274,22 +274,22 @@ describe('BashTool', () => {
     const taskId = (result.structured as { taskId: string }).taskId;
     await new Promise(resolve => setTimeout(resolve, 150));
 
-    const stopResult = await new TaskStopTool().execute({ taskId }, ctx(workspace));
+    const stopResult = await new JobStopTool().execute({ jobId: taskId }, ctx(workspace));
 
     expect(stopResult.success).toBe(true);
     expect(stopResult.structured).toMatchObject({
-      taskId,
-      status: 'killed',
-      killedProcess: true,
-      finalized: true,
+      jobId: taskId,
+      type: 'bash',
+      processKilled: true,
     });
 
-    const outputResult = await new TaskOutputTool().execute({ taskId }, ctx(workspace));
-    expect(outputResult.success).toBe(false);
-    expect(outputResult.errorMessage).toContain('Background process was stopped by user request');
-    expect(outputResult.errorMessage).toContain('partial stdout before stop');
-    expect(outputResult.errorMessage).toContain('[stderr]');
-    expect(outputResult.errorMessage).toContain('partial stderr before stop');
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const outputResult = await new JobOutputTool().execute({ jobId: taskId }, ctx(workspace));
+    expect(outputResult.success).toBe(true);
+    expect(outputResult.content).toContain('Background process was stopped by user request');
+    expect(outputResult.content).toContain('partial stdout before stop');
+    expect(outputResult.content).toContain('[stderr]');
+    expect(outputResult.content).toContain('partial stderr before stop');
   });
 
   it('blocks expanded destructive command patterns without confirmation', async () => {

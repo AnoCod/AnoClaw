@@ -60,6 +60,22 @@ import {
   ListAgentsRoute, GetAgentRoute, CreateAgentRoute,
   UpdateAgentRoute, DeleteAgentRoute, AgentStatusRoute, TestAgentConnectionRoute,
 } from './AgentRoutes.js';
+import {
+  AssignCoordinationTaskRoute,
+  ClaimCoordinationTaskRoute,
+  CoordinationEventsRoute,
+  CreateCoordinationTaskRoute,
+  CreateTeamRoute,
+  DeleteTeamRoute,
+  GetCoordinationTaskRoute,
+  GetTeamRoute,
+  ListCoordinationTasksRoute,
+  ListTeamsRoute,
+  PatchCoordinationTaskRoute,
+  PatchTeamRoute,
+  RetryCoordinationTaskRoute,
+  StopCoordinationTaskRoute,
+} from './CoordinationRoutes.js';
 
 export function registerAllRoutes(api: ApiServer): void {
   // System
@@ -134,6 +150,22 @@ export function registerAllRoutes(api: ApiServer): void {
   api.registerRoute(new HardDeleteSessionRoute());
   api.registerRoute(new SessionListFilteredRoute());
   api.registerRoute(new BackgroundTasksRoute());
+
+  // Root-scoped durable Agent Team coordination
+  api.registerRoute(new CoordinationEventsRoute());
+  api.registerRoute(new ListTeamsRoute());
+  api.registerRoute(new CreateTeamRoute());
+  api.registerRoute(new ListCoordinationTasksRoute());
+  api.registerRoute(new CreateCoordinationTaskRoute());
+  api.registerRoute(new AssignCoordinationTaskRoute());
+  api.registerRoute(new ClaimCoordinationTaskRoute());
+  api.registerRoute(new RetryCoordinationTaskRoute());
+  api.registerRoute(new StopCoordinationTaskRoute());
+  api.registerRoute(new GetTeamRoute());
+  api.registerRoute(new PatchTeamRoute());
+  api.registerRoute(new DeleteTeamRoute());
+  api.registerRoute(new GetCoordinationTaskRoute());
+  api.registerRoute(new PatchCoordinationTaskRoute());
 
   // Memory
   api.registerRoute(new MemorySearchRoute());

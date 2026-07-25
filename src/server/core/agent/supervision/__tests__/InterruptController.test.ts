@@ -215,9 +215,11 @@ describe('InterruptController', () => {
       expect(controller.takePendingUserMessage('session-b')).toBe('Message B');
     });
 
-    it('overwrites previous pending message for same session', () => {
+    it('preserves FIFO pending messages for the same session', () => {
       controller.setPendingUserMessage('session-1', 'First');
       controller.setPendingUserMessage('session-1', 'Second');
+      expect(controller.pendingMessageCount('session-1')).toBe(2);
+      expect(controller.takePendingUserMessage('session-1')).toBe('First');
       expect(controller.takePendingUserMessage('session-1')).toBe('Second');
     });
   });

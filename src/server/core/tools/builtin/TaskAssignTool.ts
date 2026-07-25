@@ -1,181 +1,92 @@
-// TaskAssignTool - delegate a task to a subordinate agent
-// Creates a sub-session for the subordinate and runs their AgentLoop
-// with the task as a user message. Returns the sub-session ID.
-
 import { Tool, RiskLevel } from '../Tool.js';
-import type { ToolResult } from '../Tool.js';
-import type { ExecutionContext } from '../../../../shared/types/session.js';
-import { AgentRuntime } from '../../agent/AgentRuntime.js';
+import type { ExecutionContext, ToolResult } from '../Tool.js';
 import { AgentRegistry } from '../../agent/AgentRegistry.js';
-import { createLogger } from '../../logger.js';
-
-const MAX_TARGET_AGENT_ID_CHARS = 200;
-const MAX_TASK_CHARS = 20000;
-const TASK_PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
+import { CoordinationService } from '../../coordination/CoordinationService.js';
+import {
+  integerParam,
+  requireActiveAgent,
+  rootSessionIdFor,
+  stringParam,
+  toolFailure,
+} from '../../coordination/CoordinationToolHelpers.js';
+import { CoordinationError } from '../../coordination/CoordinationError.js';
 
 export class TaskAssignTool extends Tool {
-
-  static category = 'Task Delegation';
-  static toolDescription = 'Delegates a distinct tracked task to a subordinate agent and returns immediately.';
-  name(): string {
-    return 'TaskAssign';
-  }
-
-  description(): string {
-    return 'Assign a distinct tracked task to a subordinate agent. The child works in its persistent session and the system sends a task notification on completion or failure.';
-  }
-
+  static category = 'Task Coordination';
+  static toolDescription = 'Assigns an existing durable task to an eligible hierarchy or team member.';
+  name(): string { return 'TaskAssign'; }
+  description(): string { return 'Assign a TaskCreate result to a direct subordinate or active team member.'; }
   prompt(): string {
     return [
-      '## TaskAssign Usage',
-      'Use TaskAssign for a separate unit of durable work that needs ownership, tracking, and a completion notification.',
-      '',
-      'TaskAssign is not a chat message. It creates or queues formal work in the subordinate persistent session.',
-      '',
-      'Every task must include:',
-      '- Goal and reason the work matters.',
-      '- Scope: files, systems, data, or constraints to inspect or change.',
-      '- Acceptance criteria and required verification.',
-      '- Priority and expected report format.',
-      '',
-      'Use AgentMessage instead when you need to clarify, amend, interrupt, or review a task that is already running.',
-      'After assigning, do not duplicate the same work yourself unless the task fails or the user changes direction.',
+      'TaskAssign no longer creates a task. Call TaskCreate first, then assign its taskId.',
+      'Hierarchy tasks may target only direct subordinates. Team tasks may target any active member of that team.',
+      'The scheduler starts ready tasks automatically; completion arrives as a coordination event.',
     ].join('\n');
   }
-
-  minRole(): string { return 'Manager'; }
-
+  minRole(): string { return 'Member'; }
+  riskLevel(): RiskLevel { return RiskLevel.Low; }
+  isAsync(): boolean { return true; }
   parametersSchema(): Record<string, unknown> {
     return {
       type: 'object',
       properties: {
-        targetAgentId: {
-          type: 'string',
-          minLength: 1,
-          maxLength: MAX_TARGET_AGENT_ID_CHARS,
-          pattern: '\\S',
-          description: 'ID of the subordinate agent to delegate the task to',
-        },
-        task: {
-          type: 'string',
-          minLength: 1,
-          maxLength: MAX_TASK_CHARS,
-          pattern: '\\S',
-          description: 'The task description and instructions for the subordinate',
-        },
-        priority: {
-          type: 'string',
-          enum: ['low', 'normal', 'high', 'urgent'],
-          description: 'Task priority. Default: "normal".',
-        },
+        taskId: { type: 'string', minLength: 1, maxLength: 200 },
+        targetAgentId: { type: 'string', minLength: 1, maxLength: 200 },
+        expectedVersion: { type: 'integer', minimum: 1 },
       },
-      required: ['targetAgentId', 'task'],
+      required: ['taskId', 'targetAgentId'],
       additionalProperties: false,
     };
   }
-
-  riskLevel(): RiskLevel {
-    return RiskLevel.Medium;
-  }
-
-  isAsync(): boolean {
-    return true; // Non-blocking - delegateTask now returns immediately
-  }
-
-  defaultTimeoutMs(): number {
-    return 30000; // The dispatch itself is fast; delegateTask returns in ~100ms
-  }
-
-  async execute(
-    params: Record<string, unknown>,
-    ctx: ExecutionContext,
-  ): Promise<ToolResult> {
-    const targetResult = normalizeString(params.targetAgentId, 'targetAgentId', MAX_TARGET_AGENT_ID_CHARS);
-    if (targetResult.error) return this.makeError(targetResult.error);
-    const targetAgentId = targetResult.value!;
-
-    const taskResult = normalizeString(params.task, 'task', MAX_TASK_CHARS);
-    if (taskResult.error) return this.makeError(taskResult.error);
-    const task = taskResult.value!;
-
-    const priorityResult = normalizeEnum(params.priority, 'priority', TASK_PRIORITIES, 'normal');
-    if (priorityResult.error) return this.makeError(priorityResult.error);
-    const priority = priorityResult.value!;
-
-    const logger = createLogger('anochat.tools');
-    logger.debug('TaskAssign executed', { targetAgentId, taskPreview: task.slice(0, 60), sid: ctx.sessionId, aid: ctx.agentId });
-
-    // ── Validate subordinate relationship ──
-    // Task can only be delegated down the org tree.
-    const registry = AgentRegistry.getInstance();
-    const target = registry.findAgent(targetAgentId);
-    if (!target) {
-      return this.makeError(`Target agent '${targetAgentId}' not found in registry`);
-    }
-    if (target.parentAgentId !== ctx.agentId) {
-      logger.warn('TaskAssign validation failed - not a subordinate', { targetAgentId, callerAid: ctx.agentId });
-      return this.makeError(
-        `Cannot assign task to '${targetAgentId}': ` +
-        'tasks can only be assigned to direct subordinates (immediate children).',
+  async execute(params: Record<string, unknown>, ctx: ExecutionContext): Promise<ToolResult> {
+    try {
+      const rootSessionId = rootSessionIdFor(ctx);
+      const taskId = stringParam(params.taskId, 'taskId', 200)!;
+      const targetAgentId = stringParam(params.targetAgentId, 'targetAgentId', 200)!;
+      requireActiveAgent(targetAgentId);
+      const service = CoordinationService.getInstance();
+      const task = service.getTask(rootSessionId, taskId);
+      if (!task) throw new CoordinationError('not_found', `Task not found: ${taskId}`);
+      if (task.creatorAgentId !== ctx.agentId) {
+        const team = task.teamId ? service.getTeam(rootSessionId, task.teamId) : undefined;
+        if (team?.leaderAgentId !== ctx.agentId) {
+          throw new CoordinationError('forbidden', 'Only the task creator or team leader may assign it');
+        }
+      }
+      if (task.mode === 'hierarchy') {
+        const target = AgentRegistry.getInstance().findAgent(targetAgentId);
+        if (target?.parentAgentId !== ctx.agentId) {
+          throw new CoordinationError('forbidden', 'Hierarchy tasks can only be assigned to a direct subordinate');
+        }
+      } else if (task.mode === 'swarm') {
+        const team = task.teamId ? service.getTeam(rootSessionId, task.teamId) : undefined;
+        if (!team?.memberAgentIds.includes(targetAgentId)) {
+          throw new CoordinationError('validation', 'Swarm assignee must belong to the task team');
+        }
+      }
+      const assigned = await service.assignTask(
+        rootSessionId,
+        taskId,
+        targetAgentId,
+        ctx.agentId,
+        integerParam(params.expectedVersion, 'expectedVersion', { optional: true, min: 1 }),
       );
+      await service.queueMessage({
+        rootSessionId,
+        teamId: assigned.teamId,
+        taskId: assigned.id,
+        fromAgentId: ctx.agentId,
+        toAgentId: targetAgentId,
+        kind: 'task_assignment',
+        summary: assigned.subject,
+        content: assigned.description,
+        idempotencyKey: `assignment:${assigned.id}:${assigned.version}`,
+      });
+      return this.makeResult(`Task ${assigned.id} assigned to ${targetAgentId}; scheduler will start it when ready.`, {
+        structured: { task: assigned },
+      });
+    } catch (error) {
+      return toolFailure(this, error);
     }
-
-    const runtime = AgentRuntime.getInstance();
-
-    // Delegate task (non-blocking - returns immediately after dispatching)
-    const result = await runtime.delegateTask(targetAgentId, task, ctx.sessionId, ctx.agentId, priority);
-
-    if (!result.success) {
-      return result;
-    }
-
-    return this.makeResult(
-      `Task dispatched to '${targetAgentId}'.\n` +
-      `Priority: ${priority}\n` +
-      `${result.content}\n\n` +
-      'The system will notify you when the task completes.',
-      {
-        structured: {
-          ...(isRecord(result.structured) ? result.structured : {}),
-          targetAgentId,
-          parentSessionId: ctx.sessionId,
-          parentAgentId: ctx.agentId,
-          priority,
-          taskPreview: task.slice(0, 120),
-        },
-      },
-    );
   }
-}
-
-function normalizeString(
-  value: unknown,
-  field: string,
-  maxLength: number,
-): { value: string; error?: undefined } | { value?: undefined; error: string } {
-  if (typeof value !== 'string') return { error: `${field} must be a string` };
-  const trimmed = value.trim();
-  if (!trimmed) return { error: `${field} must not be empty` };
-  if (trimmed.length > maxLength) {
-    return { error: `${field} must be ${maxLength} characters or less` };
-  }
-  return { value: trimmed };
-}
-
-function normalizeEnum<T extends readonly string[]>(
-  value: unknown,
-  field: string,
-  allowed: T,
-  fallback: T[number],
-): { value: T[number]; error?: undefined } | { value?: undefined; error: string } {
-  if (value === undefined || value === null) return { value: fallback };
-  if (typeof value !== 'string') return { error: `${field} must be a string` };
-  const trimmed = value.trim();
-  if (!trimmed) return { value: fallback };
-  if (!allowed.includes(trimmed)) return { error: `${field} must be one of: ${allowed.join(', ')}` };
-  return { value: trimmed };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }

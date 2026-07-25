@@ -258,4 +258,12 @@ export interface ExecutionContext {
   signal?: AbortSignal;
   /** Execution mode constraint selected by the session permission policy. */
   mode?: ToolExecutionMode;
+  /** Durable coordination attribution for delegated/team task execution. */
+  coordination?: {
+    rootSessionId: string;
+    taskId: string;
+    teamId?: string;
+    readOnly: boolean;
+    writeScope: string[];
+  };
 }

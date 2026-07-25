@@ -89,6 +89,8 @@ graph TB
         TR["ToolRegistry<br/>(built-in tools + plugins)"]
         CC["ContextCompressor"]
         AReg["AgentRegistry<br/>(Org Tree)"]
+        COORD["CoordinationService<br/>(Teams + Tasks + Mailbox + Leases)"]
+        CS["CoordinationScheduler"]
         PHM["PluginHostManager<br/>(Worker + RPC)"]
         EXT["ExtensionPoints<br/>(8 hooks)"]
     end
@@ -112,12 +114,15 @@ graph TB
     AR --> AL
     AR --> SM
     AR --> AReg
+    AR --> COORD
     AL --> PA
     AL --> TR
     AL --> CC
     AL --> LLP
     AL --> APS
     AL --> IC
+    COORD --> CS
+    CS --> AL
     SM --> JSL
     API --> SM
     API --> AReg
@@ -225,11 +230,17 @@ graph TB
     MEM1 -->|"SubAgentSpawnTool"| SA1
     MEM2 -->|"SubAgentSpawnTool"| SA2
 
-    CEO -..->|"delegateTask()"| MGR1
-    MGR1 -..->|"delegateTask()"| MEM1
+    CEO -..->|"TaskCreate + TaskAssign"| MGR1
+    MGR1 -..->|"TaskCreate + TaskAssign"| MEM1
 ```
 
 Agents are NOT single-threaded — one agent can serve multiple sessions simultaneously because LLM APIs are stateless. Each session has independent context and its own `AgentLoop` instance.
+
+### Coordination Plane
+
+The organization tree remains durable authority, while each root session may create one temporary active Team that references existing employees without changing their hierarchy. `CoordinationService` stores Team, Task, Message, and Workspace Lease events under `data/coordination/<rootSessionId>/`; JSONL is the source of truth and `projection.json` is only a rebuildable startup cache.
+
+All hierarchy, swarm, and temporary SubAgent work uses the same durable task state machine. `CoordinationScheduler` dispatches ready work after dependencies complete, enforces per-root and per-agent concurrency, acquires workspace leases before execution, and commits completion only after the worker `AgentLoop` reaches `Done`. `BackgroundTaskManager` is reserved for non-Agent process jobs.
 
 ### Plugin Architecture
 

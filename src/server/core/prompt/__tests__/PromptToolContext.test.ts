@@ -171,7 +171,7 @@ describe('prompt tool context', () => {
     expect(prompt).not.toContain('Your context window is 200,000 tokens.');
   });
 
-  it('normalizes delegation guidance to persistent child sessions', () => {
+  it('normalizes delegation guidance to the durable coordination plane', () => {
     registerAgent({
       id: 'main-agent-test',
       name: 'CEO',
@@ -185,8 +185,8 @@ describe('prompt tool context', () => {
       'session-prompt-test',
     );
 
-    expect(prompt).toContain('One parent-agent pair has one persistent child session');
-    expect(prompt).toContain('TaskAssign starts or queues durable work');
+    expect(prompt).toContain('Hierarchical delegation and temporary Team collaboration share one durable task state machine');
+    expect(prompt).toContain('Create work with TaskCreate');
     expect(prompt).toContain('AgentMessage is for mid-task clarification');
     expect(prompt).not.toContain('One agent = one active task');
   });

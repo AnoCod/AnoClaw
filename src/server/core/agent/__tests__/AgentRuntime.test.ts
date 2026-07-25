@@ -8,7 +8,7 @@
  *   - cleanupSession
  *   - processMessage rejection paths (agent not found, agent destroyed,
  *     concurrent session guard)
- *   - delegateTask permission checks
+ *   - durable task routing and Goal continuation behavior
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -218,72 +218,6 @@ describe('AgentRuntime', () => {
       for (let i = 0; i < 5; i++) {
         slm.release(`blocker-${i}`);
       }
-    });
-  });
-
-  // ── delegateTask ──
-
-  describe('delegateTask — permission checks', () => {
-    beforeEach(() => {
-      // Make sure InterruptController is clean
-      (InterruptController as any)._instance = null;
-    });
-
-    it('rejects with permission denied when delegator is not a manager role', async () => {
-      const member = makeAgent('member-1', 'Member1', AgentRole.Member);
-      AgentRegistry.getInstance().registerAgent(member);
-
-      const target = makeAgent('target-1', 'Target', AgentRole.Member);
-      AgentRegistry.getInstance().registerAgent(target);
-
-      const runtime = AgentRuntime.getInstance();
-      const result = await runtime.delegateTask('target-1', 'do stuff', 'parent-session', 'member-1');
-
-      expect(result.success).toBe(false);
-      expect(result.errorMessage).toContain('Permission denied');
-    });
-
-    it('rejects when target agent is not found', async () => {
-      const mainAgent = makeAgent('main-1', 'CEO', AgentRole.MainAgent);
-      AgentRegistry.getInstance().registerAgent(mainAgent);
-
-      const runtime = AgentRuntime.getInstance();
-      const result = await runtime.delegateTask('nonexistent', 'do stuff', 'parent-session', 'main-1');
-
-      expect(result.success).toBe(false);
-      expect(result.errorMessage).toContain('Target agent not found');
-    });
-
-    it('rejects when target agent is destroyed', async () => {
-      const mainAgent = makeAgent('main-1', 'CEO', AgentRole.MainAgent);
-      AgentRegistry.getInstance().registerAgent(mainAgent);
-
-      const target = makeAgent('target-1', 'Target', AgentRole.Member);
-      target.setState(AgentState.Destroyed);
-      AgentRegistry.getInstance().registerAgent(target);
-
-      const runtime = AgentRuntime.getInstance();
-      const result = await runtime.delegateTask('target-1', 'do stuff', 'parent-session', 'main-1');
-
-      expect(result.success).toBe(false);
-      expect(result.errorMessage).toContain('is destroyed');
-    });
-
-    it('allows MainAgent to delegate to an active member', async () => {
-      const mainAgent = makeAgent('main-1', 'CEO', AgentRole.MainAgent);
-      AgentRegistry.getInstance().registerAgent(mainAgent);
-
-      const target = makeAgent('target-1', 'Target', AgentRole.Member);
-      AgentRegistry.getInstance().registerAgent(target);
-
-      const runtime = AgentRuntime.getInstance();
-
-      // Without proper session mocks this will fail on createSubSession.
-      // But we can verify it passes the permission check.
-      const result = await runtime.delegateTask('target-1', 'do stuff', 'parent-session', 'main-1');
-
-      // Should NOT be a permission error
-      expect(result.errorMessage).not.toContain('Permission denied');
     });
   });
 

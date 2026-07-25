@@ -16,25 +16,14 @@ import { InterruptController, InterruptReason } from './supervision/InterruptCon
 import { SessionManager } from '../session/index.js';
 import { SessionLeaseManager } from '../session/SessionLeaseManager.js';
 import { createLogger } from '../logger.js';
-import { SupervisionManager, TaskStatus } from './supervision/SupervisionManager.js';
-import { BackgroundTaskManager } from './supervision/BackgroundTaskManager.js';
-import { buildContextSummary } from '../prompt/sections/DelegationContextSection.js';
+import { SupervisionManager } from './supervision/SupervisionManager.js';
 import { TypedEventBus } from '../events/index.js';
-import { SharedContextStore } from './SharedContextStore.js';
 import { TokenCounter } from '../context/index.js';
-import { TaskDAG } from './TaskDAG.js';
-import { ExecutionPlan } from './ExecutionPlan.js';
-import { EventSubscriptionManager } from '../events/index.js';
 import { WsServer } from '../../infra/network/WsServer.js';
 import { SettingsManager } from '../../infra/storage/SettingsManager.js';
 import { buildTaskNotificationXML } from './TaskNotification.js';
 import {
-  bubbleEventToParent,
-  emitDelegationStatus,
-  handleSubAgentOutput,
   spawnSubAgent,
-  subAgentAllowedTools,
-  type DelegationState,
 } from './AgentDelegation.js';
 import {
   activeGoalPermissionMode,
@@ -42,11 +31,16 @@ import {
   resolveSessionPermissionMode,
 } from './PermissionModePolicy.js';
 import { TaskResolver } from '../capability/TaskResolver.js';
+import type { CoordinationTask } from '../../../shared/types/coordination.js';
+import { CoordinationService } from '../coordination/CoordinationService.js';
+import { buildTaskPacket, renderTaskPacket } from '../coordination/TaskPacketBuilder.js';
+import { WorkspaceLeaseService } from '../coordination/WorkspaceLeaseService.js';
 
 export interface ProcessMessageOptions {
   permissionMode?: string;
   effort?: string;
   goalKick?: boolean;
+  systemPromptOverride?: string;
 }
 
 interface UserTaskResolution {
@@ -199,6 +193,7 @@ export class AgentRuntime extends EventEmitter {
     SupervisionManager.getInstance().heartbeat(sessionId);
 
     const sessionManager = SessionManager.getInstance();
+    await sessionManager.setRuntimeStatus(sessionId, 'Active').catch(() => {});
     const resolvedPermissionMode = resolveSessionPermissionMode(sessionManager, sessionId, options.permissionMode);
     const resolvedEffort = resolveSessionEffort(sessionManager, sessionId, options.effort);
     let activeGoal: SessionGoal | null = null;
@@ -221,6 +216,7 @@ export class AgentRuntime extends EventEmitter {
       extraAllowedTools: [
         ...taskResolutionExtraTools(taskResolution),
       ],
+      systemPromptOverride: options.systemPromptOverride,
     };
 
     const loop = new AgentLoop(loopConfig);
@@ -273,6 +269,7 @@ export class AgentRuntime extends EventEmitter {
       agent.clearSessionStatus(sessionId);
       agent.adjustSessionCount(-1);
       SessionLeaseManager.getInstance().release(sessionId);
+      await sessionManager.setRuntimeStatus(sessionId, 'Idle').catch(() => {});
     }
   }
 
@@ -715,481 +712,230 @@ export class AgentRuntime extends EventEmitter {
 
 
   /**
-   * Delegate a task to a subordinate agent. Creates a sub-session
-   * and runs the target agent's loop with the task as a user message.
-   *
-   * @returns ToolResult with the delegation outcome
-   */
-  async delegateTask(
-    targetAgentId: string,
-    task: string,
-    parentSessionId: string,
-    parentAgentId: string,
-    priority: string = 'normal',
-  ): Promise<ToolResult> {
-
-    const delegator = AgentRegistry.getInstance().findAgent(parentAgentId);
-    if (!delegator || !delegator.isManagerRole()) {
-      return {
-        toolCallId: `delegate-${targetAgentId}`,
-        success: false,
-        content: '',
-        errorMessage: `Permission denied: role "${delegator?.role}" cannot delegate tasks (requires Manager or MainAgent)`,
-        tokensUsed: 0,
-        startedAt: Date.now(),
-        finishedAt: Date.now(),
-        durationMs: 0,
-        wasTruncated: false,
-      };
-    }
-    const logger = createLogger('anochat.agent');
-    logger.info('Delegation started', { parentSid: parentSessionId, targetAid: targetAgentId, taskPreview: task.slice(0, 60) });
-
-    const registry = AgentRegistry.getInstance();
-    const targetAgent = registry.findAgent(targetAgentId);
-    if (!targetAgent) {
-      return {
-        toolCallId: `delegate-${targetAgentId}`,
-        success: false,
-        content: '',
-        errorMessage: `Target agent not found: ${targetAgentId}`,
-        tokensUsed: 0,
-        startedAt: Date.now(),
-        finishedAt: Date.now(),
-        durationMs: 0,
-        wasTruncated: false,
-      };
-    }
-
-    if (!targetAgent.isActive) {
-      return {
-        toolCallId: `delegate-${targetAgentId}`,
-        success: false,
-        content: '',
-        errorMessage: `Target agent ${targetAgentId} is destroyed`,
-        tokensUsed: 0,
-        startedAt: Date.now(),
-        finishedAt: Date.now(),
-        durationMs: 0,
-        wasTruncated: false,
-      };
-    }
-
-
-    // Tasks can ONLY be delegated to direct subordinates (immediate children).
-    if (targetAgent.parentAgentId !== parentAgentId) {
-      return {
-        toolCallId: `delegate-${targetAgentId}`,
-        success: false,
-        content: '',
-        errorMessage: `Cannot delegate to '${targetAgentId}': tasks can only be assigned to your direct subordinates (immediate children).`,
-        tokensUsed: 0,
-        startedAt: Date.now(),
-        finishedAt: Date.now(),
-        durationMs: 0,
-        wasTruncated: false,
-      };
-    }
-
-    // Create a real sub-session via SessionManager (use agent's internal ID, not LLM-provided name)
-    const actualAgentId = targetAgent.id; // internal ID like "manager-research", not "Research-Manager"
-    const sessionManager = SessionManager.getInstance();
-    let subSessionId: string;
-    try {
-      const subSession = await sessionManager.createSubSession(parentSessionId, actualAgentId,
-        `Task: ${task.slice(0, 40)}`);
-      subSessionId = subSession.id;
-
-      InterruptController.getInstance().linkChild(parentSessionId, subSessionId);
-      logger.info('Sub-session created for delegation', { parentSid: parentSessionId, subSid: subSessionId, targetAid: actualAgentId });
-
-      TypedEventBus.emit('delegation:subsession_created', {
-        sessionId: subSessionId,
-        parentSessionId,
-        agentId: actualAgentId,
-        title: `Task: ${task.slice(0, 40)}`,
-      });
-    } catch (err) {
-      return {
-        toolCallId: `delegate-${targetAgentId}`,
-        success: false,
-        content: '',
-        errorMessage: `Failed to create sub-session: ${(err as Error).message}`,
-        tokensUsed: 0,
-        startedAt: Date.now(),
-        finishedAt: Date.now(),
-        durationMs: 0,
-        wasTruncated: false,
-      };
-    }
-
-
-    // Append a structured summary of the parent conversation so the sub-agent
-    // understands the broader goal (prevents "memory rupture").
-    const taskParts: string[] = [task];
-    try {
-      const parentHistory = await sessionManager.getHistory(parentSessionId);
-      if (parentHistory.length > 0) {
-        const contextParts: string[] = [];
-        // User's original request (most important)
-        const userMsgs = parentHistory.filter((m: Message) => m.role === 'user');
-        const lastUser = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1] : parentHistory[parentHistory.length - 1];
-        if (lastUser && lastUser.content) {
-          contextParts.push(`**Original Request:** ${lastUser.content.slice(0, 300)}`);
-        }
-        // Last 3 conversation turns for direction
-        const recent = parentHistory.slice(-3);
-        if (recent.length > 1) {
-          contextParts.push(`**Recent Context:** ${recent.map((m: Message) => `[${m.role}] ${(m.content || '').slice(0, 80)}`).join(' | ')}`);
-        }
-        taskParts.push('\n\n---\n# Parent Session Context\n' + contextParts.join('\n'));
-      }
-    } catch {}
-
-    // Store parent context in sub-session metadata for DelegationContextSection
-    try {
-      const parentHistory = await sessionManager.getHistory(parentSessionId);
-      if (parentHistory.length > 0) {
-        const contextStr = buildContextSummary(parentHistory);
-        const subSession = sessionManager.session(subSessionId);
-        if (subSession) {
-          subSession.setMetadata('parentContext', contextStr);
-          subSession.setMetadata('parentSessionId', parentSessionId);
-        }
-      }
-    } catch { /* non-critical */ }
-
-
-    const teamScope = delegator?.teamName || parentSessionId;
-    try {
-      SharedContextStore.getInstance().set(teamScope, `task:${subSessionId}`, task, parentAgentId);
-      SharedContextStore.getInstance().set(teamScope, `status:${subSessionId}`, 'started', parentAgentId);
-    } catch { /* non-critical */ }
-
-    // Inject live SharedContextStore entries into the delegation message so the
-    // sub-agent can see team-wide context updates (other active sub-agents, progress).
-    try {
-      const contextEntries = SharedContextStore.getInstance().getAll(teamScope);
-      if (contextEntries.length > 0) {
-        const contextSummary = contextEntries
-          .map(e => `[${e.writtenBy}]: ${e.key}=${String(e.value).slice(0, 200)}`)
-          .join('\n');
-        taskParts.push('\n\n---\n# Shared Context (live updates from team)\n' + contextSummary);
-      }
-    } catch { /* non-critical */ }
-
-    const enrichedTask = taskParts.join('');
-
-    // Build delegation message
-    const parentAgent = AgentRegistry.getInstance().agent(parentAgentId);
-    const delegatorName = parentAgent?.name || parentAgentId;
-    const delegationMessage: Message = {
-      id: `delegate-msg-${Date.now()}`,
-      sessionId: subSessionId,
-      role: MessageRole.System,
-      content: `[Task delegated by ${delegatorName} (priority: ${priority})]:\n\n${enrichedTask}`,
-      tokenCount: TokenCounter.estimate(`[Task delegated by ${delegatorName} (priority: ${priority})]:\n\n${enrichedTask}`),
-      compressed: false,
-      timestamp: new Date().toISOString(),
-      agentId: parentAgentId,
-      agentName: delegatorName,
-    };
-
-    const startedAt = Date.now();
-
-
-    const state: DelegationState = {
-      fullContent: '',
-      thinking: '',
-      turnCount: 0,
-      currentTool: undefined,
-    };
-
-
-    // inject the task as a soft interrupt instead of creating a new background task.
-    // This keeps the "one agent = one session = one AgentLoop" contract intact.
-    if (this.isSessionActive(subSessionId)) {
-      try {
-        await sessionManager.appendMessage(subSessionId, delegationMessage);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.error('Failed to persist delegated task for active session', {
-          subSid: subSessionId,
-          targetAid: actualAgentId,
-          error: message,
-        });
-        return {
-          toolCallId: `delegate-${actualAgentId}`,
-          success: false,
-          content: `Task was not queued because it could not be persisted: ${message}`,
-          structured: {
-            status: 'persistence_failed',
-            type: 'subagent',
-            subSessionId,
-            targetAgentId: actualAgentId,
-            parentSessionId,
-            parentAgentId,
-          },
-          tokensUsed: 0,
-          startedAt,
-          finishedAt: Date.now(),
-          durationMs: Date.now() - startedAt,
-          wasTruncated: false,
-        };
-      }
-      InterruptController.getInstance().setPendingUserMessage(
-        subSessionId,
-        `[New task from ${delegatorName}]:\n\n${task}`,
-      );
-      InterruptController.getInstance().wakeOnly(subSessionId);
-      logger.info('Task injected into active session', { subSid: subSessionId, targetAid: actualAgentId });
-      return {
-        toolCallId: `delegate-${actualAgentId}`,
-        success: true,
-        content: `Task injected into existing session for '${actualAgentId}' (${subSessionId}).\n` +
-          `The agent is currently working -- your task will be picked up on its next turn.`,
-        structured: {
-          status: 'queued',
-          type: 'subagent',
-          subSessionId,
-          targetAgentId: actualAgentId,
-          parentSessionId,
-          parentAgentId,
-          priority,
-          background: false,
-          activeSession: true,
-        },
-        tokensUsed: 0,
-        startedAt,
-        finishedAt: Date.now(),
-        durationMs: Date.now() - startedAt,
-        wasTruncated: false,
-      };
-    }
-
-
-    const bgManager = BackgroundTaskManager.getInstance();
-    const taskId = bgManager.register({
-      type: 'subagent',
-      parentSessionId,
-      parentAgentId,
-      summary: task.slice(0, 60),
-    });
-
-
-    // oneShot: true = auto-unsubscribe after first delivery, no manual cleanup needed
-    const esm = EventSubscriptionManager.getInstance();
-    esm.subscribe(parentSessionId, parentAgentId, `task:completed:${taskId}`, { oneShot: true });
-    esm.subscribe(parentSessionId, parentAgentId, `task:failed:${taskId}`, { oneShot: true });
-
-    // Per-event persistence through the shared turn recorder.
-    const turnMsgId = `msg-sub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    const { SessionTurnRecorder } = await import('../../infra/SessionTurnRecorder.js');
-    const recorder = new SessionTurnRecorder(subSessionId, actualAgentId, turnMsgId);
-
-
-    (async () => {
-      let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
-      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-
-      try {
-
-        // Also detects unresponsive sub-agents and auto-kills them.
-        heartbeatInterval = setInterval(() => {
-          const supMgr = SupervisionManager.getInstance();
-
-
-          if (supMgr.isUnresponsive(subSessionId)) {
-            logger.warn('Sub-agent unresponsive, auto-killing', {
-              subSid: subSessionId,
-              targetAid: actualAgentId,
-              secondsSinceHeartbeat: supMgr.secondsSinceLastHeartbeat(subSessionId),
-            });
-            InterruptController.getInstance().requestInterrupt(subSessionId, InterruptReason.Timeout);
-            if (heartbeatInterval) clearInterval(heartbeatInterval);
-            return;
-          }
-
-          supMgr.setCurrentTool(subSessionId, state.currentTool);
-
-          // heartbeat when the AgentLoop is in its background-task wait loop.
-          supMgr.heartbeat(subSessionId);
-          emitDelegationStatus(this, parentSessionId, subSessionId, actualAgentId, {
-            phase: 'working',
-            taskSummary: task.slice(0, 60),
-            turnCount: state.turnCount,
-            currentTool: state.currentTool,
-            elapsedMs: Date.now() - startedAt,
-          });
-          // Update BackgroundTaskManager progress (rate-limited internally)
-          bgManager.updateProgress(taskId, { turnCount: state.turnCount, currentTool: state.currentTool });
-        }, 5000);
-
-
-        const DELEGATION_TIMEOUT_MS = 600000;
-        timeoutHandle = setTimeout(() => {
-          logger.warn('Delegation timeout, aborting sub-session', { subSid: subSessionId, targetAid: actualAgentId });
-          InterruptController.getInstance().requestInterrupt(subSessionId, InterruptReason.Timeout);
-        }, DELEGATION_TIMEOUT_MS);
-
-
-        await handleSubAgentOutput(
-          this,
-          this.processMessage(subSessionId, actualAgentId, delegationMessage),
-          parentSessionId,
-          subSessionId,
-          actualAgentId,
-          task.slice(0, 60),
-          startedAt,
-          recorder,
-          state,
-        );
-        await recorder.finalize();
-
-        const durationMs = Date.now() - startedAt;
-
-
-        if (state.turnCount === 0 && !state.fullContent.trim()) {
-          const abortReason = state.fullContent.includes('[ERROR]')
-            ? `Sub-agent process error: ${state.fullContent.replace('[ERROR] ', '')}`
-            : 'Sub-agent exited immediately with no output. The agent may have failed to start (check model config, API key, or agent setup).';
-          logger.warn('Delegation aborted - sub-agent produced no output', { parentSid: parentSessionId, subSid: subSessionId, targetAid: actualAgentId, durationMs });
-
-          emitDelegationStatus(this, parentSessionId, subSessionId, actualAgentId, {
-            phase: 'error',
-            taskSummary: task.slice(0, 60),
-            elapsedMs: durationMs,
-          });
-
-          await bgManager.fail(taskId, abortReason, durationMs);
-        } else {
-
-          emitDelegationStatus(this, parentSessionId, subSessionId, actualAgentId, {
-            phase: 'completed',
-            taskSummary: task.slice(0, 60),
-            turnCount: state.turnCount,
-            elapsedMs: durationMs,
-          });
-
-          await bgManager.complete(taskId, { content: state.fullContent, turnCount: state.turnCount, durationMs });
-        }
-
-        logger.info('Delegation completed (background)', { parentSid: parentSessionId, subSid: subSessionId, targetAid: actualAgentId, turnCount: state.turnCount, durationMs });
-      } catch (err) {
-        await recorder.recordError(
-          err instanceof Error ? err.message : String(err),
-          'delegation',
-        ).catch(() => {});
-        await recorder.finalize().catch(() => {});
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        const durationMs = Date.now() - startedAt;
-
-        logger.error('Delegation failed (background)', { parentSid: parentSessionId, subSid: subSessionId, targetAid: actualAgentId, error: errorMessage.slice(0, 200) });
-
-
-        emitDelegationStatus(this, parentSessionId, subSessionId, actualAgentId, {
-          phase: 'error',
-          taskSummary: task.slice(0, 60),
-          elapsedMs: durationMs,
-        });
-
-        // Fail in BackgroundTaskManager (injects error message into parent)
-        await bgManager.fail(taskId, errorMessage, durationMs);
-      } finally {
-        if (timeoutHandle) clearTimeout(timeoutHandle);
-        if (heartbeatInterval) clearInterval(heartbeatInterval);
-        InterruptController.getInstance().unlinkChild(subSessionId);
-      }
-    })();
-
-
-    return {
-      toolCallId: `delegate-${actualAgentId}`,
-      success: true,
-      content: `Task dispatched to '${actualAgentId}' (session: ${subSessionId}).\n` +
-        `Task ID: ${taskId}\n` +
-        `The agent will work on it independently.\n` +
-        `Use TaskList to monitor progress, AgentMessage to communicate, or TaskOutput to get the final result when complete.`,
-      structured: {
-        taskId,
-        status: 'running',
-        type: 'subagent',
-        subSessionId,
-        targetAgentId: actualAgentId,
-        parentSessionId,
-        parentAgentId,
-        priority,
-        background: true,
-      },
-      tokensUsed: 0,
-      startedAt,
-      finishedAt: Date.now(),
-      durationMs: Date.now() - startedAt,
-      wasTruncated: false,
-    };
-  }
-
-
-
-
-  /**
    * Create a temporary SubAgent and execute a task synchronously. The SubAgent
-   * is destroyed after completion (or error). If config.persist is true, the
-   * SubAgent survives and is set to Idle for reuse.
+   * is always destroyed after completion or error; its task and transcript remain.
    */
   async spawnSubAgent(config: SubAgentConfig, callerAgentId?: string, parentSessionId?: string): Promise<ToolResult> {
     return spawnSubAgent(this, config, callerAgentId, parentSessionId);
   }
 
-
-
   /**
-   * Execute multiple delegated tasks in dependency-ordered parallel batches.
-   *
-   * @param tasks - Array of {agentId, description, dependsOn?}. dependsOn lists
-   *   task IDs (by their 0-based index in the array) that must complete first.
-   * @returns Formatted summary string for the delegating agent.
+   * Execute one durable coordination task. The scheduler is the only caller.
+   * Completion is committed after the AgentLoop terminal event, never after dispatch.
    */
-  async executeParallelPlan(
-    tasks: Array<{agentId: string; description: string; dependsOn?: string[]}>,
-    parentSessionId: string,
-    parentAgentId: string,
-  ): Promise<string> {
-    const logger = createLogger('anochat.agent');
-    const dag = new TaskDAG();
-
-    for (let i = 0; i < tasks.length; i++) {
-      const t = tasks[i];
-      dag.addTask({
-        id: `task-${i}`,
-        agentId: t.agentId,
-        description: t.description,
-        dependsOn: (t.dependsOn || []).map(d => d.startsWith('task-') ? d : `task-${d}`),
-        status: 'pending',
-      });
+  async runCoordinationTask(task: CoordinationTask): Promise<void> {
+    const service = CoordinationService.getInstance();
+    const registry = AgentRegistry.getInstance();
+    const sessionManager = SessionManager.getInstance();
+    const agent = task.assigneeAgentId ? registry.findAgent(task.assigneeAgentId) : undefined;
+    if (!agent?.isActive) {
+      await service.updateTask(task.rootSessionId, task.id, {
+        status: 'blocked',
+        blocker: 'assignee_unavailable',
+        error: `Assigned agent is unavailable: ${task.assigneeAgentId || '(none)'}`,
+      }, task.creatorAgentId);
+      return;
     }
 
-    logger.info('executeParallelPlan starting', {
+    const parentSessionId = task.mode === 'swarm'
+      ? task.rootSessionId
+      : task.sourceSessionId;
+    const scopeId = task.mode === 'swarm' && task.teamId
+      ? `team-${task.teamId}`
+      : undefined;
+    const session = await sessionManager.createSubSession(
       parentSessionId,
-      parentAgentId,
-      taskCount: tasks.length,
-    });
+      agent.id,
+      `Coordination: ${task.subject.slice(0, 80)}`,
+      {
+        scopeId,
+        metadata: {
+          coordinationTaskId: task.id,
+          coordinationRootSessionId: task.rootSessionId,
+          coordinationTeamId: task.teamId,
+          coordinationMode: task.mode,
+        },
+      },
+    );
+    await sessionManager.setMetadataPersisted(session.id, 'coordinationTaskId', task.id);
+    await sessionManager.setMetadataPersisted(session.id, 'coordinationRootSessionId', task.rootSessionId);
+    if (task.teamId) await sessionManager.setMetadataPersisted(session.id, 'coordinationTeamId', task.teamId);
 
-    const plan = new ExecutionPlan(dag, AgentRegistry.getInstance());
-    const results = await plan.execute(parentSessionId, parentAgentId);
+    let current = service.getTask(task.rootSessionId, task.id) || task;
+    current = await service.updateTask(task.rootSessionId, task.id, {
+      status: 'running',
+      sessionId: session.id,
+      heartbeatAt: new Date().toISOString(),
+      progress: 0,
+    }, agent.id, current.version);
 
-    // Format summary
-    let summary = `## Parallel Plan Results\n\n${dag.summary()}\n\n`;
-    for (const task of dag.tasks.values()) {
-      const icon = task.status === 'completed' ? '[done]' : '[pending]';
-      summary += `- ${icon} **${task.agentId}**: ${task.description.slice(0, 60)}`;
-      if (task.result) {
-        summary += `\n  Result: ${task.result.slice(0, 200)}`;
+    const packet = await buildTaskPacket(current);
+    const taskContent = renderTaskPacket(packet);
+    const message: Message = {
+      id: `coord-task-${task.id}-${current.attempt}`,
+      sessionId: session.id,
+      role: MessageRole.System,
+      content: taskContent,
+      tokenCount: TokenCounter.estimate(taskContent),
+      compressed: false,
+      timestamp: new Date().toISOString(),
+      agentId: task.creatorAgentId,
+      agentName: registry.findAgent(task.creatorAgentId)?.name || task.creatorAgentId,
+    };
+    await sessionManager.appendMessage(session.id, message);
+    const history = (await sessionManager.getHistory(session.id)).filter((entry) => entry.id !== message.id);
+    const { SessionTurnRecorder } = await import('../../infra/SessionTurnRecorder.js');
+    const recorder = new SessionTurnRecorder(
+      session.id,
+      agent.id,
+      `coord-${task.id}-${current.attempt}`,
+    );
+    const startedAt = Date.now();
+    let content = '';
+    let failure = '';
+    let turnCount = 0;
+    let tokenUsage = 0;
+    let currentTool: string | undefined;
+    const ttlMs = SettingsManager.getInstance().get<number>(
+      'coordination.workspaceLeaseTtlMs',
+      30_000,
+    );
+    const timeoutMs = SettingsManager.getInstance().get<number>(
+      'coordination.maxTaskRuntimeMs',
+      600_000,
+    );
+    const heartbeat = setInterval(() => {
+      const latest = service.getTask(task.rootSessionId, task.id);
+      if (!latest || latest.status !== 'running') return;
+      void service.renewTaskLeases(task.rootSessionId, task.id, ttlMs, agent.id).catch(() => {});
+      void service.updateTask(task.rootSessionId, task.id, {
+        heartbeatAt: new Date().toISOString(),
+        currentTool,
+      }, agent.id).catch(() => {});
+    }, Math.max(1_000, Math.min(5_000, Math.floor(ttlMs / 2))));
+    const timeout = setTimeout(() => {
+      InterruptController.getInstance().requestInterrupt(session.id, InterruptReason.Timeout);
+      failure = `Coordination task timed out after ${timeoutMs}ms`;
+    }, timeoutMs);
+
+    try {
+      for await (const event of this.processMessage(session.id, agent.id, message, history, {
+        permissionMode: 'AutoEdit',
+        effort: 'HIGH',
+      })) {
+        await recorder.record(event, 'coordination');
+        if (event.type === SSEEventType.Text) content += String(event.content || '');
+        if (event.type === SSEEventType.ToolCall) {
+          currentTool = String(event.toolName || '');
+          turnCount += 1;
+          await service.updateTask(task.rootSessionId, task.id, {
+            heartbeatAt: new Date().toISOString(),
+            currentTool,
+            progress: Math.min(95, Math.max(1, turnCount * 5)),
+          }, agent.id);
+        } else if (event.type === SSEEventType.ToolResult) {
+          currentTool = undefined;
+        } else if (event.type === SSEEventType.Error) {
+          failure = String(event.errorMessage || event.content || 'AgentLoop failed');
+        } else if (event.type === SSEEventType.Done) {
+          tokenUsage = Number((event.tokenUsage as { total?: number } | undefined)?.total || 0);
+        }
+        WsServer.getInstance().send(session.id, event as unknown as Record<string, unknown>);
       }
-      summary += '\n';
+      await recorder.finalize();
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error);
+      await recorder.recordError(failure, 'coordination').catch(() => {});
+      await recorder.finalize().catch(() => {});
+    } finally {
+      clearInterval(heartbeat);
+      clearTimeout(timeout);
+      await sessionManager.setRuntimeStatus(session.id, 'Idle').catch(() => {});
     }
 
-    return summary;
+    const latest = service.getTask(task.rootSessionId, task.id);
+    if (!latest || latest.status === 'cancelled') return;
+    if (failure) {
+      const failed = await service.updateTask(task.rootSessionId, task.id, {
+        status: 'failed',
+        error: failure.slice(0, 2_000),
+        resultSummary: content.trim().slice(0, 2_000) || undefined,
+        outputRef: `session:${session.id}`,
+        tokenUsage,
+      }, agent.id);
+      if (isTransientCoordinationError(failure) && failed.attempt < failed.maxAttempts) {
+        await service.retryTask(task.rootSessionId, task.id, agent.id);
+        return;
+      }
+      await this.deliverCoordinationResult(failed, 'failed');
+      return;
+    }
+
+    const completed = await service.updateTask(task.rootSessionId, task.id, {
+      status: 'completed',
+      progress: 100,
+      currentTool: undefined,
+      heartbeatAt: new Date().toISOString(),
+      resultSummary: content.trim().slice(0, 2_000) || 'Task completed without a text summary.',
+      outputRef: `session:${session.id}`,
+      tokenUsage,
+      evidence: [`Session transcript: ${session.id}`, `Turns: ${turnCount}`, `Duration: ${Date.now() - startedAt}ms`],
+    }, agent.id);
+    await this.deliverCoordinationResult(completed, 'completed');
+  }
+
+  private async deliverCoordinationResult(
+    task: CoordinationTask,
+    status: 'completed' | 'failed',
+  ): Promise<void> {
+    const service = CoordinationService.getInstance();
+    const sessionManager = SessionManager.getInstance();
+    const message = await service.queueMessage({
+      rootSessionId: task.rootSessionId,
+      teamId: task.teamId,
+      taskId: task.id,
+      fromAgentId: task.assigneeAgentId || task.creatorAgentId,
+      toAgentId: task.creatorAgentId,
+      kind: 'task_result',
+      summary: `${task.subject}: ${status}`,
+      content: task.resultSummary || task.error || status,
+      idempotencyKey: `task-result:${task.id}:${task.attempt}:${status}`,
+    });
+    const source = sessionManager.session(task.sourceSessionId)
+      || sessionManager.session(task.rootSessionId);
+    if (!source) return;
+    const xml = [
+      [
+        `<coordination-event root-session-id="${task.rootSessionId}"`,
+        task.teamId ? `team-id="${task.teamId}"` : '',
+        `task-id="${task.id}"`,
+        `from-agent="${message.fromAgentId}"`,
+        `to-agent="${task.creatorAgentId}"`,
+        task.sessionId ? `session-id="${task.sessionId}"` : '',
+        `status="${status}">`,
+      ].filter(Boolean).join(' '),
+      `Subject: ${task.subject}`,
+      `Result: ${message.content}`,
+      task.outputRef ? `Output: ${task.outputRef}` : '',
+      '</coordination-event>',
+    ].filter(Boolean).join('\n');
+    const sessionMessage: Message = {
+      id: message.id,
+      sessionId: source.id,
+      role: MessageRole.User,
+      content: xml,
+      tokenCount: TokenCounter.estimate(xml),
+      compressed: false,
+      timestamp: new Date().toISOString(),
+      agentId: message.fromAgentId,
+      agentName: registryAgentName(message.fromAgentId),
+    };
+    await sessionManager.appendMessage(source.id, sessionMessage);
+    await service.updateMessageStatus(task.rootSessionId, message.id, 'delivered', task.creatorAgentId);
+    if (this.isSessionActive(source.id)) {
+      InterruptController.getInstance().setPendingUserMessage(source.id, xml);
+      InterruptController.getInstance().wakeOnly(source.id);
+    }
   }
 
 
@@ -1641,4 +1387,13 @@ async function runMemoryLifecycle(agentId: string, sessionId: string): Promise<v
     if (!messages.length) return;
     await runSessionCloseLifecycle(agentId, sessionId, messages);
   } catch { /* lifecycle is best-effort, never throw */ }
+}
+
+function isTransientCoordinationError(message: string): boolean {
+  return /ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|rate.?limit|too many requests|overloaded|bad gateway|service unavailable|5\d\d/i
+    .test(message);
+}
+
+function registryAgentName(agentId: string): string {
+  return AgentRegistry.getInstance().findAgent(agentId)?.name || agentId;
 }

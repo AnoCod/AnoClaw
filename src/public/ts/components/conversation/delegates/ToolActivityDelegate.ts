@@ -240,12 +240,22 @@ export class ToolActivityDelegate {
       case 'Skill':        return ((inp.skill || inp.name || '') as string).slice(0, 30) || 'skill';
       case 'SkillInspect': return ((inp.skill || inp.name || '') as string).slice(0, 30) || 'skill';
       case 'SkillList':    return 'skills';
-      case 'TaskAssign':   return ((inp.agentName || inp.agentId || '') as string).slice(0, 20) || 'agent';
+      case 'TeamCreate':
+      case 'TeamUpdate':
+      case 'TeamStatus':
+      case 'TeamDelete':   return ((inp.name || inp.teamId || '') as string).slice(0, 20) || 'team';
+      case 'TaskCreate':   return ((inp.subject || '') as string).slice(0, 30) || 'task';
+      case 'TaskAssign':
+      case 'TaskClaim':
+      case 'TaskUpdate':
+      case 'TaskGet':      return ((inp.taskId || inp.task_id || '') as string).slice(0, 20) || 'task';
       case 'TaskList':     return 'tasks';
-      case 'TaskStop':     return ((inp.task_id || '') as string).slice(0, 20) || 'task';
-      case 'TaskOutput':   return ((inp.task_id || '') as string).slice(0, 20) || 'task';
-      case 'SubAgentSpawn':return ((inp.subagent_type || '') as string).slice(0, 20) || 'sub-agent';
-      case 'SubAgentDelete': return ((inp.agentId || inp.subAgentId || '') as string).slice(0, 20) || 'agent';
+      case 'TaskStop':     return ((inp.taskId || inp.task_id || '') as string).slice(0, 20) || 'task';
+      case 'TaskOutput':   return ((inp.taskId || inp.task_id || '') as string).slice(0, 20) || 'task';
+      case 'SubAgentSpawn':return ((inp.type || '') as string).slice(0, 20) || 'sub-agent';
+      case 'JobList':      return 'jobs';
+      case 'JobOutput':
+      case 'JobStop':      return ((inp.jobId || inp.job_id || '') as string).slice(0, 20) || 'job';
       case 'AgentMessage': return ((inp.subAgentName || inp.to || '') as string).slice(0, 20) || 'agent';
       case 'HireEmployee': return ((inp.name || inp.employeeName || '') as string).slice(0, 20) || 'employee';
       case 'ListEmployees': return 'employees';

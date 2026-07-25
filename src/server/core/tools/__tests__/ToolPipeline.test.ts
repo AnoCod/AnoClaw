@@ -5,6 +5,7 @@ import type { Tool } from '../Tool.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
 import { makeResult, makeError } from '../ToolResult.js';
 import { PlanTool } from '../builtin/PlanTool.js';
+import { WorkspaceLeaseService } from '../../coordination/WorkspaceLeaseService.js';
 
 // ── Helpers ──
 
@@ -376,6 +377,67 @@ describe('ToolPipeline.securityCheck', () => {
     const r = ToolPipeline.securityCheck(tool, {}, ctx({ mode: 'read_only' }));
     expect(r).not.toBeNull();
     expect(r!.errorMessage).toContain('read_only');
+  });
+
+  it('blocks coordination writes outside the declared descendant scope', () => {
+    WorkspaceLeaseService.resetInstance();
+    const workspace = process.platform === 'win32' ? 'C:\\workspace' : '/workspace';
+    WorkspaceLeaseService.getInstance().acquire({
+      rootSessionId: 'root-1',
+      taskId: 'task-1',
+      agentId: 'a1',
+      workspace,
+      scopes: ['src/server/core'],
+      ttlMs: 30_000,
+    });
+    const tool = mockTool({
+      name: 'Write',
+      isReadOnly: false,
+      workspacePathParams: ['file_path'],
+    });
+    const result = ToolPipeline.securityCheck(tool, { file_path: 'src/server/index.ts' }, ctx({
+      workspace,
+      mode: 'auto_edit',
+      coordination: {
+        rootSessionId: 'root-1',
+        taskId: 'task-1',
+        readOnly: false,
+        writeScope: ['src/server/core'],
+      },
+    }));
+    expect(result?.success).toBe(false);
+    expect(result?.errorMessage).toContain('outside the declared or leased write scope');
+    WorkspaceLeaseService.resetInstance();
+  });
+
+  it('allows coordination writes inside the declared descendant scope', () => {
+    WorkspaceLeaseService.resetInstance();
+    const workspace = process.platform === 'win32' ? 'C:\\workspace' : '/workspace';
+    WorkspaceLeaseService.getInstance().acquire({
+      rootSessionId: 'root-1',
+      taskId: 'task-1',
+      agentId: 'a1',
+      workspace,
+      scopes: ['src/server'],
+      ttlMs: 30_000,
+    });
+    const tool = mockTool({
+      name: 'Write',
+      isReadOnly: false,
+      workspacePathParams: ['file_path'],
+    });
+    const result = ToolPipeline.securityCheck(tool, { file_path: 'src/server/core/file.ts' }, ctx({
+      workspace,
+      mode: 'auto_edit',
+      coordination: {
+        rootSessionId: 'root-1',
+        taskId: 'task-1',
+        readOnly: false,
+        writeScope: ['src/server'],
+      },
+    }));
+    expect(result).toBeNull();
+    WorkspaceLeaseService.resetInstance();
   });
 
   it('allows read-only tools in read_only mode', () => {

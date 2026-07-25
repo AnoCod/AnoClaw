@@ -9,6 +9,7 @@ import { BackgroundTaskStore } from '../viewmodel/BackgroundTaskStore.js';
 import { slotRegistry } from '../SlotRegistry.js';
 import { ToastManager } from '../ToastManager.js';
 import { ToolConfirmationQueue } from '../viewmodel/ToolConfirmationQueue.js';
+import { CoordinationStore } from '../viewmodel/CoordinationStore.js';
 
 export function registerChatHandlers(
   router: WSMessageRouter,
@@ -160,6 +161,19 @@ export function registerChatHandlers(
     const store = BackgroundTaskStore.getInstance();
     store.upsert(d);
   });
+
+  for (const type of [
+    'team_changed',
+    'task_changed',
+    'task_progress',
+    'coordination_message',
+    'workspace_conflict',
+    'coordination_snapshot_required',
+  ]) {
+    router.on(type, (ctx) => {
+      CoordinationStore.getInstance().applyWs(ctx.data);
+    });
+  }
 
   router.on('plugin:ui:mount', (ctx) => {
     const d = ctx.data as { slot: string; htmlContent: string; opts?: { position?: 'append' | 'prepend'; replace?: boolean; id?: string; priority?: number }; pluginName: string };

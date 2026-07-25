@@ -23,6 +23,11 @@ import {
 import { createLogger } from '../logger.js';
 import { makeError } from './ToolResult.js';
 import * as path from 'path';
+import {
+  WorkspaceLeaseService,
+  normalizeScope,
+  pathWithinScope,
+} from '../coordination/WorkspaceLeaseService.js';
 
 // ══════════════════════════════════════════════════════════════
 // Configuration constants
@@ -178,6 +183,55 @@ export class ToolPipeline {
     ctx: ExecutionContext,
   ): ToolResult | null {
     const mode = ctx.mode;
+
+    const workspaceMutationTools = new Set(['Write', 'Edit', 'NotebookEdit', 'Bash', 'RunProgram']);
+    if (ctx.coordination && workspaceMutationTools.has(tool.name())) {
+      if (ctx.coordination.readOnly) {
+        return makeError(
+          `Tool "${tool.name()}" is blocked because coordination task "${ctx.coordination.taskId}" is read-only.`,
+          { toolCallId: '' },
+        );
+      }
+      const leases = WorkspaceLeaseService.getInstance().getForTask(ctx.coordination.taskId);
+      if (leases.length === 0) {
+        return makeError(
+          `Workspace lease missing for coordination task "${ctx.coordination.taskId}".`,
+          { toolCallId: '' },
+        );
+      }
+      const pathParams = tool.workspacePathParams();
+      if (tool.name() === 'Bash' || tool.name() === 'RunProgram' || pathParams.length === 0) {
+        if (!leases.some((lease) => lease.scopes.includes('.'))) {
+          return makeError(
+            `Tool "${tool.name()}" requires an exclusive full-workspace lease.`,
+            { toolCallId: '' },
+          );
+        }
+      } else {
+        const workspace = path.resolve(ctx.workspace);
+        for (const paramName of pathParams) {
+          const raw = params[paramName];
+          if (typeof raw !== 'string' || !raw) continue;
+          const absolute = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(workspace, raw);
+          const rawRelative = path.relative(workspace, absolute);
+          if (rawRelative === '..' || rawRelative.startsWith(`..${path.sep}`) || path.isAbsolute(rawRelative)) {
+            return makeError(
+              `Path "${raw}" resolves outside the coordination workspace.`,
+              { toolCallId: '' },
+            );
+          }
+          const relative = normalizeScope(rawRelative || '.');
+          const declared = ctx.coordination.writeScope.some((scope) => pathWithinScope(scope, relative));
+          const leased = leases.some((lease) => lease.scopes.some((scope) => pathWithinScope(scope, relative)));
+          if (!declared || !leased) {
+            return makeError(
+              `Path "${raw}" is outside the declared or leased write scope for task "${ctx.coordination.taskId}".`,
+              { toolCallId: '' },
+            );
+          }
+        }
+      }
+    }
 
     // Block non-read-only tools in read-only mode
     if (!tool.isReadOnly()) {

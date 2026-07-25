@@ -13,6 +13,12 @@ export { WsMessageType } from './events.js';
 import type { WsMessageType } from './events.js';
 import type { TokenBreakdown } from './session.js';
 import type { ArtifactPreview, ArtifactRecord } from './artifact.js';
+import type {
+  CoordinationMessage,
+  CoordinationTask,
+  TeamRecord,
+  WorkspaceLease,
+} from './coordination.js';
 
 /** Message sent from the browser client to the server. */
 export interface WsClientMessage {
@@ -85,4 +91,11 @@ export interface WsServerMessage {
   artifactId?: string;
   artifact?: ArtifactRecord;
   preview?: ArtifactPreview;
+  rootSessionId?: string;
+  revision?: number;
+  team?: TeamRecord;
+  task?: CoordinationTask;
+  coordinationMessage?: CoordinationMessage;
+  lease?: WorkspaceLease;
+  requestedScopes?: string[];
 }

@@ -17,6 +17,11 @@ import { SettingsManager } from '../../infra/storage/SettingsManager.js';
 
 import { EventEmitter } from 'events';
 import type { Message } from '../../../shared/types/session.js';
+import { MessageRole } from '../../../shared/types/session.js';
+import type {
+  CoordinationMessage,
+  CoordinationTask,
+} from '../../../shared/types/coordination.js';
 import type { SSEEvent } from '../../../shared/types/events.js';
 import { SSEEventType } from '../../../shared/types/events.js';
 import { AgentRegistry } from './AgentRegistry.js';
@@ -33,6 +38,7 @@ import {
   MAX_TOOL_RESULT_CHARS,
 } from '../../../shared/constants.js';
 import { StallDetector } from './StallDetector.js';
+import { CoordinationService } from '../coordination/CoordinationService.js';
 import type { StallResult } from './StallDetector.js';
 import {
   messageToApiMessage,
@@ -47,7 +53,6 @@ import { callLLMWithRetry } from './AgentLoopLLM.js';
 import { AgentChannel } from './AgentChannel.js';
 import { TypedEventBus } from '../events/TypedEventBus.js';
 import { BackgroundTaskManager } from './supervision/BackgroundTaskManager.js';
-import { SharedContextStore } from './SharedContextStore.js';
 import { createAgentLoopSummarizer } from './AgentLoopSummarizer.js';
 import {
   activeGoalPermissionMode,
@@ -72,6 +77,7 @@ export interface AgentLoopConfig {
   effort?: string;
   extraAllowedTools?: string[];
   workspace?: string;
+  systemPromptOverride?: string;
 }
 
 
@@ -88,6 +94,7 @@ export class AgentLoop {
   readonly effort?: string;
   readonly extraAllowedTools: string[];
   readonly workspace?: string;
+  readonly systemPromptOverride?: string;
 
   private stallDetector: StallDetector;
   private toolCallHistory: Array<{ name: string; result: string; ts: number }> = [];
@@ -102,6 +109,7 @@ export class AgentLoop {
     this.effort = config.effort;
     this.extraAllowedTools = uniqueToolNames(config.extraAllowedTools || []);
     this.workspace = config.workspace;
+    this.systemPromptOverride = config.systemPromptOverride;
     this.stallDetector = new StallDetector();
   }
 
@@ -160,7 +168,7 @@ export class AgentLoop {
       hideUserInteractionTools: this._isAutoMode(),
       extraAllowedTools: this.extraAllowedTools,
     });
-    let systemPrompt = promptAssembler.buildEffectivePrompt(
+    let systemPrompt = this.systemPromptOverride || promptAssembler.buildEffectivePrompt(
       this.agentId,
       this.sessionId,
       undefined,
@@ -175,9 +183,15 @@ export class AgentLoop {
 
     const toolRegistry = ToolRegistry.getInstance();
     let allowedNames = mergeAllowedToolNames(agent.allowedTools(), this.extraAllowedTools);
-    let agentTools = toolRegistry.toolsForAgent(allowedNames, {
-      hideUserInteractionTools: this._isAutoMode(),
-    });
+    const taskToolPolicy = CoordinationService.getInstance().isInitialized()
+      ? CoordinationService.getInstance().findTaskBySession(this.sessionId, true)
+      : undefined;
+    let agentTools = applyCoordinationToolPolicy(
+      toolRegistry.toolsForAgent(allowedNames, {
+        hideUserInteractionTools: this._isAutoMode(),
+      }),
+      taskToolPolicy,
+    );
     // In auto mode, hide tools that require user interaction 閳?user chose
     // to be hands-off; the agent should work autonomously without asking.
     const tools = agentTools.map((t) => t.toAnthropicTool());
@@ -198,6 +212,7 @@ export class AgentLoop {
         continue;
       }
       const apiMsg = messageToApiMessage(h);
+      (apiMsg as ApiMessage & { __msgId?: string }).__msgId = h.id;
       messages.push(apiMsg);
       const tcList = apiMsg.tool_calls || [];
       for (const tc of tcList) {
@@ -234,11 +249,6 @@ export class AgentLoop {
       },
     );
 
-
-    // Checked every inter-turn. Agents read context written by teammates in real-time.
-    const sharedStore = SharedContextStore.getInstance();
-    const teamScope = agent?.teamName || this.sessionId;
-    let lastSharedContextCheck = Date.now();
 
     let turn = 0;
     let compactCheckCounter = 0;
@@ -278,9 +288,12 @@ export class AgentLoop {
         });
         allowedNames.length = 0;
         allowedNames.push(...newAllowedNames);
-        agentTools = toolRegistry.toolsForAgent(allowedNames, {
-          hideUserInteractionTools: this._isAutoMode(),
-        });
+        agentTools = applyCoordinationToolPolicy(
+          toolRegistry.toolsForAgent(allowedNames, {
+            hideUserInteractionTools: this._isAutoMode(),
+          }),
+          taskToolPolicy,
+        );
         tools.length = 0;
         tools.push(...agentTools.map((t) => t.toAnthropicTool()));
         summarizer = createAgentLoopSummarizer({
@@ -322,7 +335,7 @@ export class AgentLoop {
       turn++;
       compactCheckCounter++;
 
-      systemPrompt = promptAssembler.buildEffectivePrompt(
+      systemPrompt = this.systemPromptOverride || promptAssembler.buildEffectivePrompt(
         this.agentId,
         this.sessionId,
         undefined,
@@ -390,29 +403,64 @@ export class AgentLoop {
         };
       }
 
-      // 2. Poll SharedContextStore for team-wide bidirectional state sharing
+      // Drain the durable coordination inbox at a safe turn boundary. JSONL
+      // remains the source of truth; the interrupt channel is only a wake-up.
       {
-        const newEntries = sharedStore.getSince(teamScope, lastSharedContextCheck);
-        if (newEntries.length > 0) {
-          const contextText = newEntries
-            .filter(e => e.writtenBy !== this.agentId) // don't read own writes
-            .map(e => `[${e.writtenBy}] ${e.key}: ${String(e.value).slice(0, 300)}`)
-            .join('\n');
-          if (contextText) {
+        const coordination = CoordinationService.getInstance();
+        if (coordination.isInitialized()) {
+          let rootSessionId = this.sessionId;
+          try { rootSessionId = sessionManager.getRootSession(this.sessionId).id; } catch {}
+          const batchSize = SettingsManager.getInstance().get<number>(
+            'coordination.messageBatchSize',
+            20,
+          );
+          const queued = coordination.pendingMessages(rootSessionId, this.agentId, batchSize);
+          for (const coordinationMessage of queued) {
+            const rendered = renderCoordinationMessage(coordinationMessage);
+            const persisted: Message = {
+              id: coordinationMessage.id,
+              sessionId: this.sessionId,
+              role: MessageRole.User,
+              content: rendered,
+              tokenCount: TokenCounter.estimate(rendered),
+              compressed: false,
+              timestamp: coordinationMessage.createdAt,
+              agentId: coordinationMessage.fromAgentId,
+            };
+            await sessionManager.appendMessage(this.sessionId, persisted);
             messages.push({
-              role: 'system',
-              content: `[Shared context updates from team]:\n${contextText}`,
+              role: 'user',
+              content: rendered,
+              __msgId: coordinationMessage.id,
             } as unknown as ApiMessage);
-            createLogger('anochat.agent').debug('Injected shared context into loop', {
-              sid: this.sessionId,
-              entryCount: newEntries.length,
-            });
+            await coordination.updateMessageStatus(
+              rootSessionId,
+              coordinationMessage.id,
+              'delivered',
+              this.agentId,
+            );
+            await coordination.updateMessageStatus(
+              rootSessionId,
+              coordinationMessage.id,
+              'acknowledged',
+              this.agentId,
+            );
+          }
+          const delivered = coordination.listMessages(rootSessionId, this.agentId)
+            .filter((message) => message.status === 'delivered')
+            .slice(0, Math.max(0, batchSize - queued.length));
+          for (const coordinationMessage of delivered) {
+            await coordination.updateMessageStatus(
+              rootSessionId,
+              coordinationMessage.id,
+              'acknowledged',
+              this.agentId,
+            );
           }
         }
-        lastSharedContextCheck = Date.now();
       }
 
-      // 3. Fallback: polling-based detection for externally-appended session messages
+      // Fallback: polling-based detection for externally-appended session messages
       const currentMsgCount = sessionManager.getMessageCount(this.sessionId);
       if (currentMsgCount > lastKnownMsgCount) {
         try {
@@ -740,6 +788,9 @@ export class AgentLoop {
       const sessionWorkspace = this.workspace
         || SessionManager.getInstance().session(this.sessionId)?.workspace
         || process.cwd();
+      const coordinationTask = CoordinationService.getInstance().isInitialized()
+        ? CoordinationService.getInstance().findTaskBySession(this.sessionId, true)
+        : undefined;
 
       try {
       for (const tc of toolCalls) {
@@ -837,6 +888,13 @@ export class AgentLoop {
             mode: this._toolExecutionMode(),
             callerRole: agent.role,
             signal: signal,
+            coordination: coordinationTask ? {
+              rootSessionId: coordinationTask.rootSessionId,
+              taskId: coordinationTask.id,
+              teamId: coordinationTask.teamId,
+              readOnly: coordinationTask.readOnly,
+              writeScope: [...coordinationTask.writeScope],
+            } : undefined,
           }, tc.id);
         } catch (err) {
           result = { success: false, content: '', errorMessage: `Tool crash: ${(err as Error).message}` };
@@ -1125,10 +1183,55 @@ export class AgentLoop {
   }
 }
 
+function renderCoordinationMessage(message: CoordinationMessage): string {
+  const task = message.taskId
+    ? CoordinationService.getInstance().findTask(message.taskId)
+    : undefined;
+  return [
+    [
+      `<coordination-event message-id="${message.id}"`,
+      `root-session-id="${message.rootSessionId}"`,
+      message.teamId ? `team-id="${message.teamId}"` : '',
+      message.taskId ? `task-id="${message.taskId}"` : '',
+      `from-agent="${message.fromAgentId}"`,
+      `to-agent="${message.toAgentId}"`,
+      task?.sessionId ? `session-id="${task.sessionId}"` : '',
+      `kind="${message.kind}">`,
+    ].filter(Boolean).join(' '),
+    message.summary ? `Summary: ${message.summary}` : '',
+    message.content,
+    '</coordination-event>',
+  ].filter(Boolean).join('\n');
+}
+
 function mergeAllowedToolNames(base: string[], extra: string[]): string[] {
   return uniqueToolNames([...(base || []), ...(extra || [])]);
 }
 
 function uniqueToolNames(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean)));
+}
+
+function applyCoordinationToolPolicy<T extends { name(): string }>(
+  tools: T[],
+  task?: CoordinationTask,
+): T[] {
+  if (!task) return tools;
+  const workspaceMutationTools = new Set([
+    'Write',
+    'Edit',
+    'NotebookEdit',
+    'Bash',
+    'RunProgram',
+  ]);
+  return tools.filter((tool) => {
+    const name = tool.name();
+    if (task.readOnly && workspaceMutationTools.has(name)) return false;
+    if (
+      !task.readOnly
+      && !task.writeScope.includes('.')
+      && (name === 'Bash' || name === 'RunProgram')
+    ) return false;
+    return true;
+  });
 }

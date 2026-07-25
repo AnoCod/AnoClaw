@@ -31,7 +31,6 @@ import { TypedEventBus } from '../../../events/TypedEventBus.js';
 function createMockRuntime(): AgentRuntime {
   return {
     processMessage: vi.fn(),
-    delegateTask: vi.fn(),
     spawnSubAgent: vi.fn(),
     isSessionActive: vi.fn(),
     cleanupSession: vi.fn(),

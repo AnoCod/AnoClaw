@@ -13,6 +13,7 @@ import { ClientLogger } from '../../ClientLogger.js';
 import { TalentPoolPanel } from './talent-pool/TalentPoolPanel.js';
 import { showHireDialog } from './talent-pool/HireDialog.js';
 import { showSaveToPoolDialog } from './talent-pool/SaveToPoolDialog.js';
+import { CoordinationStore } from '../../viewmodel/CoordinationStore.js';
 
 declare const d3: any;
 
@@ -75,6 +76,10 @@ export class AgentsPage implements Page {
 
   // Guard: prevent double reload when save triggers agentsChanged
   private _reloading = false;
+  private _coordination = CoordinationStore.getInstance();
+  private _onCoordinationChanged = () => {
+    if (this._active) this._renderAll();
+  };
 
   // Pending create defaults (from ghost button click)
   private _createDefaults: { parentAgentId: string; role: string } | null = null;
@@ -129,11 +134,15 @@ export class AgentsPage implements Page {
     this.container.addEventListener('wheel', this._onWheel, { passive: false });
     this._load();
     App.getInstance().agentVM.on('agentsChanged', this._onAgentsChanged);
+    this._coordination.on('changed', this._onCoordinationChanged);
+    const activeSessionId = App.getInstance().conversationVM.getActiveSessionId();
+    if (activeSessionId) void this._coordination.loadForSession(activeSessionId);
   }
 
   onExit(): void {
     this._active = false;
     App.getInstance().agentVM.off('agentsChanged', this._onAgentsChanged);
+    this._coordination.off('changed', this._onCoordinationChanged);
     this.container.removeEventListener('wheel', this._onWheel);
     this._savePositions();
     if (this._sim) { this._sim.stop(); this._sim = null; }
@@ -458,6 +467,14 @@ export class AgentsPage implements Page {
           }
         });
       } else {
+        const activeSessionId = App.getInstance().conversationVM.getActiveSessionId();
+        const coordination = activeSessionId
+          ? this._coordination.stateForSession(activeSessionId)
+          : undefined;
+        const activeTeam = coordination?.teams.find((team) => team.state === 'active');
+        const coordinatedTask = coordination?.tasks.find(
+          (task) => task.assigneeAgentId === n.id && !['completed', 'failed', 'cancelled'].includes(task.status),
+        );
         const style = n.agent ? (ROLE_STYLES[n.agent.role] || DEFAULT_STYLE) : DEFAULT_STYLE;
         const issue = n.agent ? App.getInstance().agentVM.agentRunnableProblem(n.agent) : null;
         if (issue) {
@@ -495,6 +512,19 @@ export class AgentsPage implements Page {
           marker.setAttribute('y', String(-style.r + 5));
           marker.textContent = '!';
           g.appendChild(marker);
+        }
+        if (activeTeam?.memberAgentIds.includes(n.id)) {
+          const badge = document.createElementNS(svgNS, 'text');
+          badge.setAttribute('class', `ag-team-badge ag-team-badge-${coordinatedTask?.status || 'idle'}`);
+          badge.setAttribute('x', String(style.r + 7));
+          badge.setAttribute('y', String(-style.r - 2));
+          badge.textContent = coordinatedTask ? coordinatedTask.status.toUpperCase() : 'TEAM';
+          const badgeTitle = document.createElementNS(svgNS, 'title');
+          badgeTitle.textContent = coordinatedTask
+            ? `${activeTeam.name}: ${coordinatedTask.subject} (${coordinatedTask.status})`
+            : `${activeTeam.name}: idle`;
+          badge.appendChild(badgeTitle);
+          g.appendChild(badge);
         }
         const lbl = document.createElementNS(svgNS, 'text');
         lbl.setAttribute('class', 'ag-node-label'); lbl.setAttribute('text-anchor', 'middle');

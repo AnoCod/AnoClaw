@@ -10,8 +10,7 @@
  */
 
 import type { AgentRuntime } from './AgentRuntime.js';
-import type { Message, SessionNode } from '../../../shared/types/session.js';
-import type { SessionType, SessionStatus } from '../../../shared/types/session.js';
+import type { Message } from '../../../shared/types/session.js';
 import { MessageRole } from '../../../shared/types/session.js';
 import type { SubAgentConfig } from '../../../shared/types/agent.js';
 import type { AgentConfigWithKey } from './AgentConfig.js';
@@ -26,8 +25,14 @@ import { createLogger } from '../logger.js';
 import { TypedEventBus } from '../events/index.js';
 import { WsServer } from '../../infra/network/WsServer.js';
 import { TokenCounter } from '../context/index.js';
-import { messageToJsonlEvents } from '../../../shared/serialization/jsonl-converters.js';
 import type { SessionTurnRecorder } from '../../infra/SessionTurnRecorder.js';
+import { CoordinationService } from '../coordination/CoordinationService.js';
+import { SettingsManager } from '../../infra/storage/SettingsManager.js';
+import { PromptAssembler } from '../prompt/PromptAssembler.js';
+import {
+  InterruptController,
+  InterruptReason,
+} from './supervision/InterruptController.js';
 
 // ── SubAgent tool filtering ──
 
@@ -290,7 +295,11 @@ export async function spawnSubAgent(
     agentPrompt: config.prompt,
     preferredLanguage: 'en' as const,
     conversationLanguage: 'en' as const,
-    allowedTools: subAgentAllowedTools(runtime, config.subagent_type),
+    allowedTools: config.readOnly
+      ? subAgentAllowedTools(runtime, config.subagent_type).filter((name) =>
+        ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'EnterPlanMode', 'TodoWrite'].includes(name),
+      )
+      : subAgentAllowedTools(runtime, config.subagent_type),
     enabledSkills: [],
     mcpServers: [],
     state: AgentState.Active,
@@ -302,62 +311,137 @@ export async function spawnSubAgent(
   // Register temporarily
   registry.registerAgent(subAgent);
 
-  // ── Create session — persist creates disk-only record, no in-memory tree ──
+  // ── Create a real scoped session. The Agent is ephemeral; the transcript is durable. ──
   let subSessionId = `temp-${tempId}`;
   let recorder: SessionTurnRecorder | null = null;
+  let coordinationHeartbeat: ReturnType<typeof setInterval> | null = null;
+  let coordinationTimeout: ReturnType<typeof setTimeout> | null = null;
+  let coordinationTimeoutError = '';
+  let coordinationTask = config.coordinationTaskId && parentSessionId
+    ? CoordinationService.getInstance().getTask(
+      SessionManager.getInstance().getRootSession(parentSessionId).id,
+      config.coordinationTaskId,
+    )
+    : undefined;
 
-  if (config.persist && parentSessionId) {
+  if (parentSessionId) {
     try {
       const { SessionTurnRecorder } = await import('../../infra/SessionTurnRecorder.js');
-      const { SessionStore } = await import('../session/SessionStore.js');
-      const store = SessionStore.getInstance();
-      const diskSessionId = `sub-${parentSessionId}-${Date.now().toString(36)}`;
-      const parentLevel = SessionManager.getInstance().session(parentSessionId)?.level ?? 0;
-      const createdAt = new Date().toISOString();
-
-      // Write minimal session meta to disk (discoverable via SessionStore, no UI tree)
-      await store.writeSessionMeta(diskSessionId, {
-        sessionId: diskSessionId,
+      const session = await SessionManager.getInstance().createSubSession(
         parentSessionId,
-        level: parentLevel + 1,
-        agentId: tempId,
-        type: 'Sub' as SessionType,
-        status: 'Active' as SessionStatus,
-        title: `SubAgent: ${config.description?.slice(0, 60) || config.subagent_type}`,
-        workspace: SessionManager.getInstance().session(parentSessionId)?.workspace || '',
-        createdAt,
-        lastActiveAt: createdAt,
-        subSessionIds: [],
-        metadata: {
-          subagentType: config.subagent_type,
-          callerAgentId,
-          taskDescription: (config.description || config.prompt).slice(0, 200),
-          tempAgentId: tempId,
+        tempId,
+        `SubAgent: ${config.description?.slice(0, 60) || config.subagent_type}`,
+        {
+          scopeId: `ephemeral-${config.coordinationTaskId || tempId}`,
+          metadata: {
+            subagentType: config.subagent_type,
+            callerAgentId,
+            taskDescription: (config.description || config.prompt).slice(0, 200),
+            tempAgentId: tempId,
+            coordinationTaskId: config.coordinationTaskId,
+            coordinationRootSessionId: coordinationTask?.rootSessionId,
+            contextMode: config.contextMode || 'summary',
+          },
         },
-      } as SessionNode);
-      await store.appendEvents(diskSessionId, [{
-        type: 'session_created',
-        uuid: `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-        parentUuid: null,
-        sessionId: diskSessionId,
-        agentId: tempId,
-        parentSessionId,
-        timestamp: createdAt,
-      }], { messageDelta: 0 });
+      );
+      subSessionId = session.id;
+      recorder = new SessionTurnRecorder(
+        subSessionId,
+        tempId,
+        `msg-sub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      );
 
-      subSessionId = diskSessionId;
+      if (coordinationTask) {
+        const service = CoordinationService.getInstance();
+        coordinationTask = await service.assignTask(
+          coordinationTask.rootSessionId,
+          coordinationTask.id,
+          tempId,
+          callerAgentId || tempId,
+          coordinationTask.version,
+        );
+        if (!coordinationTask.readOnly) {
+          const root = SessionManager.getInstance().getRootSession(parentSessionId);
+          const lease = await service.acquireTaskLease(
+            coordinationTask.rootSessionId,
+            coordinationTask.id,
+            root.workspace,
+            SettingsManager.getInstance().get<number>('coordination.workspaceLeaseTtlMs', 30_000),
+          );
+          if (!lease) throw new Error('SubAgent workspace is blocked by another task lease');
+        }
+        coordinationTask = await service.claimTask(
+          coordinationTask.rootSessionId,
+          coordinationTask.id,
+          tempId,
+          coordinationTask.version,
+        );
+        coordinationTask = await service.updateTask(
+          coordinationTask.rootSessionId,
+          coordinationTask.id,
+          {
+            status: 'running',
+            sessionId: subSessionId,
+            heartbeatAt: new Date().toISOString(),
+            progress: 0,
+          },
+          tempId,
+          coordinationTask.version,
+        );
+        const leaseTtlMs = SettingsManager.getInstance().get<number>(
+          'coordination.workspaceLeaseTtlMs',
+          30_000,
+        );
+        const maxRuntimeMs = SettingsManager.getInstance().get<number>(
+          'coordination.maxTaskRuntimeMs',
+          600_000,
+        );
+        coordinationHeartbeat = setInterval(() => {
+          const current = service.getTask(coordinationTask!.rootSessionId, coordinationTask!.id);
+          if (current?.status !== 'running') return;
+          void service.renewTaskLeases(current.rootSessionId, current.id, leaseTtlMs, tempId)
+            .catch(() => {});
+          void service.updateTask(current.rootSessionId, current.id, {
+            heartbeatAt: new Date().toISOString(),
+          }, tempId).catch(() => {});
+        }, Math.max(1_000, Math.min(5_000, Math.floor(leaseTtlMs / 2))));
+        coordinationTimeout = setTimeout(() => {
+          coordinationTimeoutError = `SubAgent coordination task timed out after ${maxRuntimeMs}ms`;
+          InterruptController.getInstance().requestInterrupt(subSessionId, InterruptReason.Timeout);
+        }, maxRuntimeMs);
+      }
 
-      // Create the shared turn recorder for per-event JSONL persistence.
-      const turnMsgId = `msg-sub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      recorder = new SessionTurnRecorder(subSessionId, tempId, turnMsgId);
-
-      logger.debug('SubAgent persistent session created', { subSessionId, parentSessionId, tempId });
+      logger.debug('SubAgent durable session created', { subSessionId, parentSessionId, tempId });
     } catch (err) {
-      logger.warn('Failed to create persistent sub-session, falling back to temp', {
+      logger.warn('Failed to create SubAgent session', {
         tempId,
         error: (err as Error).message,
       });
-      subSessionId = `temp-${tempId}`;
+      if (coordinationTask) {
+        const current = CoordinationService.getInstance().getTask(coordinationTask.rootSessionId, coordinationTask.id);
+        if (current && !['completed', 'failed', 'cancelled'].includes(current.status)) {
+          await CoordinationService.getInstance().updateTask(current.rootSessionId, current.id, {
+            status: current.status === 'running' ? 'failed' : 'cancelled',
+            error: (err as Error).message,
+          }, callerAgentId || tempId).catch(() => {});
+        }
+      }
+      subAgent.setState(AgentState.Destroyed);
+      registry.unregisterAgent(tempId);
+      return {
+        toolCallId: `subagent-${tempId}`,
+        success: false,
+        content: '',
+        errorMessage: `Failed to create durable SubAgent session: ${(err as Error).message}`,
+        tokensUsed: 0,
+        startedAt,
+        finishedAt: Date.now(),
+        durationMs: Date.now() - startedAt,
+        wasTruncated: false,
+        structured: {
+          coordinationTaskId: config.coordinationTaskId,
+        },
+      };
     }
   }
 
@@ -379,32 +463,44 @@ export async function spawnSubAgent(
     compressed: false,
     timestamp: new Date().toISOString(),
   };
-  if (recorder) {
-    const { SessionStore } = await import('../session/SessionStore.js');
-    const store = SessionStore.getInstance();
-    await store.appendEvents(
-      subSessionId,
-      messageToJsonlEvents(taskMessage, '00000000-0000-0000-0000-000000000000'),
-      { messageDelta: 1 },
-    );
-  }
+  if (parentSessionId) await SessionManager.getInstance().appendMessage(subSessionId, taskMessage);
+
+  const parentHistory = parentSessionId
+    ? await SessionManager.getInstance().getHistory(parentSessionId).catch(() => [] as Message[])
+    : [];
+  const history = config.contextMode === 'fork'
+    ? parentHistory
+    : config.contextMode === 'isolated'
+      ? []
+      : parentHistory.slice(-8);
+  const forkedSystemPrompt = config.contextMode === 'fork' && parentSessionId && callerAgentId
+    ? PromptAssembler.getInstance().buildEffectivePrompt(callerAgentId, parentSessionId)
+    : undefined;
 
   let fullContent = '';
   let turnCount = 0;
+  let tokenUsage = 0;
 
   try {
     for await (const event of runtime.processMessage(
       subSessionId,
       tempId,
       taskMessage,
-      [],
-      { permissionMode: 'AutoEdit', effort: 'HIGH' },
+      history,
+      {
+        permissionMode: 'AutoEdit',
+        effort: 'HIGH',
+        ...(forkedSystemPrompt ? { systemPromptOverride: forkedSystemPrompt } : {}),
+      },
     )) {
       if (event.type === SSEEventType.Text) {
         fullContent += (event.content as string) || '';
       }
       if (event.type === 'tool_call') {
         turnCount++;
+      }
+      if (event.type === SSEEventType.Done) {
+        tokenUsage = Number((event.tokenUsage as { total?: number } | undefined)?.total || 0);
       }
       // ── Bubble progress to parent ──
       if (parentSessionId && BUBBLE_TYPES.has(event.type)) {
@@ -415,6 +511,7 @@ export async function spawnSubAgent(
         await recorder.record(event, 'subagent');
       }
     }
+    if (coordinationTimeoutError) throw new Error(coordinationTimeoutError);
     await recorder?.finalize();
 
     const durationMs = Date.now() - startedAt;
@@ -429,11 +526,31 @@ export async function spawnSubAgent(
       });
     }
 
+    if (coordinationTask) {
+      const latest = CoordinationService.getInstance().getTask(coordinationTask.rootSessionId, coordinationTask.id);
+      if (latest?.status === 'running') {
+        coordinationTask = await CoordinationService.getInstance().updateTask(
+          latest.rootSessionId,
+          latest.id,
+          {
+            status: 'completed',
+            progress: 100,
+            resultSummary: fullContent.trim().slice(0, 2_000) || 'SubAgent completed without text output.',
+            outputRef: `session:${subSessionId}`,
+            evidence: [`Session transcript: ${subSessionId}`, `Turns: ${turnCount}`],
+            tokenUsage,
+          },
+          tempId,
+          latest.version,
+        );
+      }
+    }
+
     return {
       toolCallId: `subagent-${tempId}`,
       success: true,
       content: fullContent,
-      structured: { subSessionId },
+      structured: { subSessionId, taskId: coordinationTask?.id },
       tokensUsed: Math.ceil(fullContent.length / 4),
       startedAt,
       finishedAt: Date.now(),
@@ -459,11 +576,30 @@ export async function spawnSubAgent(
       });
     }
 
+    if (coordinationTask) {
+      const latest = CoordinationService.getInstance().getTask(coordinationTask.rootSessionId, coordinationTask.id);
+      if (latest?.status === 'running') {
+        await CoordinationService.getInstance().updateTask(
+          latest.rootSessionId,
+          latest.id,
+          {
+            status: 'failed',
+            error: errorMessage.slice(0, 2_000),
+            resultSummary: fullContent.trim().slice(0, 2_000) || undefined,
+            outputRef: `session:${subSessionId}`,
+            tokenUsage,
+          },
+          tempId,
+          latest.version,
+        ).catch(() => {});
+      }
+    }
+
     return {
       toolCallId: `subagent-${tempId}`,
       success: false,
       content: fullContent,
-      structured: { subSessionId },
+      structured: { subSessionId, taskId: coordinationTask?.id },
       errorMessage,
       tokensUsed: Math.ceil(fullContent.length / 4),
       startedAt,
@@ -472,7 +608,16 @@ export async function spawnSubAgent(
       wasTruncated: false,
     };
   } finally {
-    // Always destroy the SubAgent — session data persists separately (if persist=true)
+    if (coordinationHeartbeat) clearInterval(coordinationHeartbeat);
+    if (coordinationTimeout) clearTimeout(coordinationTimeout);
+    if (coordinationTask) {
+      await CoordinationService.getInstance().releaseTaskLeases(
+        coordinationTask.rootSessionId,
+        coordinationTask.id,
+        tempId,
+      ).catch(() => {});
+    }
+    // Always destroy the SubAgent; durable Task and transcript remain.
     logger.debug('SubAgent destroyed', { tempId, type: config.subagent_type });
     subAgent.setState(AgentState.Destroyed);
     registry.unregisterAgent(tempId);

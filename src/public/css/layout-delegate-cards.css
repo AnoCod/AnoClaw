@@ -105,7 +105,7 @@
   to { transform: rotate(360deg); }
 }
 
-/* Background Tasks Panel */
+/* Legacy process-job cards used inside Team Cockpit */
 .task-panel-card[data-status="running"] { border-left-color: #60a5fa; }
 .task-panel-card[data-status="completed"] { border-left-color: #4ade80; }
 .task-panel-card[data-status="failed"] { border-left-color: #f87171; }

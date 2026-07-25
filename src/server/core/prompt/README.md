@@ -70,7 +70,7 @@ enum CacheScope {
 }
 ```
 
-## 21 Sections (Priority Order)
+## Prompt Sections (Priority Order)
 
 | # | Section | Priority | Zone | Description |
 |---|---------|----------|------|-------------|
@@ -82,11 +82,11 @@ enum CacheScope {
 | 6 | ToolUsageSection | 50 | static | Tool usage rules |
 | 7 | OutputEfficiencySection | 70 | static | Output efficiency rules |
 | 8 | OrgContextSection | 80 | dynamic | Org tree + agent relationships |
-| 9 | UserAwarenessSection | 82 | dynamic | User context awareness |
-| 10 | EditorContextSection | 83 | dynamic | Editor/file state |
-| 11 | ActiveTaskSection | 84 | dynamic | Current active tasks |
-| 12 | SessionGuidanceSection | 90 | dynamic | Session-level guidance |
-| 13 | DelegationContextSection | 100 | dynamic | Delegation rules + state |
+| 9 | CoordinationSection | 82 | dynamic | Team coordinator/member protocol and current task packet |
+| 10 | UserAwarenessSection | 82 | dynamic | User context awareness |
+| 11 | EditorContextSection | 83 | dynamic | Editor/file state |
+| 12 | ActiveTaskSection | 84 | dynamic | Durable coordination tasks and process jobs |
+| 13 | SessionGuidanceSection | 90 | dynamic | Session-level guidance |
 | 14 | MemorySection | 110 | dynamic | Injected memories |
 | 15 | EnvironmentSection | 120 | dynamic | Platform, OS, shell info |
 | 16 | LanguageSection | 130 | static | Response language preference |

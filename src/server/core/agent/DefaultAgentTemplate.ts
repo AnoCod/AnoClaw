@@ -31,44 +31,81 @@ export const DEFAULT_CORE_TOOLS = [
   'Skill',
 ];
 
-export const DEFAULT_CEO_TOOLS = [
-  ...DEFAULT_CORE_TOOLS,
-  'AskUserQuestion',
-  'ListEmployees',
-  'HireEmployee',
+export const DEFAULT_COORDINATION_TOOLS = [
+  'TeamCreate',
+  'TeamUpdate',
+  'TeamStatus',
+  'TeamDelete',
+  'TaskCreate',
   'TaskAssign',
+  'TaskClaim',
+  'TaskUpdate',
+  'TaskGet',
   'TaskList',
   'TaskOutput',
   'TaskStop',
   'AgentMessage',
-  'UpdateOrg',
   'SubAgentSpawn',
-  'SubAgentDelete',
+  'JobList',
+  'JobOutput',
+  'JobStop',
+];
+
+export const DEFAULT_CEO_TOOLS = [
+  ...DEFAULT_CORE_TOOLS,
+  ...DEFAULT_COORDINATION_TOOLS,
+  'AskUserQuestion',
+  'ListEmployees',
+  'HireEmployee',
+  'UpdateOrg',
   'ApiCall',
 ];
 
 export const DEFAULT_MANAGER_TOOLS = [
   ...DEFAULT_CORE_TOOLS,
+  ...DEFAULT_COORDINATION_TOOLS,
   'ListEmployees',
   'HireEmployee',
+  'UpdateOrg',
+];
+
+export const DEFAULT_MEMBER_TOOLS = [
+  ...DEFAULT_CORE_TOOLS,
+  ...DEFAULT_COORDINATION_TOOLS,
+];
+
+const LEGACY_COORDINATION_TOOLS = new Set([
   'TaskAssign',
   'TaskList',
   'TaskOutput',
   'TaskStop',
   'AgentMessage',
-  'UpdateOrg',
   'SubAgentSpawn',
   'SubAgentDelete',
-];
+]);
 
-export const DEFAULT_MEMBER_TOOLS = [
-  ...DEFAULT_CORE_TOOLS,
-  'TaskList',
-  'TaskOutput',
-  'AgentMessage',
-  'SubAgentSpawn',
-  'SubAgentDelete',
-];
+/**
+ * One-time contract migration for agents that already opted into the legacy
+ * delegation tool family. Explicitly restricted agents without those tools
+ * remain restricted.
+ */
+export function migrateCoordinationToolAllowlist(
+  config: AgentConfigWithKey,
+): { config: AgentConfigWithKey; changed: boolean } {
+  if (!config.allowedTools.some((name) => LEGACY_COORDINATION_TOOLS.has(name))) {
+    return { config, changed: false };
+  }
+  const allowedTools = [...new Set([
+    ...config.allowedTools.filter((name) => name !== 'SubAgentDelete'),
+    ...DEFAULT_COORDINATION_TOOLS,
+  ])];
+  const changed = allowedTools.length !== config.allowedTools.length
+    || allowedTools.some((name, index) => name !== config.allowedTools[index]);
+  return {
+    config: changed ? { ...config, allowedTools } : config,
+    changed,
+  };
+}
 
 export const DEFAULT_CEO_SKILLS = [
   'writing-plans',

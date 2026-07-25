@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
 import { BackgroundTaskManager, type BackgroundTaskResultSnapshot } from '../../agent/supervision/BackgroundTaskManager.js';
 import { RunProgramTool } from '../builtin/RunProgramTool.js';
-import { TaskStopTool } from '../builtin/TaskStopTool.js';
+import { JobStopTool } from '../builtin/JobStopTool.js';
 
 let tempDirs: string[] = [];
 
@@ -142,12 +142,12 @@ describe('RunProgramTool', () => {
       awaitCompletion: false,
     });
 
-    const stopped = await new TaskStopTool().execute({ taskId }, ctx(workspace));
+    const stopped = await new JobStopTool().execute({ jobId: taskId }, ctx(workspace));
     expect(stopped.success).toBe(true);
     expect(stopped.structured).toMatchObject({
-      taskId,
+      jobId: taskId,
       type: 'program',
-      killedProcess: true,
+      processKilled: true,
     });
 
     const recent = await waitForRecentTaskResult(taskId);

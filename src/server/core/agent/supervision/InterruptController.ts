@@ -40,7 +40,7 @@ export class InterruptController {
   private _controllers: Map<string, AbortController> = new Map();
   private _reasons: Map<string, InterruptReason> = new Map();
   private _parentMap: Map<string, string> = new Map();
-  private _pendingMessages: Map<string, string> = new Map();
+  private _pendingMessages: Map<string, string[]> = new Map();
 
   private constructor() {
   }
@@ -155,16 +155,24 @@ export class InterruptController {
   }
 
   setPendingUserMessage(sessionId: string, content: string): void {
-    this._pendingMessages.set(sessionId, content);
+    const queue = this._pendingMessages.get(sessionId) || [];
+    queue.push(content);
+    this._pendingMessages.set(sessionId, queue);
   }
 
   takePendingUserMessage(sessionId: string): string | null {
-    const msg = this._pendingMessages.get(sessionId) || null;
-    this._pendingMessages.delete(sessionId);
-    return msg;
+    const queue = this._pendingMessages.get(sessionId);
+    if (!queue?.length) return null;
+    const message = queue.shift()!;
+    if (queue.length === 0) this._pendingMessages.delete(sessionId);
+    return message;
   }
 
   hasPendingUserMessage(sessionId: string): boolean {
-    return this._pendingMessages.has(sessionId);
+    return (this._pendingMessages.get(sessionId)?.length || 0) > 0;
+  }
+
+  pendingMessageCount(sessionId: string): number {
+    return this._pendingMessages.get(sessionId)?.length || 0;
   }
 }

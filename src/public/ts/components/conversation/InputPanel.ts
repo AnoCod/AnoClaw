@@ -250,9 +250,11 @@ export class InputPanel {
     input.multiple = true;
     input.style.display = 'none';
 
+    let cleanedUp = false;
     const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
       input.remove();
-      window.removeEventListener('focus', cleanup);
     };
 
     input.addEventListener('change', () => {
@@ -282,8 +284,7 @@ export class InputPanel {
       cleanup();
     });
 
-    // Also cleanup when user cancels (window regains focus without change event)
-    window.addEventListener('focus', cleanup, { once: true });
+    input.addEventListener('cancel', cleanup, { once: true });
     document.body.appendChild(input);
     input.click();
   }
@@ -846,7 +847,10 @@ export class InputPanel {
 
     const args = rawArgs ? { raw: rawArgs } : undefined;
     ClientLogger.ui.debug('Slash command run', { command });
-    App.getInstance().conversationVM.runCommand(command, args);
+    const sent = App.getInstance().conversationVM.runCommand(command, args);
+    if (!sent) {
+      ToastManager.getInstance().error('Select a connected session before running a command.');
+    }
     return true;
   }
 

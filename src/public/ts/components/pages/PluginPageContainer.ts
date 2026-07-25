@@ -3,7 +3,6 @@
 
 import type { Page, PluginPageContribution } from '../../types.js';
 import { ConfirmDialog } from '../ConfirmDialog.js';
-import { pageRegistry } from '../../PageRegistry.js';
 
 export class PluginPageContainer implements Page {
   readonly name: string;
@@ -60,11 +59,9 @@ export class PluginPageContainer implements Page {
       try {
         const { App } = await import('../../app.js');
         const app = App.getInstance();
-        app.sessionVM.selectSession(sessionId);
-        app.conversationVM.setActiveSession(sessionId);
-        pageRegistry.navigateTo('sessions');
-        const sessionsPage = pageRegistry.getPage('sessions') as { injectInput?: (text: string) => void } | undefined;
-        sessionsPage?.injectInput?.(prompt);
+        if (!app.handoffToSession(sessionId, prompt)) {
+          throw new Error('The requested session is not available.');
+        }
         iframe.contentWindow.postMessage({
           type: 'anoclaw:session:handoff-result',
           id: e.data.id,

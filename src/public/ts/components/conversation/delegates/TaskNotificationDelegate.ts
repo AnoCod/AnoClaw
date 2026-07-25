@@ -14,12 +14,12 @@ export interface TaskNotificationData {
 export class TaskNotificationDelegate {
   element: HTMLElement;
 
-  constructor(data: TaskNotificationData) {
+  constructor(data: TaskNotificationData, options: { notify?: boolean } = {}) {
     this.element = this._build(data);
 
-    // Fire desktop notification
+    // Desktop notifications are only for newly-arrived live events, never history replay.
     const w = window as any;
-    if (w.electronAPI?.showNotification) {
+    if (options.notify && w.electronAPI?.showNotification) {
       const title = data.status === 'completed'
         ? `Completed: ${data.summary}`
         : `Failed: ${data.summary}`;
@@ -41,9 +41,15 @@ export class TaskNotificationDelegate {
       const agentName = data.subAgentId || 'sub-agent';
       header.textContent = `${status === 'completed' ? 'Task completed' : 'Task failed'}: ${agentName} — ${data.summary}`;
     }
+    let body = this.element.querySelector<HTMLElement>('.task-notification-body');
     if (data.result) {
-      const body = this.element.children[1] as HTMLElement | null;
-      if (body) body.textContent = data.result.slice(0, 500);
+      if (!body) {
+        body = this._buildBody();
+        this.element.appendChild(body);
+      }
+      body.textContent = data.result.slice(0, 500);
+    } else if (body) {
+      body.remove();
     }
   }
 
@@ -77,16 +83,22 @@ export class TaskNotificationDelegate {
     wrapper.appendChild(header);
 
     if (data.result) {
-      const body = document.createElement('div');
-      body.style.cssText = `
-        color: var(--color-text-secondary, #aaa);
-        font-size: 12px; max-height: 120px; overflow-y: auto;
-        white-space: pre-wrap; word-break: break-word;
-      `;
+      const body = this._buildBody();
       body.textContent = data.result.slice(0, 500);
       wrapper.appendChild(body);
     }
 
     return wrapper;
+  }
+
+  private _buildBody(): HTMLElement {
+    const body = document.createElement('div');
+    body.className = 'task-notification-body';
+    body.style.cssText = `
+      color: var(--color-text-secondary, #aaa);
+      font-size: 12px; max-height: 120px; overflow-y: auto;
+      white-space: pre-wrap; word-break: break-word;
+    `;
+    return body;
   }
 }

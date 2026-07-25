@@ -29,6 +29,7 @@ export class SessionViewModel extends EventEmitter {
     this.sessions.on('sessionAdded', (node: unknown) => { this.emit('sessionAdded', node); });
     this.sessions.on('sessionUpdated', (node: unknown) => { this.emit('sessionUpdated', node); });
     this.sessions.on('sessionRemoved', (node: unknown) => { this.emit('sessionRemoved', node); });
+    this.sessions.on('sessionsCleared', () => { this.emit('sessionsCleared'); });
 
     // Listen for session title changes via WebSocket (e.g. CEO renames a session)
     this._sseClient.on('session_title_changed', (data: unknown) => {
@@ -51,7 +52,7 @@ export class SessionViewModel extends EventEmitter {
     this._sseClient.on('session_hard_deleted', (data: unknown) => {
       const d = data as { sessionId: string };
       if (d.sessionId) {
-        this.sessions.removeSession(d.sessionId);
+        this._removeSessionTree(d.sessionId);
       }
     });
   }
@@ -87,11 +88,18 @@ export class SessionViewModel extends EventEmitter {
       const resp = await fetch('/api/v1/sessions');
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const raw = await resp.json(); const data: SessionNode[] = Array.isArray(raw) ? raw : (raw.sessions || []);
+      const previousIds = new Set(this.sessions.all.map((session) => session.id));
+      const nextIds = new Set(data.map((session) => session.id));
       // Rebuild the tree from scratch
       this.sessions.clear();
       for (const node of data) {
         this.sessions.addSession(node);
       }
+      const removedIds = Array.from(previousIds).filter((id) => !nextIds.has(id));
+      if (this.activeSessionId && !nextIds.has(this.activeSessionId)) {
+        this._deselectActiveSession();
+      }
+      if (removedIds.length > 0) this.emit('sessionsRemoved', removedIds);
       this.emit('sessionsLoaded', this.sessions.tree);
       ClientLogger.vm.info('Sessions loaded', { count: this.sessions.tree.length });
     } catch (e) {
@@ -150,12 +158,7 @@ export class SessionViewModel extends EventEmitter {
     try {
       const resp = await fetch(`/api/v1/sessions/${id}`, { method: 'DELETE' });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      this.sessions.removeSession(id);
-      if (this.activeSessionId === id) {
-        this.activeSessionId = null;
-        try { localStorage.removeItem(ACTIVE_SESSION_KEY); } catch (_) { /* ignore */ }
-        this.emit('sessionDeselected');
-      }
+      this._removeSessionTree(id);
       this.emit('sessionArchived', id);
       ClientLogger.vm.info('Session archived', { sid: id });
       return true;
@@ -200,5 +203,22 @@ export class SessionViewModel extends EventEmitter {
       }
     } catch (_) { /* ignore */ }
     return false;
+  }
+
+  private _removeSessionTree(id: string): string[] {
+    const removedIds = this.sessions.removeSession(id);
+    if (removedIds.length === 0) return removedIds;
+    if (this.activeSessionId && removedIds.includes(this.activeSessionId)) {
+      this._deselectActiveSession();
+    }
+    this.emit('sessionsRemoved', removedIds);
+    return removedIds;
+  }
+
+  private _deselectActiveSession(): void {
+    if (this.activeSessionId === null) return;
+    this.activeSessionId = null;
+    try { localStorage.removeItem(ACTIVE_SESSION_KEY); } catch (_) { /* ignore */ }
+    this.emit('sessionDeselected');
   }
 }

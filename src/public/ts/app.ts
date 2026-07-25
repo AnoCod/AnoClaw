@@ -100,6 +100,7 @@ class App {
   private _agentVM: AgentViewModel;
   private _titleBar: TitleBar;
   private _pluginVM: PluginViewModel;
+  private _sessionsPage: SessionsPage | null = null;
   private _registeredPluginPages: string[] = [];
   private _pendingNav: string | null = null;
   private _floatingBallStateTimer: ReturnType<typeof setTimeout> | null = null;
@@ -156,6 +157,14 @@ class App {
     this._sessionVM.on('sessionSelected', (node: unknown) => {
       const n = node as { id: string };
       this._conversationVM.setActiveSession(n.id);
+    });
+    this._sessionVM.on('sessionDeselected', () => {
+      this._conversationVM.setActiveSession(null);
+    });
+    this._sessionVM.on('sessionsRemoved', (removed: unknown) => {
+      for (const sessionId of removed as string[]) {
+        this._conversationVM.removeAgent(sessionId);
+      }
     });
 
     // Load sessions first — restoreActiveSession picks up last open session
@@ -311,6 +320,14 @@ class App {
 
   get agentVM(): AgentViewModel {
     return this._agentVM;
+  }
+
+  /** Select a mounted session and place a prompt into its composer. */
+  handoffToSession(sessionId: string, prompt: string): boolean {
+    if (!this._sessionsPage || !this._sessionVM.sessions.getById(sessionId)) return false;
+    this._sessionVM.selectSession(sessionId);
+    this._sessionsPage.injectInput(prompt);
+    return true;
   }
 
   // -- Settings --
@@ -482,10 +499,10 @@ class App {
     if (handle && pageArea) this._wireSplitHandle(handle, pageArea);
 
     // SessionsPage lives in right panel, always visible — never registered in pageRegistry
-    const sessionsPage = new SessionsPage();
-    sessionsPanel.appendChild(sessionsPage.container);
+    this._sessionsPage = new SessionsPage();
+    sessionsPanel.appendChild(this._sessionsPage.container);
     // Call onEnter-style setup once (SessionsPage no longer managed by PageRegistry lifecycle)
-    sessionsPage.onEnter();
+    this._sessionsPage.onEnter();
 
     // Left panel pages — managed by PageRegistry hide/show
     const pages = [
@@ -1120,8 +1137,8 @@ class App {
     this.navigateTo('sessions');
     this._sessionVM.selectSession(sessionId);
     const agent = this._conversationVM.getAgent(sessionId);
-    await agent.sendMessage(content, this._conversationVM.permissionMode, this._conversationVM.effortMode, []);
-    return sessionId;
+    const sent = await agent.sendMessage(content, this._conversationVM.permissionMode, this._conversationVM.effortMode, []);
+    return sent ? sessionId : null;
   }
 
   private async _ensureFloatingBallSession(preferredSessionId?: string | null): Promise<string | null> {

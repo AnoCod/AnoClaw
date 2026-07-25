@@ -98,8 +98,14 @@ export class RightEdgeBar {
     void n;
   }
 
-  setContextPct(pct: number): void {
+  setContextPct(pct: number | null): void {
     if (this._contextText) {
+      if (pct === null || !Number.isFinite(pct)) {
+        this._contextText.textContent = '--';
+        this._contextText.style.borderColor = 'var(--cinema-text-muted)';
+        this._contextText.style.color = 'var(--cinema-text-muted)';
+        return;
+      }
       this._contextText.textContent = String(Math.round(pct));
       if (pct > 80) {
         this._contextText.style.borderColor = 'var(--color-warning, #ffc533)';
@@ -193,7 +199,7 @@ export class RightEdgeBar {
     const tip = document.createElement('div');
     tip.className = 'context-tooltip-popover';
 
-    const pct = breakdown.total > 0
+    const pct = breakdown.total > 0 && breakdown.contextWindow > 0
       ? Math.round((breakdown.total / breakdown.contextWindow) * 100) : 0;
 
     const fmt = (n: number): string => {

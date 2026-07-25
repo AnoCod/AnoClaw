@@ -518,9 +518,9 @@ export class SessionAgent extends EventEmitter {
     effortMode: boolean,
     attachments: { name: string; path: string; type: string; size: number; content?: string }[],
     options: { internalGoal?: boolean } = {},
-  ): Promise<void> {
-    if (!inputValue.trim() && attachments.length === 0) return;
-    if (this._sendingLock) return;
+  ): Promise<boolean> {
+    if (!inputValue.trim() && attachments.length === 0) return false;
+    if (this._sendingLock) return false;
 
     console.log('[SessionAgent] sendMessage', { sessionId: this.sessionId, inputLen: inputValue.length });
 
@@ -547,27 +547,14 @@ export class SessionAgent extends EventEmitter {
       await vm.ensureRunnableAgentForSession(targetSessionId);
 
 
-      if (!options.internalGoal && node && (node.title === 'New Session' || !node.title || node.title === content.slice(0, 30))) {
-        this._generateSessionTitle(targetSessionId, content).then(title => {
-          if (title) vm.renameSession(targetSessionId, title).catch(() => {});
-        });
-      }
-
-      if (!this._sendingLock) return;
+      if (!this._sendingLock) return false;
 
       const wsClient = vm.getWSClient();
       if (!wsClient || !wsClient.connected) {
         throw new Error('WebSocket is not connected. Please wait for reconnection or refresh the page.');
       }
 
-      if (!options.internalGoal) this.state.messages.appendMessage(userMsg);
-
-
-      finalizeThink(this);
-      this.state.streamMsgId = null;
-      this.state.currentStreamMessage = '';
-
-      wsClient.sendMessage(
+      const accepted = wsClient.sendMessage(
         this.sessionId,
         content,
         permissionMode,
@@ -575,21 +562,43 @@ export class SessionAgent extends EventEmitter {
         attachments,
         options.internalGoal ? 'goal' : undefined,
       );
+      if (!accepted) {
+        throw new Error('WebSocket could not accept the message. Please wait for reconnection and try again.');
+      }
+
+      if (!options.internalGoal) {
+        this.state.messages.appendMessage(userMsg);
+        this._resolvePendingAsk(displayContent, true);
+      }
+
+      finalizeThink(this);
+      this.state.streamMsgId = null;
+      this.state.currentStreamMessage = '';
+
       ClientLogger.vm.debug('Message sent via WS', { sid: this.sessionId, mode: permissionMode, contentLen: effectiveContent.length });
 
       if (!options.internalGoal) this.emit('messageAdded', userMsg);
       this.state.isStreaming = true;
       this.state.generationSeq++;
       this.emit('streamingStarted');
+      if (!options.internalGoal && node && (node.title === 'New Session' || !node.title || node.title === content.slice(0, 30))) {
+        this._generateSessionTitle(targetSessionId, content).then(title => {
+          if (title) vm.renameSession(targetSessionId, title).catch(() => {});
+        });
+      }
+      return true;
     } catch (err) {
       console.error('[SessionAgent] sendMessage failed', { sessionId: this.sessionId, error: (err as Error).message });
       ClientLogger.vm.error('Send failed', { error: (err as Error).message });
-      this.state.messages.appendMessage({
+      const errorMsg: Message = {
         id: generateId(), sessionId: this.sessionId, type: 'error',
         content: `Failed to send message: ${err instanceof Error ? err.message : String(err)}`, timestamp: Date.now(),
         agentId: this.agentId,
-      });
+      };
+      this.state.messages.appendMessage(errorMsg);
+      this.emit('messageAdded', errorMsg);
       ToastManager.getInstance().error(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       this._sendingLock = false;
     }
@@ -755,7 +764,10 @@ export class SessionAgent extends EventEmitter {
    *  and the full structured format with interleaved thinking + tool calls + text + results. */
   private _ingestStoredMessage(m: any): void {
     const s = this.state;
-    const ts = typeof m.timestamp === 'string' ? new Date(m.timestamp).getTime() : Date.now();
+    const parsedTimestamp = typeof m.timestamp === 'string'
+      ? new Date(m.timestamp).getTime()
+      : Number(m.timestamp);
+    const ts = Number.isFinite(parsedTimestamp) ? parsedTimestamp : Date.now();
     const sessionId = String(m.sessionId || this.sessionId);
     const agentId = (m.agentId as string | undefined) || this.agentId;
     const agentName = m.agentName as string | undefined;
@@ -808,6 +820,7 @@ export class SessionAgent extends EventEmitter {
           return;
         }
       }
+      this._resolvePendingAsk(rawContent, false);
       s.messages.appendMessage({ id: m.id || generateId(), sessionId, type: 'message', role: 'user', content: rawContent, timestamp: ts, agentId, agentName });
       return;
     }
@@ -835,11 +848,12 @@ export class SessionAgent extends EventEmitter {
           s.messages.appendMessage({ id: generateId(), sessionId, type: 'todo_write', content: '', todos: input.todos as TodoItem[], timestamp: ts, agentId, agentName });
           continue;
         }
-        if (name === 'AskUserQuestion') continue;
         s.messages.appendMessage({
           id: tc.id || generateId(), sessionId, type: 'tool_call', toolName: name, toolId: tc.id || '',
-          toolInput: input, content: result && typeof result.content === 'string' ? result.content : '',
-          status: result ? (result.success ? 'success' : 'error') : 'success', timestamp: ts,
+          toolInput: input,
+          content: name === 'AskUserQuestion' ? '' : (result && typeof result.content === 'string' ? result.content : ''),
+          status: name === 'AskUserQuestion' ? 'pending' : (result ? (result.success ? 'success' : 'error') : 'success'),
+          timestamp: ts,
           agentId, agentName,
         });
       }
@@ -860,13 +874,28 @@ export class SessionAgent extends EventEmitter {
       const name = tc.toolName || tc.name || '';
       const input = tc.params || tc.input || {};
       if (name === 'TodoWrite' && input.todos) { s.messages.appendMessage({ id: generateId(), sessionId, type: 'todo_write', content: '', todos: input.todos as TodoItem[], timestamp: ts, agentId, agentName }); continue; }
-      if (name === 'AskUserQuestion') continue;
       s.messages.appendMessage({
         id: tc.id || generateId(), sessionId, type: 'tool_call', toolName: name, toolId: tc.id || '',
-        toolInput: input, content: tr && typeof tr.content === 'string' ? tr.content : '',
-        status: tr ? (tr.success ? 'success' : 'error') : 'pending', timestamp: ts,
+        toolInput: input,
+        content: name === 'AskUserQuestion' ? '' : (tr && typeof tr.content === 'string' ? tr.content : ''),
+        status: name === 'AskUserQuestion' ? 'pending' : (tr ? (tr.success ? 'success' : 'error') : 'pending'),
+        timestamp: ts,
         agentId, agentName,
       });
+    }
+  }
+
+  private _resolvePendingAsk(answer: string, emitChange: boolean): void {
+    const messages = this.state.messages.messages;
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const message = messages[index];
+      if (message.type !== 'tool_call' || message.toolName !== 'AskUserQuestion' || message.status !== 'pending') continue;
+      message.status = 'success';
+      message.content = answer;
+      message.durationMs = Math.max(0, Date.now() - Number(message.timestamp || Date.now()));
+      this.state.messages.updateMessage(index, message);
+      if (emitChange) this.emit('messageUpdated', message);
+      return;
     }
   }
 

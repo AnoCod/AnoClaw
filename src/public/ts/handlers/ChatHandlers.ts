@@ -45,11 +45,15 @@ export function registerChatHandlers(
       if (sessionId) {
         ClientLogger.ui.info('Compact completed, reloading history');
         conversationVM.getAgent(sessionId).loadHistory().catch(() => {});
-        window.dispatchEvent(new CustomEvent('compaction-completed', { detail: { sessionId } }));
+        window.dispatchEvent(new CustomEvent('compaction-completed', {
+          detail: { sessionId, success: true, output: data.output },
+        }));
       }
     }
     if (data.command === 'compact' && !data.success) {
-      window.dispatchEvent(new CustomEvent('compaction-completed', { detail: { sessionId: ctx.sessionId } }));
+      window.dispatchEvent(new CustomEvent('compaction-completed', {
+        detail: { sessionId: ctx.sessionId, success: false, output: data.output },
+      }));
     }
     if (data.success) {
       ToastManager.getInstance().success(data.output || `${data.command} completed`);

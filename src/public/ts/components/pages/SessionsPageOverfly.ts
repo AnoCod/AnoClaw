@@ -15,14 +15,21 @@ export class SessionsPageOverfly {
   private _activeSessionId: string | null = null;
   private _workspacePath: string = '';
   private _clickHandler: ((e: MouseEvent) => void) | null = null;
+  private _outsideClickHandler: ((e: MouseEvent) => void) | null = null;
+  private _outsideClickTimer: ReturnType<typeof setTimeout> | null = null;
   private _artifactPanel: ArtifactPanel | null = null;
   private _tasksPanel: BackgroundTasksTab | null = null;
+  private _onClose: (() => void) | null;
+
+  constructor(onClose?: () => void) {
+    this._onClose = onClose || null;
+  }
 
   get isOpen(): boolean { return this._panel !== null; }
 
   show(panel: string, activeSessionId: string | null, workspacePath?: string): void {
     console.log('[Overfly] show panel:', panel, 'session:', activeSessionId);
-    this.close();
+    this.close(false);
 
     this._currentPanel = panel;
     this._activeSessionId = activeSessionId;
@@ -61,10 +68,11 @@ export class SessionsPageOverfly {
 
 
     // and streaming DOM updates don't spuriously trigger close.
-    setTimeout(() => {
-      const onOutsideClick = (e: MouseEvent) => {
+    this._outsideClickTimer = setTimeout(() => {
+      this._outsideClickTimer = null;
+      this._outsideClickHandler = (e: MouseEvent) => {
         if (!this._panel) {
-          document.removeEventListener('click', onOutsideClick);
+          this._removeOutsideClickHandler();
           return;
         }
         // Grace period: ignore clicks in the first 300ms (panel still rendering)
@@ -76,19 +84,37 @@ export class SessionsPageOverfly {
           this.close();
         }
       };
-      document.addEventListener('click', onOutsideClick);
+      document.addEventListener('click', this._outsideClickHandler);
     }, 0);
   }
 
-  close(): void {
+  close(notify = true): void {
     console.log('[Overfly] close');
+    const wasOpen = this._panel !== null;
+    this._removeOutsideClickHandler();
     if (this._artifactPanel) { this._artifactPanel.dispose(); this._artifactPanel = null; }
     if (this._tasksPanel) { this._tasksPanel.destroy(); this._tasksPanel = null; }
-    if (this._panel) { this._panel.remove(); this._panel = null; }
+    if (this._panel) {
+      if (this._clickHandler) this._panel.removeEventListener('click', this._clickHandler);
+      this._panel.remove();
+      this._panel = null;
+    }
+    this._clickHandler = null;
     this._currentPanel = null;
     this._activeSessionId = null;
+    if (wasOpen && notify) this._onClose?.();
   }
 
+  private _removeOutsideClickHandler(): void {
+    if (this._outsideClickTimer) {
+      clearTimeout(this._outsideClickTimer);
+      this._outsideClickTimer = null;
+    }
+    if (this._outsideClickHandler) {
+      document.removeEventListener('click', this._outsideClickHandler);
+      this._outsideClickHandler = null;
+    }
+  }
 
 
   private _renderOverviewPanel(overfly: HTMLElement, activeSessionId: string | null): void {

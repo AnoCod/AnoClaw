@@ -26,6 +26,33 @@ function flattenTree(nodes: SessionNode[]): SessionNode[] {
   return result;
 }
 
+export function visibleSessionNodes(
+  tree: SessionNode[],
+  activeId: string | null,
+): Array<{ node: SessionNode; depth: number }> {
+  const activePath = new Set<string>();
+  const markActivePath = (nodes: SessionNode[]): boolean => {
+    for (const node of nodes) {
+      if (node.id === activeId || (node.children?.length && markActivePath(node.children))) {
+        activePath.add(node.id);
+        return true;
+      }
+    }
+    return false;
+  };
+  if (activeId) markActivePath(tree);
+
+  const visible: Array<{ node: SessionNode; depth: number }> = [];
+  const collect = (nodes: SessionNode[], depth: number): void => {
+    for (const node of nodes) {
+      visible.push({ node, depth });
+      if (node.children?.length && activePath.has(node.id)) collect(node.children, depth + 1);
+    }
+  };
+  collect(tree, 0);
+  return visible;
+}
+
 export class SessionEdgeBar {
   readonly element: HTMLElement;
   private _treeOverlay: HTMLElement | null = null;
@@ -35,6 +62,10 @@ export class SessionEdgeBar {
   private _tree: SessionNode[] = [];
   private _searchActive = false;
   private _overlayOpen = false;
+  private _outsideClickHandler: ((event: MouseEvent) => void) | null = null;
+  private _outsideClickTimer: ReturnType<typeof setTimeout> | null = null;
+  private _searchAbortController: AbortController | null = null;
+  private _searchRequestSeq = 0;
 
   constructor(callbacks: EdgeBarCallbacks) {
     this._callbacks = callbacks;
@@ -86,20 +117,9 @@ export class SessionEdgeBar {
     const container = (this.element as any)._dotsContainer as HTMLElement | undefined;
     if (!container) return;
 
-    // Collect visible nodes (active session's children expanded)
     const visibleIds = new Set<string>();
-    const visible: Array<{ node: SessionNode; depth: number }> = [];
-
-    const collect = (nodes: SessionNode[], depth: number) => {
-      for (const n of nodes) {
-        visibleIds.add(n.id);
-        visible.push({ node: n, depth });
-        if (n.children && n.children.length > 0 && n.id === activeId) {
-          collect(n.children, depth + 1);
-        }
-      }
-    };
-    collect(tree, 0);
+    const visible = visibleSessionNodes(tree, activeId);
+    for (const { node } of visible) visibleIds.add(node.id);
 
     // Remove dots for sessions no longer visible
     for (const [id, dot] of this._dots) {
@@ -278,22 +298,38 @@ export class SessionEdgeBar {
       doLocalFilter(q);
 
       if (this._searchTimer) clearTimeout(this._searchTimer);
+      this._searchTimer = null;
+      if (this._searchAbortController) {
+        this._searchAbortController.abort();
+        this._searchAbortController = null;
+      }
+      const requestSeq = ++this._searchRequestSeq;
       if (!q) return;
 
       this._searchTimer = setTimeout(async () => {
+        this._searchTimer = null;
+        const controller = new AbortController();
+        this._searchAbortController = controller;
         try {
-          const resp = await fetch(`/api/v1/search?q=${encodeURIComponent(q)}&limit=15`);
+          const resp = await fetch(`/api/v1/search?q=${encodeURIComponent(q)}&limit=15`, {
+            signal: controller.signal,
+          });
           if (!resp.ok) return;
           const data = await resp.json();
+          if (controller.signal.aborted || requestSeq !== this._searchRequestSeq || this._treeOverlay !== overlay) return;
           const contentMatches: Array<{ sessionId: string; title: string; matchType: 'content'; excerpt?: string }> =
             (data.results || []).filter((r: any) => r.matchType === 'content');
 
           const q2 = input.value.trim().toLowerCase();
+          if (q2 !== q.toLowerCase()) return;
           const titleMatches = q2
             ? flatItems.filter(n => (n.title || '').toLowerCase().includes(q2) || n.id.toLowerCase().includes(q2))
             : flatItems;
           renderResults(titleMatches, contentMatches, q2);
-        } catch { /* ignore */ }
+        } catch { /* cancellation and network failures leave local matches visible */ }
+        finally {
+          if (this._searchAbortController === controller) this._searchAbortController = null;
+        }
       }, 300);
     });
 
@@ -306,13 +342,11 @@ export class SessionEdgeBar {
     document.body.appendChild(overlay);
     setTimeout(() => input.focus(), 50);
 
-    const onClickOutside = (e: MouseEvent) => {
+    this._installOutsideClickHandler(overlay, (e: MouseEvent) => {
       if (!overlay.contains(e.target as Node) && !this.element.contains(e.target as Node)) {
         this._hideSearchOverlay();
-        document.removeEventListener('click', onClickOutside);
       }
-    };
-    setTimeout(() => document.addEventListener('click', onClickOutside), 0);
+    });
   }
 
   private _buildResultRow(id: string, title: string, excerpt?: string): HTMLElement {
@@ -367,6 +401,15 @@ export class SessionEdgeBar {
     const searchBtn = this.element.querySelector('.edge-search') as HTMLElement;
     if (searchBtn) searchBtn.classList.remove('active');
     this._searchActive = false;
+    if (this._searchTimer) {
+      clearTimeout(this._searchTimer);
+      this._searchTimer = null;
+    }
+    if (this._searchAbortController) {
+      this._searchAbortController.abort();
+      this._searchAbortController = null;
+    }
+    this._searchRequestSeq++;
     this._hideTreeOverlay();
   }
 
@@ -393,21 +436,41 @@ export class SessionEdgeBar {
 
     // Close on click outside (NOT on mouseleave — mouseleave fires spuriously
     // when DOM changes during streaming output).
-    const onClickOutside = (e: MouseEvent) => {
+    this._installOutsideClickHandler(overlay, (e: MouseEvent) => {
       if (!overlay.contains(e.target as Node) && !this.element.contains(e.target as Node)) {
         this._hideTreeOverlay();
-        document.removeEventListener('click', onClickOutside);
       }
-    };
-    // Small delay so the current click doesn't immediately close it
-    setTimeout(() => document.addEventListener('click', onClickOutside), 0);
+    });
   }
 
   private _hideTreeOverlay(): void {
+    this._removeOutsideClickHandler();
     this._overlayOpen = false;
     if (this._treeOverlay) {
       this._treeOverlay.remove();
       this._treeOverlay = null;
+    }
+  }
+
+  private _installOutsideClickHandler(overlay: HTMLElement, handler: (event: MouseEvent) => void): void {
+    this._removeOutsideClickHandler();
+    this._outsideClickHandler = handler;
+    this._outsideClickTimer = setTimeout(() => {
+      this._outsideClickTimer = null;
+      if (this._treeOverlay === overlay && this._outsideClickHandler === handler) {
+        document.addEventListener('click', handler);
+      }
+    }, 0);
+  }
+
+  private _removeOutsideClickHandler(): void {
+    if (this._outsideClickTimer) {
+      clearTimeout(this._outsideClickTimer);
+      this._outsideClickTimer = null;
+    }
+    if (this._outsideClickHandler) {
+      document.removeEventListener('click', this._outsideClickHandler);
+      this._outsideClickHandler = null;
     }
   }
 

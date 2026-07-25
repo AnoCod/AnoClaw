@@ -31,9 +31,9 @@ export class SessionListModel extends EventEmitter {
     }
   }
 
-  removeSession(id: string): void {
+  removeSession(id: string): string[] {
     const idx = this._sessions.findIndex((s) => s.id === id);
-    if (idx === -1) return;
+    if (idx === -1) return [];
     const removed = this._sessions[idx];
 
     // Remove all descendants too
@@ -43,6 +43,7 @@ export class SessionListModel extends EventEmitter {
 
     this._sessions = this._sessions.filter((s) => !toRemove.has(s.id));
     this.emit('sessionRemoved', removed);
+    return Array.from(toRemove);
   }
 
   updateSession(node: Partial<SessionNode> & { id: string }): void {

@@ -16,13 +16,14 @@ export class SlashCommandPanel extends EventEmitter {
   private _commands: CommandDefinition[] = [];
   private _filtered: CommandDefinition[] = [];
   private _textarea: HTMLElement | null = null;
+  private _outsideClickHandler: ((event: MouseEvent) => void) | null = null;
+  private _outsideClickTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Show the popup anchored to the textarea with the current filter text. */
   open(textarea: HTMLElement, commands: CommandDefinition[], filterText: string): void {
+    this.close();
     this._textarea = textarea;
     this._commands = commands;
-
-    if (this._el) this._el.remove();
 
     this._el = this._buildPopup(commands);
     document.body.appendChild(this._el);
@@ -31,14 +32,16 @@ export class SlashCommandPanel extends EventEmitter {
     this._position();
 
     // Dismiss on outside click (matching ModeSelector pattern)
-    const closeOnClick = (e: MouseEvent) => {
+    this._outsideClickHandler = (e: MouseEvent) => {
       if (!this._el) return;
       if (!this._el.contains(e.target as Node) && e.target !== this._textarea) {
         this.close();
-        document.removeEventListener('click', closeOnClick);
       }
     };
-    setTimeout(() => document.addEventListener('click', closeOnClick), 0);
+    this._outsideClickTimer = setTimeout(() => {
+      this._outsideClickTimer = null;
+      if (this._outsideClickHandler) document.addEventListener('click', this._outsideClickHandler);
+    }, 0);
 
     ClientLogger.ui.debug('Slash popup opened', { commandCount: commands.length });
   }
@@ -52,6 +55,14 @@ export class SlashCommandPanel extends EventEmitter {
 
   /** Close and remove the popup. */
   close(): void {
+    if (this._outsideClickTimer) {
+      clearTimeout(this._outsideClickTimer);
+      this._outsideClickTimer = null;
+    }
+    if (this._outsideClickHandler) {
+      document.removeEventListener('click', this._outsideClickHandler);
+      this._outsideClickHandler = null;
+    }
     if (this._el) {
       this._el.remove();
       this._el = null;

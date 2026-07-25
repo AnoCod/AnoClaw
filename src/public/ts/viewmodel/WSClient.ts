@@ -118,9 +118,9 @@ export class WSClient {
     effortMode?: boolean,
     attachments?: Array<Record<string, unknown>>,
     internal?: 'goal',
-  ): void {
+  ): boolean {
     console.log('[WS] sendMessage — sessionId:', sessionId);
-    this._gw.send({
+    return this._gw.send({
       type: 'send_message',
       sessionId,
       content,
@@ -139,8 +139,8 @@ export class WSClient {
   }
 
   /** Run a slash command in the context of a session. */
-  runCommand(sessionId: string, command: string, args?: Record<string, string>): void {
-    this._gw.send({
+  runCommand(sessionId: string, command: string, args?: Record<string, string>): boolean {
+    return this._gw.send({
       type: 'run_command',
       sessionId,
       command,

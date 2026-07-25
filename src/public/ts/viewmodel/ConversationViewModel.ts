@@ -152,7 +152,7 @@ export class ConversationViewModel extends EventEmitter {
   // ── Active session ──
 
   /** Switch the active session. No-ops if already active. Fires activeSessionChanged. */
-  setActiveSession(sessionId: string): void {
+  setActiveSession(sessionId: string | null): void {
     if (this._activeSessionId === sessionId) return;
     console.log('[ConvVM] Active session changed', { from: this._activeSessionId, to: sessionId });
     this._activeSessionId = sessionId;
@@ -271,7 +271,14 @@ export class ConversationViewModel extends EventEmitter {
 
   private _syncModeFromActiveSession(): void {
     const active = this._sessionVM?.activeSession;
-    if (!active || !this._isRootSession(active)) {
+    if (!active) {
+      this.permissionMode = 'auto';
+      this.effortMode = true;
+      this.emit('permissionModeChanged', this.permissionMode);
+      this.emit('effortModeChanged', this.effortMode);
+      return;
+    }
+    if (!this._isRootSession(active)) {
       this.permissionMode = 'auto-edit';
       this.effortMode = true;
       this.emit('permissionModeChanged', this.permissionMode);
@@ -389,12 +396,14 @@ export class ConversationViewModel extends EventEmitter {
   // ── Commands ──
 
   /** Dispatch a slash command to the backend via WS for the active session. */
-  runCommand(command: string, args?: Record<string, string>): void {
+  runCommand(command: string, args?: Record<string, string>): boolean {
     console.log('[ConvVM] Command run', { command, args });
     const sid = this._sessionVM?.activeSessionId;
-    if (!sid || !this._sessionVM) return;
-    this._sessionVM.getWSClient().runCommand(sid, command, args);
+    if (!sid || !this._sessionVM) return false;
+    const sent = this._sessionVM.getWSClient().runCommand(sid, command, args);
+    if (!sent) return false;
     ClientLogger.vm.debug('Command sent via WS', { command });
+    return true;
   }
 
   // ── Connection ──

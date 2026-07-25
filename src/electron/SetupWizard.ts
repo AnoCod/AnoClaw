@@ -158,18 +158,28 @@ export function runSetupWizard(): Promise<void> {
       }
     });
 
-    const onSetupDone = () => {
+    let setupCompleted = false;
+    const cleanupIpc = () => {
       ipc.removeHandler('save-setup');
+      ipc.removeListener('setup-done', onSetupDone);
+      ipc.removeListener('quit-setup', onQuitSetup);
+    };
+
+    const onSetupDone = () => {
+      if (setupCompleted) return;
+      setupCompleted = true;
+      cleanupIpc();
       if (!win.isDestroyed()) win.close();
       resolve();
     };
-    ipc.on('setup-done', onSetupDone);
 
     const onQuitSetup = () => {
-      ipc.removeHandler('save-setup');
+      cleanupIpc();
       if (!win.isDestroyed()) win.close();
-      app.quit();
+      else app.quit();
     };
+
+    ipc.on('setup-done', onSetupDone);
     ipc.on('quit-setup', onQuitSetup);
 
     win.loadFile(finalHtmlPath);
@@ -180,9 +190,8 @@ export function runSetupWizard(): Promise<void> {
     });
 
     win.on('closed', () => {
-      ipc.removeHandler('save-setup');
-      ipc.removeAllListeners('setup-done');
-      ipc.removeAllListeners('quit-setup');
+      cleanupIpc();
+      if (!setupCompleted) app.quit();
     });
   });
 }

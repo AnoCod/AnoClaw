@@ -6,6 +6,7 @@ import { WindowManager } from './WindowManager.js';
 import { TrayManager } from './TrayManager.js';
 import { FloatingBallManager } from './FloatingBallManager.js';
 import { BrowserViewManager } from './BrowserViewManager.js';
+import { AppLifecycleController } from './AppLifecycleController.js';
 import { getAutoStart, setAutoStart } from './AutoStart.js';
 import { init as initSetup, needsSetup, runSetupWizard } from './SetupWizard.js';
 import { startServer, shutdown } from '../server/main.js';
@@ -39,6 +40,28 @@ export async function createApp(electron: typeof import('electron')) {
   TrayManager.init(Tray, Menu, app, nativeImage);
   FloatingBallManager.init(BW, ipcMain);
   BrowserViewManager.init(() => WindowManager.getInstance().getMainWindow());
+
+  const lifecycle = new AppLifecycleController({
+    quit: () => app.quit(),
+    forceExit: (exitCode) => app.exit(exitCode),
+    listWindows: () => BW.getAllWindows(),
+    hideFloatingBall: () => FloatingBallManager.getInstance().hide(),
+    markQuitting: () => { globalThis._quitting = true; },
+    gracefulShutdown: async () => {
+      try {
+        await shutdown();
+      } catch (error) {
+        console.error('[shutdown] Server drain failed', error);
+      }
+      try {
+        const { LogManager } = await import('../server/infra/logging/LogManager.js');
+        await LogManager.getInstance().shutdown();
+      } catch (error) {
+        console.error('[shutdown] Log flush failed', error);
+      }
+    },
+    reportError: (message, error) => console.error(`[shutdown] ${message}`, error ?? ''),
+  });
 
   // Provide recent sessions to the floating ball
   let sessionManager: any = null;
@@ -79,10 +102,7 @@ export async function createApp(electron: typeof import('electron')) {
     if (win) win.isMaximized() ? win.unmaximize() : win.maximize();
   });
   ipcMain.on('window-close', () => {
-    // Close → truly quit the process
-    globalThis._quitting = true;
-    FloatingBallManager.getInstance().hide();
-    app.quit();
+    lifecycle.requestQuit();
   });
   ipcMain.handle('window-is-maximized', (e: IpcMainInvokeEvent) => BW.fromWebContents(e.sender)?.isMaximized() ?? false);
   ipcMain.handle('dialog-open', async (e: IpcMainInvokeEvent, opts: Electron.OpenDialogOptions) => {
@@ -293,6 +313,9 @@ export async function createApp(electron: typeof import('electron')) {
       // Check if first-run setup is needed
       initSetup(BW, ipcMain);
       if (needsSetup()) {
+        // Closing the setup window briefly leaves Electron with zero windows.
+        // Suppress window-all-closed until the configured main window exists.
+        lifecycle.setSetupTransitionInProgress(true);
         await runSetupWizard();
         // Setup wizard saved agent config + settings — reload server to pick them up
         await shutdown();
@@ -300,6 +323,7 @@ export async function createApp(electron: typeof import('electron')) {
       }
 
       wireFloatingBallMinimize(WindowManager.getInstance().createWindow());
+      lifecycle.setSetupTransitionInProgress(false);
       TrayManager.getInstance().createTray();
 
       // ── Keyboard shortcuts (hidden menu) ──
@@ -320,34 +344,8 @@ export async function createApp(electron: typeof import('electron')) {
     }
   });
 
-  app.on('window-all-closed', () => { app.quit(); });
-  let gracefulQuitStarted = false;
-  let gracefulQuitComplete = false;
-  app.on('before-quit', (event) => {
-    globalThis._quitting = true;
-    if (gracefulQuitComplete) return;
-    event.preventDefault();
-    if (gracefulQuitStarted) return;
-    gracefulQuitStarted = true;
-    void (async () => {
-      try {
-        try {
-          await shutdown();
-        } catch (error) {
-          console.error('[shutdown] Server drain failed', error);
-        }
-        try {
-          const { LogManager } = await import('../server/infra/logging/LogManager.js');
-          await LogManager.getInstance().shutdown();
-        } catch (error) {
-          console.error('[shutdown] Log flush failed', error);
-        }
-      } finally {
-        gracefulQuitComplete = true;
-        app.quit();
-      }
-    })();
-  });
+  app.on('window-all-closed', () => lifecycle.handleAllWindowsClosed());
+  app.on('before-quit', (event) => lifecycle.handleBeforeQuit(event));
   app.on('certificate-error', (event: any, webContents: any, url: string, error: string, _certificate: unknown, callback: (allowed: boolean) => void) => {
     if (!bvm.handleCertificateError(webContents, url, error)) return;
     event.preventDefault();

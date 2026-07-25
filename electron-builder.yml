@@ -8,7 +8,6 @@ files:
   - "!dist/electron/bridge.js.map"
   - src/public/**/*
   - "!src/public/ts/**"
-  - "!src/public/v3/**"
   - "!src/public/tsconfig.json"
   - "!src/public/js/**/*.js.map"
   - src/electron/setup-wizard.html

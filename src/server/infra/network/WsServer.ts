@@ -23,8 +23,6 @@ export interface WsConnection {
   isAlive: boolean;
 }
 
-export type WsReply = (data: Record<string, unknown>) => boolean;
-
 export function isAllowedWsOrigin(origin: string | undefined, hostHeader: string | undefined): boolean {
   if (!origin || !hostHeader) return false;
   try {
@@ -94,16 +92,7 @@ export class WsServer extends EventEmitter implements Transport {
           const msg = JSON.parse(data.toString()) as { type: string; [key: string]: unknown };
           // sessionId comes from the message payload, not URL
           const sessionId = (msg.sessionId as string) || 'default';
-          const reply: WsReply = (payload) => {
-            if (ws.readyState !== WebSocket.OPEN) return false;
-            try {
-              ws.send(JSON.stringify({ ...payload, _sessionId: sessionId }));
-              return true;
-            } catch {
-              return false;
-            }
-          };
-          this.emit('message', sessionId, msg, reply);
+          this.emit('message', sessionId, msg);
         } catch {
           ws.send(JSON.stringify({ type: WsMessageType.Error, errorMessage: 'Invalid JSON' }));
         }

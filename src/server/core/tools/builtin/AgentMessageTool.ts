@@ -1,41 +1,39 @@
-import type { CoordinationMessageKind } from '../../../../shared/types/v3/index.js';
-import { RiskLevel, Tool } from '../Tool.js';
+import { Tool, RiskLevel } from '../Tool.js';
 import type { ExecutionContext, ToolResult } from '../Tool.js';
+import type {
+  CoordinationMessageKind,
+  TeamRecord,
+} from '../../../../shared/types/coordination.js';
+import type { Message } from '../../../../shared/types/session.js';
+import { MessageRole } from '../../../../shared/types/session.js';
+import { AgentRegistry } from '../../agent/AgentRegistry.js';
+import { AgentRuntime } from '../../agent/AgentRuntime.js';
+import { CoordinationService } from '../../coordination/CoordinationService.js';
 import {
-  activeTeamMembers,
-  appendCommand,
-  assertTaskInTeam,
-  nextId,
-  optionalText,
-  requiredText,
-  requireScopedState,
-  responsibleTaskTeamId,
-  v3WorkToolDependencies,
-  V3WorkToolError,
-  withWorkRevisionRetry,
-  workToolFailure,
-  type V3WorkToolDependencies,
-} from '../v3/V3WorkToolSupport.js';
+  rootSessionIdFor,
+  stringParam,
+  toolFailure,
+} from '../../coordination/CoordinationToolHelpers.js';
+import { CoordinationError } from '../../coordination/CoordinationError.js';
+import { SessionManager } from '../../session/SessionManager.js';
+import { InterruptController } from '../../agent/supervision/InterruptController.js';
+import { TokenCounter } from '../../context/TokenCounter.js';
 
-const MESSAGE_KINDS = new Set<CoordinationMessageKind>(['note', 'steer']);
+const KINDS = new Set<CoordinationMessageKind>(['note', 'steer']);
 
 export class AgentMessageTool extends Tool {
   static category = 'Agent Teams';
-  static toolDescription = 'Queues durable FIFO messages between members of one persistent v3 Team.';
-
-  constructor(private readonly dependencies?: V3WorkToolDependencies) {
-    super();
-  }
-
+  static toolDescription = 'Queues durable peer, hierarchy, or team broadcast coordination messages.';
   name(): string { return 'AgentMessage'; }
   description(): string {
-    return 'Send a persistent note, live steer, or one-record-per-recipient Team broadcast.';
+    return 'Send a durable note, live steer, or team broadcast without creating another task.';
   }
   prompt(): string {
     return [
-      'Use note for durable information a teammate may consume during a later Task.',
-      'Use steer only when the target Agent has a running Run Session in this Work.',
-      'Use to="*" for a broadcast to every other active member of the executing Team.',
+      'Use note for information the recipient may read on its next task.',
+      'Use steer only for a currently running recipient session.',
+      'Use a note when a response or review is expected. Use to="*" only inside an active team.',
+      'Task work itself belongs in TaskCreate/TaskAssign.',
     ].join('\n');
   }
   minRole(): string { return 'Member'; }
@@ -47,10 +45,10 @@ export class AgentMessageTool extends Tool {
         to: {
           type: ['string', 'array'],
           items: { type: 'string', minLength: 1, maxLength: 200 },
-          description: 'Agent ID, Agent ID list, or "*" for the executing Team.',
+          description: 'Agent ID, list of agent IDs, or "*" to broadcast to the active team.',
         },
         kind: { type: 'string', enum: ['note', 'steer'] },
-        content: { type: 'string', minLength: 1, maxLength: 20_000 },
+        content: { type: 'string', minLength: 1, maxLength: 20000 },
         summary: { type: 'string', maxLength: 120 },
         taskId: { type: 'string', maxLength: 200 },
       },
@@ -60,137 +58,166 @@ export class AgentMessageTool extends Tool {
   }
 
   async execute(params: Record<string, unknown>, ctx: ExecutionContext): Promise<ToolResult> {
-    const dependencies = v3WorkToolDependencies(this.dependencies);
     try {
-      const state = await requireScopedState(dependencies, ctx);
-      const kind = requiredText(params.kind, 'kind', 20) as CoordinationMessageKind;
-      if (!MESSAGE_KINDS.has(kind)) {
-        throw new V3WorkToolError('validation_failed', `Invalid message kind: ${kind}`);
+      const rootSessionId = rootSessionIdFor(ctx);
+      const service = CoordinationService.getInstance();
+      const team = service.getActiveTeam(rootSessionId);
+      const kindRaw = stringParam(params.kind, 'kind', 20)! as CoordinationMessageKind;
+      if (!KINDS.has(kindRaw)) throw new CoordinationError('validation', `Invalid message kind: ${kindRaw}`);
+      const content = stringParam(params.content, 'content', 20_000)!;
+      const summary = stringParam(params.summary, 'summary', 120, true);
+      const taskId = stringParam(params.taskId, 'taskId', 200, true);
+      if (taskId && !service.getTask(rootSessionId, taskId)) {
+        throw new CoordinationError('not_found', `Task not found: ${taskId}`);
       }
-      const content = requiredText(params.content, 'content', 20_000);
-      const summary = optionalText(params.summary, 'summary', 120);
-      const taskId = optionalText(params.taskId, 'taskId', 200);
-      let messageTeamId = state.context.teamId;
-      if (taskId) {
-        const task = state.work.tasks[taskId];
-        if (!task) throw new V3WorkToolError('task_not_found', `Task not found: ${taskId}`);
-        assertTaskInTeam(
-          task,
-          state.context.teamId,
-          state.company,
-          state.context.agentId,
-        );
-        messageTeamId = responsibleTaskTeamId(task, state.context.teamId);
-      }
-      const teamMemberIds = new Set(
-        activeTeamMembers(state.company, messageTeamId)
-          .map((membership) => membership.agentId)
-          .filter((agentId) => state.company.agents[agentId]?.status === 'active'),
-      );
-      const recipients = resolveRecipients(
-        params.to,
-        teamMemberIds,
-        state.context.agentId,
-      );
-      const baseIdempotencyKey = `agent-message:${nextId(dependencies)}`;
-      const messages = [];
-      for (const recipientAgentId of recipients) {
-        const recipientSessionId = kind === 'steer'
-          ? activeRunSessionId(state.work, messageTeamId, recipientAgentId)
-          : undefined;
-        if (kind === 'steer' && !recipientSessionId) {
-          throw new V3WorkToolError(
-            'recipient_not_running',
-            `Cannot steer idle Agent ${recipientAgentId}; send a note instead.`,
-            { recipientAgentId },
-          );
+      const recipients = resolveRecipients(params.to, team, ctx.agentId);
+      if (recipients.length === 0) throw new CoordinationError('validation', 'No recipients selected');
+
+      const delivered: Array<Record<string, unknown>> = [];
+      for (const targetAgentId of recipients) {
+        const target = AgentRegistry.getInstance().findAgent(targetAgentId);
+        if (!target?.isActive) throw new CoordinationError('validation', `Active target agent not found: ${targetAgentId}`);
+        const inSameTeam = !!team
+          && team.memberAgentIds.includes(ctx.agentId)
+          && team.memberAgentIds.includes(targetAgentId);
+        if (!inSameTeam) assertHierarchyAdjacency(ctx.agentId, targetAgentId);
+
+        const targetSession = await resolveTargetSession(ctx, targetAgentId, team, inSameTeam);
+        const runtime = AgentRuntime.getInstance();
+        if (kindRaw === 'steer' && !runtime.isSessionActive(targetSession.id)) {
+          throw new CoordinationError('conflict', `Cannot steer idle agent ${targetAgentId}; send a note instead`);
         }
-        const message = await withWorkRevisionRetry(
-          dependencies,
-          state.context.workId,
-          state.context.agentId,
-          (projection) => dependencies.workRepository.enqueueCoordinationMessage(
-            state.context.workId,
-            {
-              teamId: messageTeamId,
-              ...(taskId ? { taskId } : {}),
-              senderAgentId: state.context.agentId,
-              recipientAgentId,
-              ...(recipientSessionId ? { recipientSessionId } : {}),
-              kind,
-              content,
-              ...(summary ? { summary } : {}),
-              idempotencyKey: `${baseIdempotencyKey}:${recipientAgentId}`,
-            },
-            appendCommand(projection, state.context.agentId, baseIdempotencyKey),
-          ),
+
+        const queued = await service.queueMessage({
+          rootSessionId,
+          teamId: inSameTeam ? team?.id : undefined,
+          taskId,
+          fromAgentId: ctx.agentId,
+          toAgentId: targetAgentId,
+          kind: kindRaw,
+          content,
+          summary,
+        });
+        const caller = AgentRegistry.getInstance().findAgent(ctx.agentId);
+        const rendered = [
+          [
+            `<coordination-message id="${queued.id}"`,
+            `root-session-id="${rootSessionId}"`,
+            queued.teamId ? `team-id="${queued.teamId}"` : '',
+            taskId ? `task-id="${taskId}"` : '',
+            `from-agent="${ctx.agentId}"`,
+            `to-agent="${targetAgentId}"`,
+            `session-id="${targetSession.id}"`,
+            `kind="${kindRaw}">`,
+          ].filter(Boolean).join(' '),
+          content,
+          '</coordination-message>',
+        ].join('\n');
+        const message: Message = {
+          id: queued.id,
+          sessionId: targetSession.id,
+          role: MessageRole.User,
+          content: rendered,
+          tokenCount: TokenCounter.estimate(rendered),
+          compressed: false,
+          timestamp: queued.createdAt,
+          agentId: ctx.agentId,
+          agentName: caller?.name || ctx.agentId,
+        };
+        await SessionManager.getInstance().appendMessage(targetSession.id, message);
+        const deliveredMessage = await service.updateMessageStatus(
+          rootSessionId,
+          queued.id,
+          'delivered',
+          ctx.agentId,
         );
-        messages.push(message);
-        if (kind === 'steer' && recipientSessionId) {
-          dependencies.wakeSafeTurnBoundary?.(recipientSessionId);
+        if (runtime.isSessionActive(targetSession.id)) {
+          InterruptController.getInstance().setPendingUserMessage(targetSession.id, rendered);
+          InterruptController.getInstance().wakeOnly(targetSession.id);
+        } else {
+          // A mailbox-only sub-session has no running AgentLoop and must not
+          // remain visible as Active.
+          await SessionManager.getInstance().setRuntimeStatus(targetSession.id, 'Idle');
         }
+        delivered.push({
+          message: deliveredMessage,
+          targetSessionId: targetSession.id,
+          active: runtime.isSessionActive(targetSession.id),
+        });
       }
-      return this.makeResult(
-        `Queued ${messages.length} persistent Team message${messages.length === 1 ? '' : 's'}.`,
-        {
-          structured: {
-            workId: state.context.workId,
-            teamId: messageTeamId,
-            messages,
-          },
-        },
-      );
+      return this.makeResult(`Delivered ${delivered.length} durable coordination message(s).`, {
+        structured: { rootSessionId, deliveries: delivered },
+      });
     } catch (error) {
-      return workToolFailure(error);
+      return toolFailure(this, error);
     }
   }
 }
 
-function resolveRecipients(
-  value: unknown,
-  activeMemberIds: Set<string>,
-  senderAgentId: string,
-): string[] {
+function resolveRecipients(value: unknown, team: TeamRecord | undefined, callerAgentId: string): string[] {
   if (value === '*') {
-    const recipients = [...activeMemberIds].filter((agentId) => agentId !== senderAgentId);
-    if (recipients.length === 0) {
-      throw new V3WorkToolError(
-        'no_recipients',
-        'The executing Team has no other active members.',
-      );
+    if (!team || !team.memberAgentIds.includes(callerAgentId)) {
+      throw new CoordinationError('forbidden', 'Broadcast requires membership in the active team');
     }
-    return recipients;
+    return team.memberAgentIds.filter((agentId) => agentId !== callerAgentId);
   }
   const raw = Array.isArray(value) ? value : [value];
-  const recipients = [...new Set(raw.map((entry, index) =>
-    requiredText(entry, `to[${index}]`, 200),
-  ))].filter((agentId) => agentId !== senderAgentId);
-  if (recipients.length === 0) {
-    throw new V3WorkToolError('no_recipients', 'No other Team recipients were selected.');
-  }
-  const outsider = recipients.find((agentId) => !activeMemberIds.has(agentId));
-  if (outsider) {
-    throw new V3WorkToolError(
-      'recipient_not_in_team',
-      `Agent ${outsider} is not an active member of the executing Team.`,
-      { recipientAgentId: outsider },
-    );
-  }
-  return recipients;
+  const recipients = raw.map((entry) => {
+    if (typeof entry !== 'string' || !entry.trim()) {
+      throw new CoordinationError('validation', 'to must contain non-empty agent IDs');
+    }
+    return entry.trim();
+  });
+  return [...new Set(recipients)].filter((agentId) => agentId !== callerAgentId);
 }
 
-function activeRunSessionId(
-  projection: Awaited<ReturnType<V3WorkToolDependencies['workRepository']['getProjection']>>,
-  teamId: string,
-  recipientAgentId: string,
-): string | undefined {
-  return Object.values(projection.runs)
-    .filter((run) => (
-      run.agentId === recipientAgentId
-      && run.status === 'running'
-      && projection.tasks[run.taskId]?.teamId === teamId
-    ))
-    .sort((left, right) => (right.startedAt ?? '').localeCompare(left.startedAt ?? ''))
-    .find((run) => projection.sessions[run.sessionId]?.status === 'active')
-    ?.sessionId;
+function assertHierarchyAdjacency(callerAgentId: string, targetAgentId: string): void {
+  const registry = AgentRegistry.getInstance();
+  const caller = registry.findAgent(callerAgentId);
+  const target = registry.findAgent(targetAgentId);
+  const adjacent = caller?.parentAgentId === target?.id || target?.parentAgentId === caller?.id;
+  if (!adjacent) {
+    throw new CoordinationError(
+      'forbidden',
+      'Agents outside an active shared team may message only a direct parent or child',
+    );
+  }
+}
+
+async function resolveTargetSession(
+  ctx: ExecutionContext,
+  targetAgentId: string,
+  team: TeamRecord | undefined,
+  inSameTeam: boolean,
+) {
+  const sessionManager = SessionManager.getInstance();
+  if (inSameTeam && team) {
+    return sessionManager.createSubSession(
+      team.rootSessionId,
+      targetAgentId,
+      `Team ${team.name}: ${targetAgentId}`,
+      {
+        scopeId: `team-${team.id}`,
+        metadata: {
+          coordinationTeamId: team.id,
+          coordinationRootSessionId: team.rootSessionId,
+          coordinationMode: 'swarm',
+        },
+      },
+    );
+  }
+  const caller = AgentRegistry.getInstance().findAgent(ctx.agentId)!;
+  const target = AgentRegistry.getInstance().findAgent(targetAgentId)!;
+  if (target.parentAgentId === caller.id) {
+    return sessionManager.createSubSession(ctx.sessionId, targetAgentId);
+  }
+  const current = sessionManager.session(ctx.sessionId);
+  if (!current?.parentSessionId) {
+    throw new CoordinationError('not_found', 'Current session has no parent session for upward messaging');
+  }
+  const parent = sessionManager.session(current.parentSessionId);
+  if (!parent || parent.agentId !== target.id) {
+    throw new CoordinationError('not_found', 'Matching parent agent session was not found');
+  }
+  return parent;
 }

@@ -3,10 +3,7 @@
 import { EventEmitter } from 'events';
 import { AgentRegistry } from './AgentRegistry.js';
 import { AgentLoop } from './AgentLoop.js';
-import type {
-  AgentLoopConfig,
-  SafeTurnBoundaryMessageProvider,
-} from './AgentLoop.js';
+import type { AgentLoopConfig } from './AgentLoop.js';
 import type { Message, SessionGoal } from '../../../shared/types/session.js';
 import { MessageRole } from '../../../shared/types/session.js';
 import type { SubAgentConfig } from '../../../shared/types/agent.js';
@@ -43,13 +40,7 @@ export interface ProcessMessageOptions {
   permissionMode?: string;
   effort?: string;
   goalKick?: boolean;
-  /** v3 owns task resolution and must not enter the retired v2 resolver. */
-  skipTaskResolution?: boolean;
   systemPromptOverride?: string;
-  /** Server-owned workspace override used by the v3 execution plane. */
-  workspace?: string;
-  /** Durable messages to inject immediately before each safe LLM turn. */
-  safeTurnBoundaryMessageProvider?: SafeTurnBoundaryMessageProvider;
 }
 
 interface UserTaskResolution {
@@ -147,7 +138,7 @@ export class AgentRuntime extends EventEmitter {
       return;
     }
 
-    const taskResolution = options.goalKick || options.skipTaskResolution
+    const taskResolution = options.goalKick
       ? null
       : await this._resolveUserTask(sessionId, agent, message, logger);
     if (taskResolution) {
@@ -221,13 +212,11 @@ export class AgentRuntime extends EventEmitter {
       contextWindow: agent.contextWindow,
       permissionMode: resolvedPermissionMode,
       effort: resolvedEffort,
-      workspace: options.workspace
-        ?? (activeGoal?.status === 'active' ? activeGoal.workspace : undefined),
+      workspace: activeGoal?.status === 'active' ? activeGoal.workspace : undefined,
       extraAllowedTools: [
         ...taskResolutionExtraTools(taskResolution),
       ],
       systemPromptOverride: options.systemPromptOverride,
-      safeTurnBoundaryMessageProvider: options.safeTurnBoundaryMessageProvider,
     };
 
     const loop = new AgentLoop(loopConfig);

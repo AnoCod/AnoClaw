@@ -1,35 +1,23 @@
 import { Tool, RiskLevel } from '../Tool.js';
 import type { ExecutionContext, ToolResult } from '../Tool.js';
+import { CoordinationService } from '../../coordination/CoordinationService.js';
 import {
-  InternalV3OrganizationApiAdapter,
-  type V3OrganizationApi,
-} from '../v3/V3OrganizationApiAdapter.js';
-import {
-  optionalBoolean,
-  organizationToolFailure,
-  requiredString,
-} from '../v3/V3OrganizationToolSupport.js';
+  booleanParam,
+  isRootMainAgent,
+  rootSessionIdFor,
+  stringParam,
+  toolFailure,
+} from '../../coordination/CoordinationToolHelpers.js';
+import { CoordinationError } from '../../coordination/CoordinationError.js';
+import { InterruptController, InterruptReason } from '../../agent/supervision/InterruptController.js';
 
 export class TeamDeleteTool extends Tool {
-  static category = 'Persistent Teams';
-  static toolDescription = 'Archives a persistent v3 Team.';
-
-  constructor(private readonly api: V3OrganizationApi = new InternalV3OrganizationApiAdapter()) {
-    super();
-  }
-
+  static category = 'Agent Teams';
+  static toolDescription = 'Gracefully or forcibly disbands a collaboration team.';
   name(): string { return 'TeamDelete'; }
-
-  description(): string {
-    return 'Archive a persistent Team. Remove active memberships first.';
-  }
-
-  prompt(): string {
-    return 'TeamDelete is an archive operation. It never deletes the Team event history.';
-  }
-
+  description(): string { return 'Disband a team after work completes, or cancel active work with force=true.'; }
+  minRole(): string { return 'Member'; }
   riskLevel(): RiskLevel { return RiskLevel.High; }
-
   parametersSchema(): Record<string, unknown> {
     return {
       type: 'object',
@@ -41,26 +29,34 @@ export class TeamDeleteTool extends Tool {
       additionalProperties: false,
     };
   }
-
-  async execute(
-    params: Record<string, unknown>,
-    _ctx: ExecutionContext,
-  ): Promise<ToolResult> {
+  async execute(params: Record<string, unknown>, ctx: ExecutionContext): Promise<ToolResult> {
     try {
-      const teamId = requiredString(params.teamId, 'teamId', 200);
-      const result = await this.api.archiveTeam(
-        teamId,
-        optionalBoolean(params.force, 'force') ?? false,
+      const rootSessionId = rootSessionIdFor(ctx);
+      const teamId = stringParam(params.teamId, 'teamId', 200)!;
+      const force = booleanParam(params.force, false);
+      const service = CoordinationService.getInstance();
+      const team = service.getTeam(rootSessionId, teamId);
+      if (!team) throw new CoordinationError('not_found', `Team not found: ${teamId}`);
+      if (team.leaderAgentId !== ctx.agentId && !isRootMainAgent(ctx)) {
+        throw new CoordinationError('forbidden', 'Only the team leader or root MainAgent may disband the team');
+      }
+      const active = service.listTasks(rootSessionId).filter(
+        (task) => task.teamId === teamId && !['completed', 'failed', 'cancelled'].includes(task.status),
       );
-      return this.makeResult(`Persistent Team "${result.data.name}" archived.`, {
-        structured: {
-          team: result.data,
-          revision: result.revision,
-          operation: 'archive',
-        },
-      });
+      if (active.length > 0 && !force) {
+        throw new CoordinationError('conflict', `Team has ${active.length} non-terminal task(s)`);
+      }
+      for (const task of active) {
+        if (task.sessionId) InterruptController.getInstance().requestInterrupt(task.sessionId, InterruptReason.ParentStop);
+        await service.updateTask(rootSessionId, task.id, {
+          status: 'cancelled',
+          error: 'Cancelled by forced team disband.',
+        }, ctx.agentId);
+      }
+      const disbanded = await service.disbandTeam(rootSessionId, teamId, ctx.agentId);
+      return this.makeResult(`Team "${disbanded.name}" disbanded.`, { structured: { team: disbanded } });
     } catch (error) {
-      return organizationToolFailure(error);
+      return toolFailure(this, error);
     }
   }
 }

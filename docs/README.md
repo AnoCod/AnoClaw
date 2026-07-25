@@ -24,8 +24,7 @@
 | 主题 | 先读 | 适合问题 |
 |---|---|---|
 | 普通用户上手 | [user-guide.md](user-guide.md) | AnoClaw 能做什么、怎么组织任务、怎么和 agent 配合 |
-| 多 Agent 协作 | [agent-collaboration.md](agent-collaboration.md) | MainAgent、持久 Team 与员工 Agent 如何协作 |
-| 3.0 协调协议 | [multi-agent-coordination.md](multi-agent-coordination.md) | Task、消息、验证、租约与恢复 |
+| 多 agent 协作 | [agent-collaboration.md](agent-collaboration.md) | MainAgent、Manager、Member、SubAgent 如何分工 |
 | 系统架构 | [architecture-overview.md](architecture-overview.md) | Electron、HTTP/WS、AgentLoop、JSONL、插件隔离 |
 | 插件开发 | [plugin-dev.md](plugin-dev.md) | 创建插件、热重载、工具、页面、路由、调试 |
 | 插件 API | [plugin-api.md](plugin-api.md) | `api.tools`、`api.llm`、`api.fs`、events、UI、扩展点 |

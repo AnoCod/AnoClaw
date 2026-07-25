@@ -2,7 +2,6 @@ import type { AgentConfig } from '../../../shared/types/agent.js';
 import { AgentRole, AgentState } from '../../../shared/types/agent.js';
 import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAIN_AGENT_ID } from '../../../shared/constants.js';
 import { defaultConfig, type AgentConfigWithKey } from './AgentConfig.js';
-import { RETIRED_ORGANIZATION_TOOL_NAMES } from '../tools/v3/RetiredOrganizationTools.js';
 
 export const DEFAULT_ENGINEERING_MANAGER_ID = 'manager-engineering';
 export const DEFAULT_IMPLEMENTATION_MEMBER_ID = 'member-implementation';
@@ -37,11 +36,6 @@ export const DEFAULT_COORDINATION_TOOLS = [
   'TeamUpdate',
   'TeamStatus',
   'TeamDelete',
-  'TeamMemberAdd',
-  'TeamMemberUpdate',
-  'TeamMemberRemove',
-  'AgentList',
-  'MissionCreate',
   'TaskCreate',
   'TaskAssign',
   'TaskClaim',
@@ -50,8 +44,8 @@ export const DEFAULT_COORDINATION_TOOLS = [
   'TaskList',
   'TaskOutput',
   'TaskStop',
-  'TaskVerify',
   'AgentMessage',
+  'SubAgentSpawn',
   'JobList',
   'JobOutput',
   'JobStop',
@@ -61,12 +55,17 @@ export const DEFAULT_CEO_TOOLS = [
   ...DEFAULT_CORE_TOOLS,
   ...DEFAULT_COORDINATION_TOOLS,
   'AskUserQuestion',
+  'ListEmployees',
+  'HireEmployee',
+  'UpdateOrg',
   'ApiCall',
 ];
 
 export const DEFAULT_MANAGER_TOOLS = [
   ...DEFAULT_CORE_TOOLS,
   ...DEFAULT_COORDINATION_TOOLS,
+  'ListEmployees',
+  'HireEmployee',
 ];
 
 export const DEFAULT_MEMBER_TOOLS = [
@@ -80,6 +79,7 @@ const LEGACY_COORDINATION_TOOLS = new Set([
   'TaskOutput',
   'TaskStop',
   'AgentMessage',
+  'SubAgentSpawn',
   'SubAgentDelete',
 ]);
 
@@ -92,12 +92,11 @@ export function migrateCoordinationToolAllowlist(
   config: AgentConfigWithKey,
 ): { config: AgentConfigWithKey; changed: boolean } {
   const hadLegacyCoordination = config.allowedTools.some(
-    (name) => LEGACY_COORDINATION_TOOLS.has(name)
-      || RETIRED_ORGANIZATION_TOOL_NAMES.has(name),
+    (name) => LEGACY_COORDINATION_TOOLS.has(name),
   );
   const baseTools = config.allowedTools.filter((name) =>
     name !== 'SubAgentDelete'
-    && !RETIRED_ORGANIZATION_TOOL_NAMES.has(name)
+    && (config.role === AgentRole.MainAgent || name !== 'UpdateOrg')
   );
   const allowedTools = [...new Set([
     ...baseTools,
@@ -170,11 +169,11 @@ function commonConfig(options: DefaultAgentTemplateOptions, createdAt: string): 
 
 export function defaultCeoPrompt(agentName = 'MainAgent'): string {
   return [
-    `# ${agentName} - AnoClaw Company Owner`,
+    `# ${agentName} - AnoClaw CEO`,
     '',
     '## Identity',
     `You are ${agentName}. You run on AnoClaw; it is the platform, not your name.`,
-    'Own the user outcome, keep the current goal in focus, and coordinate persistent Team agents when delegation improves quality, speed, or coverage.',
+    'Own the user outcome, keep the current goal in focus, and coordinate specialist agents when delegation improves quality, speed, or coverage.',
     '',
     '## Operating Loop',
     '- Clarify only when genuinely blocked; otherwise make a reasonable plan and execute.',
@@ -182,13 +181,11 @@ export function defaultCeoPrompt(agentName = 'MainAgent'): string {
     '- Use TodoWrite or Plan for multi-step work, and verify completion before reporting.',
     '- Preserve durable project preferences, decisions, and lessons with memory tools.',
     '',
-    '## Persistent Team Collaboration',
-    '- Use AgentList and TeamStatus to inspect durable organization state before assigning work.',
-    '- Use TeamMemberAdd to add an existing Agent or to create exactly one Agent with an immediate primary Team membership.',
+    '## Delegation',
+    '- Use the default Engineering Manager for substantial implementation, review, or investigation work.',
     '- Delegate with concrete goal, scope, constraints, acceptance criteria, and verification requirements.',
-    '- Use AgentMessage to amend active Team work instead of creating duplicate assignments.',
+    '- Use AgentMessage to amend active child work instead of creating duplicate assignments.',
     '- Review delegated results before reporting to the user.',
-    '- Do not create reporting-line, parent-agent, or organization-role hierarchies.',
     '',
     '## Communication',
     '- Match the user-facing language preference.',
@@ -198,11 +195,11 @@ export function defaultCeoPrompt(agentName = 'MainAgent'): string {
 
 export function defaultManagerPrompt(): string {
   return [
-    '# Engineering Agent - AnoClaw',
+    '# Engineering Manager - AnoClaw',
     '',
-    'Own substantial implementation work within persistent Teams. Break work into clear execution steps, collaborate with suitable Team agents when useful, and return verified results.',
+    'Lead implementation work for the CEO. Break work into clear execution steps, delegate narrow leaf tasks to members when useful, and return verified results.',
     '',
-    'Use memory and skills before unfamiliar work. Prefer direct file/search tools over broad shell probing. Team membership is durable; do not invent organization roles or reporting lines.',
+    'Use memory and skills before unfamiliar work. Prefer direct file/search tools over broad shell probing. Keep task status concise and actionable.',
   ].join('\n');
 }
 
@@ -210,9 +207,9 @@ export function defaultMemberPrompt(): string {
   return [
     '# Implementation Specialist - AnoClaw',
     '',
-    'Execute focused Team tasks with careful file inspection, minimal tool calls, and concrete verification. Report what changed, what was tested, and any residual risk.',
+    'Execute focused engineering tasks with careful file inspection, minimal tool calls, and concrete verification. Report what changed, what was tested, and any residual risk.',
     '',
-    'Use specialized skills for debugging, TDD, review, browser/web research, and verification when relevant. Persistent Teams, not parent/role hierarchy, define organization membership.',
+    'Use specialized skills for debugging, TDD, review, browser/web research, and verification when relevant.',
   ].join('\n');
 }
 

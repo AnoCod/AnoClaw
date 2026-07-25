@@ -311,7 +311,7 @@ interface ExecutionContext {
   agentId: string;          // Calling agent identifier
   workspace: string;        // Agent's workspace directory
   userConfirmed: boolean;   // User approval or Auto Edit pre-authorization
-  callerRole?: AgentRole;   // Compatibility-level permission checks; organization is Team-based in 3.0
+  callerRole?: AgentRole;   // Role for permission checks ('MainAgent' | 'Manager' | 'Member' | 'SubAgent')
   signal?: AbortSignal;     // From InterruptController — tools should abort when signaled
 }
 ```
@@ -347,26 +347,22 @@ enum InterruptBehavior {
 function canUseTool(callerRole: string | undefined, minRequiredRole: string): boolean
 ```
 
-Checks whether the caller's compatibility role meets a tool's minimum execution
-requirement. AnoClaw 3.0 does not use this legacy hierarchy to model the
-organization: Company membership, responsibility, and authority are resolved
-from persistent Team records and the current Work execution context.
+Checks whether the caller's agent role meets the tool's minimum role requirement. Role hierarchy (lower number = higher privilege):
 
 ```
 MainAgent (0) → Manager (1) → Member (2) → SubAgent (3)
 ```
 
-A caller at level N can use any tool requiring level ≥ N. Returns `true` if
-`callerRole` is undefined for kernel compatibility.
+A caller at level N can use any tool requiring level ≥ N. Returns `true` if `callerRole` is undefined (backward compatibility).
 
 ### Role Assignments (builtin tools)
 
-| Authority | Tools |
+| Role | Tools |
 |---|---|
-| MainAgent only | `AskUserQuestion`, company-wide cross-Team orchestration |
-| Team execution context | `MissionCreate`, `TaskCreate`, `TaskAssign`, `TaskClaim`, `TaskUpdate`, `TaskGet`, `TaskList`, `TaskOutput`, `TaskStop`, `TaskVerify`, `AgentMessage` |
-| Persistent organization | `TeamCreate`, `TeamUpdate`, `TeamStatus`, `TeamDelete`, `TeamMemberAdd`, `TeamMemberUpdate`, `TeamMemberRemove`, `AgentList` |
-| Retired and not registered | `HireEmployee`, `ListEmployees`, `UpdateOrg`, `SubAgentSpawn` |
+| `MainAgent` (0) only | `AskUserQuestion` |
+| `Manager` (1)+ | `HireEmployee`, `TaskAssign`, `UpdateOrg` |
+| `Member` (2)+ | `SubAgentSpawn` |
+| `SubAgent` (3)+ | All other tools (the default) |
 
 ---
 
@@ -468,9 +464,9 @@ Choose one of the 8 existing categories (or a new one — new categories auto-cr
 |---|---|
 | `File & Code` | Bash, Read, Write, Edit, Glob, Grep, NotebookEdit |
 | `Search & Web` | WebFetch, WebSearch |
-| `Task Delegation` | MissionCreate, TaskCreate, TaskAssign, TaskClaim, TaskUpdate, TaskGet, TaskList, TaskOutput, TaskStop, TaskVerify, AgentMessage |
+| `Task Delegation` | TaskAssign, TaskList, AgentMessage, SubAgentSpawn |
 | `Planning & Communication` | TodoWrite, Sleep, AskUserQuestion, EnterPlanMode |
-| `Organization Management` | TeamCreate, TeamUpdate, TeamStatus, TeamDelete, TeamMemberAdd, TeamMemberUpdate, TeamMemberRemove, AgentList |
+| `Organization Management` | HireEmployee, ListEmployees, UpdateOrg |
 | `Memory & Skills` | MemorySave, MemorySearch, Skill, SkillList |
 | `Browser` | BrowserAgent |
 | `System` | ApiCall, RunProgram, RestartServer |

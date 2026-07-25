@@ -47,15 +47,12 @@ describe('buildDefaultAgentConfigs', () => {
     expect(ceo.allowedTools).toEqual(expect.arrayContaining([
       'RunProgram',
       'TeamCreate',
-      'TeamMemberAdd',
-      'TeamMemberUpdate',
-      'TeamMemberRemove',
-      'AgentList',
       'TaskCreate',
       'TaskAssign',
       'TaskClaim',
       'TaskUpdate',
       'JobList',
+      'ListEmployees',
       'memory_save',
       'memory_search',
       'Skill',
@@ -65,17 +62,15 @@ describe('buildDefaultAgentConfigs', () => {
     ]));
     expect(manager.allowedTools).toContain('TaskAssign');
     expect(manager.allowedTools).toContain('RunProgram');
-    expect(manager.allowedTools).toContain('TeamMemberAdd');
-    expect(ceo.allowedTools).toContain('AgentList');
+    expect(manager.allowedTools).toContain('HireEmployee');
+    expect(manager.allowedTools).not.toContain('UpdateOrg');
+    expect(ceo.allowedTools).toContain('UpdateOrg');
+    expect(member.allowedTools).toContain('SubAgentSpawn');
     expect(member.allowedTools).toContain('TeamCreate');
     expect(member.allowedTools).toContain('TaskClaim');
     expect(member.allowedTools).toContain('RunProgram');
     expect(member.allowedTools).not.toContain('SubAgentDelete');
-    for (const config of [ceo, manager, member]) {
-      expect(config.allowedTools).not.toContain('HireEmployee');
-      expect(config.allowedTools).not.toContain('UpdateOrg');
-      expect(config.allowedTools).not.toContain('SubAgentSpawn');
-    }
+    expect(member.allowedTools).not.toContain('HireEmployee');
   });
 
   it('enables focused default skills instead of leaving skills blank', () => {
@@ -120,7 +115,6 @@ describe('buildDefaultAgentConfigs', () => {
       'JobList',
     ]));
     expect(migrated.config.allowedTools).not.toContain('SubAgentDelete');
-    expect(migrated.config.allowedTools).not.toContain('SubAgentSpawn');
 
     const restricted = { ...config, allowedTools: ['Read'] };
     expect(migrateCoordinationToolAllowlist(restricted)).toEqual({
@@ -131,18 +125,10 @@ describe('buildDefaultAgentConfigs', () => {
     const legacyManager = {
       ...config,
       role: AgentRole.Manager,
-      allowedTools: ['Read', 'HireEmployee', 'UpdateOrg', 'SubAgentSpawn'],
+      allowedTools: ['Read', 'UpdateOrg'],
     };
     expect(migrateCoordinationToolAllowlist(legacyManager)).toEqual({
-      config: {
-        ...legacyManager,
-        allowedTools: expect.arrayContaining([
-          'Read',
-          'TeamCreate',
-          'TeamMemberAdd',
-          'AgentList',
-        ]),
-      },
+      config: { ...legacyManager, allowedTools: ['Read'] },
       changed: true,
     });
   });

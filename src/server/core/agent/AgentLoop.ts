@@ -31,11 +31,7 @@ import { SessionManager } from '../session/index.js';
 import { PromptAssembler } from '../prompt/index.js';
 import { TokenCounter } from '../context/index.js';
 import { createLogger } from '../logger.js';
-import {
-  InterruptController,
-  InterruptReason,
-  INTERRUPT_MESSAGE_PREFIX,
-} from './supervision/InterruptController.js';
+import { InterruptController, INTERRUPT_MESSAGE_PREFIX } from './supervision/InterruptController.js';
 import {
   MAX_TURNS_DEFAULT,
   COMPRESSION_TRIGGER_RATIO,
@@ -82,27 +78,10 @@ export interface AgentLoopConfig {
   extraAllowedTools?: string[];
   workspace?: string;
   systemPromptOverride?: string;
-  /**
-   * Optional durable inbox adapter. It is invoked immediately before every
-   * LLM request boundary; returned records are injected as FIFO user messages.
-   */
-  safeTurnBoundaryMessageProvider?: SafeTurnBoundaryMessageProvider;
 }
 
-export interface SafeTurnBoundaryMessage {
-  id: string;
-  content: string;
-}
 
-export interface SafeTurnBoundaryMessageContext {
-  agentId: string;
-  sessionId: string;
-  turn: number;
-}
 
-export type SafeTurnBoundaryMessageProvider = (
-  context: SafeTurnBoundaryMessageContext,
-) => Promise<readonly SafeTurnBoundaryMessage[]>;
 
 
 export class AgentLoop {
@@ -116,7 +95,6 @@ export class AgentLoop {
   readonly extraAllowedTools: string[];
   readonly workspace?: string;
   readonly systemPromptOverride?: string;
-  readonly safeTurnBoundaryMessageProvider?: SafeTurnBoundaryMessageProvider;
 
   private stallDetector: StallDetector;
   private toolCallHistory: Array<{ name: string; result: string; ts: number }> = [];
@@ -132,7 +110,6 @@ export class AgentLoop {
     this.extraAllowedTools = uniqueToolNames(config.extraAllowedTools || []);
     this.workspace = config.workspace;
     this.systemPromptOverride = config.systemPromptOverride;
-    this.safeTurnBoundaryMessageProvider = config.safeTurnBoundaryMessageProvider;
     this.stallDetector = new StallDetector();
   }
 
@@ -265,12 +242,6 @@ export class AgentLoop {
 
     // Messages arrive via TypedEventBus (no polling delay). Checked every turn.
     const channelMsgs: Array<{ role: 'system' | 'user'; content: string }> = [];
-    const safeBoundaryMessageIds = new Set(
-      messages.flatMap((message) => {
-        const messageId = (message as ApiMessage & { __msgId?: string }).__msgId;
-        return messageId ? [messageId] : [];
-      }),
-    );
     const unsubChannel = AgentChannel.getInstance().subscribe(
       this.agentId, this.sessionId,
       (msg) => {
@@ -346,18 +317,6 @@ export class AgentLoop {
           this.stallDetector.reset();
 
           lastKnownMsgCount = sessionManager.getMessageCount(this.sessionId);
-          continue;
-        }
-        if (
-          this.safeTurnBoundaryMessageProvider
-          && ic.reason(this.sessionId) === InterruptReason.UserSteer
-        ) {
-          yield {
-            type: SSEEventType.StatusInfo,
-            content: '(Processing persistent Team message...)',
-          };
-          signal = ic.createController(this.sessionId).signal;
-          this.stallDetector.reset();
           continue;
         }
         const abortReason = ic.reason(this.sessionId);
@@ -444,36 +403,9 @@ export class AgentLoop {
         };
       }
 
-      if (this.safeTurnBoundaryMessageProvider) {
-        const boundaryMessages = await this.safeTurnBoundaryMessageProvider({
-          agentId: this.agentId,
-          sessionId: this.sessionId,
-          turn,
-        });
-        for (const boundaryMessage of boundaryMessages) {
-          if (
-            !boundaryMessage.id?.trim()
-            || typeof boundaryMessage.content !== 'string'
-            || safeBoundaryMessageIds.has(boundaryMessage.id)
-          ) {
-            continue;
-          }
-          safeBoundaryMessageIds.add(boundaryMessage.id);
-          messages.push({
-            role: 'user',
-            content: boundaryMessage.content,
-            __msgId: boundaryMessage.id,
-          } as unknown as ApiMessage);
-          yield {
-            type: SSEEventType.Think,
-            content: '(Received persistent Team message)',
-          };
-        }
-      }
-
       // Drain the durable coordination inbox at a safe turn boundary. JSONL
       // remains the source of truth; the interrupt channel is only a wake-up.
-      if (!this.safeTurnBoundaryMessageProvider) {
+      {
         const coordination = CoordinationService.getInstance();
         if (coordination.isInitialized()) {
           let rootSessionId = this.sessionId;
@@ -640,18 +572,6 @@ export class AgentLoop {
           lastKnownMsgCount = sessionManager.getMessageCount(this.sessionId);
           continue;
         }
-        if (
-          this.safeTurnBoundaryMessageProvider
-          && ic.reason(this.sessionId) === InterruptReason.UserSteer
-        ) {
-          yield {
-            type: SSEEventType.StatusInfo,
-            content: '(Processing persistent Team message...)',
-          };
-          signal = ic.createController(this.sessionId).signal;
-          this.stallDetector.reset();
-          continue;
-        }
         yield { type: SSEEventType.Text, content: '(User aborted during API call)' };
         break;
       }
@@ -808,15 +728,6 @@ export class AgentLoop {
                   signal = ic.createController(this.sessionId).signal;
                   this.stallDetector.reset();
                   lastKnownMsgCount = sessionManager.getMessageCount(this.sessionId);
-                  taskWaitInterrupted = true;
-                  break;
-                }
-                if (
-                  this.safeTurnBoundaryMessageProvider
-                  && ic.reason(this.sessionId) === InterruptReason.UserSteer
-                ) {
-                  signal = ic.createController(this.sessionId).signal;
-                  this.stallDetector.reset();
                   taskWaitInterrupted = true;
                   break;
                 }
@@ -1113,14 +1024,6 @@ export class AgentLoop {
               signal = ic.createController(this.sessionId).signal;
               this.stallDetector.reset();
               lastKnownMsgCount = sessionManager.getMessageCount(this.sessionId);
-              break;
-            }
-            if (
-              this.safeTurnBoundaryMessageProvider
-              && ic.reason(this.sessionId) === InterruptReason.UserSteer
-            ) {
-              signal = ic.createController(this.sessionId).signal;
-              this.stallDetector.reset();
               break;
             }
           }

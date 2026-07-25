@@ -8,6 +8,8 @@ import { defaultConfig } from '../../agent/AgentConfig.js';
 import { AgentRegistry } from '../../agent/AgentRegistry.js';
 import { SessionManager } from '../../session/SessionManager.js';
 import { SessionStore } from '../../session/SessionStore.js';
+import { TaskAssignTool } from '../../tools/builtin/TaskAssignTool.js';
+import { TaskCreateTool } from '../../tools/builtin/TaskCreateTool.js';
 import { CoordinationScheduler } from '../CoordinationScheduler.js';
 import { CoordinationService } from '../CoordinationService.js';
 import { WorkspaceLeaseService } from '../WorkspaceLeaseService.js';
@@ -154,6 +156,124 @@ describe('CoordinationScheduler', () => {
     scheduler.stop();
   });
 
+  it('executes a durable MainAgent -> Manager -> Member chain and returns results upward', async () => {
+    const service = CoordinationService.getInstance();
+    const sessions = SessionManager.getInstance();
+    const ceoContext = {
+      sessionId: rootSessionId,
+      agentId: 'ceo',
+      workspace: dir,
+      userConfirmed: true,
+      callerRole: AgentRole.MainAgent,
+    };
+    const rootCreated = await new TaskCreateTool().execute({
+      subject: 'Coordinate implementation',
+      description: 'Delegate one focused implementation task through the manager.',
+      acceptanceCriteria: ['Member result is returned through the manager'],
+      readOnly: true,
+    }, ceoContext);
+    expect(rootCreated.success).toBe(true);
+    const rootTaskId = (rootCreated.structured as { task: { id: string } }).task.id;
+    const rootAssigned = await new TaskAssignTool().execute({
+      taskId: rootTaskId,
+      targetAgentId: 'manager-1',
+    }, ceoContext);
+    expect(rootAssigned.success).toBe(true);
+
+    let childTaskId = '';
+    let managerSessionId = '';
+    let resolveMemberDone!: () => void;
+    const memberDone = new Promise<void>((resolve) => { resolveMemberDone = resolve; });
+    const scheduler = CoordinationScheduler.getInstance();
+    scheduler.start(async (task) => {
+      const running = await service.updateTask(rootSessionId, task.id, {
+        status: 'running',
+      }, task.assigneeAgentId!, task.version);
+
+      if (task.assigneeAgentId === 'manager-1') {
+        const managerSession = await sessions.createSubSession(
+          rootSessionId,
+          'manager-1',
+          'Coordinate implementation',
+        );
+        managerSessionId = managerSession.id;
+        const managerContext = {
+          sessionId: managerSession.id,
+          agentId: 'manager-1',
+          workspace: dir,
+          userConfirmed: true,
+          callerRole: AgentRole.Manager,
+        };
+        const childCreated = await new TaskCreateTool().execute({
+          subject: 'Implement focused change',
+          description: 'Produce the member-level implementation evidence.',
+          acceptanceCriteria: ['Focused implementation evidence is available'],
+          readOnly: true,
+        }, managerContext);
+        if (!childCreated.success) throw new Error(childCreated.errorMessage);
+        childTaskId = (childCreated.structured as { task: { id: string } }).task.id;
+        const childAssigned = await new TaskAssignTool().execute({
+          taskId: childTaskId,
+          targetAgentId: 'worker-1',
+        }, managerContext);
+        if (!childAssigned.success) throw new Error(childAssigned.errorMessage);
+
+        await memberDone;
+        const child = service.getTask(rootSessionId, childTaskId);
+        if (child?.status !== 'completed') throw new Error('Member task did not complete');
+        const latestManager = service.getTask(rootSessionId, task.id)!;
+        await service.updateTask(rootSessionId, task.id, {
+          status: 'completed',
+          progress: 100,
+          resultSummary: `Manager verified member result from ${child.id}`,
+        }, 'manager-1', latestManager.version);
+        await service.queueMessage({
+          rootSessionId,
+          taskId: task.id,
+          fromAgentId: 'manager-1',
+          toAgentId: 'ceo',
+          kind: 'task_result',
+          content: 'Manager verified and returned the member result.',
+        });
+        return;
+      }
+
+      await service.updateTask(rootSessionId, task.id, {
+        status: 'completed',
+        progress: 100,
+        resultSummary: 'Member implementation evidence',
+      }, task.assigneeAgentId!, running.version);
+      await service.queueMessage({
+        rootSessionId,
+        taskId: task.id,
+        fromAgentId: task.assigneeAgentId!,
+        toAgentId: 'manager-1',
+        kind: 'task_result',
+        content: 'Member implementation evidence',
+      });
+      resolveMemberDone();
+    });
+
+    await vi.waitFor(
+      () => expect(service.getTask(rootSessionId, rootTaskId)?.status).toBe('completed'),
+      { timeout: 5_000 },
+    );
+
+    const child = service.getTask(rootSessionId, childTaskId);
+    expect(child).toMatchObject({
+      sourceSessionId: managerSessionId,
+      creatorAgentId: 'manager-1',
+      assigneeAgentId: 'worker-1',
+      status: 'completed',
+    });
+    expect(service.listMessages(rootSessionId).filter((message) => message.kind === 'task_result'))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ fromAgentId: 'worker-1', toAgentId: 'manager-1', taskId: childTaskId }),
+        expect.objectContaining({ fromAgentId: 'manager-1', toAgentId: 'ceo', taskId: rootTaskId }),
+      ]));
+    expect(sessions.session(managerSessionId)?.parentSessionId).toBe(rootSessionId);
+    scheduler.stop();
+  });
 });
 
 function makeAgent(id: string, role: AgentRole, parentAgentId: string | null, level: number): Agent {

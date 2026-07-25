@@ -4,6 +4,7 @@ import type {
   CoordinationMessageKind,
   TeamRecord,
 } from '../../../../shared/types/coordination.js';
+import { AgentRole } from '../../../../shared/types/agent.js';
 import type { Message } from '../../../../shared/types/session.js';
 import { MessageRole } from '../../../../shared/types/session.js';
 import { AgentRegistry } from '../../agent/AgentRegistry.js';
@@ -23,16 +24,17 @@ const KINDS = new Set<CoordinationMessageKind>(['note', 'steer']);
 
 export class AgentMessageTool extends Tool {
   static category = 'Agent Teams';
-  static toolDescription = 'Queues durable peer, hierarchy, or team broadcast coordination messages.';
+  static toolDescription = 'Queues durable hierarchy, Team, or MainAgent organization-wide messages.';
   name(): string { return 'AgentMessage'; }
   description(): string {
-    return 'Send a durable note, live steer, or team broadcast without creating another task.';
+    return 'Send a durable note, live steer, active-Team broadcast, or MainAgent organization-wide message without creating another task.';
   }
   prompt(): string {
     return [
       'Use note for information the recipient may read on its next task.',
       'Use steer only for a currently running recipient session.',
-      'Use a note when a response or review is expected. Use to="*" only inside an active team.',
+      'Use a note when a response or review is expected. Use to="*" only inside an active session Team.',
+      'The MainAgent may address any employee directly or use to="@organization" to broadcast to every active employee.',
       'Task work itself belongs in TaskCreate/TaskAssign.',
     ].join('\n');
   }
@@ -45,7 +47,7 @@ export class AgentMessageTool extends Tool {
         to: {
           type: ['string', 'array'],
           items: { type: 'string', minLength: 1, maxLength: 200 },
-          description: 'Agent ID, list of agent IDs, or "*" to broadcast to the active team.',
+          description: 'Agent ID, list of agent IDs, "*" for the active Team, or "@organization" for a MainAgent broadcast.',
         },
         kind: { type: 'string', enum: ['note', 'steer'] },
         content: { type: 'string', minLength: 1, maxLength: 20000 },
@@ -62,6 +64,9 @@ export class AgentMessageTool extends Tool {
       const rootSessionId = rootSessionIdFor(ctx);
       const service = CoordinationService.getInstance();
       const team = service.getActiveTeam(rootSessionId);
+      const registry = AgentRegistry.getInstance();
+      const caller = registry.findAgent(ctx.agentId);
+      const isMainAgent = caller?.isActive === true && caller.role === AgentRole.MainAgent;
       const kindRaw = stringParam(params.kind, 'kind', 20)! as CoordinationMessageKind;
       if (!KINDS.has(kindRaw)) throw new CoordinationError('validation', `Invalid message kind: ${kindRaw}`);
       const content = stringParam(params.content, 'content', 20_000)!;
@@ -70,19 +75,25 @@ export class AgentMessageTool extends Tool {
       if (taskId && !service.getTask(rootSessionId, taskId)) {
         throw new CoordinationError('not_found', `Task not found: ${taskId}`);
       }
-      const recipients = resolveRecipients(params.to, team, ctx.agentId);
+      const recipients = resolveRecipients(params.to, team, ctx.agentId, isMainAgent, registry);
       if (recipients.length === 0) throw new CoordinationError('validation', 'No recipients selected');
 
       const delivered: Array<Record<string, unknown>> = [];
       for (const targetAgentId of recipients) {
-        const target = AgentRegistry.getInstance().findAgent(targetAgentId);
+        const target = registry.findAgent(targetAgentId);
         if (!target?.isActive) throw new CoordinationError('validation', `Active target agent not found: ${targetAgentId}`);
         const inSameTeam = !!team
           && team.memberAgentIds.includes(ctx.agentId)
           && team.memberAgentIds.includes(targetAgentId);
-        if (!inSameTeam) assertHierarchyAdjacency(ctx.agentId, targetAgentId);
+        if (!inSameTeam && !isMainAgent) assertHierarchyAdjacency(ctx.agentId, targetAgentId);
 
-        const targetSession = await resolveTargetSession(ctx, targetAgentId, team, inSameTeam);
+        const targetSession = await resolveTargetSession(
+          ctx,
+          targetAgentId,
+          team,
+          inSameTeam,
+          isMainAgent,
+        );
         const runtime = AgentRuntime.getInstance();
         if (kindRaw === 'steer' && !runtime.isSessionActive(targetSession.id)) {
           throw new CoordinationError('conflict', `Cannot steer idle agent ${targetAgentId}; send a note instead`);
@@ -98,7 +109,6 @@ export class AgentMessageTool extends Tool {
           content,
           summary,
         });
-        const caller = AgentRegistry.getInstance().findAgent(ctx.agentId);
         const rendered = [
           [
             `<coordination-message id="${queued.id}"`,
@@ -154,7 +164,22 @@ export class AgentMessageTool extends Tool {
   }
 }
 
-function resolveRecipients(value: unknown, team: TeamRecord | undefined, callerAgentId: string): string[] {
+function resolveRecipients(
+  value: unknown,
+  team: TeamRecord | undefined,
+  callerAgentId: string,
+  isMainAgent: boolean,
+  registry: AgentRegistry,
+): string[] {
+  if (value === '@organization') {
+    if (!isMainAgent) {
+      throw new CoordinationError('forbidden', 'Only the active MainAgent may broadcast to the organization');
+    }
+    return registry.activeAgents()
+      .filter((agent) => agent.role !== AgentRole.SubAgent)
+      .map((agent) => agent.id)
+      .filter((agentId) => agentId !== callerAgentId);
+  }
   if (value === '*') {
     if (!team || !team.memberAgentIds.includes(callerAgentId)) {
       throw new CoordinationError('forbidden', 'Broadcast requires membership in the active team');
@@ -189,6 +214,7 @@ async function resolveTargetSession(
   targetAgentId: string,
   team: TeamRecord | undefined,
   inSameTeam: boolean,
+  isMainAgent: boolean,
 ) {
   const sessionManager = SessionManager.getInstance();
   if (inSameTeam && team) {
@@ -202,6 +228,26 @@ async function resolveTargetSession(
           coordinationTeamId: team.id,
           coordinationRootSessionId: team.rootSessionId,
           coordinationMode: 'swarm',
+        },
+      },
+    );
+  }
+  if (isMainAgent) {
+    const root = sessionManager.getRootSession(ctx.sessionId);
+    const caller = AgentRegistry.getInstance().findAgent(ctx.agentId)!;
+    const target = AgentRegistry.getInstance().findAgent(targetAgentId)!;
+    if (target.parentAgentId === caller.id) {
+      return sessionManager.createSubSession(root.id, targetAgentId);
+    }
+    return sessionManager.createSubSession(
+      root.id,
+      targetAgentId,
+      `Organization message: ${targetAgentId}`,
+      {
+        scopeId: 'organization',
+        metadata: {
+          coordinationRootSessionId: root.id,
+          coordinationMode: 'hierarchy',
         },
       },
     );

@@ -7,7 +7,9 @@ export class TeamStatusTool extends Tool {
   static category = 'Agent Teams';
   static toolDescription = 'Returns the current collaboration team and its task/member state.';
   name(): string { return 'TeamStatus'; }
-  description(): string { return 'Inspect team membership, lifecycle, tasks, messages, and workspace leases.'; }
+  description(): string {
+    return 'Inspect the current session collaboration team, its tasks, messages, and leases. Use ListEmployees for the complete durable roster.';
+  }
   minRole(): string { return 'Member'; }
   riskLevel(): RiskLevel { return RiskLevel.Safe; }
   isReadOnly(): boolean { return true; }

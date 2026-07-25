@@ -359,8 +359,8 @@ A caller at level N can use any tool requiring level ≥ N. Returns `true` if `c
 
 | Role | Tools |
 |---|---|
-| `MainAgent` (0) only | `AskUserQuestion` |
-| `Manager` (1)+ | `HireEmployee`, `TaskAssign`, `UpdateOrg` |
+| `MainAgent` (0) only | `AskUserQuestion`, `UpdateOrg` |
+| `Manager` (1)+ | `HireEmployee`, `TaskAssign` |
 | `Member` (2)+ | `SubAgentSpawn` |
 | `SubAgent` (3)+ | All other tools (the default) |
 
@@ -464,9 +464,9 @@ Choose one of the 8 existing categories (or a new one — new categories auto-cr
 |---|---|
 | `File & Code` | Bash, Read, Write, Edit, Glob, Grep, NotebookEdit |
 | `Search & Web` | WebFetch, WebSearch |
-| `Task Delegation` | TaskAssign, TaskList, AgentMessage, SubAgentSpawn |
+| `Agent Teams` | ListEmployees, HireEmployee, UpdateOrg, TeamCreate, TeamUpdate, TeamStatus, TeamDelete, AgentMessage |
+| `Task Coordination` | TaskCreate, TaskAssign, TaskClaim, TaskUpdate, TaskGet, TaskList, TaskOutput, TaskStop, SubAgentSpawn |
 | `Planning & Communication` | TodoWrite, Sleep, AskUserQuestion, EnterPlanMode |
-| `Organization Management` | HireEmployee, ListEmployees, UpdateOrg |
 | `Memory & Skills` | MemorySave, MemorySearch, Skill, SkillList |
 | `Browser` | BrowserAgent |
 | `System` | ApiCall, RunProgram, RestartServer |

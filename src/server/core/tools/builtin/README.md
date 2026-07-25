@@ -7,7 +7,8 @@
 
 | Group | Tools |
 |---|---|
-| Team | `TeamCreate`, `TeamUpdate`, `TeamStatus`, `TeamDelete` |
+| Team roster | `ListEmployees`, `HireEmployee`, `UpdateOrg` |
+| Session Team | `TeamCreate`, `TeamUpdate`, `TeamStatus`, `TeamDelete` |
 | Durable task | `TaskCreate`, `TaskAssign`, `TaskClaim`, `TaskUpdate`, `TaskGet`, `TaskList`, `TaskOutput`, `TaskStop` |
 | Messaging | `AgentMessage` |
 | Temporary worker | `SubAgentSpawn` |
@@ -16,6 +17,11 @@
 Tasks and process Jobs are intentionally separate. Agent work is always stored
 by `CoordinationService`; `BackgroundTaskManager` is only for Bash and native
 program processes.
+
+All roster, session-Team, and messaging tools appear under the `Agent Teams`
+tool group. The roster is durable across sessions: `HireEmployee` creates an
+agent and `UpdateOrg` changes reporting lines. A session Team is temporary and
+only references existing active employees for the current root session.
 
 `TaskCreate` declares acceptance criteria, dependencies, read-only mode, and
 write scope. `TaskAssign` chooses an eligible worker but does not mark work

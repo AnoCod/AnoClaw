@@ -25,21 +25,22 @@ const HIRE_ROLES = ['Manager', 'Member'] as const;
 
 export class HireEmployeeTool extends Tool {
 
-  static category = 'Organization Management';
-  static toolDescription = 'Creates a durable Manager or Member agent in the organization.';
+  static category = 'Agent Teams';
+  static toolDescription = 'Adds a durable Manager or Member to the organization roster.';
 
   name(): string {
     return 'HireEmployee';
   }
 
   description(): string {
-    return 'Create a durable employee agent. Use this only when the organization needs persistent specialist or manager capacity. LLM connection settings are inherited from the hiring agent unless explicitly overridden.';
+    return 'Add a durable employee to the Team tool group roster. Use TeamCreate separately when existing employees only need a temporary collaboration team for one root session.';
   }
 
   prompt(): string {
     return [
-      '## HireEmployee Usage',
+      '## Team roster hiring',
       'Hire only for durable responsibilities, not for a one-off task. Use SubAgentSpawn for temporary helpers and TaskAssign for existing employees.',
+      'This changes the persistent organization roster. It does not add the employee to the current session Team; use TeamUpdate for that.',
       '',
       'Good hires have:',
       '- A professional role-based name, such as Frontend Engineer, QA Tester, or Security Auditor.',

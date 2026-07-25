@@ -12,14 +12,14 @@ const MAX_AGENT_ID_CHARS = 200;
 
 export class UpdateOrgTool extends Tool {
 
-  static category = 'Organization Management';
-  static toolDescription = 'Updates agent metadata, parent, or configuration in the org tree.';
+  static category = 'Agent Teams';
+  static toolDescription = 'Changes durable reporting relationships in the organization roster.';
   name(): string {
     return 'UpdateOrg';
   }
 
   description(): string {
-    return 'Reassign an agent to a new parent in the organization hierarchy. MainAgent only. Enforces role hierarchy and prevents circular references.';
+    return 'Reassign a durable employee to a new manager. MainAgent only. This changes the organization roster; TeamUpdate changes only the current session collaboration team.';
   }
 
   prompt(): string {

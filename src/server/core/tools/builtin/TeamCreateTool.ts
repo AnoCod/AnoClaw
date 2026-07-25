@@ -1,6 +1,5 @@
 import { Tool, RiskLevel } from '../Tool.js';
 import type { ExecutionContext, ToolResult } from '../Tool.js';
-import { AgentRegistry } from '../../agent/AgentRegistry.js';
 import { CoordinationService } from '../../coordination/CoordinationService.js';
 import {
   booleanParam,
@@ -17,12 +16,13 @@ export class TeamCreateTool extends Tool {
   static toolDescription = 'Creates the single active collaboration team for the current root session.';
   name(): string { return 'TeamCreate'; }
   description(): string {
-    return 'Create a dynamic team from existing active employees without changing the organization tree.';
+    return 'Create a temporary collaboration team from the durable employee roster without changing reporting relationships.';
   }
   prompt(): string {
     return [
       'Use TeamCreate when at least two independent tasks benefit from parallel execution.',
-      'Invite existing active employee IDs. The creator becomes the team leader.',
+      'Call ListEmployees first, then invite existing active employee IDs. Use HireEmployee first only when durable capacity is missing.',
+      'The creator becomes the team leader. Team membership is session-scoped and does not change the organization roster.',
       'A root session can have only one active team; reuse it instead of creating another.',
     ].join('\n');
   }

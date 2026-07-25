@@ -44,7 +44,8 @@ export function createSessionGuidanceSection(): SystemPromptSection {
 
       lines.push(
         '',
-        'Coordination tools: TaskCreate defines durable work; TaskAssign or TaskClaim selects a worker; AgentMessage updates active work; TaskList, TaskGet, and TaskOutput inspect state and results; TaskStop cancels work.',
+        'Team tools: ListEmployees, HireEmployee, and UpdateOrg manage the durable roster; TeamCreate, TeamUpdate, TeamStatus, and TeamDelete manage only the current root session collaboration team; AgentMessage handles hierarchy, Team, and MainAgent organization-wide communication.',
+        'Task tools: TaskCreate defines durable work; TaskAssign or TaskClaim selects a worker; TaskList, TaskGet, and TaskOutput inspect state and results; TaskStop cancels work.',
       );
 
       return lines.join('\n');

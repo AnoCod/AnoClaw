@@ -33,21 +33,21 @@ interface EmployeeNode extends EmployeeSummary {
 
 export class ListEmployeesTool extends Tool {
 
-  static category = 'Organization Management';
-  static toolDescription = 'Lists all employees (agents) in the organization.';
+  static category = 'Agent Teams';
+  static toolDescription = 'Lists the complete durable organization roster and reporting tree.';
   name(): string {
     return 'ListEmployees';
   }
 
   description(): string {
-    return 'List the current organization structure. Shows the full agent hierarchy from the CEO down, including roles, teams, report chains, and agent status.';
+    return 'List the durable Team roster from MainAgent down, including roles, reporting lines, specialties, and status. Use TeamStatus for the current session collaboration team.';
   }
 
   prompt(): string {
     return '## ListEmployees Usage\n' +
       'See your organization chart. Shows all agents, their roles, teams, and reporting chains.\n\n' +
       '**When to use:** Before delegating (check who\'s available and what they specialize in). When planning team structure. When the user asks "who works for me?".\n\n' +
-      'Use this BEFORE TaskAssign or HireEmployee. Know your team before you delegate or hire.';
+      'Use this BEFORE HireEmployee, TeamCreate, TeamUpdate, TaskAssign, or AgentMessage. Know the durable roster before you form a temporary collaboration team.';
   }
 
   parametersSchema(): Record<string, unknown> {

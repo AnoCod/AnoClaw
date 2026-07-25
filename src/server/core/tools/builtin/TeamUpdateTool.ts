@@ -19,7 +19,16 @@ export class TeamUpdateTool extends Tool {
   static category = 'Agent Teams';
   static toolDescription = 'Invites, removes, or transfers leadership of existing team members.';
   name(): string { return 'TeamUpdate'; }
-  description(): string { return 'Update the active team without changing persistent org relationships.'; }
+  description(): string {
+    return 'Update the current session collaboration team without hiring, destroying, or reassigning durable employees.';
+  }
+  prompt(): string {
+    return [
+      'Use TeamUpdate to add or remove existing employees from the active session Team, or transfer its leadership.',
+      'Use HireEmployee to add durable capacity and UpdateOrg to change persistent reporting relationships.',
+      'Removing a member from this Team never removes that employee from the organization roster.',
+    ].join('\n');
+  }
   minRole(): string { return 'Member'; }
   riskLevel(): RiskLevel { return RiskLevel.Medium; }
   parametersSchema(): Record<string, unknown> {

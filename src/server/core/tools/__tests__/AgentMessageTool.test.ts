@@ -3,6 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
+import { AgentRole } from '../../../../shared/types/agent.js';
 import { AgentRegistry } from '../../agent/AgentRegistry.js';
 import { AgentRuntime } from '../../agent/AgentRuntime.js';
 import { CoordinationService } from '../../coordination/CoordinationService.js';
@@ -22,6 +23,7 @@ describe('AgentMessageTool durable mailbox', () => {
   let service: CoordinationService;
   const appendMessage = vi.fn().mockResolvedValue(undefined);
   const setRuntimeStatus = vi.fn().mockResolvedValue(undefined);
+  const createSubSession = vi.fn().mockResolvedValue({ id: 'child-session', agentId: 'member-1' });
 
   beforeEach(async () => {
     dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'anoclaw-agent-message-'));
@@ -29,19 +31,21 @@ describe('AgentMessageTool durable mailbox', () => {
     WorkspaceLeaseService.resetInstance();
     service = CoordinationService.getInstance();
     await service.initialize(dir);
-    appendMessage.mockClear();
-    setRuntimeStatus.mockClear();
+    appendMessage.mockReset().mockResolvedValue(undefined);
+    setRuntimeStatus.mockReset().mockResolvedValue(undefined);
+    createSubSession.mockReset().mockResolvedValue({ id: 'child-session', agentId: 'member-1' });
     vi.spyOn(SessionManager, 'getInstance').mockReturnValue({
       getRootSession: vi.fn(() => ({ id: 'root-1', agentId: ctx.agentId })),
       session: vi.fn(() => ({ id: 'root-1', agentId: ctx.agentId, parentSessionId: null })),
-      createSubSession: vi.fn().mockResolvedValue({ id: 'child-session', agentId: 'member-1' }),
+      createSubSession,
       appendMessage,
       setRuntimeStatus,
     } as unknown as SessionManager);
     vi.spyOn(AgentRegistry, 'getInstance').mockReturnValue({
       findAgent: vi.fn((id: string) => id === ctx.agentId
-        ? { id, name: 'Manager', parentAgentId: null, isActive: true }
-        : { id, name: 'Member', parentAgentId: ctx.agentId, isActive: true }),
+        ? { id, name: 'Manager', role: AgentRole.Manager, parentAgentId: null, isActive: true }
+        : { id, name: 'Member', role: AgentRole.Member, parentAgentId: ctx.agentId, isActive: true }),
+      activeAgents: vi.fn(() => []),
     } as unknown as AgentRegistry);
     vi.spyOn(AgentRuntime, 'getInstance').mockReturnValue({
       isSessionActive: vi.fn(() => false),
@@ -109,5 +113,59 @@ describe('AgentMessageTool durable mailbox', () => {
     expect(messages).toHaveLength(2);
     expect(messages.map((message) => message.toAgentId).sort()).toEqual(['member-1', 'member-2']);
     expect(messages.every((message) => message.teamId === team.id && message.status === 'delivered')).toBe(true);
+  });
+
+  it('lets MainAgent message any employee and broadcast to the durable roster', async () => {
+    const mainCtx = { ...ctx, agentId: 'main-agent' };
+    const employees = [
+      { id: 'main-agent', name: 'MainAgent', role: AgentRole.MainAgent, parentAgentId: null, isActive: true },
+      { id: 'manager-1', name: 'Manager', role: AgentRole.Manager, parentAgentId: 'main-agent', isActive: true },
+      { id: 'member-1', name: 'Member', role: AgentRole.Member, parentAgentId: 'manager-1', isActive: true },
+      { id: 'subagent-1', name: 'Temporary', role: AgentRole.SubAgent, parentAgentId: 'member-1', isActive: true },
+    ];
+    vi.mocked(SessionManager.getInstance).mockReturnValue({
+      getRootSession: vi.fn(() => ({ id: 'root-1', agentId: 'main-agent' })),
+      session: vi.fn(() => ({ id: 'root-1', agentId: 'main-agent', parentSessionId: null })),
+      createSubSession,
+      appendMessage,
+      setRuntimeStatus,
+    } as unknown as SessionManager);
+    vi.mocked(AgentRegistry.getInstance).mockReturnValue({
+      findAgent: vi.fn((id: string) => employees.find((agent) => agent.id === id)),
+      activeAgents: vi.fn(() => employees),
+    } as unknown as AgentRegistry);
+
+    const direct = await new AgentMessageTool().execute({
+      to: 'member-1',
+      kind: 'note',
+      content: 'Direct message across reporting levels.',
+    }, mainCtx);
+    expect(direct.success).toBe(true);
+    expect(createSubSession).toHaveBeenCalledWith(
+      'root-1',
+      'member-1',
+      'Organization message: member-1',
+      expect.objectContaining({ scopeId: 'organization' }),
+    );
+
+    const broadcast = await new AgentMessageTool().execute({
+      to: '@organization',
+      kind: 'note',
+      content: 'Organization-wide update.',
+    }, mainCtx);
+    expect(broadcast.success).toBe(true);
+    expect(service.listMessages('root-1').filter(
+      (message) => message.content === 'Organization-wide update.',
+    ).map((message) => message.toAgentId).sort()).toEqual(['manager-1', 'member-1']);
+  });
+
+  it('rejects organization-wide broadcast from non-MainAgent callers', async () => {
+    const result = await new AgentMessageTool().execute({
+      to: '@organization',
+      kind: 'note',
+      content: 'Unauthorized broadcast.',
+    }, ctx);
+    expect(result.success).toBe(false);
+    expect(result.errorMessage).toContain('Only the active MainAgent');
   });
 });

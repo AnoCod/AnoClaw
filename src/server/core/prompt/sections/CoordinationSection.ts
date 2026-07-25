@@ -107,7 +107,8 @@ function autoSwarmGuidance(agentId: string): string {
     '# Automatic Team Coordination',
     '',
     `When the request contains at least ${minTasks} genuinely independent tasks, create or reuse a temporary Team and represent the work on the durable task board.`,
-    'Use existing active employees only. Team membership never changes the persistent organization tree.',
+    'Call ListEmployees to inspect the durable roster. Use existing active employees; HireEmployee is only for missing long-term capacity.',
+    'Team membership never changes the persistent organization tree.',
     'If work is sequential, tiny, or must modify one shared area, continue normally without creating a Team.',
   ].join('\n');
 }

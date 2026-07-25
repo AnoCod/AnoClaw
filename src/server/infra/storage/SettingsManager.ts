@@ -27,6 +27,8 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
     temperature: 1.0,
     apiKey: '',
     apiUrl: 'https://api.deepseek.com',
+    contextWindow: 131072,
+    credentialRef: 'local-llm',
   },
 
   // Agent

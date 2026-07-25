@@ -1,27 +1,40 @@
-import { Tool, RiskLevel } from '../Tool.js';
+import type { TaskPriority } from '../../../../shared/types/v3/index.js';
+import { RiskLevel, Tool } from '../Tool.js';
 import type { ExecutionContext, ToolResult } from '../Tool.js';
-import type { CoordinationTaskPriority } from '../../../../shared/types/coordination.js';
-import { CoordinationService } from '../../coordination/CoordinationService.js';
 import {
-  booleanParam,
-  rootSessionIdFor,
-  stringArrayParam,
-  stringParam,
-  toolFailure,
-} from '../../coordination/CoordinationToolHelpers.js';
+  appendCommand,
+  booleanValue,
+  isCompanyMainAgent,
+  optionalText,
+  requiredText,
+  requireScopedState,
+  stringList,
+  v3WorkToolDependencies,
+  V3WorkToolError,
+  withWorkRevisionRetry,
+  workToolFailure,
+  type V3WorkToolDependencies,
+} from '../v3/V3WorkToolSupport.js';
 
-const PRIORITIES = new Set<CoordinationTaskPriority>(['low', 'normal', 'high', 'urgent']);
+const PRIORITIES = new Set<TaskPriority>(['low', 'normal', 'high', 'critical']);
 
 export class TaskCreateTool extends Tool {
   static category = 'Task Coordination';
-  static toolDescription = 'Creates a durable task with acceptance criteria, dependencies, and workspace scope.';
+  static toolDescription = 'Creates a persistent v3 Team task in the current Work and Mission.';
+
+  constructor(private readonly dependencies?: V3WorkToolDependencies) {
+    super();
+  }
+
   name(): string { return 'TaskCreate'; }
-  description(): string { return 'Create a durable hierarchy or team task. Use TaskAssign separately to select an owner.'; }
+  description(): string {
+    return 'Create one persistent Team task in the current Work. Use MissionCreate first when no Mission exists.';
+  }
   prompt(): string {
     return [
       'Create one Task per independently verifiable unit of work.',
-      'Declare dependencies by Task ID and declare readOnly/writeScope before assigning.',
-      'A mutating task without a narrow writeScope should use ["."] and will serialize the workspace.',
+      'Declare dependencies and write scope before assignment.',
+      'Mutating Tasks default to writeScope ["."]; read-only Tasks cannot declare writeScope.',
     ].join('\n');
   }
   minRole(): string { return 'Member'; }
@@ -30,43 +43,131 @@ export class TaskCreateTool extends Tool {
     return {
       type: 'object',
       properties: {
-        teamId: { type: 'string', minLength: 1, maxLength: 200 },
+        missionId: { type: 'string', minLength: 1, maxLength: 200 },
         subject: { type: 'string', minLength: 1, maxLength: 200 },
-        description: { type: 'string', minLength: 1, maxLength: 20000 },
-        acceptanceCriteria: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 2000 }, minItems: 1, maxItems: 50 },
-        priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] },
-        dependsOn: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 200 }, maxItems: 50 },
+        description: { type: 'string', minLength: 1, maxLength: 20_000 },
+        acceptanceCriteria: {
+          type: 'array',
+          items: { type: 'string', minLength: 1, maxLength: 2_000 },
+          minItems: 1,
+          maxItems: 50,
+        },
+        priority: { type: 'string', enum: ['low', 'normal', 'high', 'critical'] },
+        dependsOn: {
+          type: 'array',
+          items: { type: 'string', minLength: 1, maxLength: 200 },
+          maxItems: 50,
+        },
         readOnly: { type: 'boolean' },
-        writeScope: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 500 }, maxItems: 50 },
+        writeScope: {
+          type: 'array',
+          items: { type: 'string', minLength: 1, maxLength: 500 },
+          maxItems: 50,
+        },
       },
       required: ['subject', 'description', 'acceptanceCriteria'],
       additionalProperties: false,
     };
   }
+
   async execute(params: Record<string, unknown>, ctx: ExecutionContext): Promise<ToolResult> {
+    const dependencies = v3WorkToolDependencies(this.dependencies);
     try {
-      const teamId = stringParam(params.teamId, 'teamId', 200, true);
-      const priorityRaw = stringParam(params.priority, 'priority', 20, true) || 'normal';
-      if (!PRIORITIES.has(priorityRaw as CoordinationTaskPriority)) return this.makeError(`Invalid priority: ${priorityRaw}`);
-      const task = await CoordinationService.getInstance().createTask({
-        rootSessionId: rootSessionIdFor(ctx),
-        sourceSessionId: ctx.sessionId,
-        teamId,
-        mode: teamId ? 'swarm' : 'hierarchy',
-        subject: stringParam(params.subject, 'subject', 200)!,
-        description: stringParam(params.description, 'description', 20_000)!,
-        acceptanceCriteria: stringArrayParam(params.acceptanceCriteria, 'acceptanceCriteria', { maxItems: 50, maxLength: 2_000 }),
-        priority: priorityRaw as CoordinationTaskPriority,
-        creatorAgentId: ctx.agentId,
-        dependsOn: stringArrayParam(params.dependsOn, 'dependsOn', { optional: true, maxItems: 50, maxLength: 200 }),
-        readOnly: booleanParam(params.readOnly, false),
-        writeScope: stringArrayParam(params.writeScope, 'writeScope', { optional: true, maxItems: 50, maxLength: 500 }),
+      const state = await requireScopedState(dependencies, ctx);
+      const requestedMissionId = optionalText(params.missionId, 'missionId', 200);
+      const missionId = requestedMissionId
+        || state.context.missionId
+        || state.work.work?.focusMissionId;
+      if (!missionId) {
+        throw new V3WorkToolError(
+          'mission_required',
+          'TaskCreate requires a Mission. Call MissionCreate first or pass missionId.',
+        );
+      }
+      const mission = state.work.missions[missionId];
+      const missionTeamId = mission?.teamId ?? state.context.teamId;
+      if (
+        !mission
+        || (
+          missionTeamId !== state.context.teamId
+          && !isCompanyMainAgent(state.company, state.context.agentId)
+        )
+      ) {
+        throw new V3WorkToolError(
+          'mission_outside_team',
+          `Mission ${missionId} does not belong to the executing Team.`,
+        );
+      }
+      if (mission.status !== 'active' && mission.status !== 'planned') {
+        throw new V3WorkToolError(
+          'mission_not_active',
+          `Mission ${missionId} cannot accept tasks while ${mission.status}.`,
+        );
+      }
+      const priority = optionalText(params.priority, 'priority', 20) ?? 'normal';
+      if (!PRIORITIES.has(priority as TaskPriority)) {
+        throw new V3WorkToolError('validation_failed', `Invalid Task priority: ${priority}`);
+      }
+      const readOnly = booleanValue(params.readOnly, false);
+      const declaredScope = stringList(params.writeScope, 'writeScope', {
+        maxItems: 50,
+        maxLength: 500,
       });
-      return this.makeResult(`Task created: ${task.id} [${task.status}] ${task.subject}`, {
+      if (readOnly && (declaredScope?.length ?? 0) > 0) {
+        throw new V3WorkToolError(
+          'invalid_write_scope',
+          'A read-only Task cannot declare writeScope.',
+        );
+      }
+      const writeScope = readOnly ? [] : declaredScope?.length ? declaredScope : ['.'];
+      const task = await withWorkRevisionRetry(
+        dependencies,
+        state.context.workId,
+        state.context.agentId,
+        async (projection) => {
+          const currentMission = projection.missions[missionId];
+          const currentMissionTeamId = currentMission?.teamId ?? state.context.teamId;
+          if (
+            !currentMission
+            || (
+              currentMissionTeamId !== state.context.teamId
+              && !isCompanyMainAgent(state.company, state.context.agentId)
+            )
+          ) {
+            throw new V3WorkToolError(
+              'mission_outside_team',
+              `Mission ${missionId} is no longer available to the executing Team.`,
+            );
+          }
+          return dependencies.workRepository.createTask(
+            state.context.workId,
+            {
+              missionId,
+              title: requiredText(params.subject, 'subject', 200),
+              description: requiredText(params.description, 'description', 20_000),
+              acceptanceCriteria: stringList(params.acceptanceCriteria, 'acceptanceCriteria', {
+                required: true,
+                maxItems: 50,
+                maxLength: 2_000,
+              }),
+              priority: priority as TaskPriority,
+              teamId: currentMissionTeamId,
+              dependsOnTaskIds: stringList(params.dependsOn, 'dependsOn', {
+                maxItems: 50,
+                maxLength: 200,
+              }),
+              readOnly,
+              writeScope,
+            },
+            appendCommand(projection, state.context.agentId),
+          );
+        },
+      );
+      return this.makeResult(`Task created: ${task.id} [${task.status}] ${task.title}`, {
         structured: { task },
       });
     } catch (error) {
-      return toolFailure(this, error);
+      return workToolFailure(error);
     }
   }
 }

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-07-07",
+  "updated": "2026-07-25",
   "purpose": "AnoClaw agent-readable knowledge base. Supplements skills and memory with durable product, plugin, API, architecture, design, and troubleshooting references.",
   "entries": [
     {
@@ -22,7 +22,7 @@
       "title": "多 Agent 协作模型",
       "audience": ["user", "agent", "developer"],
       "tags": ["agent", "delegation", "organization", "sessions"],
-      "summary": "Explains MainAgent, Managers, Members, SubAgents, task assignment, and reporting."
+      "summary": "Explains MainAgent, persistent Teams and Agents, durable Missions and Tasks, transparent employee Sessions, and reporting."
     },
     {
       "path": "docs/architecture-overview.md",

@@ -9,7 +9,18 @@ AnoClaw is now developed with Codex. `AGENTS.md` is the canonical repository ins
 
 ## Project Overview
 
-AnoClaw v2.0 — AI desktop platform. An Electron-packaged Node.js application where users customize their own AI agents and tools through a plugin system. The kernel is frozen at ~17 files (process isolation, tool registry, event bus, LLM interface). Everything else is plugin territory. The frontend is a browser-based SPA, the backend is a single-threaded Node.js HTTP+WebSocket server. No Express, no database — pure `http` module with JSONL append-only storage.
+AnoClaw 3.0 is a local-first autonomous AI company. Most users talk only to
+MainAgent; persistent Teams and independent Agents organize, delegate, execute,
+verify, remember, and communicate behind that simple surface. The transparent
+Work view exposes real Agent conversations and execution evidence without
+making users operate the orchestration machinery.
+
+The Electron application uses a browser SPA and a single-threaded Node.js
+HTTP+WebSocket server. There is no Express or database. Version 3 uses
+append-only JSONL event streams under `data/v3/` and does not import or
+dual-write v2 organization/task/session state. See
+`docs/anoclaw-3-architecture.md` for the canonical product and execution
+invariants.
 
 ## Commands
 
@@ -204,43 +215,37 @@ sequenceDiagram
     WS->>U: SSE-like events (text, think, tool_call, tool_result, done)
 ```
 
-### Agent Hierarchy
+### Persistent Company and Teams
 
-- **MainAgent** (CEO, level 0): Always exists. Decomposes tasks, delegates to Managers/Members. Can communicate with user.
-- **Manager** (level 1): Manages a team of Members. Can hire/fire Members via `HireEmployeeTool`.
-- **Member** (level 2): Leaf workers. Execute tasks, cannot manage others. Can create SubAgents.
-- **SubAgent**: Temporary, not persisted. Created/spawned by any agent via `SubAgentSpawnTool`. Destroyed when done.
+- **Company**: exactly one local Company per installation in 3.0.
+- **Team**: persistent, nested organization unit. Teams may grow, split, or be
+  archived without changing the Agent execution engine.
+- **TeamMembership**: gives an Agent `leader` or `member` responsibility and a
+  primary Team.
+- **Agent**: a persistent independent worker with its own instructions, model,
+  tools, skills, capabilities, memory, sessions, and runtime state.
+- **MainAgent**: the Company owner and normal user-facing Agent. It uses the
+  same runtime as every other Agent but has company-level responsibilities.
 
-```mermaid
-graph TB
-    CEO["MainAgent (CEO)<br/>level: 0<br/>Role: MainAgent"]
-    MGR1["Manager A<br/>level: 1<br/>Role: Manager"]
-    MGR2["Manager B<br/>level: 1<br/>Role: Manager"]
-    MEM1["Member 1<br/>level: 2<br/>Role: Member"]
-    MEM2["Member 2<br/>level: 2<br/>Role: Member"]
-    MEM3["Member 3<br/>level: 2<br/>Role: Member"]
-    SA1["SubAgent<br/>(temporary)"]
-    SA2["SubAgent<br/>(temporary)"]
+`HireEmployee`, `ListEmployees`, `UpdateOrg`, and temporary `SubAgentSpawn` are not public 3.0
+operations. Adding a new employee is a Team member operation that atomically
+creates a persistent Agent and membership.
 
-    CEO -->|"HireEmployeeTool"| MGR1
-    CEO -->|"HireEmployeeTool"| MGR2
-    MGR1 -->|"HireEmployeeTool"| MEM1
-    MGR1 -->|"HireEmployeeTool"| MEM2
-    MGR2 -->|"HireEmployeeTool"| MEM3
-    MEM1 -->|"SubAgentSpawnTool"| SA1
-    MEM2 -->|"SubAgentSpawnTool"| SA2
-
-    CEO -..->|"TaskCreate + TaskAssign"| MGR1
-    MGR1 -..->|"TaskCreate + TaskAssign"| MEM1
-```
-
-Agents are NOT single-threaded — one agent can serve multiple sessions simultaneously because LLM APIs are stateless. Each session has independent context and its own `AgentLoop` instance.
+Agents are not globally single-threaded. An Agent can serve multiple Works
+because each Run owns an independent Session and `AgentLoop`; server-owned
+capacity policies still limit concurrent reads and writes.
 
 ### Coordination Plane
 
-The organization tree remains durable authority, while each root session may create one temporary active Team that references existing employees without changing their hierarchy. `CoordinationService` stores Team, Task, Message, and Workspace Lease events under `data/coordination/<rootSessionId>/`; JSONL is the source of truth and `projection.json` is only a rebuildable startup cache.
+Every Work owns a persistent `Work → Mission → Task → Run → Session` execution
+graph. The v3 scheduler is event-driven and server-owned. It selects Agents from
+the responsible persistent Team, releases dependencies only after durable
+completion, obtains Workspace isolation before execution, and submits a Task
+only after the worker `AgentLoop` reaches `Done`.
 
-All hierarchy, swarm, and temporary SubAgent work uses the same durable task state machine. `CoordinationScheduler` dispatches ready work after dependencies complete, enforces per-root and per-agent concurrency, acquires workspace leases before execution, and commits completion only after the worker `AgentLoop` reaches `Done`. `BackgroundTaskManager` is reserved for non-Agent process jobs.
+Agent messages, Workspace leases, orchestration decisions, verification
+records, and tool-call write-ahead journal entries live in the same Work JSONL
+stream. `BackgroundTaskManager` remains reserved for non-Agent process jobs.
 
 ### Plugin Architecture
 
@@ -283,38 +288,37 @@ Plugins declare contributions in `plugin.json`: tools, pages (iframe HTML), comm
 
 ### Session Model
 
-Sessions form a tree: `MainSession (User↔CEO)` → `SubSession (CEO↔Manager)` → `SubSession (Manager↔Member)`. Users can view all sub-sessions read-only but can only type in the main session. Each session stored as JSONL shards in `data/sessions/<sessionId>/`.
+A Session is only a transcript boundary and execution evidence:
 
-```mermaid
-graph TB
-    MS["MainSession<br/>id: abc12345<br/>level: 0<br/>User ↔ CEO"]
+- each Work owns one primary MainAgent Session;
+- every Task Run owns a Run Session with an immutable Agent actor snapshot;
+- Run Sessions may name their parent Session so the UI can show a transparent
+  conversation tree;
+- Work, Mission, Task, Team, and Agent state never live in Session metadata.
 
-    SS1["SubSession<br/>id: abc12345-mgrA<br/>level: 1<br/>CEO ↔ Manager A"]
-    SS2["SubSession<br/>id: abc12345-mgrB<br/>level: 1<br/>CEO ↔ Manager B"]
-
-    SS1A["SubSession<br/>id: abc12345-mgrA-m1<br/>level: 2<br/>Manager A ↔ Member 1"]
-    SS1B["SubSession<br/>id: abc12345-mgrA-m2<br/>level: 2<br/>Manager A ↔ Member 2"]
-
-    MS -->|"createSubSession()"| SS1
-    MS -->|"createSubSession()"| SS2
-    SS1 -->|"createSubSession()"| SS1A
-    SS1 -->|"createSubSession()"| SS1B
-
-    MS -..->|"workspace inherits"| SS1
-    SS1 -..->|"workspace inherits"| SS1A
-```
+Users normally type only in the Work's primary Session. Team conversations are
+visible and auditable but are driven by durable coordination messages.
 
 ### Tool System
 
-Built-in tools are registered in `registerAllTools()` via directory scan of `builtin/`. Every tool extends the abstract `Tool` class (EventEmitter-based). Additional tools are registered by plugins at runtime via `anoclaw.tools.register()` (RPC → PluginToolProxy → ToolRegistry). Each agent has an `allowedTools` whitelist. Key categories: File I/O (Read/Write/Edit/Glob/Grep), shell execution (Bash), native program launch (RunProgram), Web (Fetch/Search), agent management (HireEmployee/SubAgentSpawn), cross-agent communication (TaskAssign/AgentMessage), Plan mode, Memory, Skills, MCP, and Gateway.
+Built-in tools are registered in `registerAllTools()` via directory scan of
+`builtin/`. Every tool extends the abstract `Tool` class (EventEmitter-based).
+Additional tools are registered by plugins at runtime via
+`anoclaw.tools.register()` (RPC → PluginToolProxy → ToolRegistry). Each Agent
+has an `allowedTools` whitelist. Key categories are File I/O, shell/native
+execution, Web, persistent Team membership, Mission/Task orchestration,
+AgentMessage, Plan mode, Memory, Skills, MCP, and Gateway.
 
 ### Storage: JSONL Append-Only
 
-- `data/sessions/<id>/shard_NNNNNN.jsonl` — event stream (10K lines / 10MB / 30 day sharding)
-- `data/sessions/<id>/meta.json` — session metadata (small, rewritable)
-- `data/agents/<id>.json` — agent configuration
-- `memory/team/` — shared team memories (markdown files)
-- `memory/agents/<id>/` — per-agent memories
+- `data/v3/company/install-company/events.jsonl` — Company, Workspace, Team,
+  TeamMembership, and Agent source of truth
+- `data/v3/work/<id>/events.jsonl` — Work and orchestration source of truth
+- `data/v3/transcript/<session-id>/events.jsonl` — Session transcript evidence
+- `data/v3/**/projection.json` — rebuildable startup checkpoints, never the
+  source of truth
+- `memory/company/`, `memory/teams/`, `memory/agents/`, and Work/Mission memory
+  scopes — durable knowledge
 
 ### Singleton Pattern
 

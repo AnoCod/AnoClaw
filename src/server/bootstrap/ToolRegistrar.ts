@@ -8,6 +8,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ToolRegistry } from '../core/tools/ToolRegistry.js';
 import type { Tool } from '../core/tools/Tool.js';
 import { LogManager } from '../infra/logging/LogManager.js';
+import {
+  RETIRED_ORGANIZATION_TOOL_MODULES,
+  RETIRED_ORGANIZATION_TOOL_NAMES,
+} from '../core/tools/v3/RetiredOrganizationTools.js';
 
 const log = LogManager.getInstance().logger('anochat.tools');
 
@@ -37,12 +41,23 @@ export async function registerAllTools(tools: ToolRegistry): Promise<void> {
     // Skip declaration files, source maps, and non-tool helpers
     if (entry.name.endsWith('.d.ts') || entry.name.endsWith('.js.map')) continue;
     if (entry.name === 'main.js') continue;
+    if (isRetiredBuiltinOrganizationTool(entry.name)) {
+      log.info('Skipping retired organization tool', { file: entry.name });
+      continue;
+    }
 
     const filePath = path.join(builtinDir, entry.name);
     try {
       const mod = await import(pathToFileURL(filePath).href);
       const toolInstance = extractTool(mod);
       if (toolInstance) {
+        if (isRetiredBuiltinOrganizationTool(entry.name, toolInstance.name())) {
+          log.info('Skipping retired organization tool', {
+            file: entry.name,
+            tool: toolInstance.name(),
+          });
+          continue;
+        }
         const category = (toolInstance.constructor as typeof Tool).category || 'Uncategorized';
         tools.registerTool(toolInstance, category);
         registered++;
@@ -53,6 +68,14 @@ export async function registerAllTools(tools: ToolRegistry): Promise<void> {
   }
 
   log.info(`Auto-registered ${registered} built-in tools from ${builtinDir}`);
+}
+
+export function isRetiredBuiltinOrganizationTool(
+  moduleName: string,
+  toolName?: string,
+): boolean {
+  return RETIRED_ORGANIZATION_TOOL_MODULES.has(moduleName)
+    || (toolName !== undefined && RETIRED_ORGANIZATION_TOOL_NAMES.has(toolName));
 }
 
 /**

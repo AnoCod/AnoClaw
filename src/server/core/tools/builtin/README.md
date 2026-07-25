@@ -7,15 +7,14 @@
 
 | Group | Tools |
 |---|---|
-| Team | `TeamCreate`, `TeamUpdate`, `TeamStatus`, `TeamDelete` |
-| Durable task | `TaskCreate`, `TaskAssign`, `TaskClaim`, `TaskUpdate`, `TaskGet`, `TaskList`, `TaskOutput`, `TaskStop` |
+| Team | `TeamCreate`, `TeamUpdate`, `TeamStatus`, `TeamDelete`, `TeamMemberAdd`, `TeamMemberUpdate`, `TeamMemberRemove`, `AgentList` |
+| Durable work | `MissionCreate`, `TaskCreate`, `TaskAssign`, `TaskClaim`, `TaskUpdate`, `TaskGet`, `TaskList`, `TaskOutput`, `TaskStop`, `TaskVerify` |
 | Messaging | `AgentMessage` |
-| Temporary worker | `SubAgentSpawn` |
 | Process job | `JobList`, `JobOutput`, `JobStop` |
 
 Tasks and process Jobs are intentionally separate. Agent work is always stored
-by `CoordinationService`; `BackgroundTaskManager` is only for Bash and native
-program processes.
+in the v3 Work JSONL event stream; `BackgroundTaskManager` is only for Bash and
+native program processes.
 
 `TaskCreate` declares acceptance criteria, dependencies, read-only mode, and
 write scope. `TaskAssign` chooses an eligible worker but does not mark work
@@ -23,12 +22,12 @@ complete. The scheduler claims and runs ready tasks, and the runtime commits a
 terminal state only after actual execution.
 
 `AgentMessage` writes to a durable FIFO mailbox. Team members can address peers
-or broadcast; outside a Team the organization parent/child restriction applies.
-`steer` requires a running recipient, while `note` may wait for the next task.
+or broadcast. `steer` requires a running recipient, while `note` waits for the
+recipient's next Team Run.
 
-`SubAgentSpawn` accepts `contextMode: isolated | summary | fork` and optional
-read/write scope. Temporary agent configuration is never persisted after the
-run, but its task, session transcript, and output are durable.
+AnoClaw 3.0 has no temporary worker or hierarchy-management tools.
+`HireEmployee`, `ListEmployees`, `UpdateOrg`, and `SubAgentSpawn` are retired:
+persistent Team membership is the only multi-Agent organization model.
 
 ## Tool execution safety
 
@@ -40,5 +39,5 @@ and task mode. `ToolPipeline` enforces the coordination execution context:
 - `Bash` and `RunProgram` require the full-workspace `"."` lease;
 - every modifying call must be covered by the running task lease.
 
-See [multi-agent-coordination.md](../../../../../docs/multi-agent-coordination.md)
+See [anoclaw-3-architecture.md](../../../../../docs/anoclaw-3-architecture.md)
 for the full contract.

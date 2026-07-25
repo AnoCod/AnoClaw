@@ -6,11 +6,24 @@ import type { ToolResult } from '../Tool.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
 import { MemoryManager } from '../../memory/MemoryManager.js';
 import { parseScopeParameter } from '../../memory/MemoryEntry.js';
+import { V3ScopedMemoryService } from '../../v3/memory/V3ScopedMemoryService.js';
+import {
+  assertNoModelSuppliedMemoryTarget,
+  parseV3MemoryScope,
+  resolveV3MemoryTarget,
+  v3MemoryContext,
+  v3MemoryFailure,
+} from '../v3/V3MemoryToolSupport.js';
 
 export class MemoryDeleteTool extends Tool {
 
   static category = 'Memory & Skills';
   static toolDescription = 'Deletes entries from the persistent memory system.';
+
+  constructor(private readonly v3Memory: V3ScopedMemoryService = V3ScopedMemoryService.getInstance()) {
+    super();
+  }
+
   name(): string { return 'memory_delete'; }
 
   description(): string {
@@ -21,6 +34,7 @@ export class MemoryDeleteTool extends Tool {
     return '## MemoryDelete Usage\n' +
       'Delete a memory entry by exact name match within a scope.\n\n' +
       '**When to delete:** The information is outdated, wrong, or superseded by a newer entry. Use sparingly - memories are cheap, wrong memories are expensive.\n\n' +
+      'The scope target is bound to the current server-owned execution context.\n\n' +
       'Prefer updating (MemorySave with same name+scope) over delete+recreate.';
   }
 
@@ -28,9 +42,10 @@ export class MemoryDeleteTool extends Tool {
     return {
       type: 'object',
       properties: {
-        scope: { type: 'string', enum: ['personal', 'team', 'project', 'session_personal', 'session_team'], description: 'Scope to delete from.' },
+        scope: { type: 'string', enum: ['company', 'team', 'agent', 'workspace', 'work', 'mission'], description: 'Current-context scope to delete from.' },
         name: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'Name of the memory entry to delete (must match exactly).' },
         dry_run: { type: 'boolean', description: 'Check whether the memory exists without deleting it. Default: false.' },
+        idempotency_key: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'Optional stable key for safe retry of the same deletion.' },
       },
       required: ['scope', 'name'],
       additionalProperties: false,
@@ -40,7 +55,14 @@ export class MemoryDeleteTool extends Tool {
   riskLevel(): RiskLevel { return RiskLevel.Safe; }
 
   async execute(params: Record<string, unknown>, ctx: ExecutionContext): Promise<ToolResult> {
-    const scopeResult = normalizeEnum(params.scope, 'scope', ['personal', 'team', 'project', 'session_personal', 'session_team']);
+    const v3Context = v3MemoryContext(ctx.sessionId);
+    const scopeResult = normalizeEnum(
+      params.scope,
+      'scope',
+      v3Context
+        ? ['company', 'team', 'agent', 'workspace', 'work', 'mission']
+        : ['personal', 'team', 'project', 'session_personal', 'session_team'],
+    );
     if (scopeResult.error) return this.makeError(scopeResult.error);
     const nameResult = normalizeString(params.name, 'name');
     if (nameResult.error) return this.makeError(nameResult.error);
@@ -50,8 +72,63 @@ export class MemoryDeleteTool extends Tool {
     const scope = scopeResult.value!;
     const name = nameResult.value!;
     const dryRun = dryRunResult.value!;
+    let idempotencyKey: string | undefined;
+    if (params.idempotency_key !== undefined && params.idempotency_key !== null) {
+      const idempotencyResult = normalizeString(params.idempotency_key, 'idempotency_key', 200);
+      if (idempotencyResult.error) return this.makeError(idempotencyResult.error);
+      idempotencyKey = idempotencyResult.value;
+    }
 
     try {
+      if (v3Context) {
+        assertNoModelSuppliedMemoryTarget(params);
+        const v3Scope = parseV3MemoryScope(scope);
+        if (!v3Scope) return this.makeError('scope must be a v3 memory scope');
+        const target = resolveV3MemoryTarget(v3Context, v3Scope);
+        if (dryRun) {
+          const existing = await this.v3Memory.get(target, name);
+          return this.makeResult(
+            existing
+              ? `Memory "${name}" exists in ${scope} scope. dry_run=true; no deletion performed.`
+              : `Memory "${name}" was not found in ${scope} scope. dry_run=true; no deletion performed.`,
+            {
+              structured: {
+                scope,
+                targetId: target.targetId,
+                name,
+                status: existing ? 'found' : 'not_found',
+                dryRun: true,
+              },
+            },
+          );
+        }
+        const deleted = await this.v3Memory.delete({
+          ...target,
+          idOrName: name,
+          ...(idempotencyKey ? { idempotencyKey } : {}),
+        });
+        if (!deleted) {
+          return this.makeError(`Memory "${name}" not found in ${scope} scope.`, {
+            structured: {
+              scope,
+              targetId: target.targetId,
+              name,
+              status: 'not_found',
+              dryRun: false,
+            },
+          });
+        }
+        return this.makeResult(`Memory "${name}" deleted from ${scope} scope.`, {
+          structured: {
+            scope,
+            targetId: target.targetId,
+            name,
+            status: 'deleted',
+            dryRun: false,
+          },
+        });
+      }
+
       const mm = MemoryManager.getInstance();
       const isSession = scope === 'session_personal' || scope === 'session_team';
       const sessionId = isSession ? ctx.sessionId : undefined;
@@ -91,15 +168,17 @@ export class MemoryDeleteTool extends Tool {
         structured: { scope, effectiveScope: memScope, targetId, name, status: 'deleted', dryRun: false },
       });
     } catch (err) {
+      if (v3Context) return v3MemoryFailure(err, (message) => this.makeError(message));
       return this.makeError(`Failed to delete memory: ${(err as Error).message}`);
     }
   }
 }
 
-function normalizeString(value: unknown, field: string): { value: string; error?: undefined } | { value?: undefined; error: string } {
+function normalizeString(value: unknown, field: string, maxLength = 200): { value: string; error?: undefined } | { value?: undefined; error: string } {
   if (typeof value !== 'string') return { error: `${field} must be a string` };
   const trimmed = value.trim();
   if (!trimmed) return { error: `${field} must not be empty` };
+  if (trimmed.length > maxLength) return { error: `${field} must be ${maxLength} characters or less` };
   return { value: trimmed };
 }
 

@@ -185,9 +185,11 @@ describe('prompt tool context', () => {
       'session-prompt-test',
     );
 
-    expect(prompt).toContain('Hierarchical delegation and temporary Team collaboration share one durable task state machine');
+    expect(prompt).toContain('Persistent Team collaboration uses one durable task state machine');
     expect(prompt).toContain('Create work with TaskCreate');
     expect(prompt).toContain('AgentMessage is for mid-task clarification');
+    expect(prompt).toContain('Team membership is persistent Company state');
+    expect(prompt).not.toContain('Hierarchical delegation');
     expect(prompt).not.toContain('One agent = one active task');
   });
 
@@ -205,7 +207,7 @@ describe('prompt tool context', () => {
       'session-prompt-test',
     );
 
-    expect(prompt).toContain('## Multi-Agent Leadership');
+    expect(prompt).toContain('## Persistent Team Collaboration');
     expect(prompt).toContain('You own the user outcome');
     expect(prompt).not.toMatch(/[鈥鈫鈼鉁鈿锟�]/);
   });

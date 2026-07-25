@@ -6,6 +6,15 @@ import type { ToolResult } from '../Tool.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
 import { MemoryManager } from '../../memory/MemoryManager.js';
 import { MemoryScope } from '../../memory/MemoryEntry.js';
+import { V3ScopedMemoryService } from '../../v3/memory/V3ScopedMemoryService.js';
+import {
+  assertNoModelSuppliedMemoryTarget,
+  parseV3MemoryScope,
+  resolveAllV3MemoryTargets,
+  resolveV3MemoryTarget,
+  v3MemoryContext,
+  v3MemoryFailure,
+} from '../v3/V3MemoryToolSupport.js';
 
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 50;
@@ -15,19 +24,25 @@ const MAX_SNIPPET_CHARS = 1000;
 export class MemorySearchTool extends Tool {
 
   static category = 'Memory & Skills';
-  static toolDescription = 'Searches durable memory for relevant project, user, team, or session knowledge.';
+  static toolDescription = 'Searches durable scoped memory for relevant shared or execution knowledge.';
+
+  constructor(private readonly v3Memory: V3ScopedMemoryService = V3ScopedMemoryService.getInstance()) {
+    super();
+  }
+
   name(): string { return 'memory_search'; }
 
   description(): string {
-    return 'Search memory across personal, team, session, or all scopes. Use before unfamiliar work or when past decisions may matter.';
+    return 'Search company, team, agent, workspace, work, mission, or all current-context memory scopes.';
   }
 
   prompt(): string {
     return [
       '## memory_search Usage',
-      'Search memory when previous context could improve accuracy: project conventions, past bugs, user preferences, or prior decisions.',
+      'Search memory when previous context could improve accuracy: workspace conventions, past bugs, user preferences, or prior decisions.',
       '',
-      'Use broad all-scope search for unfamiliar work, team scope for shared project rules, and personal scope for your own lessons.',
+      'Use all for broad discovery, team for shared knowledge, agent for private lessons, and work or mission for execution-specific decisions.',
+      'Scope target IDs are bound by the server and cannot be supplied by the model.',
       'After finding a relevant entry, use memory_recall for full content only when the summary is insufficient.',
     ].join('\n');
   }
@@ -37,7 +52,7 @@ export class MemorySearchTool extends Tool {
       type: 'object',
       properties: {
         query: { type: 'string', minLength: 1, pattern: '\\S', description: 'Search query - keywords or phrases to find in memories. Supports fuzzy matching (typo-tolerant) and cross-language synonyms (e.g. "logging" matches "logging").' },
-        scope: { type: 'string', enum: ['team', 'personal', 'session_personal', 'session_team', 'all'], description: 'Scope to search. Default: "all". session_personal/session_team search session-scoped.' },
+        scope: { type: 'string', enum: ['company', 'team', 'agent', 'workspace', 'work', 'mission', 'all'], description: 'Current-context scope to search. Default: all.' },
         fuzzy: { type: 'boolean', description: 'Enable fuzzy/semantic matching with typo tolerance. Default: true (always on).' },
         limit: { type: 'integer', minimum: 1, maximum: MAX_LIMIT, description: `Maximum memories to return. Default: ${DEFAULT_LIMIT}, max: ${MAX_LIMIT}.` },
         max_snippet_chars: { type: 'integer', minimum: 40, maximum: MAX_SNIPPET_CHARS, description: `Maximum content preview characters per memory. Default: ${DEFAULT_SNIPPET_CHARS}, max: ${MAX_SNIPPET_CHARS}.` },
@@ -52,11 +67,19 @@ export class MemorySearchTool extends Tool {
   isReadOnly(): boolean { return true; }
 
   async execute(params: Record<string, unknown>, ctx: ExecutionContext): Promise<ToolResult> {
+    const v3Context = v3MemoryContext(ctx.sessionId);
     const queryResult = normalizeString(params.query, 'query');
     if (queryResult.error) return this.makeError(queryResult.error);
     const query = queryResult.value!;
 
-    const scopeResult = normalizeEnum(params.scope, 'scope', ['team', 'personal', 'session_personal', 'session_team', 'all'] as const, 'all');
+    const scopeResult = normalizeEnum(
+      params.scope,
+      'scope',
+      v3Context
+        ? ['company', 'team', 'agent', 'workspace', 'work', 'mission', 'all'] as const
+        : ['team', 'personal', 'session_personal', 'session_team', 'all'] as const,
+      'all',
+    );
     if (scopeResult.error) return this.makeError(scopeResult.error);
     const scope = scopeResult.value!;
 
@@ -72,6 +95,26 @@ export class MemorySearchTool extends Tool {
     const maxSnippetChars = snippetResult.value!;
 
     try {
+      if (v3Context) {
+        assertNoModelSuppliedMemoryTarget(params);
+        const targets = scope === 'all'
+          ? resolveAllV3MemoryTargets(v3Context)
+          : [resolveV3MemoryTarget(v3Context, parseV3MemoryScope(scope)!)];
+        const entries = (await Promise.all(targets.map((target) =>
+          this.v3Memory.search({ ...target, query, limit: MAX_LIMIT }))))
+          .flat()
+          .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+        return searchResult(
+          entries,
+          query,
+          scope,
+          fuzzy,
+          limit,
+          maxSnippetChars,
+          (content, options) => this.makeResult(content, options),
+        );
+      }
+
       const mm = MemoryManager.getInstance();
       let entries;
       if (scope === 'personal') {
@@ -86,42 +129,17 @@ export class MemorySearchTool extends Tool {
         entries = await mm.searchAllScopes(ctx.agentId, query, ctx.sessionId);
       }
 
-      if (entries.length === 0) {
-        return this.makeResult(`No memories found for query "${query}" in ${scope} scope.`, {
-          structured: { query, scope, fuzzy, count: 0, returned: 0, limit, entries: [] },
-        });
-      }
-
-      const returnedEntries = entries.slice(0, limit);
-      const lines = [
-        `Found ${entries.length} memories for "${query}" in ${scope} scope` +
-        (entries.length > returnedEntries.length ? ` (showing ${returnedEntries.length})` : '') +
-        ':',
-        '',
-      ];
-      for (const e of returnedEntries) {
-        const snippet = truncate(e.content, maxSnippetChars);
-        lines.push(`- [${e.type}] **${e.name}** (${e.scope}): ${snippet}`);
-      }
-      return this.makeResult(lines.join('\n'), {
-        structured: {
-          query,
-          scope,
-          fuzzy,
-          count: entries.length,
-          returned: returnedEntries.length,
-          limit,
-          maxSnippetChars,
-          entries: returnedEntries.map(e => ({
-            name: e.name,
-            type: e.type,
-            scope: e.scope,
-            description: e.description,
-            snippet: truncate(e.content, maxSnippetChars),
-          })),
-        },
-      });
+      return searchResult(
+        entries,
+        query,
+        scope,
+        fuzzy,
+        limit,
+        maxSnippetChars,
+        (content, options) => this.makeResult(content, options),
+      );
     } catch (err) {
+      if (v3Context) return v3MemoryFailure(err, (message) => this.makeError(message));
       return this.makeError(`Failed to search memories: ${(err as Error).message}`);
     }
   }
@@ -179,4 +197,65 @@ function normalizeEnum<T extends readonly string[]>(
 function truncate(value: string, limit: number): string {
   if (value.length <= limit) return value;
   return `${value.slice(0, Math.max(0, limit - 20)).trimEnd()}... [truncated]`;
+}
+
+interface SearchResultEntry {
+  id?: string;
+  name: string;
+  type: string;
+  scope: string;
+  targetId?: string;
+  description: string;
+  content: string;
+}
+
+function searchResult(
+  entries: SearchResultEntry[],
+  query: string,
+  scope: string,
+  fuzzy: boolean,
+  limit: number,
+  maxSnippetChars: number,
+  makeResult: (
+    content: string,
+    options: { structured: Record<string, unknown> },
+  ) => ToolResult,
+): ToolResult {
+  if (entries.length === 0) {
+    return makeResult(`No memories found for query "${query}" in ${scope} scope.`, {
+      structured: { query, scope, fuzzy, count: 0, returned: 0, limit, entries: [] },
+    });
+  }
+
+  const returnedEntries = entries.slice(0, limit);
+  const lines = [
+    `Found ${entries.length} memories for "${query}" in ${scope} scope`
+      + (entries.length > returnedEntries.length ? ` (showing ${returnedEntries.length})` : '')
+      + ':',
+    '',
+  ];
+  for (const entry of returnedEntries) {
+    const snippet = truncate(entry.content, maxSnippetChars);
+    lines.push(`- [${entry.type}] **${entry.name}** (${entry.scope}): ${snippet}`);
+  }
+  return makeResult(lines.join('\n'), {
+    structured: {
+      query,
+      scope,
+      fuzzy,
+      count: entries.length,
+      returned: returnedEntries.length,
+      limit,
+      maxSnippetChars,
+      entries: returnedEntries.map((entry) => ({
+        ...(entry.id ? { id: entry.id } : {}),
+        name: entry.name,
+        type: entry.type,
+        scope: entry.scope,
+        ...(entry.targetId ? { targetId: entry.targetId } : {}),
+        description: entry.description,
+        snippet: truncate(entry.content, maxSnippetChars),
+      })),
+    },
+  });
 }

@@ -19,7 +19,7 @@ export function createLanguageSection(): SystemPromptSection {
       '',
       'Agent-to-agent communication must be English:',
       '- TaskAssign descriptions',
-      '- SubAgentSpawn prompts',
+      '- Team names, descriptions, and membership-change reasons',
       '- AgentMessage content',
       '- Delegation reports and structured data',
       '',

@@ -1,7 +1,7 @@
 /**
  * ApiServer — HTTP REST API server
  *
- * Serves the AnoClaw v2 REST API on port 15730 (localhost only).
+ * Serves the AnoClaw 3 REST API on port 15730 (localhost only).
  * Handlers have been extracted to `src/server/gateway/handlers/` to keep this file lean.
  *
  * @public
@@ -13,6 +13,9 @@ import { validateToken, hasPermission } from './ApiAuth.js';
 import type { ApiToken } from './ApiAuth.js';
 import { ApiPermission } from '../../shared/types/gateway.js';
 import { LogManager } from '../infra/logging/LogManager.js';
+import { createRepositoryV3Services } from '../api/v3/RepositoryServices.js';
+import { createV3Router, type V3Router } from '../api/v3/V3Router.js';
+import type { V3ApiServices } from '../api/v3/Contracts.js';
 
 // Route handler interface
 import type { RouteHandler, RouteMatch } from './RouteHandler.js';
@@ -127,9 +130,22 @@ export class ApiServer extends EventEmitter {
 
   // Plugin HTTP routes
   private _pluginRoutes: Array<{ pluginName: string; method: string; path: string; handler: string; permission?: string }> = [];
+  private _v3Router: V3Router;
 
   private constructor() {
     super();
+    this._v3Router = createV3Router(createRepositoryV3Services(
+      undefined,
+      { enablePrimaryTurns: true },
+    ));
+  }
+
+  /**
+   * Installs the process-owned v3 service graph. Main uses this to share the
+   * exact repositories with the event-driven scheduler and primary-turn queue.
+   */
+  configureV3Services(services: V3ApiServices): void {
+    this._v3Router = createV3Router(services);
   }
 
   static getInstance(): ApiServer {
@@ -239,6 +255,11 @@ export class ApiServer extends EventEmitter {
     if (token && !this.checkRateLimit(token.token)) {
       res.setHeader('Retry-After', '60');
       this.sendJson(res, 429, { error: 'Too Many Requests', message: 'Rate limit exceeded' });
+      return;
+    }
+
+    if (pathname === '/api/v3' || pathname.startsWith('/api/v3/')) {
+      await this._v3Router.handle(req, res);
       return;
     }
 
@@ -418,7 +439,21 @@ export class ApiServer extends EventEmitter {
         }
         req.emit('end');
       });
-      this.route(method, new URL(path, `http://127.0.0.1:${this.port}`).pathname, req as unknown as http.IncomingMessage, res as unknown as http.ServerResponse, INTERNAL_TOKEN);
+      const pathname = new URL(path, `http://127.0.0.1:${this.port}`).pathname;
+      if (pathname === '/api/v3' || pathname.startsWith('/api/v3/')) {
+        void this._v3Router.handle(
+          req as unknown as http.IncomingMessage,
+          res as unknown as http.ServerResponse,
+        );
+      } else {
+        this.route(
+          method,
+          pathname,
+          req as unknown as http.IncomingMessage,
+          res as unknown as http.ServerResponse,
+          INTERNAL_TOKEN,
+        );
+      }
     });
   }
 

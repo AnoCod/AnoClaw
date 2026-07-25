@@ -43,8 +43,8 @@ describe('Shared constants — application identity', () => {
     expect(APP_NAME).toBe('AnoClaw');
   });
 
-  it('APP_VERSION is 2.0.1', () => {
-    expect(APP_VERSION).toBe('2.0.1');
+  it('APP_VERSION is 3.0.0', () => {
+    expect(APP_VERSION).toBe('3.0.0');
   });
 
   it('DEFAULT_MAIN_AGENT_ID is main-agent', () => {

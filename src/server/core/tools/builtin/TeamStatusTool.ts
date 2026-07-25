@@ -1,42 +1,97 @@
 import { Tool, RiskLevel } from '../Tool.js';
 import type { ExecutionContext, ToolResult } from '../Tool.js';
-import { CoordinationService } from '../../coordination/CoordinationService.js';
-import { rootSessionIdFor, stringParam, toolFailure } from '../../coordination/CoordinationToolHelpers.js';
+import type { Team } from '../../../../shared/types/v3/index.js';
+import {
+  InternalV3OrganizationApiAdapter,
+  type V3OrganizationApi,
+} from '../v3/V3OrganizationApiAdapter.js';
+import {
+  optionalBoolean,
+  optionalString,
+  organizationToolFailure,
+} from '../v3/V3OrganizationToolSupport.js';
 
 export class TeamStatusTool extends Tool {
-  static category = 'Agent Teams';
-  static toolDescription = 'Returns the current collaboration team and its task/member state.';
+  static category = 'Persistent Teams';
+  static toolDescription = 'Lists persistent v3 Teams and memberships.';
+
+  constructor(private readonly api: V3OrganizationApi = new InternalV3OrganizationApiAdapter()) {
+    super();
+  }
+
   name(): string { return 'TeamStatus'; }
-  description(): string { return 'Inspect team membership, lifecycle, tasks, messages, and workspace leases.'; }
-  minRole(): string { return 'Member'; }
+
+  description(): string {
+    return 'Inspect persistent Team records and their active memberships.';
+  }
+
   riskLevel(): RiskLevel { return RiskLevel.Safe; }
   isReadOnly(): boolean { return true; }
+  isConcurrencySafe(): boolean { return true; }
+
   parametersSchema(): Record<string, unknown> {
     return {
       type: 'object',
-      properties: { teamId: { type: 'string', minLength: 1, maxLength: 200 } },
-      required: [],
+      properties: {
+        teamId: { type: 'string', minLength: 1, maxLength: 200 },
+        includeArchived: { type: 'boolean' },
+      },
       additionalProperties: false,
     };
   }
-  async execute(params: Record<string, unknown>, ctx: ExecutionContext): Promise<ToolResult> {
+
+  async execute(
+    params: Record<string, unknown>,
+    _ctx: ExecutionContext,
+  ): Promise<ToolResult> {
     try {
-      const rootSessionId = rootSessionIdFor(ctx);
-      const teamId = stringParam(params.teamId, 'teamId', 200, true);
-      const snapshot = CoordinationService.getInstance().getSnapshot(rootSessionId);
-      const teams = teamId ? snapshot.teams.filter((team) => team.id === teamId) : snapshot.teams;
-      if (teamId && teams.length === 0) return this.makeError(`Team not found: ${teamId}`);
-      const selectedIds = new Set(teams.map((team) => team.id));
-      const tasks = snapshot.tasks.filter((task) => !task.teamId || selectedIds.has(task.teamId));
+      const teamId = optionalString(params.teamId, 'teamId', 200);
+      const includeArchived = optionalBoolean(params.includeArchived, 'includeArchived') ?? false;
+      const teamsResult = teamId
+        ? await this.api.getTeam(teamId)
+        : await this.api.listTeams();
+      const rawTeams = Array.isArray(teamsResult.data)
+        ? teamsResult.data
+        : [teamsResult.data];
+      const teams = includeArchived
+        ? rawTeams
+        : rawTeams.filter((team) => !team.archivedAt);
+      const membershipResults = await Promise.all(
+        teams.map((team) => this.api.listTeamMembers(team.id)),
+      );
+      const memberships = membershipResults.flatMap((result) => result.data);
+      const membershipsByTeam = new Map<string, typeof memberships>();
+      for (const membership of memberships) {
+        const existing = membershipsByTeam.get(membership.teamId) ?? [];
+        existing.push(membership);
+        membershipsByTeam.set(membership.teamId, existing);
+      }
       const lines = teams.length === 0
-        ? ['No team has been created for this root session.']
-        : teams.map((team) => `${team.id} [${team.state}] ${team.name} — leader ${team.leaderAgentId}; members ${team.memberAgentIds.join(', ')}`);
-      lines.push(`Tasks: ${tasks.length}; queued messages: ${snapshot.messages.filter((message) => message.status === 'queued').length}; leases: ${snapshot.leases.length}`);
+        ? ['No persistent Teams found.']
+        : teams.map((team) => formatTeam(team, membershipsByTeam.get(team.id) ?? []));
       return this.makeResult(lines.join('\n'), {
-        structured: { rootSessionId, revision: snapshot.revision, teams, tasks, messages: snapshot.messages, leases: snapshot.leases },
+        structured: {
+          teams,
+          memberships,
+          revision: Math.max(
+            teamsResult.revision,
+            ...membershipResults.map((result) => result.revision),
+          ),
+        },
       });
     } catch (error) {
-      return toolFailure(this, error);
+      return organizationToolFailure(error);
     }
   }
+}
+
+function formatTeam(
+  team: Team,
+  memberships: Array<{ role: string; agentId: string }>,
+): string {
+  const state = team.archivedAt ? `archived ${team.archivedAt}` : 'active';
+  const members = memberships.length === 0
+    ? 'no members'
+    : memberships.map((membership) => `${membership.agentId} (${membership.role})`).join(', ');
+  return `${team.id} [${state}] ${team.name} — ${members}`;
 }

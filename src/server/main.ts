@@ -5,16 +5,11 @@ import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_PORT, DEFAULT_HOST, APP_NAME, APP_VERSION, DEFAULT_MAIN_AGENT_ID } from '../shared/constants.js';
+import { DEFAULT_PORT, DEFAULT_HOST, APP_NAME, APP_VERSION } from '../shared/constants.js';
 import { WsServer } from './infra/network/WsServer.js';
-import { WsMessageRouter } from './infra/network/WsMessageRouter.js';
-import { registerAllWsHandlers } from './infra/network/handlers/registerAllHandlers.js';
 import { AgentRegistry } from './core/agent/AgentRegistry.js';
 import { AgentRuntime } from './core/agent/AgentRuntime.js';
-import { loadAgentConfig, saveAgentConfig } from './core/agent/AgentConfig.js';
-import { migrateCoordinationToolAllowlist } from './core/agent/DefaultAgentTemplate.js';
 import { SessionManager } from './core/session/SessionManager.js';
-import { recoverRestartCheckpoint } from './core/session/RestartCheckpointRecovery.js';
 import { ToolRegistry } from './core/tools/ToolRegistry.js';
 import { ToolProfiler } from './infra/supervision/ToolProfiler.js';
 import { PromptAssembler } from './core/prompt/PromptAssembler.js';
@@ -33,6 +28,8 @@ process.chdir(REPO_ROOT);
 
 // process.cwd() is the unpacked root (or project root in dev) and won't find these.
 const PUBLIC_DIR = appPath('src', 'public');
+let v3RealtimeBridge: import('./core/v3/events/V3RealtimeBridge.js').V3RealtimeBridge | null = null;
+let v3Scheduler: import('./core/v3/orchestration/CoordinationScheduler.js').CoordinationScheduler | null = null;
 
 
 function isAllowedLocalOrigin(origin: string | undefined): boolean {
@@ -448,59 +445,11 @@ async function initialize(): Promise<void> {
   logManager.setMinLevel(settings.get<string>('logging.level', 'info'));
 
 
+  // Persistent v3 Agents live only in the company event stream. Runtime Agent
+  // objects are registered lazily for an active turn and never loaded from
+  // the retired data/agents v2 directory.
   const registry = AgentRegistry.getInstance();
-  const agentsDir = ensureWritableDir('data', 'agents');
-  const files = fs.readdirSync(agentsDir).filter((f) => f.endsWith('.json'));
-  for (const file of files) {
-    const agentId = file.replace('.json', '');
-    try {
-      const loaded = await loadAgentConfig(agentId);
-      const migration = migrateCoordinationToolAllowlist(loaded);
-      if (migration.changed) {
-        await saveAgentConfig(migration.config);
-        logManager.logger('anochat.core').info('Agent coordination tools migrated', { aid: agentId });
-      }
-      const { Agent } = await import('./core/agent/Agent.js');
-      const agent = new Agent(migration.config);
-      registry.registerAgent(agent);
-      logManager.logger('anochat.core').info('Agent loaded', { aid: agent.id, name: agent.name });
-    } catch (err) {
-      logManager.logger('anochat.core').warn('Agent load failed', { aid: agentId, error: (err as Error).message });
-    }
-  }
-
-  // Auto-create a main agent on first run only if setup is done (apiKey exists).
-
-  if (registry.allAgents().length === 0) {
-    const hasApiKey = !!settings.get('apiKey');
-    if (!hasApiKey) {
-      logManager.logger('anochat.core').info('No agents and no apiKey - skipping auto-create, waiting for setup wizard');
-    } else {
-      logManager.logger('anochat.core').info('First run - creating default agent organization');
-      const { Agent } = await import('./core/agent/Agent.js');
-      const { buildDefaultAgentConfigs } = await import('./core/agent/DefaultAgentTemplate.js');
-      const defaultId = DEFAULT_MAIN_AGENT_ID;
-      const existingCfg = await loadAgentConfig(defaultId).catch(() => null);
-      if (!existingCfg) {
-        const configs = buildDefaultAgentConfigs({
-          agentName: 'MainAgent',
-          provider: settings.get('provider') || 'openai-compatible',
-          apiUrl: settings.get('apiUrl') || '',
-          apiKey: settings.get('apiKey') || '',
-          model: settings.get('model') || '',
-          contextWindow: Number(settings.get('contextWindow')) || 131072,
-        });
-        for (const cfg of configs) {
-          await saveAgentConfig(cfg);
-          const agent = new Agent(cfg);
-          registry.registerAgent(agent);
-        }
-        logManager.logger('anochat.core').info('Default agent organization auto-created', {
-          agents: configs.map((cfg) => cfg.id),
-        });
-      }
-    }
-  }
+  logManager.logger('anochat.core').info('Clean v3 runtime Agent registry initialized');
 
   // 3. Register all tools (built-in tools auto-discovered from builtin/)
   const { registerAllTools } = await import('./bootstrap/ToolRegistrar.js');
@@ -515,56 +464,105 @@ async function initialize(): Promise<void> {
   const { ApiServer: ApiServerClass } = await import('./gateway/ApiServer.js');
   registerAllRoutes(ApiServerClass.getInstance());
 
-  // 4. Initialize SessionManager
+  // 4. Keep the legacy SessionManager only as an internal AgentLoop
+  // compatibility service. It starts from a clean v3-owned directory and is
+  // not a public source of truth; v3 Session transcripts remain authoritative.
   const sessionManager = SessionManager.getInstance();
   try {
-    await sessionManager.initialize(ensureWritableDir('data', 'sessions'));
+    await sessionManager.initialize(ensureWritableDir('data', 'v3', 'runtime-compat', 'sessions'));
     const reconciledStatuses = await sessionManager.reconcileRuntimeStatuses();
-    logManager.logger('anochat.core').info('SessionManager initialized', { reconciledStatuses });
+    logManager.logger('anochat.core').info('AgentLoop compatibility sessions initialized', {
+      reconciledStatuses,
+    });
   } catch (err) {
     logManager.logger('anochat.core').error('SessionManager initialization failed', { error: (err as Error).message });
     throw err;
   }
 
-  // 4.2 Initialize the durable multi-agent coordination event log and scheduler.
-  try {
-    const { CoordinationService } = await import('./core/coordination/CoordinationService.js');
-    const { CoordinationScheduler } = await import('./core/coordination/CoordinationScheduler.js');
-    await CoordinationService.getInstance().initialize(ensureWritableDir('data', 'coordination'));
-    CoordinationScheduler.getInstance().start(
-      (task) => AgentRuntime.getInstance().runCoordinationTask(task),
-    );
-    logManager.logger('anochat.core').info('CoordinationService and scheduler initialized');
-  } catch (err) {
-    logManager.logger('anochat.core').error('Coordination initialization failed', {
-      error: (err as Error).message,
-    });
-    throw err;
-  }
+  // 4.2 Build one shared v3 repository graph for REST, primary turns,
+  // realtime replay, and (below) the event-driven scheduler.
+  const v3Root = ensureWritableDir('data', 'v3');
+  const {
+    CompanyRepository,
+    SessionTranscriptRepository,
+    WorkRepository,
+  } = await import('./core/v3/store/index.js');
+  const { V3PrimaryTurnCoordinator } = await import(
+    './core/v3/execution/V3PrimaryTurnCoordinator.js'
+  );
+  const { createRepositoryV3Services } = await import('./api/v3/RepositoryServices.js');
+  const companyRepository = new CompanyRepository(v3Root);
+  const workRepository = new WorkRepository(v3Root);
+  const transcriptRepository = new SessionTranscriptRepository(v3Root);
+  const primaryTurnCoordinator = new V3PrimaryTurnCoordinator({
+    companyRepository,
+    workRepository,
+    transcriptRepository,
+  });
+  const { V3RunAgentTurnExecutor } = await import(
+    './core/v3/orchestration/V3RunAgentTurnExecutor.js'
+  );
+  const { V3RepositoryWorkspacePreparer } = await import(
+    './core/v3/workspace/V3RepositoryWorkspacePreparer.js'
+  );
+  const { V3RunExecutor } = await import('./core/v3/orchestration/V3RunExecutor.js');
+  const { CoordinationScheduler } = await import(
+    './core/v3/orchestration/CoordinationScheduler.js'
+  );
+  const runExecutor = new V3RunExecutor({
+    companyRepository,
+    workRepository,
+    turnExecutor: new V3RunAgentTurnExecutor({
+      companyRepository,
+      workRepository,
+      transcriptRepository,
+    }),
+    workspacePreparer: new V3RepositoryWorkspacePreparer({
+      workRepository,
+      leaseTtlMs: settings.get<number>('coordination.workspaceLeaseTtlMs', 30_000),
+    }),
+    maxTaskRuntimeMs: settings.get<number>('coordination.maxTaskRuntimeMs', 600_000),
+  });
+  ApiServerClass.getInstance().configureV3Services(createRepositoryV3Services(v3Root, {
+    companyRepository,
+    workRepository,
+    transcriptRepository,
+    runExecutor,
+    primaryTurnDispatcher: primaryTurnCoordinator,
+  }));
+
+  const { AppendOnlyEventStore } = await import('./core/v3/store/AppendOnlyEventStore.js');
+  const { V3RealtimeBridge } = await import('./core/v3/events/V3RealtimeBridge.js');
+  v3RealtimeBridge = new V3RealtimeBridge(
+    wsServer,
+    new AppendOnlyEventStore(v3Root),
+  );
+  v3RealtimeBridge.start();
+  v3Scheduler = new CoordinationScheduler({
+    companyRepository,
+    workRepository,
+    runExecutor,
+  });
+  const { configureV3WorkToolDependencies } = await import(
+    './core/tools/v3/V3WorkToolSupport.js'
+  );
+  configureV3WorkToolDependencies({
+    companyRepository,
+    workRepository,
+    transcriptRepository,
+    wakeSafeTurnBoundary: runExecutor.wakeSafeTurnBoundary,
+    stopTask: (workId, taskId, reason) => (
+      v3Scheduler
+        ? v3Scheduler.stopTask(workId, taskId, reason)
+        : runExecutor.stop(workId, taskId, reason)
+    ),
+  });
+  await v3Scheduler.start();
+  logManager.logger('anochat.core').info('Persistent v3 service graph and scheduler initialized');
 
   // 4.5 Initialize API auth tokens
   await initAuthStore('config');
 
-
-  // Restore a restart checkpoint as an idempotent system message. The restartId
-  // survives a crash between transcript commit and checkpoint deletion.
-  try {
-    const checkpointPath = writablePath('data', 'restart-checkpoint.json');
-    const result = await recoverRestartCheckpoint(checkpointPath, { sessionManager });
-    if (result.status === 'recovered' || result.status === 'deduplicated') {
-      logManager.logger('anochat.core').info(
-        'Restart checkpoint recovered',
-        result as unknown as Record<string, unknown>,
-      );
-    } else if (result.status === 'retained_failed') {
-      logManager.logger('anochat.core').warn(
-        'Restart checkpoint retained for diagnostics',
-        result as unknown as Record<string, unknown>,
-      );
-    }
-  } catch (err) {
-    logManager.logger('anochat.core').warn('Restart checkpoint recovery failed', { error: (err as Error).message });
-  }
 
   // 5. Gateway adapters registered later (after PluginHost starts, gated by plugin existence)
 
@@ -580,15 +578,6 @@ async function initialize(): Promise<void> {
     logManager.logger('anochat.core').info('Skills loaded', { count: sm.count });
   } catch (err) {
     logManager.logger('anochat.core').warn('Skill loading failed', { error: (err as Error).message });
-  }
-
-  // 10.2 Initialize TalentPoolService
-  try {
-    const { TalentPoolService } = await import('./core/talent-pool/TalentPoolService.js');
-    await TalentPoolService.getInstance().init();
-    logManager.logger('anochat.core').info('TalentPoolService initialized');
-  } catch (err) {
-    logManager.logger('anochat.core').warn('TalentPoolService init failed', { error: (err as Error).message });
   }
 
   // 10.5 Start Plugin Host (Worker Thread for plugin system)
@@ -670,19 +659,6 @@ const server = http.createServer(handleRequest);
 const wsServer = WsServer.getInstance();
 wsServer.attach(server);
 
-// Wire WebSocket messages through the pluggable message router
-const wsRouter = new WsMessageRouter();
-registerAllWsHandlers(wsRouter);
-
-wsServer.on('message', async (sessionId: string, msg: Record<string, unknown>) => {
-  await wsRouter.dispatch({
-    sessionId,
-    type: msg.type as string,
-    data: msg,
-    ws: wsServer,
-  });
-});
-
 export async function startServer(): Promise<http.Server> {
   await initialize();
   const settings = SettingsManager.getInstance();
@@ -715,11 +691,19 @@ export async function shutdown(): Promise<void> {
   shutdownPromise = (async () => {
     const logger = LogManager.getInstance().logger('anochat.core');
     logger.info('Server shutting down');
+    await v3Scheduler?.stop();
+    v3Scheduler = null;
+    const { configureV3WorkToolDependencies } = await import(
+      './core/tools/v3/V3WorkToolSupport.js'
+    );
+    configureV3WorkToolDependencies(null);
     const httpClosePromise = server.listening
       ? new Promise<void>((resolve, reject) => {
         server.close((error?: Error) => error ? reject(error) : resolve());
       })
       : Promise.resolve();
+    v3RealtimeBridge?.stop();
+    v3RealtimeBridge = null;
     await wsServer.shutdown();
 
     const { InterruptController, InterruptReason } = await import(
@@ -738,8 +722,6 @@ export async function shutdown(): Promise<void> {
     await SessionStore.getInstance().drain();
     const { SessionLeaseManager } = await import('./core/session/SessionLeaseManager.js');
     SessionLeaseManager.getInstance().stop();
-    const { CoordinationScheduler } = await import('./core/coordination/CoordinationScheduler.js');
-    CoordinationScheduler.getInstance().stop();
     SettingsManager.getInstance().stopWatching();
     const { ExtensionManager } = await import('./core/extensible/ExtensionManager.js');
     await ExtensionManager.getInstance().stopAll();

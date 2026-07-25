@@ -28,6 +28,7 @@ import {
   normalizeScope,
   pathWithinScope,
 } from '../coordination/WorkspaceLeaseService.js';
+import { V3ToolExecutionRegistry } from '../v3/runtime/V3ToolExecutionRegistry.js';
 
 // ══════════════════════════════════════════════════════════════
 // Configuration constants
@@ -150,12 +151,41 @@ export class ToolPipeline {
     const securityBlock = ToolPipeline.securityCheck(tool, params, effectiveCtx);
     if (securityBlock) return ToolPipeline.normalizeOutput(withToolCallId(securityBlock, toolCallId), tool);
 
+    try {
+      await V3ToolExecutionRegistry.getInstance().beforeTool(
+        effectiveCtx.sessionId,
+        tool,
+        toolCallId,
+      );
+    } catch (error) {
+      return ToolPipeline.normalizeOutput(
+        makeError(
+          `Tool journal preparation failed; execution was not started: ${error instanceof Error ? error.message : String(error)}`,
+          { toolCallId },
+        ),
+        tool,
+      );
+    }
+
     // ── Stage 2: Execute ──
     let result = await ToolPipeline.execute(tool, params, effectiveCtx, toolCallId);
 
     // ── Stage 3: Retry (only on transient errors) ──
     if (!result.success) {
       result = await ToolPipeline.retry(tool, params, effectiveCtx, result);
+    }
+
+    try {
+      await V3ToolExecutionRegistry.getInstance().afterTool(
+        effectiveCtx.sessionId,
+        toolCallId,
+        result,
+      );
+    } catch (error) {
+      result = makeError(
+        `Tool execution finished but its durable journal could not be committed; recovery is required: ${error instanceof Error ? error.message : String(error)}`,
+        { toolCallId },
+      );
     }
 
     // ── Stage 4: Output/Error Normalization ──
@@ -183,6 +213,18 @@ export class ToolPipeline {
     ctx: ExecutionContext,
   ): ToolResult | null {
     const mode = ctx.mode;
+
+    const v3Decision = V3ToolExecutionRegistry.getInstance().validate(
+      ctx.sessionId,
+      tool,
+      params,
+    );
+    if (!v3Decision.allowed) {
+      return makeError(
+        `v3 tool policy blocked "${tool.name()}" (${v3Decision.code}): ${v3Decision.message}`,
+        { toolCallId: '' },
+      );
+    }
 
     const workspaceMutationTools = new Set(['Write', 'Edit', 'NotebookEdit', 'Bash', 'RunProgram']);
     if (ctx.coordination && workspaceMutationTools.has(tool.name())) {

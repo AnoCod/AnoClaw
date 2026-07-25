@@ -369,7 +369,7 @@ describe('native tool parameter schemas', () => {
     expect(ToolPipeline.validateParams(new MemoryDeleteTool(), {
       scope: 'personal',
       name: '   ',
-    })?.errorMessage).toContain('Invalid format');
+    })?.errorMessage).toContain('Invalid value');
   });
 
   it('exposes skill tool bounds and rejects stray no-arg params', () => {

@@ -10,6 +10,7 @@ import { ContextCompressor } from './ContextCompressor.js';
 import type { SummarizerFn } from './ContextCompressor.js';
 import { COMPRESSION_TRIGGER_RATIO } from '../../../shared/constants.js';
 import { SettingsManager } from '../../infra/storage/SettingsManager.js';
+import { isCompactionSummaryMessage } from './CompactionConstants.js';
 
 /** Lightweight API message shape — a subset of what AgentLoopHelpers.ApiMessage provides. */
 export interface ApiMsgLite {
@@ -18,6 +19,7 @@ export interface ApiMsgLite {
   id?: string;
   tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
   tool_call_id?: string;
+  tool_success?: boolean;
   reasoning_content?: string;
 }
 
@@ -27,34 +29,103 @@ export interface CompactionResult {
 }
 
 /**
- * Convert ApiMsgLite to a minimal Message-compatible object for the compressor.
- * Only populates the fields ContextCompressor actually reads: id, role, content.
- * toolCalls/toolResults are blank because the compressor only inspects role+content for summarization.
+ * Convert ApiMsgLite to the Message shape used by ContextCompressor.
+ * Runtime-only ids keep otherwise anonymous messages distinct for summarizer
+ * selection, while tool calls/results stay structured for token counting and
+ * pair-aware compaction.
  */
-function toCompressorMessage(msg: ApiMsgLite, sessionId: string): Message {
+function parseToolParams(raw: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    return { value: parsed };
+  } catch {
+    return { raw };
+  }
+}
+
+function toCompressorMessage(msg: ApiMsgLite, sessionId: string, id: string): Message {
+  const isToolResult = msg.role === 'tool' && Boolean(msg.tool_call_id);
   return {
-    id: msg.id || '',
+    id,
     sessionId,
     role: msg.role as Message['role'],
-    content: msg.content || '',
-    toolCalls: [],
-    toolResults: [],
+    content: isToolResult ? '' : (msg.content || ''),
+    toolCalls: (msg.tool_calls || []).map(call => ({
+      id: call.id,
+      toolName: call.function.name,
+      params: parseToolParams(call.function.arguments),
+    })),
+    toolResults: isToolResult ? [{
+      toolCallId: msg.tool_call_id!,
+      success: msg.tool_success !== false,
+      content: msg.content || '',
+      tokensUsed: 0,
+      startedAt: 0,
+      finishedAt: 0,
+      durationMs: 0,
+      wasTruncated: false,
+    }] : [],
     tokenCount: 0,
-    compressed: false,
+    compressed: isCompactionSummaryMessage(msg),
     timestamp: '',
   };
 }
 
 /**
  * Convert a compressor Message back to ApiMsgLite.
- * Only copies the fields ApiMsgLite cares about: role, content, id.
+ * Merge with the original runtime message so provider metadata such as
+ * tool_calls and reasoning_content survives the adapter round trip.
  */
-function fromCompressorMessage(msg: Message): ApiMsgLite {
+function fromCompressorMessage(
+  msg: Message,
+  originals: ReadonlyMap<string, ApiMsgLite>,
+): ApiMsgLite {
+  const original = originals.get(msg.id);
+  const toolResult = msg.role === 'tool' ? msg.toolResults?.[0] : undefined;
   return {
+    ...(original || {}),
     role: msg.role,
-    content: msg.content,
+    content: toolResult?.content ?? msg.content,
     id: msg.id,
+    tool_success: toolResult?.success ?? original?.tool_success,
   };
+}
+
+function selectTailPreservingContext(messages: Message[], limit: number): Message[] {
+  if (messages.length <= limit) return messages;
+
+  let start = Math.max(0, messages.length - Math.max(1, limit));
+
+  // Preserve the newest user request even when a large tool group follows it.
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') {
+      start = Math.min(start, i);
+      break;
+    }
+  }
+
+  // Include the complete assistant call group when selected results cross the boundary.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const resultIds = new Set<string>();
+    for (let i = start; i < messages.length; i++) {
+      for (const result of messages[i].toolResults || []) {
+        if (result.toolCallId) resultIds.add(result.toolCallId);
+      }
+    }
+    for (let i = start - 1; i >= 0; i--) {
+      if ((messages[i].toolCalls || []).some(call => resultIds.has(call.id))) {
+        start = i;
+        changed = true;
+      }
+    }
+  }
+
+  return messages.slice(start);
 }
 
 /**
@@ -76,7 +147,16 @@ export async function compactAndRebuildMessages(
 ): Promise<CompactionResult> {
   const compressor = ContextCompressor.getInstance();
 
-  const compressorInput = messages.map((m) => toCompressorMessage(m, sessionId));
+  const originals = new Map<string, ApiMsgLite>();
+  const seenIds = new Set<string>();
+  const compressorInput = messages.map((message, index) => {
+    const baseId = message.id?.trim() || `runtime-msg-${index}`;
+    let id = baseId;
+    if (seenIds.has(id)) id = `${baseId}-${index}`;
+    seenIds.add(id);
+    originals.set(id, message);
+    return toCompressorMessage(message, sessionId, id);
+  });
   const result = await compressor.compact(
     compressorInput,
     contextWindow,
@@ -90,19 +170,19 @@ export async function compactAndRebuildMessages(
 
   // Rebuild: system msg + prior compaction summaries + recent tail
   const sysMsg = messages[0];
-  const rebuilt: ApiMsgLite[] = [sysMsg];
+  const rebuilt: ApiMsgLite[] = sysMsg ? [sysMsg] : [];
 
   for (const m of result.messages) {
-    if (m.id?.startsWith('compact-summary-')) {
-      rebuilt.push(fromCompressorMessage(m));
+    if (isCompactionSummaryMessage(m)) {
+      rebuilt.push(fromCompressorMessage(m, originals));
     }
   }
 
   const tail = result.messages.filter(
-    (m) => m.role !== 'system' && !m.id?.startsWith('compact-summary-'),
+    (m) => m.role !== 'system' && !isCompactionSummaryMessage(m),
   );
-  for (const m of tail.slice(-tailCount)) {
-    rebuilt.push(fromCompressorMessage(m));
+  for (const m of selectTailPreservingContext(tail, tailCount)) {
+    rebuilt.push(fromCompressorMessage(m, originals));
   }
 
   // Replace in-place

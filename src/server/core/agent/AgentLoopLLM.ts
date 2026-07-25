@@ -19,6 +19,7 @@ import { extensionPoints } from '../plugin-host/ExtensionPoints.js';
 import { compactAndRebuildMessages } from '../context/index.js';
 import { TypedEventBus } from '../events/index.js';
 import type { SummarizerFn } from '../context/ContextCompressor.js';
+import { isCompactionSummaryMessage } from '../context/CompactionConstants.js';
 
 export interface LLMCallResult {
   assistantMessage: ApiMessage | null;
@@ -29,9 +30,11 @@ export interface LLMCallResult {
 }
 
 interface SanitizableMsg {
+  id?: string;
   role: string;
-  content?: string;
+  content?: string | null;
   tool_call_id?: string;
+  tool_success?: boolean;
   tool_calls?: Array<{ id?: string; function?: { name?: string; arguments?: string } }>;
 }
 
@@ -82,6 +85,28 @@ function sanitizeOrphanedMessages(messages: SanitizableMsg[]): SanitizableMsg[] 
   }
 
   return cleaned;
+}
+
+/**
+ * Build the provider-visible conversation.
+ *
+ * The primary system prompt is supplied separately to provider.chat(). Other
+ * system messages keep the historical filtering behavior, except compaction
+ * summaries: those are mapped to a guarded user message so the model actually
+ * receives the handoff.
+ */
+export function prepareMessagesForLLM(messages: readonly ApiMessage[]): ApiMessage[] {
+  const visible: ApiMessage[] = [];
+  for (const message of messages) {
+    if (message.role !== 'system') {
+      visible.push(message);
+      continue;
+    }
+    if (isCompactionSummaryMessage(message)) {
+      visible.push({ ...message, role: 'user' });
+    }
+  }
+  return sanitizeOrphanedMessages(visible) as ApiMessage[];
 }
 
 export interface LLMCallConfig {
@@ -166,9 +191,12 @@ export async function* callLLMWithRetry(
       const estimatedTotalTokens = estimatedInputTokens + tools.length * 50 + llmOptions.maxTokens;
       await APIScheduler.getInstance().acquireSlot(config.apiKey || '', estimatedTotalTokens);
 
-      const chatMessages = sanitizeOrphanedMessages(
-        messages.filter((m) => m.role !== 'system') as SanitizableMsg[],
-      ) as Array<{ role: string; content: string; tool_calls?: unknown[]; tool_call_id?: string }>;
+      const chatMessages = prepareMessagesForLLM(messages) as Array<{
+        role: string;
+        content: string;
+        tool_calls?: unknown[];
+        tool_call_id?: string;
+      }>;
 
       const stream = provider.chat(
         chatMessages,

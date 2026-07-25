@@ -219,9 +219,19 @@ export class AgentLoop {
         const hasResult = (h.toolResults || []).some(tr => tr.toolCallId === tc.id);
         if (hasResult) {
           const tr = (h.toolResults || []).find(r => r.toolCallId === tc.id)!;
-          messages.push({ role: 'tool', content: tr.content || '(tool result)', tool_call_id: tc.id });
+          messages.push({
+            role: 'tool',
+            content: tr.content || '(tool result)',
+            tool_call_id: tc.id,
+            tool_success: tr.success,
+          });
         } else {
-          messages.push({ role: 'tool', content: '(completed)', tool_call_id: tc.id });
+          messages.push({
+            role: 'tool',
+            content: '(completed)',
+            tool_call_id: tc.id,
+            tool_success: true,
+          });
         }
       }
     }
@@ -963,6 +973,7 @@ export class AgentLoop {
           role: 'tool',
           content: toolResultContent,
           tool_call_id: tc.id,
+          tool_success: result.success,
         });
         completedToolIds.add(tc.id);
         if (toolName === 'GoalReport' && result.success) {
@@ -991,6 +1002,7 @@ export class AgentLoop {
             role: 'tool',
             content: errMsg,
             tool_call_id: tc.id,
+            tool_success: false,
           });
         }
       }

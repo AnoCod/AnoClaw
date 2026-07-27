@@ -226,9 +226,9 @@ describe('AgentRuntime', () => {
       CapabilityRegistry.getInstance().setCatalogCapabilities([{
         id: 'widget.create',
         title: 'Create a widget',
-        description: 'Create a widget artifact.',
+        description: 'Create a widget output.',
         domain: 'utility',
-        kind: 'artifact',
+        kind: 'utility',
         triggers: ['widget'],
         requiredTools: ['widget.render'],
         recommendedPlugins: ['widget-provider'],
@@ -265,12 +265,12 @@ describe('AgentRuntime', () => {
         {
           id: 'widget.create',
           title: 'Create a widget',
-          description: 'Create a widget artifact.',
+          description: 'Create a widget output.',
           domain: 'test',
-          kind: 'artifact',
+          kind: 'utility',
           triggers: ['widget'],
           requiredTools: ['DoThing'],
-          outputs: [{ type: 'file', label: 'Widget file', extension: 'widget', artifactType: 'widget' }],
+          outputs: [{ type: 'file', label: 'Widget file', extension: 'widget' }],
         },
       ]);
       ToolRegistry.getInstance().registerTool(new FixtureTool('DoThing'));
@@ -372,9 +372,9 @@ describe('AgentRuntime', () => {
         {
           id: 'widget.create',
           title: 'Create a widget',
-          description: 'Create a widget artifact.',
+          description: 'Create a widget output.',
           domain: 'test',
-          kind: 'artifact',
+          kind: 'utility',
           triggers: ['widget'],
           requiredTools: ['DoThing'],
         },

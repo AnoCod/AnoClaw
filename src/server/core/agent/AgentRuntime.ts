@@ -1149,9 +1149,9 @@ export function buildGoalContinuationContent(ctx: GoalContinuationContext): stri
 
   lines.push('', '# Goal Execution Rules');
   lines.push(
-    '- Treat the workspace as the primary working context. Inspect current files, artifacts, and project state before broad assumptions.',
+    '- Treat the workspace as the primary working context. Inspect current files, deliverables, and project state before broad assumptions.',
     '- Advance exactly one meaningful next step unless the goal clearly requires a short burst of tightly coupled steps.',
-    '- Prefer durable artifacts, code changes, tests, or concrete workspace updates over vague progress summaries.',
+    '- Prefer durable deliverables, code changes, tests, or concrete workspace updates over vague progress summaries.',
     '- If the goal is already complete, say so clearly and stop taking further action.',
     '- If blocked, name the blocker, preserve useful partial work, and suggest the next concrete unblock action.',
     '- Before ending this run, call GoalReport exactly once with the Run ID above. A run without GoalReport is treated as a failed no-progress run.',
@@ -1164,7 +1164,7 @@ export function buildGoalContinuationContent(ctx: GoalContinuationContext): stri
     );
   } else if (ctx.userMode === 'office') {
     lines.push(
-      '- Office mode: prefer Artifact and Workspace outputs such as documents, reports, slides, spreadsheets, previews, and downloadable files.',
+      '- Office mode: prefer downloadable and Workspace outputs such as documents, reports, slides, spreadsheets, previews, and files.',
     );
   } else if (ctx.userMode === 'professional') {
     lines.push(
@@ -1251,7 +1251,7 @@ function buildTaskResolutionContext(taskResolution: UserTaskResolution): string 
 
   const requiredTools = capabilityToolNames(capability);
   const outputs = (capability.outputs || [])
-    .map((output) => [output.label, output.extension, output.artifactType].filter(Boolean).join(' / '))
+    .map((output) => [output.label, output.extension].filter(Boolean).join(' / '))
     .filter(Boolean);
 
   const lines = [

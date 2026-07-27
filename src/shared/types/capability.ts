@@ -8,7 +8,6 @@ export type CapabilityAvailability =
   | 'error';
 
 export type CapabilityKind =
-  | 'artifact'
   | 'analysis'
   | 'automation'
   | 'communication'
@@ -73,7 +72,6 @@ export interface CapabilityOutput {
   label?: string;
   mimeType?: string;
   extension?: string;
-  artifactType?: string;
 }
 
 export interface CapabilityDefinition {
@@ -89,7 +87,6 @@ export interface CapabilityDefinition {
   tools?: string[];
   requiredTools?: string[];
   skills?: string[];
-  artifactTypes?: string[];
   recommendedPlugins?: string[];
   priority?: number;
 }

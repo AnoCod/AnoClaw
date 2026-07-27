@@ -171,7 +171,6 @@ function normalizeDefinition(capability: CapabilityDefinition): CapabilityDefini
     tools: Array.isArray(capability.tools) ? capability.tools.filter(Boolean) : undefined,
     requiredTools: Array.isArray(capability.requiredTools) ? capability.requiredTools.filter(Boolean) : undefined,
     skills: Array.isArray(capability.skills) ? capability.skills.filter(Boolean) : undefined,
-    artifactTypes: Array.isArray(capability.artifactTypes) ? capability.artifactTypes.filter(Boolean) : undefined,
     recommendedPlugins: Array.isArray(capability.recommendedPlugins) ? capability.recommendedPlugins.filter(Boolean) : undefined,
     priority: capability.priority || 0,
   };
@@ -253,12 +252,10 @@ function capabilityHaystack(capability: CapabilityRecord): string {
     capability.status,
     ...(capability.triggers || []),
     ...(capability.examples || []),
-    ...(capability.artifactTypes || []),
     ...(capability.outputs || []).flatMap((output) => [
       output.type,
       output.label || '',
       output.extension || '',
-      output.artifactType || '',
     ]),
   ].join(' ').toLowerCase();
 }

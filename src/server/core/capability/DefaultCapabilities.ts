@@ -28,10 +28,9 @@ export function createDefaultCapabilityCatalog(): CapabilityDefinition[] {
         '跑测试',
       ],
       outputs: [
-        { type: 'artifact', label: 'Change summary', artifactType: 'report' },
+        { type: 'report', label: 'Change summary' },
       ],
       requiredTools: ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash'],
-      artifactTypes: ['code-change', 'report'],
       priority: 88,
     },
     {
@@ -52,10 +51,9 @@ export function createDefaultCapabilityCatalog(): CapabilityDefinition[] {
         '看一下这个 PR',
       ],
       outputs: [
-        { type: 'artifact', label: 'Review findings', artifactType: 'report' },
+        { type: 'report', label: 'Review findings' },
       ],
       requiredTools: ['Read', 'Glob', 'Grep', 'Bash'],
-      artifactTypes: ['code-review', 'report'],
       priority: 82,
     },
     {
@@ -63,13 +61,12 @@ export function createDefaultCapabilityCatalog(): CapabilityDefinition[] {
       title: 'Generate or edit an image',
       description: 'Create, edit, or transform a bitmap image for everyday visual work.',
       domain: 'image',
-      kind: 'artifact',
+      kind: 'utility',
       triggers: ['image', 'picture', 'photo', 'poster', 'logo', '生成图片', '改图', '海报', '照片'],
       outputs: [
-        { type: 'file', label: 'Image', extension: 'png', artifactType: 'image' },
+        { type: 'file', label: 'Image', extension: 'png' },
       ],
       requiredTools: ['image.generate'],
-      artifactTypes: ['image'],
       recommendedPlugins: ['image'],
       priority: 60,
     },
@@ -85,7 +82,7 @@ export function createDefaultCapabilityCatalog(): CapabilityDefinition[] {
         { name: 'childAge', label: 'Child age', type: 'number', required: false },
       ],
       outputs: [
-        { type: 'artifact', label: 'Learning explanation', artifactType: 'report' },
+        { type: 'report', label: 'Learning explanation' },
       ],
       requiredTools: ['education.explain'],
       recommendedPlugins: ['education'],
@@ -99,7 +96,7 @@ export function createDefaultCapabilityCatalog(): CapabilityDefinition[] {
       kind: 'memory',
       triggers: ['remember', 'preference', '以后', '记住', '偏好', '习惯'],
       outputs: [
-        { type: 'artifact', label: 'Saved memory', artifactType: 'memory' },
+        { type: 'memory', label: 'Saved memory' },
       ],
       requiredTools: ['memory_save', 'memory_search'],
       priority: 50,

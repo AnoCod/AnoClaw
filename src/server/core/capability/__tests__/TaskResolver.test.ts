@@ -23,7 +23,7 @@ describe('TaskResolver', () => {
       id: 'widget.create',
       title: 'Create a widget',
       domain: 'utility',
-      kind: 'artifact',
+      kind: 'utility',
       triggers: ['widget'],
       requiredTools: ['widget.render'],
       recommendedPlugins: ['widget-provider'],
@@ -54,7 +54,7 @@ describe('TaskResolver', () => {
         id: 'office.report',
         title: 'Create an office report',
         domain: 'office',
-        kind: 'artifact',
+        kind: 'utility',
         triggers: ['report'],
         priority: 10,
       },
@@ -128,11 +128,11 @@ describe('TaskResolver', () => {
   it('prefers an available runtime capability over a catalog placeholder with the same id', async () => {
     const registry = CapabilityRegistry.getInstance();
     registry.setCatalogCapabilities([{
-      id: 'artifact.render',
-      title: 'Render an artifact',
+      id: 'output.render',
+      title: 'Render an output',
       domain: 'utility',
-      kind: 'artifact',
-      triggers: ['artifact'],
+      kind: 'utility',
+      triggers: ['output'],
       requiredTools: ['demo.render'],
       recommendedPlugins: ['demo-provider'],
     }]);
@@ -142,17 +142,17 @@ describe('TaskResolver', () => {
       { source: 'plugin', pluginName: 'demo-provider' },
     );
     registry.registerRuntimeCapabilities('demo-provider', [{
-      id: 'artifact.render',
-      title: 'Render an artifact',
+      id: 'output.render',
+      title: 'Render an output',
       domain: 'utility',
-      kind: 'artifact',
-      triggers: ['artifact'],
+      kind: 'utility',
+      triggers: ['output'],
       requiredTools: ['demo.render'],
     }], { source: 'plugin', pluginName: 'demo-provider', pluginStatus: 'activated' });
 
-    const result = await new TaskResolver(registry).resolve({ message: 'Render an artifact' });
+    const result = await new TaskResolver(registry).resolve({ message: 'Render an output' });
 
-    expect(result.bestCapability?.id).toBe('artifact.render');
+    expect(result.bestCapability?.id).toBe('output.render');
     expect(result.bestCapability?.source).toBe('plugin');
     expect(result.bestCapability?.sourceName).toBe('demo-provider');
     expect(result.nextAction).toBe('execute_capability');
@@ -165,30 +165,30 @@ describe('TaskResolver', () => {
 
   it('treats primary freeform inputs as supplied by the user message', async () => {
     ToolRegistry.getInstance().registerTool(
-      new NamedFixtureTool('demo.create_text_artifact'),
+      new NamedFixtureTool('demo.create_text_output'),
       'Demo Provider',
       { source: 'plugin', pluginName: 'demo-provider' },
     );
     const registry = CapabilityRegistry.getInstance();
     registry.registerRuntimeCapabilities('demo-provider', [{
-      id: 'text-artifact.create',
-      title: 'Create a text artifact',
+      id: 'text-output.create',
+      title: 'Create a text output',
       domain: 'utility',
-      kind: 'artifact',
-      triggers: ['text artifact'],
+      kind: 'utility',
+      triggers: ['text output'],
       inputs: [{ name: 'content', type: 'string', required: true }],
-      requiredTools: ['demo.create_text_artifact'],
+      requiredTools: ['demo.create_text_output'],
     }], { source: 'plugin', pluginName: 'demo-provider', pluginStatus: 'activated' });
 
     const result = await new TaskResolver(registry).resolve({
-      message: 'Create a text artifact containing hello',
+      message: 'Create a text output containing hello',
     });
 
-    expect(result.bestCapability?.id).toBe('text-artifact.create');
+    expect(result.bestCapability?.id).toBe('text-output.create');
     expect(result.missingInputs).toEqual([]);
     expect(result.nextAction).toBe('execute_capability');
     expect(result.suggestedToolCall).toMatchObject({
-      toolName: 'demo.create_text_artifact',
+      toolName: 'demo.create_text_output',
       parameters: {},
     });
   });

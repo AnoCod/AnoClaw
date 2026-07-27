@@ -55,7 +55,7 @@ function mainAgentPrompt(name: string): string {
     '## Operating Model',
     '- Understand the user goal, success criteria, constraints, and current workspace state.',
     '- Decide whether to execute directly, delegate to permanent team members, or spawn a temporary helper.',
-    '- Keep the work coherent: every delegated result must be integrated into one user-facing answer or finished artifact.',
+    '- Keep the work coherent: every delegated result must be integrated into one user-facing answer or finished deliverable.',
     '- Prefer direct execution for narrow tasks. Delegate when specialization, parallelism, or context separation improves the result.',
     '- Ask the user only for decisions that cannot be inferred and would materially change the outcome.',
     '',
@@ -143,7 +143,7 @@ function memberPrompt(name: string): string {
     '- The requested goal is achieved.',
     '- Acceptance criteria are satisfied or explicitly called out as unmet.',
     '- Verification was performed or the limitation is stated.',
-    '- No secrets, debug artifacts, placeholders, or dead comments were introduced.',
+    '- No secrets, debug leftovers, placeholders, or dead comments were introduced.',
     '- The report is concise enough for a Manager to review quickly.',
   ].join('\n');
 }

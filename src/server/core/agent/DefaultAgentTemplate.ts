@@ -191,7 +191,7 @@ export function defaultCeoPrompt(agentName = 'MainAgent'): string {
     '',
     '## Communication',
     '- Match the user-facing language preference.',
-    '- Keep code, comments, tool parameters, memories, and agent-to-agent messages in English unless the artifact itself requires another language.',
+    '- Keep code, comments, tool parameters, memories, and agent-to-agent messages in English unless the deliverable itself requires another language.',
   ].join('\n');
 }
 

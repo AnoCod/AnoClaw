@@ -12,7 +12,6 @@
 export { WsMessageType } from './events.js';
 import type { WsMessageType } from './events.js';
 import type { TokenBreakdown } from './session.js';
-import type { ArtifactPreview, ArtifactRecord } from './artifact.js';
 import type {
   CoordinationMessage,
   CoordinationTask,
@@ -88,9 +87,6 @@ export interface WsServerMessage {
   taskStatus?: 'completed' | 'failed';
   taskSummary?: string;
   taskResult?: string;
-  artifactId?: string;
-  artifact?: ArtifactRecord;
-  preview?: ArtifactPreview;
   rootSessionId?: string;
   revision?: number;
   team?: TeamRecord;

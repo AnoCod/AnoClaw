@@ -12,24 +12,6 @@ import { CapabilityPluginRecommender } from './CapabilityPluginRecommender.js';
 
 const MIN_CAPABILITY_SCORE = 6;
 
-const CREATE_INTENT_TERMS = [
-  'create',
-  'make',
-  'generate',
-  'build',
-  'write',
-  'produce',
-  '制作',
-  '生成',
-  '创建',
-  '做',
-  '写',
-  '整理',
-  '分析',
-  '总结',
-  '规划',
-];
-
 const CODE_FILE_EXTENSIONS = [
   '.ts',
   '.tsx',
@@ -163,21 +145,15 @@ function scoreCapability(capability: CapabilityRecord, query: string, userMode: 
 
   for (const output of capability.outputs || []) {
     const extension = normalize(output.extension || '');
-    const artifactType = normalize(output.artifactType || '');
     if (extension && normalizedQuery.includes(extension)) {
       matchedTerms.add(extension);
       score += 6;
-    }
-    if (artifactType && normalizedQuery.includes(artifactType)) {
-      matchedTerms.add(artifactType);
-      score += 3;
     }
   }
 
   const fileTypeBoost = explicitFileTypeBoost(capability, normalizedQuery);
   if (fileTypeBoost > 0) score += fileTypeBoost;
 
-  if (hasCreateIntent(normalizedQuery) && capability.kind === 'artifact') score += 2;
   score += userModeScoreBoost(capability, userMode);
   if (capability.status === 'available') score += 2;
   if (capability.status === 'error') score -= 3;
@@ -201,7 +177,6 @@ function keywordTerms(capability: CapabilityRecord): string[] {
     capability.domain,
     capability.description || '',
     ...(capability.examples || []),
-    ...(capability.artifactTypes || []),
   ]
     .join(' ')
     .toLowerCase()
@@ -210,24 +185,22 @@ function keywordTerms(capability: CapabilityRecord): string[] {
 }
 
 function explicitFileTypeBoost(capability: CapabilityRecord, normalizedQuery: string): number {
-  const artifactTypes = new Set((capability.artifactTypes || [])
-    .map(normalize)
-    .filter(Boolean));
+  const outputTypes = new Set<string>();
   for (const output of capability.outputs || []) {
-    if (output.artifactType) artifactTypes.add(normalize(output.artifactType));
-    if (output.extension) artifactTypes.add(normalize(output.extension));
+    if (output.type) outputTypes.add(normalize(output.type));
+    if (output.extension) outputTypes.add(normalize(output.extension));
   }
-  artifactTypes.add(normalize(capability.domain));
+  outputTypes.add(normalize(capability.domain));
 
   let score = 0;
-  for (const type of artifactTypes) {
+  for (const type of outputTypes) {
     if (!type) continue;
     if (normalizedQuery.includes(`.${type}`)) score += 10;
   }
-  if (artifactTypes.has('pdf') && /\bpdf\b|\.pdf\b/.test(normalizedQuery)) score += 6;
-  if (artifactTypes.has('spreadsheet') && /\.(xlsx|xls|csv|tsv)\b/.test(normalizedQuery)) score += 8;
-  if (artifactTypes.has('presentation') && /\.(pptx|ppt)\b/.test(normalizedQuery)) score += 8;
-  if (artifactTypes.has('document') && /\.(docx|doc)\b/.test(normalizedQuery)) score += 8;
+  if (outputTypes.has('pdf') && /\bpdf\b|\.pdf\b/.test(normalizedQuery)) score += 6;
+  if (outputTypes.has('spreadsheet') && /\.(xlsx|xls|csv|tsv)\b/.test(normalizedQuery)) score += 8;
+  if (outputTypes.has('presentation') && /\.(pptx|ppt)\b/.test(normalizedQuery)) score += 8;
+  if (outputTypes.has('document') && /\.(docx|doc)\b/.test(normalizedQuery)) score += 8;
   return score;
 }
 
@@ -472,7 +445,7 @@ function normalizeUserMode(value: unknown): UserMode {
 function userModeScoreBoost(capability: CapabilityRecord, userMode: UserMode): number {
   if (userMode === 'office') {
     if (['office', 'pdf', 'data'].includes(capability.domain)) return 4;
-    if (capability.artifactTypes?.some((type) => ['presentation', 'document', 'spreadsheet', 'report'].includes(type))) return 2;
+    if (capability.outputs?.some((output) => ['presentation', 'document', 'spreadsheet', 'report'].includes(normalize(output.type)))) return 2;
   }
   if (userMode === 'child') {
     if (capability.domain === 'education') return 5;
@@ -488,12 +461,7 @@ function userModeScoreBoost(capability: CapabilityRecord, userMode: UserMode): n
     if (['automation', 'memory', 'files'].includes(capability.domain)) return 2;
     if (capability.kind === 'automation' || capability.kind === 'utility') return 2;
   }
-  if (userMode === 'simple' && capability.kind === 'artifact') return 1;
   return 0;
-}
-
-function hasCreateIntent(query: string): boolean {
-  return CREATE_INTENT_TERMS.some((term) => query.includes(normalize(term)));
 }
 
 function normalize(value: string): string {

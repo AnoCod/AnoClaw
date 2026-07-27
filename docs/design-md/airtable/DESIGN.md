@@ -399,7 +399,7 @@ The elevation philosophy is **color-block first, shadow second**. Shadows are mi
 
 ### Decorative Depth
 - **Vertical rainbow stripes** appear on the articles hero only — multi-color vertical bands sitting on `{colors.surface-dark-elevated}`. This is a single-page treatment, not a system-wide signature.
-- **Photography-as-depth** in the demo-card grid: every card carries a real product UI screenshot or mockup, contributing depth through legible artifact density rather than decorative effects.
+- **Photography-as-depth** in the demo-card grid: every card carries a real product UI screenshot or mockup, contributing depth through legible interface density rather than decorative effects.
 
 ## Shapes
 

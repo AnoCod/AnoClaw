@@ -19,9 +19,9 @@ describe('capability API routes', () => {
     CapabilityRegistry.getInstance().setCatalogCapabilities([{
       id: 'widget.create',
       title: 'Create a widget',
-      description: 'Create a widget artifact.',
+      description: 'Create a widget output.',
       domain: 'utility',
-      kind: 'artifact',
+      kind: 'utility',
       triggers: ['widget'],
       requiredTools: ['widget.render'],
       recommendedPlugins: ['widget-provider'],

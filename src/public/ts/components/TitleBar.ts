@@ -140,7 +140,7 @@ export class TitleBar {
     // Slot: titlebar-left — after page name
     const leftSlot = document.createElement('div');
     leftSlot.setAttribute('data-slot', 'titlebar-left');
-    leftSlot.style.cssText = 'display:flex;align-items:center;gap:8px;margin-left:8px;min-width:0;flex:1 1 auto;overflow:hidden;-webkit-app-region:no-drag;';
+    leftSlot.style.cssText = 'display:flex;align-items:center;gap:8px;margin-left:8px;min-width:0;flex:1 1 auto;overflow:hidden;-webkit-app-region:drag;';
     el.appendChild(leftSlot);
     slotRegistry._onSlotReady('titlebar-left');
 

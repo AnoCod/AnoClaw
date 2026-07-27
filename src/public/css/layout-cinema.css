@@ -640,6 +640,9 @@
   gap: 6px;
   -webkit-app-region: no-drag;
 }
+.topbar-cinema [data-slot="titlebar-left"] > * {
+  -webkit-app-region: no-drag;
+}
 .topbar-cinema .topbar-page-switcher {
   cursor: pointer;
   font-size: 9px;

@@ -34,30 +34,6 @@ describe('registerChatHandlers', () => {
     );
   });
 
-  it('routes artifact events to the owning session agent', () => {
-    const router = new WSMessageRouter();
-    const onServerEvent = vi.fn();
-    const getAgent = vi.fn(() => ({ onServerEvent }));
-
-    registerChatHandlers(
-      router,
-      { getAgent } as any,
-      {} as any,
-    );
-
-    router.dispatch('artifact_done', {
-      sessionId: 'artifact-session',
-      artifactId: 'art-1',
-      artifact: { id: 'art-1', sessionId: 'artifact-session' },
-    }, 'root-session');
-
-    expect(getAgent).toHaveBeenCalledWith('artifact-session');
-    expect(onServerEvent).toHaveBeenCalledWith('artifact_done', expect.objectContaining({
-      sessionId: 'artifact-session',
-      artifactId: 'art-1',
-    }));
-  });
-
   it('removes all slot content for a deactivated plugin', () => {
     const router = new WSMessageRouter();
     const removeSpy = vi.spyOn(slotRegistry, 'removeByPlugin').mockImplementation(() => {});

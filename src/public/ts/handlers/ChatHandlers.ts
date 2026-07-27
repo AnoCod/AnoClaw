@@ -1,4 +1,4 @@
-// Registers WebSocket handlers for chat, session, plugin, and artifact events.
+// Registers WebSocket handlers for chat, session, and plugin events.
 
 import type { WSMessageRouter } from '../viewmodel/WSMessageRouter.js';
 import type { ConversationViewModel } from '../viewmodel/ConversationViewModel.js';
@@ -26,15 +26,6 @@ export function registerChatHandlers(
     router.on(type, (ctx) => {
       const agent = conversationVM.getAgent(ctx.sessionId);
       agent.onServerEvent(ctx.type, ctx.data);
-    });
-  }
-
-  for (const type of ['artifact_created', 'artifact_updated', 'artifact_preview', 'artifact_done']) {
-    router.on(type, (ctx) => {
-      const sessionId = (ctx.data.sessionId as string | undefined) || ctx.sessionId;
-      if (!sessionId) return;
-      const agent = conversationVM.getAgent(sessionId);
-      agent.onServerEvent(ctx.type, { ...ctx.data, sessionId });
     });
   }
 

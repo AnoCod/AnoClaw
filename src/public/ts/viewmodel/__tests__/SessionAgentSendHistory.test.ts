@@ -12,9 +12,7 @@ function makeAgent(sendMessage: ReturnType<typeof vi.fn>): SessionAgent {
     getWSClient: () => ({ connected: true, sendMessage }),
     renameSession: vi.fn(async () => true),
   } as unknown as SessionViewModel;
-  const agent = new SessionAgent('session-1', sessionVM);
-  vi.spyOn(agent, 'loadArtifacts').mockResolvedValue();
-  return agent;
+  return new SessionAgent('session-1', sessionVM);
 }
 
 afterEach(() => {

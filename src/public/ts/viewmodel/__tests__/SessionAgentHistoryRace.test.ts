@@ -8,9 +8,7 @@ function makeAgent(): SessionAgent {
     sessions: { getById: () => ({ id: 'session-1', agentId: 'agent-1' }) },
     getWSClient: () => ({ connected: true }),
   } as unknown as SessionViewModel;
-  const agent = new SessionAgent('session-1', sessionVM);
-  vi.spyOn(agent, 'loadArtifacts').mockResolvedValue();
-  return agent;
+  return new SessionAgent('session-1', sessionVM);
 }
 
 function response(body: Record<string, unknown>): Response {

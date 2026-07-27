@@ -4,7 +4,11 @@ import { TypedEventBus } from '../events/TypedEventBus.js';
 import { SessionManager } from '../session/SessionManager.js';
 import { SettingsManager } from '../../infra/storage/SettingsManager.js';
 import { createLogger } from '../logger.js';
-import { CoordinationService } from './CoordinationService.js';
+import {
+  CHILD_TASKS_READY_BLOCKER,
+  CoordinationService,
+  WAITING_FOR_CHILD_TASKS_BLOCKER,
+} from './CoordinationService.js';
 import { WorkspaceLeaseService } from './WorkspaceLeaseService.js';
 
 type TaskRunner = (task: CoordinationTask) => Promise<void>;
@@ -46,7 +50,13 @@ export class CoordinationScheduler {
     this.unsubscribers.push(
       TypedEventBus.on('coordination:task_changed', ({ rootSessionId, task }) => {
         this.kick(rootSessionId);
-        if (task.status === 'blocked') void this.notifyBlockedTask(task);
+        if (
+          task.status === 'blocked'
+          && task.blocker !== WAITING_FOR_CHILD_TASKS_BLOCKER
+          && task.blocker !== CHILD_TASKS_READY_BLOCKER
+        ) {
+          void this.notifyBlockedTask(task);
+        }
       }),
       TypedEventBus.on('coordination:team_changed', ({ rootSessionId }) => this.kick(rootSessionId)),
       TypedEventBus.on('coordination:message', ({ rootSessionId }) => this.kick(rootSessionId)),
@@ -107,15 +117,29 @@ export class CoordinationScheduler {
           await service.releaseTaskLeases(root.id, task.id, task.assigneeAgentId || task.creatorAgentId);
           await service.updateTask(root.id, task.id, {
             status: 'pending',
-            blocker: undefined,
+            blocker: task.blocker === CHILD_TASKS_READY_BLOCKER
+              ? CHILD_TASKS_READY_BLOCKER
+              : undefined,
           }, task.assigneeAgentId || task.creatorAgentId);
         } else if (task.status === 'running') {
           await service.releaseTaskLeases(root.id, task.id, task.assigneeAgentId || task.creatorAgentId);
-          await service.updateTask(root.id, task.id, {
-            status: 'blocked',
-            blocker: 'recovery_required: previous process ended during execution',
-            error: 'Execution state requires review before retry.',
-          }, task.assigneeAgentId || task.creatorAgentId);
+          const childTasks = this.directChildTasks(task);
+          await service.updateTask(
+            root.id,
+            task.id,
+            childTasks.length > 0
+              ? {
+                status: 'blocked',
+                blocker: WAITING_FOR_CHILD_TASKS_BLOCKER,
+                error: undefined,
+              }
+              : {
+                status: 'blocked',
+                blocker: 'recovery_required: previous process ended during execution',
+                error: 'Execution state requires review before retry.',
+              },
+            task.assigneeAgentId || task.creatorAgentId,
+          );
         } else if (['completed', 'failed', 'cancelled'].includes(task.status)) {
           await service.releaseTaskLeases(root.id, task.id, task.assigneeAgentId || task.creatorAgentId)
             .catch(() => {});
@@ -129,6 +153,7 @@ export class CoordinationScheduler {
     if (!this.runner) return;
     const service = CoordinationService.getInstance();
     await this.ensureLeaderAvailable(rootSessionId);
+    await this.releaseWaitingParents(rootSessionId);
     await this.unblockWorkspaceTasks(rootSessionId);
 
     const maxConcurrent = SettingsManager.getInstance().get<number>(
@@ -146,7 +171,17 @@ export class CoordinationScheduler {
       .sort(compareTasks);
     const busyAgents = new Set(
       service.listTasks(rootSessionId)
-        .filter((task) => task.status === 'claimed' || task.status === 'running')
+        .filter((task) => (
+          task.status === 'claimed'
+          || task.status === 'running'
+          || (
+            task.status === 'blocked'
+            && (
+              task.blocker === WAITING_FOR_CHILD_TASKS_BLOCKER
+              || task.blocker === CHILD_TASKS_READY_BLOCKER
+            )
+          )
+        ))
         .map((task) => task.assigneeAgentId)
         .filter((value): value is string => !!value),
     );
@@ -174,7 +209,9 @@ export class CoordinationScheduler {
         if (!lease) {
           await service.updateTask(rootSessionId, task.id, {
             status: 'blocked',
-            blocker: 'workspace_conflict',
+            blocker: task.blocker === CHILD_TASKS_READY_BLOCKER
+              ? CHILD_TASKS_READY_BLOCKER
+              : 'workspace_conflict',
           }, assignee, task.version);
           continue;
         }
@@ -283,7 +320,16 @@ export class CoordinationScheduler {
     const root = SessionManager.getInstance().session(rootSessionId);
     if (!root) return;
     for (const task of service.listTasks(rootSessionId)) {
-      if (task.status !== 'blocked' || task.blocker !== 'workspace_conflict' || !task.assigneeAgentId) continue;
+      if (
+        task.status !== 'blocked'
+        || (
+          task.blocker !== 'workspace_conflict'
+          && task.blocker !== CHILD_TASKS_READY_BLOCKER
+        )
+        || !task.assigneeAgentId
+      ) {
+        continue;
+      }
       const conflict = WorkspaceLeaseService.getInstance().findConflict(
         rootSessionId,
         task.id,
@@ -293,10 +339,50 @@ export class CoordinationScheduler {
       if (!conflict) {
         await service.updateTask(rootSessionId, task.id, {
           status: 'pending',
-          blocker: undefined,
+          blocker: task.blocker === CHILD_TASKS_READY_BLOCKER
+            ? CHILD_TASKS_READY_BLOCKER
+            : undefined,
         }, task.assigneeAgentId, task.version);
       }
     }
+  }
+
+  /**
+   * Child completion and result-message delivery both emit coordination
+   * events, so this is event driven: no timer or polling is needed.
+   */
+  private async releaseWaitingParents(rootSessionId: string): Promise<void> {
+    const service = CoordinationService.getInstance();
+    for (const parent of service.listTasks(rootSessionId)) {
+      if (
+        parent.status !== 'blocked'
+        || parent.blocker !== WAITING_FOR_CHILD_TASKS_BLOCKER
+      ) {
+        continue;
+      }
+      const children = this.directChildTasks(parent);
+      if (
+        children.length === 0
+        || !children.every((child) => (
+          service.isTaskTerminal(child)
+          && service.hasConsumableTaskResult(child)
+        ))
+      ) {
+        continue;
+      }
+      await service.updateTask(rootSessionId, parent.id, {
+        status: 'pending',
+        blocker: CHILD_TASKS_READY_BLOCKER,
+        error: undefined,
+      }, parent.assigneeAgentId || parent.creatorAgentId, parent.version);
+    }
+  }
+
+  private directChildTasks(parent: CoordinationTask): CoordinationTask[] {
+    if (!parent.sessionId) return [];
+    const session = SessionManager.getInstance().session(parent.sessionId);
+    if (session?.metadata.coordinationTaskId !== parent.id) return [];
+    return CoordinationService.getInstance().listDirectChildTasks(parent);
   }
 
   private scheduleAutoDisband(rootSessionId: string): void {
@@ -346,6 +432,9 @@ export class CoordinationScheduler {
 }
 
 function compareTasks(a: CoordinationTask, b: CoordinationTask): number {
+  const continuationA = Number(a.blocker === CHILD_TASKS_READY_BLOCKER);
+  const continuationB = Number(b.blocker === CHILD_TASKS_READY_BLOCKER);
+  if (continuationA !== continuationB) return continuationB - continuationA;
   const hour = 60 * 60_000;
   const ageA = Math.floor((Date.now() - Date.parse(a.createdAt)) / hour);
   const ageB = Math.floor((Date.now() - Date.parse(b.createdAt)) / hour);

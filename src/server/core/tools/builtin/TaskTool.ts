@@ -22,7 +22,7 @@ export class TaskTool extends Tool {
 
   private readonly actions: ToolActionMap = {
     create: {
-      description: 'Create a durable task; targetAgentId optionally assigns it immediately.',
+      description: 'Create a durable task; targetAgentId optionally assigns it. Tasks default to read-only unless writeScope is supplied.',
       tool: new TaskCreateTool(),
     },
     assign: {
@@ -34,7 +34,7 @@ export class TaskTool extends Tool {
       tool: new TaskClaimTool(),
     },
     update: {
-      description: 'Report progress, a blocker, result summary, evidence, or failure.',
+      description: 'Report non-terminal progress, a blocker, a result summary, or evidence. Running work completes by returning a final answer.',
       tool: new TaskUpdateTool(),
     },
     list: {
@@ -46,7 +46,7 @@ export class TaskTool extends Tool {
       tool: new TaskOutputTool(),
     },
     stop: {
-      description: 'Cancel a task and interrupt its running AgentLoop.',
+      description: 'Cancel unfinished work and interrupt its running AgentLoop; never use stop to submit or complete work.',
       tool: new TaskStopTool(),
     },
     spawn: {
@@ -64,9 +64,12 @@ export class TaskTool extends Tool {
   prompt(): string {
     return [
       'Use action="create" for durable employee work. Include targetAgentId to create and assign in one call.',
+      'Conversation, review, research, and status tasks should use readOnly=true. When readOnly and writeScope are both omitted, the task defaults to read-only.',
+      'Only workspace-editing tasks should use readOnly=false with the narrowest possible writeScope. readOnly=false without writeScope locks the whole workspace.',
       'Use action="spawn" only for a bounded temporary helper.',
       'Completion notifications are automatic. Use action="list" for oversight and action="output" for details or final results; do not poll.',
-      'Use AgentMessage to clarify or steer work that is already running.',
+      'While executing a running task, return the final answer normally. Do not call action="update" or action="stop" to submit completion; stop only cancels unfinished work.',
+      'Use AgentMessage for mailbox-only information or to steer work that is already running. Use a read-only Task when a reply is required.',
     ].join('\n');
   }
 
@@ -106,7 +109,7 @@ export class TaskTool extends Tool {
     const createResult = await executeToolAction(this.actions, { action: 'create', ...createParams }, ctx);
     if (!createResult.success) return createResult;
 
-    const createStructured = createResult.structured as { task?: { id?: string } } | undefined;
+    const createStructured = createResult.structured as { task?: { id?: string; version?: number } } | undefined;
     const createdTask = createStructured?.task;
     if (!createdTask?.id) return this.makeError('Task was created but its ID was not returned.');
 
@@ -122,8 +125,10 @@ export class TaskTool extends Tool {
       );
     }
 
+    const assignedTask = (assignResult.structured as { task?: { version?: number } } | undefined)?.task;
+    const version = assignedTask?.version;
     return this.makeResult(
-      `Task ${createdTask.id} created and assigned to ${targetAgentId}; scheduler will start it when ready.`,
+      `Task ${createdTask.id}${version ? ` (v${version})` : ''} created and assigned to ${targetAgentId}; scheduler will start it when ready.`,
       { structured: assignResult.structured as Record<string, unknown> },
     );
   }

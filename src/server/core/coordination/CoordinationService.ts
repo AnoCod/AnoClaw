@@ -61,6 +61,8 @@ export interface CreateTaskInput {
 }
 
 export const CANCELLATION_REQUESTED_BLOCKER = 'cancellation_requested';
+export const WAITING_FOR_CHILD_TASKS_BLOCKER = 'waiting_for_child_tasks';
+export const CHILD_TASKS_READY_BLOCKER = 'child_tasks_ready';
 
 const TERMINAL_STATUSES = new Set<CoordinationTaskStatus>([
   'completed',
@@ -421,7 +423,10 @@ export class CoordinationService {
     actorAgentId: string,
     reason: string,
   ): Promise<CoordinationTask> {
-    return this.withScopeLock(rootSessionId, async () => {
+    let cancellationInterrupt:
+      | { sessionId: string; kind: 'self' | 'creator' | 'coordinator' }
+      | undefined;
+    const result = await this.withScopeLock(rootSessionId, async () => {
       const scope = await this.scope(rootSessionId);
       const current = this.requireTask(scope, taskId);
       if (TERMINAL_STATUSES.has(current.status)) return cloneTask(current);
@@ -437,11 +442,40 @@ export class CoordinationService {
         updatedAt: now,
       };
       await this.commit(rootSessionId, 'task_updated', { task }, actorAgentId);
+      if (waitsForLoopExit && task.sessionId) {
+        cancellationInterrupt = {
+          sessionId: task.sessionId,
+          kind: actorAgentId === task.assigneeAgentId
+            ? 'self'
+            : actorAgentId === task.creatorAgentId
+              ? 'creator'
+              : 'coordinator',
+        };
+      }
       if (!waitsForLoopExit) {
         await this.releaseTaskLeasesUnlocked(scope, task, actorAgentId);
       }
       return cloneTask(task);
     });
+    if (cancellationInterrupt) {
+      // Keep cancellation attribution next to the state transition so every
+      // caller (tool, REST route, forced team update) gets identical semantics.
+      // Dynamic import avoids coupling coordination storage initialization to
+      // the agent runtime during startup.
+      const { InterruptController, InterruptReason } = await import(
+        '../agent/supervision/InterruptController.js'
+      );
+      const interruptReason = cancellationInterrupt.kind === 'self'
+        ? InterruptReason.TaskSelfCancel
+        : cancellationInterrupt.kind === 'creator'
+          ? InterruptReason.TaskCreatorCancel
+          : InterruptReason.TaskCoordinatorCancel;
+      InterruptController.getInstance().requestInterruptWhenAvailable(
+        cancellationInterrupt.sessionId,
+        interruptReason,
+      );
+    }
+    return result;
   }
 
   async retryTask(rootSessionId: string, taskId: string, actorAgentId: string): Promise<CoordinationTask> {
@@ -630,6 +664,58 @@ export class CoordinationService {
 
   listTasks(rootSessionId: string): CoordinationTask[] {
     return this.getSnapshot(rootSessionId).tasks;
+  }
+
+  /**
+   * Return only tasks created by this task's owned execution session during
+   * the current durable task lifetime. Session ownership itself is verified
+   * by the scheduler/runtime because SessionManager owns that metadata.
+   */
+  listDirectChildTasks(parent: CoordinationTask): CoordinationTask[] {
+    if (
+      !parent.sessionId
+      || !parent.assigneeAgentId
+      || !parent.startedAt
+      || parent.attempt < 1
+    ) {
+      return [];
+    }
+    const startedAt = Date.parse(parent.startedAt);
+    if (!Number.isFinite(startedAt)) return [];
+    return this.listTasks(parent.rootSessionId)
+      .filter((candidate) => candidate.id !== parent.id)
+      .filter((candidate) => candidate.sourceSessionId === parent.sessionId)
+      .filter((candidate) => candidate.creatorAgentId === parent.assigneeAgentId)
+      .filter((candidate) => {
+        const createdAt = Date.parse(candidate.createdAt);
+        return Number.isFinite(createdAt) && createdAt >= startedAt;
+      });
+  }
+
+  isTaskTerminal(task: CoordinationTask): boolean {
+    return TERMINAL_STATUSES.has(task.status);
+  }
+
+  /**
+   * A terminal child is consumable only after its exact final result has been
+   * appended to the source session. deliverCoordinationResult marks the
+   * message delivered only after that durable append.
+   */
+  hasConsumableTaskResult(task: CoordinationTask): boolean {
+    if (!TERMINAL_STATUSES.has(task.status)) return false;
+    const terminalAt = Date.parse(task.completedAt || task.updatedAt);
+    return this.listMessages(task.rootSessionId).some((message) => (
+      message.kind === 'task_result'
+      && message.taskId === task.id
+      && message.fromAgentId === (task.assigneeAgentId || task.creatorAgentId)
+      && message.toAgentId === task.creatorAgentId
+      && (message.status === 'delivered' || message.status === 'acknowledged')
+      && message.summary === `${task.subject}: ${task.status}`
+      && (
+        !Number.isFinite(terminalAt)
+        || Date.parse(message.createdAt) >= terminalAt
+      )
+    ));
   }
 
   getTask(rootSessionId: string, taskId: string): CoordinationTask | undefined {

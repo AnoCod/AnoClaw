@@ -207,6 +207,16 @@ export class ToolPipeline {
             { toolCallId: '' },
           );
         }
+        if (tool.name() === 'Bash' || tool.name() === 'RunProgram') {
+          const processBoundaryError = coordinationProcessBoundaryError(
+            tool.name(),
+            params,
+            ctx.workspace,
+          );
+          if (processBoundaryError) {
+            return makeError(processBoundaryError, { toolCallId: '' });
+          }
+        }
       } else {
         const workspace = path.resolve(ctx.workspace);
         for (const paramName of pathParams) {
@@ -643,6 +653,135 @@ function normalizePromptText(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function coordinationProcessBoundaryError(
+  toolName: string,
+  params: Record<string, unknown>,
+  workspaceValue: string,
+): string | null {
+  if (!workspaceValue) {
+    return `Tool "${toolName}" is blocked because the coordination workspace is unavailable.`;
+  }
+
+  const cwd = typeof params.cwd === 'string' && params.cwd.trim()
+    ? params.cwd.trim()
+    : workspaceValue;
+  if (!pathReferenceInsideWorkspace(cwd, workspaceValue, workspaceValue)) {
+    return `Tool "${toolName}" cwd resolves outside the coordination workspace.`;
+  }
+
+  if (toolName === 'Bash') {
+    const command = typeof params.command === 'string' ? params.command : '';
+    const external = externalProcessPathReference(command, workspaceValue, cwd);
+    if (external) {
+      return `Bash command references path "${external}" outside the coordination workspace.`;
+    }
+    if (containsParentTraversal(command)) {
+      return 'Bash command uses parent-directory traversal, which is blocked for coordination tasks.';
+    }
+    if (containsExternalPathVariable(command)) {
+      return 'Bash command references an external user/data directory variable, which is blocked for coordination tasks.';
+    }
+    return null;
+  }
+
+  const program = typeof params.program === 'string' ? params.program.trim() : '';
+  if (looksLikeExplicitProgramPath(program)
+    && !pathReferenceInsideWorkspace(program, workspaceValue, cwd)) {
+    return `RunProgram executable "${program}" resolves outside the coordination workspace; use a PATH command name instead.`;
+  }
+  const args = Array.isArray(params.args)
+    ? params.args.filter((value): value is string => typeof value === 'string')
+    : [];
+  for (const arg of args) {
+    const external = externalProcessPathReference(arg, workspaceValue, cwd);
+    if (external) {
+      return `RunProgram argument references path "${external}" outside the coordination workspace.`;
+    }
+    if (containsParentTraversal(arg) || containsExternalPathVariable(arg)) {
+      return 'RunProgram argument may escape the coordination workspace.';
+    }
+  }
+  return null;
+}
+
+function pathReferenceInsideWorkspace(
+  candidateValue: string,
+  workspaceValue: string,
+  baseValue: string,
+): boolean {
+  const useWindowsPaths = looksLikeWindowsAbsolute(workspaceValue)
+    || looksLikeWindowsAbsolute(candidateValue)
+    || looksLikeWindowsAbsolute(baseValue);
+  const pathApi = useWindowsPaths ? path.win32 : path.posix;
+  const workspace = pathApi.resolve(workspaceValue);
+  const candidate = pathApi.isAbsolute(candidateValue)
+    ? pathApi.resolve(candidateValue)
+    : pathApi.resolve(baseValue, candidateValue);
+  const relative = pathApi.relative(workspace, candidate);
+  return relative === ''
+    || (relative !== '..' && !relative.startsWith(`..${pathApi.sep}`) && !pathApi.isAbsolute(relative));
+}
+
+function externalProcessPathReference(
+  value: string,
+  workspaceValue: string,
+  baseValue: string,
+): string | null {
+  const candidates = looksLikeWindowsAbsolute(workspaceValue)
+    ? extractWindowsAbsolutePaths(value)
+    : extractPosixAbsolutePaths(value);
+  for (const candidate of candidates) {
+    if (!pathReferenceInsideWorkspace(candidate, workspaceValue, baseValue)) return candidate;
+  }
+  return null;
+}
+
+function extractWindowsAbsolutePaths(value: string): string[] {
+  const quoted = [...value.matchAll(/(["'`])((?:[A-Za-z]:[\\/]|\\\\).*?)\1/g)]
+    .map((match) => match[2]);
+  const unquoted = [
+    ...value.matchAll(/(?:^|[\s=(:,])([A-Za-z]:[\\/][^"'`;&|<>\s\r\n]*)/g),
+    ...value.matchAll(/(?:^|[\s=(:,])(\\\\[^\\/"'`;&|<>\s]+\\[^"'`;&|<>\s\r\n]*)/g),
+  ].map((match) => match[1]);
+  return [...quoted, ...unquoted].map(cleanShellPathCandidate);
+}
+
+function extractPosixAbsolutePaths(value: string): string[] {
+  const quoted = [...value.matchAll(/(["'`])(\/.*?)\1/g)].map((match) => match[2]);
+  const unquoted = [...value.matchAll(/(?:^|[\s=(:,])(\/[^"'`;&|<>\s\r\n]*)/g)]
+    .map((match) => match[1]);
+  return [...quoted, ...unquoted]
+    .map(cleanShellPathCandidate)
+    .filter((candidate) => candidate.startsWith('/'));
+}
+
+function cleanShellPathCandidate(value: string): string {
+  return value.trim().replace(/[),:\]]+$/, '');
+}
+
+function looksLikeWindowsAbsolute(value: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(value) || /^\\\\/.test(value);
+}
+
+function looksLikeExplicitProgramPath(value: string): boolean {
+  return looksLikeWindowsAbsolute(value)
+    || value.startsWith('/')
+    || value.startsWith('./')
+    || value.startsWith('.\\')
+    || value.includes('/')
+    || value.includes('\\');
+}
+
+function containsParentTraversal(value: string): boolean {
+  return /(?:^|[\s"'`=(:,;|&])\.\.(?:[\\/]|$)/.test(value)
+    || /[\\/]\.\.(?:[\\/]|$)/.test(value)
+    || /(?:^|[\s"'`=(:,;|&])~[\\/]/.test(value);
+}
+
+function containsExternalPathVariable(value: string): boolean {
+  return /(?:\$(?:env:)?|\$\{|%)(?:HOME|USERPROFILE|APPDATA|LOCALAPPDATA|PROGRAMDATA|CODEX_HOME)(?:\}|%|[\\/]|$)/i.test(value);
 }
 
 function validateJsonSchemaNode(schema: JsonSchemaNode, value: unknown, pathName: string): string | null {

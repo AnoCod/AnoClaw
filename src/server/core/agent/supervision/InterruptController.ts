@@ -24,6 +24,9 @@ export enum InterruptReason {
   UserStop = 'user_stop',
   UserSteer = 'user_steer',
   ParentStop = 'parent_stop',
+  TaskSelfCancel = 'task_self_cancel',
+  TaskCreatorCancel = 'task_creator_cancel',
+  TaskCoordinatorCancel = 'task_coordinator_cancel',
   Timeout = 'timeout',
 }
 
@@ -72,7 +75,13 @@ export class InterruptController {
   /** Abort now, or persist the request until the session controller exists. */
   requestInterruptWhenAvailable(sessionId: string, reason: InterruptReason): void {
     if (!this._controllers.has(sessionId)) {
-      this._pendingInterrupts.set(sessionId, reason);
+      const existing = this._pendingInterrupts.get(sessionId);
+      // UserSteer is only a soft wake and must yield to a later hard stop.
+      // ParentStop is a legacy/generic hard stop that may be upgraded to an
+      // exact coordination cancellation. Otherwise the first hard reason wins.
+      if (!existing || shouldReplacePendingInterrupt(existing, reason)) {
+        this._pendingInterrupts.set(sessionId, reason);
+      }
       return;
     }
     this.requestInterrupt(sessionId, reason);
@@ -98,13 +107,13 @@ export class InterruptController {
   requestSteerInterrupt(sessionId: string): void {
     this.setPendingUserMessage(sessionId,
       '[System notification] A background task finished. Check the latest message for details.');
-    this._interruptOne(sessionId, InterruptReason.UserSteer);
+    this.requestInterruptWhenAvailable(sessionId, InterruptReason.UserSteer);
   }
 
   /** Abort without cascading to children and without setting a pending message.
    *  Caller should set their own pending message before calling this. */
   wakeOnly(sessionId: string): void {
-    this._interruptOne(sessionId, InterruptReason.UserSteer);
+    this.requestInterruptWhenAvailable(sessionId, InterruptReason.UserSteer);
   }
 
   private _interruptOne(sessionId: string, reason: InterruptReason): void {
@@ -193,4 +202,20 @@ export class InterruptController {
   pendingMessageCount(sessionId: string): number {
     return this._pendingMessages.get(sessionId)?.length || 0;
   }
+}
+
+function shouldReplacePendingInterrupt(
+  existing: InterruptReason,
+  incoming: InterruptReason,
+): boolean {
+  if (existing === InterruptReason.UserSteer) {
+    return incoming !== InterruptReason.UserSteer;
+  }
+  return existing === InterruptReason.ParentStop && isTaskCancellation(incoming);
+}
+
+function isTaskCancellation(reason: InterruptReason): boolean {
+  return reason === InterruptReason.TaskSelfCancel
+    || reason === InterruptReason.TaskCreatorCancel
+    || reason === InterruptReason.TaskCoordinatorCancel;
 }

@@ -8,6 +8,7 @@ import { CoordinationService } from '../../coordination/CoordinationService.js';
 import { WorkspaceLeaseService } from '../../coordination/WorkspaceLeaseService.js';
 import { SessionManager } from '../../session/SessionManager.js';
 import { JobListTool } from '../builtin/JobListTool.js';
+import { TaskCreateTool } from '../operations/TaskCreateTool.js';
 import { TaskListTool } from '../operations/TaskListTool.js';
 import { TaskOutputTool } from '../operations/TaskOutputTool.js';
 import { TaskStopTool } from '../operations/TaskStopTool.js';
@@ -58,7 +59,39 @@ describe('durable Task tools and process Job separation', () => {
     const structured = result.structured as { tasks: Array<{ id: string }> };
     expect(result.success).toBe(true);
     expect(structured.tasks.map((item) => item.id)).toEqual([task.id]);
+    expect(result.content).toContain(`v${task.version}`);
     expect(result.content).not.toContain('Process job');
+  });
+
+  it('defaults tasks without a write scope to read-only and infers writes from a supplied scope', async () => {
+    const readOnlyResult = await new TaskCreateTool().execute({
+      subject: 'Status conversation',
+      description: 'Reply with current status',
+      acceptanceCriteria: ['A status response is returned'],
+    }, ctx);
+    const scopedWriteResult = await new TaskCreateTool().execute({
+      subject: 'Edit frontend',
+      description: 'Update one frontend component',
+      acceptanceCriteria: ['The component is updated'],
+      writeScope: ['src/public'],
+    }, ctx);
+    const explicitBroadWriteResult = await new TaskCreateTool().execute({
+      subject: 'Repository migration',
+      description: 'Perform a repository-wide migration',
+      acceptanceCriteria: ['The migration is complete'],
+      readOnly: false,
+    }, ctx);
+
+    expect(readOnlyResult.success).toBe(true);
+    expect(readOnlyResult.structured).toMatchObject({
+      task: { readOnly: true, writeScope: [] },
+    });
+    expect(scopedWriteResult.structured).toMatchObject({
+      task: { readOnly: false, writeScope: ['src/public'] },
+    });
+    expect(explicitBroadWriteResult.structured).toMatchObject({
+      task: { readOnly: false, writeScope: ['.'] },
+    });
   });
 
   it('JobList reads only non-Agent background processes', async () => {
@@ -87,7 +120,7 @@ describe('durable Task tools and process Job separation', () => {
 
   it('TaskOutput remains available after durable completion', async () => {
     const running = await createRunningTask();
-    await service.updateTask('root-1', running.id, {
+    const completed = await service.updateTask('root-1', running.id, {
       status: 'completed',
       resultSummary: 'Verified result',
       evidence: ['test passed'],
@@ -96,7 +129,26 @@ describe('durable Task tools and process Job separation', () => {
     const result = await new TaskOutputTool().execute({ taskId: running.id }, ctx);
     expect(result.success).toBe(true);
     expect(result.content).toContain('completed');
+    expect(result.content).toContain(`v${completed.version}`);
     expect(result.content).toContain('Verified result');
+  });
+
+  it('allows a best-effort progress update without expectedVersion', async () => {
+    const running = await createRunningTask();
+
+    const result = await new TaskUpdateTool().execute({
+      taskId: running.id,
+      progress: 25,
+      resultSummary: 'Inspection in progress',
+    }, ctx);
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain(`v${running.version + 1}`);
+    expect(service.getTask('root-1', running.id)).toMatchObject({
+      progress: 25,
+      resultSummary: 'Inspection in progress',
+      version: running.version + 1,
+    });
   });
 
   it('TaskStop persists cancellation', async () => {
@@ -110,6 +162,7 @@ describe('durable Task tools and process Job separation', () => {
       status: 'cancelled',
       error: 'No longer needed',
     });
+    expect(result.content).toContain('does not submit or complete');
   });
 
   it('keeps a running task lease until the interrupted AgentLoop exits', async () => {
@@ -165,7 +218,8 @@ describe('durable Task tools and process Job separation', () => {
     }, ctx);
 
     expect(result.success).toBe(false);
-    expect(result.errorMessage).toContain('finalized by its runtime');
+    expect(result.errorMessage).toContain('Return your final answer normally');
+    expect(result.errorMessage).toContain('only cancels unfinished work');
     expect(service.getTask('root-1', running.id)?.status).toBe('running');
   });
 

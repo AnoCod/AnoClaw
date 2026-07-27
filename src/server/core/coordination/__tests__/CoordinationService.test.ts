@@ -9,6 +9,10 @@ import {
   pathPrefixesOverlap,
   pathWithinScope,
 } from '../WorkspaceLeaseService.js';
+import {
+  InterruptController,
+  InterruptReason,
+} from '../../agent/supervision/InterruptController.js';
 
 describe('CoordinationService', () => {
   let dir = '';
@@ -18,6 +22,7 @@ describe('CoordinationService', () => {
     dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'anoclaw-coordination-'));
     CoordinationService.resetInstance();
     WorkspaceLeaseService.resetInstance();
+    (InterruptController as any)._instance = null;
     service = CoordinationService.getInstance();
     await service.initialize(dir);
   });
@@ -25,6 +30,7 @@ describe('CoordinationService', () => {
   afterEach(async () => {
     CoordinationService.resetInstance();
     WorkspaceLeaseService.resetInstance();
+    (InterruptController as any)._instance = null;
     await fsp.rm(dir, { recursive: true, force: true });
   });
 
@@ -102,6 +108,128 @@ describe('CoordinationService', () => {
     ]);
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
     expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+  });
+
+  it('bounds direct children to the owned parent lifetime and requires the exact delivered final result', async () => {
+    const historical = await service.createTask({
+      rootSessionId: 'root-1',
+      sourceSessionId: 'manager-session',
+      mode: 'subagent',
+      subject: 'Historical child',
+      description: 'Predates the current parent task lifetime.',
+      acceptanceCriteria: ['Ignored by the new parent'],
+      creatorAgentId: 'manager',
+      assigneeAgentId: 'worker',
+      readOnly: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const parent = await service.createTask({
+      rootSessionId: 'root-1',
+      mode: 'hierarchy',
+      subject: 'Current parent',
+      description: 'Own only children created during this execution lifetime.',
+      acceptanceCriteria: ['Only current children are included'],
+      creatorAgentId: 'ceo',
+      assigneeAgentId: 'manager',
+      readOnly: true,
+    });
+    const claimedParent = await service.claimTask('root-1', parent.id, 'manager', parent.version);
+    const runningParent = await service.updateTask('root-1', parent.id, {
+      status: 'running',
+      sessionId: 'manager-session',
+    }, 'manager', claimedParent.version);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const child = await service.createTask({
+      rootSessionId: 'root-1',
+      sourceSessionId: 'manager-session',
+      mode: 'subagent',
+      subject: 'Current child',
+      description: 'Belongs to the current parent execution.',
+      acceptanceCriteria: ['Final result becomes consumable'],
+      creatorAgentId: 'manager',
+      assigneeAgentId: 'worker',
+      readOnly: true,
+    });
+    await service.createTask({
+      rootSessionId: 'root-1',
+      sourceSessionId: 'manager-session',
+      mode: 'subagent',
+      subject: 'Wrong creator',
+      description: 'Shares a session id but not the owning parent agent.',
+      acceptanceCriteria: ['Excluded'],
+      creatorAgentId: 'other-manager',
+      assigneeAgentId: 'worker',
+      readOnly: true,
+    });
+
+    expect(service.listDirectChildTasks(runningParent).map((task) => task.id)).toEqual([child.id]);
+    expect(service.listDirectChildTasks({
+      ...runningParent,
+      attempt: 0,
+    })).toEqual([]);
+    expect(service.listDirectChildTasks(runningParent).some((task) => task.id === historical.id)).toBe(false);
+
+    const claimedChild = await service.claimTask('root-1', child.id, 'worker', child.version);
+    const runningChild = await service.updateTask('root-1', child.id, {
+      status: 'running',
+      sessionId: 'worker-session',
+    }, 'worker', claimedChild.version);
+    const completedChild = await service.updateTask('root-1', child.id, {
+      status: 'completed',
+      resultSummary: 'Current child result',
+    }, 'worker', runningChild.version);
+    expect(service.hasConsumableTaskResult(completedChild)).toBe(false);
+
+    const queued = await service.queueMessage({
+      rootSessionId: 'root-1',
+      taskId: child.id,
+      fromAgentId: 'worker',
+      toAgentId: 'manager',
+      kind: 'task_result',
+      summary: `${child.subject}: completed`,
+      content: completedChild.resultSummary!,
+    });
+    expect(service.hasConsumableTaskResult(completedChild)).toBe(false);
+    await service.updateMessageStatus('root-1', queued.id, 'delivered', 'manager');
+    expect(service.hasConsumableTaskResult(completedChild)).toBe(true);
+  });
+
+  it.each([
+    ['worker', InterruptReason.TaskSelfCancel],
+    ['ceo', InterruptReason.TaskCreatorCancel],
+    ['team-leader', InterruptReason.TaskCoordinatorCancel],
+  ])('attributes cancellation by %s without degrading it to ParentStop', async (actor, expectedReason) => {
+    const created = await service.createTask({
+      rootSessionId: 'root-1',
+      mode: 'hierarchy',
+      subject: `Cancellation by ${actor}`,
+      description: 'Exercise cancellation attribution',
+      acceptanceCriteria: ['The precise cancellation reason is retained'],
+      creatorAgentId: 'ceo',
+      assigneeAgentId: 'worker',
+      readOnly: true,
+    });
+    const claimed = await service.claimTask('root-1', created.id, 'worker', created.version);
+    const sessionId = `session-${actor}`;
+    const running = await service.updateTask('root-1', created.id, {
+      status: 'running',
+      sessionId,
+    }, 'worker', claimed.version);
+    const interrupts = InterruptController.getInstance();
+    interrupts.createController(sessionId);
+
+    const cancelled = await service.requestTaskCancellation(
+      'root-1',
+      running.id,
+      actor,
+      `Cancelled by ${actor}`,
+    );
+    // Legacy callers used to send this immediately after the state change.
+    // The first, precise cancellation reason must remain authoritative.
+    interrupts.requestInterruptWhenAvailable(sessionId, InterruptReason.ParentStop);
+
+    expect(cancelled.blocker).toBe('cancellation_requested');
+    expect(interrupts.reason(sessionId)).toBe(expectedReason);
   });
 
   it('enforces one active team per root and permits teams in another root', async () => {

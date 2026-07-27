@@ -17,9 +17,17 @@ const STATUSES = new Set<CoordinationTaskStatus>([
 
 export class TaskUpdateTool extends Tool {
   static category = 'Task Coordination';
-  static toolDescription = 'Updates owned task progress, blockers, terminal result, and evidence with optimistic versioning.';
+  static toolDescription = 'Updates owned task progress, blockers, summaries, and evidence with optional optimistic versioning.';
   name(): string { return 'TaskUpdate'; }
-  description(): string { return 'Report progress, block, complete, or fail the current durable task.'; }
+  description(): string { return 'Report non-terminal progress, a blocker, a result summary, or evidence for a durable task.'; }
+  prompt(): string {
+    return [
+      'For a running AgentLoop task, report progress or blockers only when useful.',
+      'To finish running work, return the final answer normally; the runtime records completion or failure after the AgentLoop exits.',
+      'Task action="stop" only cancels unfinished work. Never use stop to submit an answer or mark work complete.',
+      'expectedVersion is optional. Supply the version shown by Task list/output only when stale-write detection is required.',
+    ].join('\n');
+  }
   minRole(): string { return 'Member'; }
   riskLevel(): RiskLevel { return RiskLevel.Low; }
   parametersSchema(): Record<string, unknown> {
@@ -27,7 +35,11 @@ export class TaskUpdateTool extends Tool {
       type: 'object',
       properties: {
         taskId: { type: 'string', minLength: 1, maxLength: 200 },
-        expectedVersion: { type: 'integer', minimum: 1 },
+        expectedVersion: {
+          type: 'integer',
+          minimum: 1,
+          description: 'Optional task version from Task list/output for optimistic stale-write detection.',
+        },
         status: { type: 'string', enum: ['pending', 'claimed', 'running', 'blocked', 'completed', 'failed', 'cancelled'] },
         progress: { type: 'integer', minimum: 0, maximum: 100 },
         blocker: { type: 'string', maxLength: 2000 },
@@ -35,7 +47,7 @@ export class TaskUpdateTool extends Tool {
         evidence: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 2000 }, maxItems: 50 },
         error: { type: 'string', maxLength: 2000 },
       },
-      required: ['taskId', 'expectedVersion'],
+      required: ['taskId'],
       additionalProperties: false,
     };
   }
@@ -60,7 +72,7 @@ export class TaskUpdateTool extends Tool {
       ) {
         throw new CoordinationError(
           'conflict',
-          'A running task is finalized by its runtime after the AgentLoop exits; use Task action="stop" to cancel it',
+          'Do not call Task update or stop to finish running work. Return your final answer normally; the runtime finalizes the task after the AgentLoop exits. Task action="stop" only cancels unfinished work and never submits completion.',
         );
       }
       const task = await service.updateTask(rootSessionId, taskId, {
@@ -70,7 +82,7 @@ export class TaskUpdateTool extends Tool {
         resultSummary: stringParam(params.resultSummary, 'resultSummary', 4_000, true),
         evidence: stringArrayParam(params.evidence, 'evidence', { optional: true, maxItems: 50, maxLength: 2_000 }),
         error: stringParam(params.error, 'error', 2_000, true),
-      }, ctx.agentId, integerParam(params.expectedVersion, 'expectedVersion', { min: 1 }));
+      }, ctx.agentId, integerParam(params.expectedVersion, 'expectedVersion', { optional: true, min: 1 }));
       return this.makeResult(`Task ${task.id} updated to ${task.status} (v${task.version}).`, {
         structured: { task },
       });

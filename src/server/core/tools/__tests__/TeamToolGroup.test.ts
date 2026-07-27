@@ -51,4 +51,14 @@ describe('simplified coordination tool surface', () => {
     expect(toolRequiresConfirmation('Auto', task, { action: 'list' })).toBe(false);
     expect(toolRequiresConfirmation('Auto', task, { action: 'stop' })).toBe(true);
   });
+
+  it('makes mailbox, read-only task, and cancellation semantics explicit', () => {
+    const messagePrompt = new AgentMessageTool().prompt();
+    const taskPrompt = new TaskTool().prompt();
+
+    expect(messagePrompt).toContain('mailbox-only');
+    expect(messagePrompt).toContain('readOnly=true');
+    expect(taskPrompt).toContain('defaults to read-only');
+    expect(taskPrompt).toContain('stop only cancels unfinished work');
+  });
 });

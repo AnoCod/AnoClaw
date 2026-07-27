@@ -81,6 +81,16 @@ describe('AgentMessageTool durable mailbox', () => {
       content: expect.stringContaining('<coordination-message'),
     }));
     expect(setRuntimeStatus).toHaveBeenCalledWith('child-session', 'Idle');
+    expect(result.content).toContain('mailbox-only');
+    expect(result.content).toContain('readOnly=true');
+    expect(result.structured).toMatchObject({
+      deliveries: [
+        expect.objectContaining({
+          active: false,
+          deliveryMode: 'mailbox_only',
+        }),
+      ],
+    });
   });
 
   it('rejects steer for an idle recipient', async () => {
@@ -91,6 +101,7 @@ describe('AgentMessageTool durable mailbox', () => {
     }, ctx);
     expect(result.success).toBe(false);
     expect(result.errorMessage).toContain('Cannot steer idle agent');
+    expect(result.errorMessage).toContain('read-only Task');
   });
 
   it('persists one independently acknowledged record per broadcast recipient', async () => {

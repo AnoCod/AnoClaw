@@ -20,8 +20,9 @@ export class TaskCreateTool extends Tool {
   prompt(): string {
     return [
       'Create one Task per independently verifiable unit of work.',
-      'Declare dependencies by Task ID and declare readOnly/writeScope before assigning.',
-      'A mutating task without a narrow writeScope should use ["."] and will serialize the workspace.',
+      'Conversation, review, research, and status tasks should use readOnly=true and never need a workspace lease.',
+      'If readOnly and writeScope are both omitted, the task safely defaults to read-only.',
+      'For workspace edits, use readOnly=false with the narrowest writeScope. Omitting writeScope on an explicit write task locks the whole workspace.',
     ].join('\n');
   }
   minRole(): string { return 'Member'; }
@@ -36,8 +37,16 @@ export class TaskCreateTool extends Tool {
         acceptanceCriteria: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 2000 }, minItems: 1, maxItems: 50 },
         priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'] },
         dependsOn: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 200 }, maxItems: 50 },
-        readOnly: { type: 'boolean' },
-        writeScope: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 500 }, maxItems: 50 },
+        readOnly: {
+          type: 'boolean',
+          description: 'Defaults to true when writeScope is omitted. Set false only for tasks that modify workspace files.',
+        },
+        writeScope: {
+          type: 'array',
+          items: { type: 'string', minLength: 1, maxLength: 500 },
+          maxItems: 50,
+          description: 'Workspace-relative paths the task may edit. Supplying a scope implies readOnly=false when readOnly is omitted.',
+        },
       },
       required: ['subject', 'description', 'acceptanceCriteria'],
       additionalProperties: false,
@@ -48,6 +57,12 @@ export class TaskCreateTool extends Tool {
       const teamId = stringParam(params.teamId, 'teamId', 200, true);
       const priorityRaw = stringParam(params.priority, 'priority', 20, true) || 'normal';
       if (!PRIORITIES.has(priorityRaw as CoordinationTaskPriority)) return this.makeError(`Invalid priority: ${priorityRaw}`);
+      const writeScope = stringArrayParam(params.writeScope, 'writeScope', {
+        optional: true,
+        maxItems: 50,
+        maxLength: 500,
+      });
+      const readOnly = booleanParam(params.readOnly, writeScope.length === 0);
       const task = await CoordinationService.getInstance().createTask({
         rootSessionId: rootSessionIdFor(ctx),
         sourceSessionId: ctx.sessionId,
@@ -59,10 +74,10 @@ export class TaskCreateTool extends Tool {
         priority: priorityRaw as CoordinationTaskPriority,
         creatorAgentId: ctx.agentId,
         dependsOn: stringArrayParam(params.dependsOn, 'dependsOn', { optional: true, maxItems: 50, maxLength: 200 }),
-        readOnly: booleanParam(params.readOnly, false),
-        writeScope: stringArrayParam(params.writeScope, 'writeScope', { optional: true, maxItems: 50, maxLength: 500 }),
+        readOnly,
+        writeScope,
       });
-      return this.makeResult(`Task created: ${task.id} [${task.status}] ${task.subject}`, {
+      return this.makeResult(`Task created: ${task.id} [${task.status}/v${task.version}] ${task.subject}`, {
         structured: { task },
       });
     } catch (error) {

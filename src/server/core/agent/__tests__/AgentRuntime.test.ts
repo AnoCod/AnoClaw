@@ -11,7 +11,7 @@
  *   - durable task routing and Goal continuation behavior
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest';
 import { AgentRuntime, buildGoalContinuationContent } from '../AgentRuntime.js';
 import { AgentLoop } from '../AgentLoop.js';
 import { AgentRegistry } from '../AgentRegistry.js';
@@ -26,6 +26,9 @@ import { Tool, type ExecutionContext } from '../../tools/Tool.js';
 import type { Message } from '../../../../shared/types/session.js';
 import type { ToolResult } from '../../../../shared/types/tool.js';
 import { WsServer } from '../../../infra/network/WsServer.js';
+import { CoordinationService } from '../../coordination/CoordinationService.js';
+import { SessionManager } from '../../session/SessionManager.js';
+import type { CoordinationMessage, CoordinationTask } from '../../../../shared/types/coordination.js';
 
 // Reset singletons before each test
 beforeEach(() => {
@@ -37,6 +40,10 @@ beforeEach(() => {
   // SessionLeaseManager can't be reset via static method easily; recreate
   const slm = SessionLeaseManager.getInstance();
   (slm as any)._leases?.clear();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 class FixtureTool extends Tool {
@@ -137,6 +144,188 @@ describe('AgentRuntime', () => {
       // Should not throw
       runtime.cleanupSession('never-added');
     });
+
+    it('serializes idle-session wakes and deduplicates the same notification', async () => {
+      const runtime = AgentRuntime.getInstance();
+      const started: string[] = [];
+      let releaseFirst!: () => void;
+      const firstBlocked = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      vi.spyOn(runtime as any, 'processIdleSessionWake').mockImplementation(
+        async (request: unknown) => {
+          const notificationId = (request as { notificationId: string }).notificationId;
+          started.push(notificationId);
+          if (notificationId === 'notification-1') await firstBlocked;
+        },
+      );
+
+      const first = {
+        sessionId: 'session-1',
+        agentId: 'agent-1',
+        notificationId: 'notification-1',
+        content: 'first',
+        source: 'test',
+      };
+      const second = {
+        ...first,
+        notificationId: 'notification-2',
+        content: 'second',
+      };
+      (runtime as any).enqueueIdleSessionWake(first);
+      (runtime as any).enqueueIdleSessionWake(second);
+      (runtime as any).enqueueIdleSessionWake(second);
+      await vi.waitFor(() => expect(started).toEqual(['notification-1']));
+
+      releaseFirst();
+      await (runtime as any)._idleSessionWakeQueues.get('session-1');
+
+      expect(started).toEqual(['notification-1', 'notification-2']);
+      expect((runtime as any)._idleSessionWakeQueues.has('session-1')).toBe(false);
+    });
+  });
+
+  describe('coordination result delivery', () => {
+    it('queues an automatic idle wake after durably delivering a task result', async () => {
+      const runtime = AgentRuntime.getInstance();
+      const service = CoordinationService.getInstance();
+      const sessionManager = SessionManager.getInstance();
+      const task: CoordinationTask = {
+        id: 'task-1',
+        rootSessionId: 'root-1',
+        sourceSessionId: 'source-1',
+        mode: 'hierarchy',
+        subject: 'Report status',
+        description: 'Return a status report',
+        acceptanceCriteria: [],
+        priority: 'normal',
+        creatorAgentId: 'creator-1',
+        assigneeAgentId: 'worker-1',
+        dependsOn: [],
+        readOnly: true,
+        writeScope: [],
+        status: 'completed',
+        version: 4,
+        attempt: 1,
+        maxAttempts: 1,
+        sessionId: 'worker-session-1',
+        resultSummary: 'All checks passed.',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      const message: CoordinationMessage = {
+        id: 'message-task-result-1',
+        rootSessionId: 'root-1',
+        taskId: task.id,
+        fromAgentId: 'worker-1',
+        toAgentId: 'creator-1',
+        kind: 'task_result',
+        content: 'All checks passed.',
+        sequence: 1,
+        status: 'queued',
+        createdAt: new Date().toISOString(),
+      };
+      vi.spyOn(service, 'queueMessage').mockResolvedValue(message);
+      const updateStatus = vi.spyOn(service, 'updateMessageStatus').mockResolvedValue({
+        ...message,
+        status: 'delivered',
+      });
+      vi.spyOn(sessionManager, 'session').mockImplementation((sessionId: string) => (
+        sessionId === 'source-1' ? { id: 'source-1' } as any : undefined
+      ));
+      vi.spyOn(sessionManager, 'getHistory').mockResolvedValue([]);
+      const appendMessage = vi.spyOn(sessionManager, 'appendMessage').mockResolvedValue(undefined);
+      const enqueueWake = vi.spyOn(runtime as any, 'enqueueIdleSessionWake').mockImplementation(() => {});
+
+      await (runtime as any).deliverCoordinationResult(task, 'completed');
+
+      expect(appendMessage).toHaveBeenCalledWith('source-1', expect.objectContaining({
+        id: message.id,
+        role: 'user',
+        content: expect.stringContaining('All checks passed.'),
+      }));
+      expect(updateStatus).toHaveBeenCalledWith('root-1', message.id, 'delivered', 'creator-1');
+      expect(enqueueWake).toHaveBeenCalledWith(expect.objectContaining({
+        sessionId: 'source-1',
+        agentId: 'creator-1',
+        notificationId: message.id,
+        source: 'coordination_result',
+      }));
+    });
+
+    it('leaves an idle coordination parent for the scheduler instead of racing it with a generic wake', async () => {
+      const runtime = AgentRuntime.getInstance();
+      const service = CoordinationService.getInstance();
+      const sessionManager = SessionManager.getInstance();
+      const now = new Date().toISOString();
+      const parent: CoordinationTask = {
+        id: 'parent-task',
+        rootSessionId: 'root-1',
+        sourceSessionId: 'root-1',
+        mode: 'hierarchy',
+        subject: 'Parent',
+        description: 'Integrate child results',
+        acceptanceCriteria: [],
+        priority: 'normal',
+        creatorAgentId: 'ceo',
+        assigneeAgentId: 'manager',
+        dependsOn: [],
+        readOnly: true,
+        writeScope: [],
+        status: 'blocked',
+        blocker: 'waiting_for_child_tasks',
+        version: 5,
+        attempt: 1,
+        maxAttempts: 3,
+        sessionId: 'manager-session',
+        startedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const child: CoordinationTask = {
+        ...parent,
+        id: 'child-task',
+        sourceSessionId: 'manager-session',
+        subject: 'Child',
+        creatorAgentId: 'manager',
+        assigneeAgentId: 'worker',
+        status: 'completed',
+        blocker: undefined,
+        sessionId: 'worker-session',
+        resultSummary: 'Child result',
+      };
+      const message: CoordinationMessage = {
+        id: 'child-result-message',
+        rootSessionId: 'root-1',
+        taskId: child.id,
+        fromAgentId: 'worker',
+        toAgentId: 'manager',
+        kind: 'task_result',
+        content: 'Child result',
+        summary: 'Child: completed',
+        sequence: 1,
+        status: 'queued',
+        createdAt: now,
+      };
+      vi.spyOn(service, 'queueMessage').mockResolvedValue(message);
+      vi.spyOn(service, 'updateMessageStatus').mockResolvedValue({
+        ...message,
+        status: 'delivered',
+      });
+      vi.spyOn(service, 'getTask').mockReturnValue(parent);
+      vi.spyOn(service, 'listDirectChildTasks').mockReturnValue([child]);
+      vi.spyOn(sessionManager, 'session').mockReturnValue({
+        id: 'manager-session',
+        metadata: { coordinationTaskId: parent.id },
+      } as any);
+      vi.spyOn(sessionManager, 'getHistory').mockResolvedValue([]);
+      vi.spyOn(sessionManager, 'appendMessage').mockResolvedValue(undefined);
+      const enqueueWake = vi.spyOn(runtime as any, 'enqueueIdleSessionWake').mockImplementation(() => {});
+
+      await runtime.deliverCoordinationResult(child, 'completed');
+
+      expect(enqueueWake).not.toHaveBeenCalled();
+    });
   });
 
   // ── processMessage ──
@@ -201,6 +390,65 @@ describe('AgentRuntime', () => {
       expect(events).toHaveLength(1);
       expect(events[0].type).toBe(SSEEventType.StatusInfo);
       expect(events[0].content).toContain('queued');
+    });
+
+    it('reserves a session during async preflight so a second loop cannot race it', async () => {
+      const agent = makeAgent('agent-1', 'TestAgent', AgentRole.Member);
+      AgentRegistry.getInstance().registerAgent(agent);
+      const runtime = AgentRuntime.getInstance();
+      let releasePreflight!: () => void;
+      const preflight = new Promise<void>((resolve) => {
+        releasePreflight = resolve;
+      });
+      vi.spyOn(runtime as any, '_resolveUserTask').mockImplementation(async () => {
+        await preflight;
+        return null;
+      });
+      const executeLoop = vi.spyOn(runtime as any, '_executeAndForwardLoop')
+        .mockImplementation(async function* () {
+          yield { type: SSEEventType.Done };
+        });
+      vi.spyOn(runtime as any, '_runGoalMode').mockImplementation(async function* () {});
+
+      const firstEvents: unknown[] = [];
+      const firstRun = (async () => {
+        for await (const event of runtime.processMessage(
+          'session-race',
+          'agent-1',
+          {
+            id: 'first',
+            sessionId: 'session-race',
+            role: 'user',
+            content: 'first',
+            tokenCount: 0,
+            compressed: false,
+            timestamp: new Date().toISOString(),
+          },
+        )) firstEvents.push(event);
+      })();
+      await vi.waitFor(() => expect(runtime.isSessionActive('session-race')).toBe(true));
+
+      const secondEvents: any[] = [];
+      for await (const event of runtime.processMessage(
+        'session-race',
+        'agent-1',
+        {
+          id: 'second',
+          sessionId: 'session-race',
+          role: 'user',
+          content: 'second',
+          tokenCount: 0,
+          compressed: false,
+          timestamp: new Date().toISOString(),
+        },
+      )) secondEvents.push(event);
+
+      expect(secondEvents).toHaveLength(1);
+      expect(secondEvents[0].content).toContain('queued');
+      releasePreflight();
+      await firstRun;
+      expect(executeLoop).toHaveBeenCalledOnce();
+      expect(runtime.isSessionActive('session-race')).toBe(false);
     });
 
     it('allows unlimited concurrent sessions (no lease limit)', async () => {

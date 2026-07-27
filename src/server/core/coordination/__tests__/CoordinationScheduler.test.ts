@@ -8,10 +8,15 @@ import { defaultConfig } from '../../agent/AgentConfig.js';
 import { AgentRegistry } from '../../agent/AgentRegistry.js';
 import { SessionManager } from '../../session/SessionManager.js';
 import { SessionStore } from '../../session/SessionStore.js';
+import { TaskTool } from '../../tools/builtin/TaskTool.js';
 import { TaskAssignTool } from '../../tools/operations/TaskAssignTool.js';
 import { TaskCreateTool } from '../../tools/operations/TaskCreateTool.js';
 import { CoordinationScheduler } from '../CoordinationScheduler.js';
-import { CoordinationService } from '../CoordinationService.js';
+import {
+  CHILD_TASKS_READY_BLOCKER,
+  CoordinationService,
+  WAITING_FOR_CHILD_TASKS_BLOCKER,
+} from '../CoordinationService.js';
 import { WorkspaceLeaseService } from '../WorkspaceLeaseService.js';
 
 describe('CoordinationScheduler', () => {
@@ -153,6 +158,185 @@ describe('CoordinationScheduler', () => {
       { timeout: 5_000 },
     );
     expect(maxActiveForWorker).toBe(1);
+    scheduler.stop();
+  });
+
+  it('reserves a waiting parent assignee and runs its ready continuation before ordinary work', async () => {
+    const service = CoordinationService.getInstance();
+    const sessions = SessionManager.getInstance();
+    const parent = await service.createTask({
+      rootSessionId,
+      mode: 'hierarchy',
+      subject: 'Waiting manager parent',
+      description: 'Wait for the direct child and then synthesize its result.',
+      acceptanceCriteria: ['Child result is integrated'],
+      creatorAgentId: 'ceo',
+      assigneeAgentId: 'manager-1',
+      readOnly: true,
+    });
+    const claimedParent = await service.claimTask(
+      rootSessionId,
+      parent.id,
+      'manager-1',
+      parent.version,
+    );
+    const managerSession = await sessions.createSubSession(
+      rootSessionId,
+      'manager-1',
+      'Waiting manager parent',
+      { metadata: { coordinationTaskId: parent.id } },
+    );
+    const runningParent = await service.updateTask(rootSessionId, parent.id, {
+      status: 'running',
+      sessionId: managerSession.id,
+    }, 'manager-1', claimedParent.version);
+    const child = await service.createTask({
+      rootSessionId,
+      sourceSessionId: managerSession.id,
+      mode: 'subagent',
+      subject: 'Direct child',
+      description: 'Produce the result required by the waiting parent.',
+      acceptanceCriteria: ['Result is returned'],
+      creatorAgentId: 'manager-1',
+      assigneeAgentId: 'worker-1',
+      readOnly: true,
+    });
+    await service.updateTask(rootSessionId, parent.id, {
+      status: 'blocked',
+      blocker: WAITING_FOR_CHILD_TASKS_BLOCKER,
+    }, 'manager-1', runningParent.version);
+    const ordinary = await service.createTask({
+      rootSessionId,
+      mode: 'hierarchy',
+      subject: 'Ordinary manager work',
+      description: 'Must not overtake the waiting parent continuation.',
+      acceptanceCriteria: ['Runs after the continuation'],
+      creatorAgentId: 'ceo',
+      assigneeAgentId: 'manager-1',
+      priority: 'urgent',
+      readOnly: true,
+    });
+
+    const started: Array<{ id: string; blocker?: string }> = [];
+    const scheduler = CoordinationScheduler.getInstance();
+    scheduler.start(async (task) => {
+      started.push({ id: task.id, blocker: task.blocker });
+      const running = await service.updateTask(rootSessionId, task.id, {
+        status: 'running',
+      }, task.assigneeAgentId!, task.version);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await service.updateTask(rootSessionId, task.id, {
+        status: 'completed',
+        progress: 100,
+        resultSummary: task.id === parent.id ? 'Integrated child result' : 'Ordinary result',
+      }, task.assigneeAgentId!, running.version);
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(started).toEqual([]);
+    expect(service.getTask(rootSessionId, ordinary.id)?.status).toBe('pending');
+
+    const currentChild = service.getTask(rootSessionId, child.id)!;
+    const claimedChild = await service.claimTask(
+      rootSessionId,
+      child.id,
+      'worker-1',
+      currentChild.version,
+    );
+    const runningChild = await service.updateTask(rootSessionId, child.id, {
+      status: 'running',
+      sessionId: 'direct-child-session',
+    }, 'worker-1', claimedChild.version);
+    const completedChild = await service.updateTask(rootSessionId, child.id, {
+      status: 'completed',
+      progress: 100,
+      resultSummary: 'Direct child result',
+    }, 'worker-1', runningChild.version);
+    const resultMessage = await service.queueMessage({
+      rootSessionId,
+      taskId: child.id,
+      fromAgentId: 'worker-1',
+      toAgentId: 'manager-1',
+      kind: 'task_result',
+      summary: `${child.subject}: completed`,
+      content: completedChild.resultSummary!,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(started).toEqual([]);
+    expect(service.getTask(rootSessionId, parent.id)).toMatchObject({
+      status: 'blocked',
+      blocker: WAITING_FOR_CHILD_TASKS_BLOCKER,
+    });
+
+    await service.updateMessageStatus(rootSessionId, resultMessage.id, 'delivered', 'manager-1');
+    await vi.waitFor(
+      () => expect(service.getTask(rootSessionId, ordinary.id)?.status).toBe('completed'),
+      { timeout: 5_000 },
+    );
+
+    expect(started.map((entry) => entry.id)).toEqual([parent.id, ordinary.id]);
+    expect(started[0].blocker).toBe(CHILD_TASKS_READY_BLOCKER);
+    scheduler.stop();
+  });
+
+  it('runs six default read-only manager conversations without workspace conflicts', async () => {
+    const registry = AgentRegistry.getInstance();
+    for (let index = 2; index <= 6; index++) {
+      registry.registerAgent(makeAgent(`manager-${index}`, AgentRole.Manager, 'ceo', 1));
+    }
+
+    const service = CoordinationService.getInstance();
+    const context = {
+      sessionId: rootSessionId,
+      agentId: 'ceo',
+      workspace: dir,
+      userConfirmed: true,
+      callerRole: AgentRole.MainAgent,
+    };
+    const taskTool = new TaskTool();
+    for (let index = 1; index <= 6; index++) {
+      const result = await taskTool.execute({
+        action: 'create',
+        subject: `Manager ${index} status conversation`,
+        description: 'Reply with current work, progress, blockers, and support needed.',
+        acceptanceCriteria: ['A concise status response is returned'],
+        targetAgentId: `manager-${index}`,
+      }, context);
+      expect(result.success).toBe(true);
+    }
+
+    let active = 0;
+    let maxActive = 0;
+    const scheduler = CoordinationScheduler.getInstance();
+    scheduler.start(async (task) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      try {
+        const running = await service.updateTask(rootSessionId, task.id, {
+          status: 'running',
+        }, task.assigneeAgentId!, task.version);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        await service.updateTask(rootSessionId, task.id, {
+          status: 'completed',
+          progress: 100,
+          resultSummary: `Status returned by ${task.assigneeAgentId}`,
+        }, task.assigneeAgentId!, running.version);
+      } finally {
+        active -= 1;
+      }
+    });
+
+    await vi.waitFor(
+      () => expect(service.listTasks(rootSessionId).filter((task) => task.status === 'completed')).toHaveLength(6),
+      { timeout: 5_000 },
+    );
+
+    const tasks = service.listTasks(rootSessionId);
+    expect(tasks).toHaveLength(6);
+    expect(tasks.every((task) => task.readOnly && task.writeScope.length === 0)).toBe(true);
+    expect(tasks.some((task) => task.blocker === 'workspace_conflict')).toBe(false);
+    expect(maxActive).toBeGreaterThan(1);
+    expect(maxActive).toBeLessThanOrEqual(4);
     scheduler.stop();
   });
 

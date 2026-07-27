@@ -558,8 +558,9 @@ async function initialize(): Promise<void> {
     const { CoordinationService } = await import('./core/coordination/CoordinationService.js');
     const { CoordinationScheduler } = await import('./core/coordination/CoordinationScheduler.js');
     await CoordinationService.getInstance().initialize(ensureWritableDir('data', 'coordination'));
+    const coordinationRuntime = AgentRuntime.getInstance();
     CoordinationScheduler.getInstance().start(
-      (task) => AgentRuntime.getInstance().runCoordinationTask(task),
+      (task) => coordinationRuntime.runCoordinationTask(task),
     );
     logManager.logger('anochat.core').info('CoordinationService and scheduler initialized');
   } catch (err) {

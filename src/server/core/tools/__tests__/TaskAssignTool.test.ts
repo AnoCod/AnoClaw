@@ -108,7 +108,6 @@ describe('TaskAssignTool durable contract', () => {
       subject: 'Inspect',
       description: 'Inspect code',
       acceptanceCriteria: ['Evidence'],
-      readOnly: true,
       targetAgentId: 'member-1',
     }, ctx);
 
@@ -118,6 +117,8 @@ describe('TaskAssignTool durable contract', () => {
       subject: 'Inspect',
       assigneeAgentId: 'member-1',
       status: 'pending',
+      readOnly: true,
+      writeScope: [],
     });
   });
 });

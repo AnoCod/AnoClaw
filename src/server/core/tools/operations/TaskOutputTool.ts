@@ -62,7 +62,7 @@ export class TaskOutputTool extends Tool {
       }
       const rendered = truncateMiddle(transcript || task.resultSummary || task.error || '(no output yet)', maxChars);
       return this.makeResult(
-        `${task.id} is ${task.status}.\nSummary: ${task.resultSummary || task.subject}\nOutput: ${rendered}`,
+        `${task.id} is ${task.status} (v${task.version}).\nSummary: ${task.resultSummary || task.subject}\nOutput: ${rendered}`,
         { structured: { task, output: rendered } },
       );
     } catch (error) {

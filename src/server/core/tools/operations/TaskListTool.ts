@@ -43,7 +43,7 @@ export class TaskListTool extends Tool {
           const deps = task.dependsOn.length ? ` deps=${task.dependsOn.join(',')}` : '';
           const owner = task.assigneeAgentId ? ` owner=${task.assigneeAgentId}` : '';
           const progress = task.progress !== undefined ? ` progress=${task.progress}%` : '';
-          return `${task.id} [${task.status}/${task.priority}] ${task.subject}${owner}${deps}${progress}${task.blocker ? ` blocker=${task.blocker}` : ''}`;
+          return `${task.id} [${task.status}/${task.priority}/v${task.version}] ${task.subject}${owner}${deps}${progress}${task.blocker ? ` blocker=${task.blocker}` : ''}`;
         })
         : ['No coordination tasks matched.'];
       return this.makeResult(lines.join('\n'), {

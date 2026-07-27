@@ -24,16 +24,17 @@ const KINDS = new Set<CoordinationMessageKind>(['note', 'steer']);
 
 export class AgentMessageTool extends Tool {
   static category = 'Agent Teams';
-  static toolDescription = 'Queues durable hierarchy, Team, or MainAgent organization-wide messages.';
+  static toolDescription = 'Queues durable mailbox notes or live steers without requesting task work.';
   name(): string { return 'AgentMessage'; }
   description(): string {
-    return 'Send a durable note, live steer, active-Team broadcast, or MainAgent organization-wide message without creating another task.';
+    return 'Send a persistent mailbox-only note or steer a recipient whose AgentLoop is already running.';
   }
   prompt(): string {
     return [
-      'Use note for information the recipient may read on its next task.',
-      'Use steer only for a currently running recipient session.',
-      'Use a note when a response or review is expected. Use to="*" only inside an active session Team.',
+      'kind="note" is a persistent mailbox-only notification. It does not start an idle AgentLoop and does not request a reply.',
+      'If a reply, review, or status response is required, use Task action="create" with targetAgentId and readOnly=true.',
+      'Use kind="steer" only to intervene in a recipient session whose AgentLoop is already running.',
+      'Use to="*" only inside an active session Team.',
       'The MainAgent may address any employee directly or use to="@organization" to broadcast to every active employee.',
       'Task work itself belongs in Task action="create" or action="assign".',
     ].join('\n');
@@ -49,7 +50,11 @@ export class AgentMessageTool extends Tool {
           items: { type: 'string', minLength: 1, maxLength: 200 },
           description: 'Agent ID, list of agent IDs, "*" for the active Team, or "@organization" for a MainAgent broadcast.',
         },
-        kind: { type: 'string', enum: ['note', 'steer'] },
+        kind: {
+          type: 'string',
+          enum: ['note', 'steer'],
+          description: 'note is persistent mailbox-only delivery; steer requires an already-running recipient session.',
+        },
         content: { type: 'string', minLength: 1, maxLength: 20000 },
         summary: { type: 'string', maxLength: 120 },
         taskId: { type: 'string', maxLength: 200 },
@@ -95,8 +100,12 @@ export class AgentMessageTool extends Tool {
           isMainAgent,
         );
         const runtime = AgentRuntime.getInstance();
-        if (kindRaw === 'steer' && !runtime.isSessionActive(targetSession.id)) {
-          throw new CoordinationError('conflict', `Cannot steer idle agent ${targetAgentId}; send a note instead`);
+        const active = runtime.isSessionActive(targetSession.id);
+        if (kindRaw === 'steer' && !active) {
+          throw new CoordinationError(
+            'conflict',
+            `Cannot steer idle agent ${targetAgentId}. A note is mailbox-only; create a read-only Task when a reply is required.`,
+          );
         }
 
         const queued = await service.queueMessage({
@@ -141,7 +150,7 @@ export class AgentMessageTool extends Tool {
           'delivered',
           ctx.agentId,
         );
-        if (runtime.isSessionActive(targetSession.id)) {
+        if (active) {
           InterruptController.getInstance().setPendingUserMessage(targetSession.id, rendered);
           InterruptController.getInstance().wakeOnly(targetSession.id);
         } else {
@@ -152,10 +161,19 @@ export class AgentMessageTool extends Tool {
         delivered.push({
           message: deliveredMessage,
           targetSessionId: targetSession.id,
-          active: runtime.isSessionActive(targetSession.id),
+          active,
+          deliveryMode: active ? 'live' : 'mailbox_only',
         });
       }
-      return this.makeResult(`Delivered ${delivered.length} durable coordination message(s).`, {
+      const idleCount = delivered.filter((delivery) => delivery.deliveryMode === 'mailbox_only').length;
+      const resultContent = kindRaw === 'note'
+        ? [
+          `Delivered ${delivered.length} persistent mailbox note(s).`,
+          `Idle delivery is mailbox-only: ${idleCount} recipient(s) remained idle and no reply was requested.`,
+          'For a reply, review, or status response, create a Task with targetAgentId and readOnly=true.',
+        ].join(' ')
+        : `Delivered ${delivered.length} live steer message(s) to running AgentLoop(s).`;
+      return this.makeResult(resultContent, {
         structured: { rootSessionId, deliveries: delivered },
       });
     } catch (error) {

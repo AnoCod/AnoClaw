@@ -11,6 +11,8 @@ import type { ConversationMessage } from '../types.js';
 import { renderMarkdown } from '../../../MarkdownRenderer.js';
 import { StarRating } from '../../evolution/StarRating.js';
 import { App } from '../../../app.js';
+import { parseInterruptNotice } from '../CoordinationPresentation.js';
+import { InterruptNoticeDelegate } from './CoordinationMessageDelegate.js';
 
 export class AgentMessageDelegate {
   element: HTMLElement;
@@ -23,6 +25,11 @@ export class AgentMessageDelegate {
 
   /** Build the editorial block: agent label → markdown body → star rating footer. */
   render(): HTMLElement {
+    const interrupt = parseInterruptNotice(this._msg.content || '');
+    if (interrupt) {
+      return new InterruptNoticeDelegate(this._msg, interrupt).element;
+    }
+
     const block = document.createElement('div');
     block.className = 'cinema-agent-block';
 

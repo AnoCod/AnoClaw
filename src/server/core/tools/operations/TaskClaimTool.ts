@@ -29,7 +29,7 @@ export class TaskClaimTool extends Tool {
         ctx.agentId,
         integerParam(params.expectedVersion, 'expectedVersion', { optional: true, min: 1 }),
       );
-      return this.makeResult(`Task ${task.id} claimed by ${ctx.agentId}.`, { structured: { task } });
+      return this.makeResult(`Task ${task.id} (v${task.version}) claimed by ${ctx.agentId}.`, { structured: { task } });
     } catch (error) {
       return toolFailure(this, error);
     }

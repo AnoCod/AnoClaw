@@ -82,7 +82,7 @@ export class TaskAssignTool extends Tool {
         content: assigned.description,
         idempotencyKey: `assignment:${assigned.id}:${assigned.version}`,
       });
-      return this.makeResult(`Task ${assigned.id} assigned to ${targetAgentId}; scheduler will start it when ready.`, {
+      return this.makeResult(`Task ${assigned.id} (v${assigned.version}) assigned to ${targetAgentId}; scheduler will start it when ready.`, {
         structured: { task: assigned },
       });
     } catch (error) {

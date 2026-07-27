@@ -31,7 +31,11 @@ import { SessionManager } from '../session/index.js';
 import { PromptAssembler } from '../prompt/index.js';
 import { TokenCounter } from '../context/index.js';
 import { createLogger } from '../logger.js';
-import { InterruptController, INTERRUPT_MESSAGE_PREFIX } from './supervision/InterruptController.js';
+import {
+  InterruptController,
+  InterruptReason,
+  INTERRUPT_MESSAGE_PREFIX,
+} from './supervision/InterruptController.js';
 import {
   MAX_TURNS_DEFAULT,
   COMPRESSION_TRIGGER_RATIO,
@@ -248,6 +252,12 @@ export class AgentLoop {
 
     const sessionManager = SessionManager.getInstance();
     let lastKnownMsgCount = sessionManager.getMessageCount(this.sessionId);
+    const sessionHistoryMessageIds = new Set(
+      [...history, userMessage].map((message) => message.id).filter(Boolean),
+    );
+    const contextMessageIds = new Set(
+      [...selectedHistory, userMessage].map((message) => message.id).filter(Boolean),
+    );
 
 
     // Messages arrive via TypedEventBus (no polling delay). Checked every turn.
@@ -329,16 +339,10 @@ export class AgentLoop {
           lastKnownMsgCount = sessionManager.getMessageCount(this.sessionId);
           continue;
         }
-        const abortReason = ic.reason(this.sessionId);
-        if (abortReason === 'timeout') {
-          yield { type: SSEEventType.Text, content: '(Session timed out)' };
-        } else if (abortReason === 'user_stop') {
-          yield { type: SSEEventType.Text, content: '(User stopped)' };
-        } else if (abortReason === 'parent_stop') {
-          yield { type: SSEEventType.Text, content: '(Parent session stopped)' };
-        } else {
-          yield { type: SSEEventType.Text, content: '(User aborted)' };
-        }
+        yield {
+          type: SSEEventType.Text,
+          content: interruptReasonMessage(ic.reason(this.sessionId)),
+        };
         break;
       }
 
@@ -438,6 +442,8 @@ export class AgentLoop {
               agentId: coordinationMessage.fromAgentId,
             };
             await sessionManager.appendMessage(this.sessionId, persisted);
+            sessionHistoryMessageIds.add(coordinationMessage.id);
+            contextMessageIds.add(coordinationMessage.id);
             messages.push({
               role: 'user',
               content: rendered,
@@ -459,7 +465,51 @@ export class AgentLoop {
           const delivered = coordination.listMessages(rootSessionId, this.agentId)
             .filter((message) => message.status === 'delivered')
             .slice(0, Math.max(0, batchSize - queued.length));
+          const durableHistoryById = new Map<string, Message>();
+          if (delivered.length > 0) {
+            // Refresh IDs because AgentMessage/task-result delivery may append
+            // directly while this loop is already active.
+            const durableHistory = await sessionManager.getHistory(this.sessionId);
+            for (const message of durableHistory) {
+              if (!message.id) continue;
+              sessionHistoryMessageIds.add(message.id);
+              durableHistoryById.set(message.id, message);
+            }
+          }
           for (const coordinationMessage of delivered) {
+            // Agent mailboxes are global per agent, while team/hierarchy work can
+            // run in different sessions. A message delivered into one target
+            // session must not be silently acknowledged by another session.
+            // Inject it unless the current model context already contains it;
+            // persist only when this session does not already own the record.
+            if (!contextMessageIds.has(coordinationMessage.id)) {
+              const durableMessage = durableHistoryById.get(coordinationMessage.id);
+              const rendered = durableMessage?.content || renderCoordinationMessage(coordinationMessage);
+              if (!sessionHistoryMessageIds.has(coordinationMessage.id)) {
+                const persisted: Message = {
+                  id: coordinationMessage.id,
+                  sessionId: this.sessionId,
+                  role: MessageRole.User,
+                  content: rendered,
+                  tokenCount: TokenCounter.estimate(rendered),
+                  compressed: false,
+                  timestamp: coordinationMessage.createdAt,
+                  agentId: coordinationMessage.fromAgentId,
+                };
+                await sessionManager.appendMessage(this.sessionId, persisted);
+              }
+              sessionHistoryMessageIds.add(coordinationMessage.id);
+              contextMessageIds.add(coordinationMessage.id);
+              messages.push({
+                role: 'user',
+                content: rendered,
+                __msgId: coordinationMessage.id,
+              } as unknown as ApiMessage);
+              yield {
+                type: SSEEventType.Think,
+                content: `(Received coordination message: ${coordinationMessage.summary || coordinationMessage.kind})`,
+              };
+            }
             await coordination.updateMessageStatus(
               rootSessionId,
               coordinationMessage.id,
@@ -1209,6 +1259,25 @@ export class AgentLoop {
     } catch {
       return COMPRESSION_TRIGGER_RATIO;
     }
+  }
+}
+
+export function interruptReasonMessage(reason: InterruptReason | null): string {
+  switch (reason) {
+    case InterruptReason.Timeout:
+      return '(Session timed out)';
+    case InterruptReason.UserStop:
+      return '(User stopped)';
+    case InterruptReason.ParentStop:
+      return '(Parent session stopped)';
+    case InterruptReason.TaskSelfCancel:
+      return '(Agent cancelled its own task)';
+    case InterruptReason.TaskCreatorCancel:
+      return '(Task cancelled by its creator)';
+    case InterruptReason.TaskCoordinatorCancel:
+      return '(Task cancelled by the team coordinator)';
+    default:
+      return '(Request interrupted)';
   }
 }
 

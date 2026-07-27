@@ -5,6 +5,8 @@
 
 import type { ConversationMessage } from '../types.js';
 import { renderMarkdown } from '../../../MarkdownRenderer.js';
+import { parseCoordinationEnvelope } from '../CoordinationPresentation.js';
+import { CoordinationMessageDelegate } from './CoordinationMessageDelegate.js';
 
 export class UserMessageDelegate {
   element: HTMLElement;
@@ -16,6 +18,11 @@ export class UserMessageDelegate {
   }
 
   render(): HTMLElement {
+    const coordination = parseCoordinationEnvelope(this._msg.content);
+    if (coordination) {
+      return new CoordinationMessageDelegate(this._msg, coordination).element;
+    }
+
     const isSystem = this._msg.role === 'system' || (this._msg as any).agentName?.startsWith('System');
 
     const block = document.createElement('div');

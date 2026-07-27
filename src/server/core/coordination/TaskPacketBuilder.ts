@@ -50,6 +50,7 @@ export async function buildTaskPacket(task: CoordinationTask): Promise<TaskPacke
       task.readOnly
         ? 'This task is read-only. Do not invoke workspace-mutating tools.'
         : `Writes are limited to: ${task.writeScope.join(', ')}`,
+      'All file and process access must stay inside the assigned workspace. Never inspect application data, session storage, credentials, or another session workspace.',
       'Report verification evidence and any remaining risk.',
     ],
     parentContext: summarizeHistory(history),

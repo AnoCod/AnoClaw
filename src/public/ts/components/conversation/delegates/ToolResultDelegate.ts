@@ -26,18 +26,9 @@ const FRIENDLY_NAMES: Record<string, string> = {
   WebFetch: 'Web Fetch',
   ApiCall: 'API Call',
   Browser: 'Browser',
-  TeamCreate: 'Team Create',
-  TeamUpdate: 'Team Update',
-  TeamStatus: 'Team Status',
-  TeamDelete: 'Team Delete',
-  TaskCreate: 'Task Create',
-  TaskAssign: 'Task Assign',
-  TaskClaim: 'Task Claim',
-  TaskUpdate: 'Task Update',
-  TaskGet: 'Task Get',
-  TaskList: 'Task List',
-  TaskStop: 'Task Stop',
-  TaskOutput: 'Task Output',
+  Organization: 'Organization',
+  Team: 'Team',
+  Task: 'Task',
   Skill: 'Skill',
   SkillInspect: 'Skill Inspect',
   SkillList: 'Skill List',
@@ -46,7 +37,6 @@ const FRIENDLY_NAMES: Record<string, string> = {
   memory_delete: 'Memory Delete',
   NotebookEdit: 'Notebook Edit',
   AskUserQuestion: 'Ask User',
-  SubAgentSpawn: 'Sub-Agent Spawn',
   JobList: 'Job List',
   JobOutput: 'Job Output',
   JobStop: 'Job Stop',
@@ -59,9 +49,6 @@ const FRIENDLY_NAMES: Record<string, string> = {
   MCPListResources: 'MCP List',
   GatewaySend: 'Gateway Send',
   GatewayStatus: 'Gateway Status',
-  UpdateOrg: 'Update Org',
-  HireEmployee: 'Hire Employee',
-  ListEmployees: 'List Employees',
 };
 
 const TOOL_META: Record<string, ToolVisualMeta> = {
@@ -75,26 +62,13 @@ const TOOL_META: Record<string, ToolVisualMeta> = {
   WebFetch: { label: 'FETCH', category: 'Web', tone: 'web' },
   Browser: { label: 'BROWSER', category: 'Browser', tone: 'browser' },
   ApiCall: { label: 'API', category: 'API', tone: 'api' },
-  TeamCreate: { label: 'TEAM', category: 'Coordination', tone: 'agent' },
-  TeamUpdate: { label: 'TEAM', category: 'Coordination', tone: 'agent' },
-  TeamStatus: { label: 'TEAM', category: 'Coordination', tone: 'agent' },
-  TeamDelete: { label: 'TEAM', category: 'Coordination', tone: 'agent' },
-  TaskCreate: { label: 'TASK', category: 'Coordination', tone: 'agent' },
-  TaskAssign: { label: 'TASK', category: 'Coordination', tone: 'agent' },
-  TaskClaim: { label: 'CLAIM', category: 'Coordination', tone: 'agent' },
-  TaskUpdate: { label: 'TASK', category: 'Coordination', tone: 'agent' },
-  TaskGet: { label: 'TASK', category: 'Coordination', tone: 'agent' },
-  TaskList: { label: 'TASKS', category: 'Delegation', tone: 'agent' },
-  TaskStop: { label: 'STOP', category: 'Delegation', tone: 'agent' },
-  TaskOutput: { label: 'OUTPUT', category: 'Delegation', tone: 'agent' },
-  SubAgentSpawn: { label: 'SPAWN', category: 'Agent', tone: 'agent' },
+  Organization: { label: 'ORG', category: 'Coordination', tone: 'agent' },
+  Team: { label: 'TEAM', category: 'Coordination', tone: 'agent' },
+  Task: { label: 'TASK', category: 'Coordination', tone: 'agent' },
   JobList: { label: 'JOBS', category: 'Process', tone: 'shell' },
   JobOutput: { label: 'OUTPUT', category: 'Process', tone: 'shell' },
   JobStop: { label: 'STOP', category: 'Process', tone: 'shell' },
   AgentMessage: { label: 'MESSAGE', category: 'Team', tone: 'agent' },
-  HireEmployee: { label: 'HIRE', category: 'Team', tone: 'agent' },
-  ListEmployees: { label: 'ROSTER', category: 'Team', tone: 'agent' },
-  UpdateOrg: { label: 'REPORTS', category: 'Team', tone: 'agent' },
   Skill: { label: 'SKILL', category: 'Skill', tone: 'skill' },
   SkillInspect: { label: 'INSPECT', category: 'Skill', tone: 'skill' },
   SkillList: { label: 'SKILLS', category: 'Skill', tone: 'skill' },
@@ -138,7 +112,10 @@ export class ToolResultDelegate {
   }
 
   private get userFacingName(): string {
-    return FRIENDLY_NAMES[this.event.toolName] || this.event.toolName;
+    const base = FRIENDLY_NAMES[this.event.toolName] || this.event.toolName;
+    if (!['Organization', 'Team', 'Task'].includes(this.event.toolName)) return base;
+    const action = String(this.input.action || '');
+    return action ? `${base} ${action.charAt(0).toUpperCase()}${action.slice(1)}` : base;
   }
 
   private get meta(): ToolVisualMeta {
@@ -368,40 +345,40 @@ export class ToolResultDelegate {
       case 'Browser':
         add('Action', input.action || input.command || input.url);
         break;
-      case 'TaskCreate':
-        add('Subject', input.subject);
-        add('Priority', input.priority);
-        add('Task', input.description, 180);
+      case 'Organization':
+        add('Action', input.action);
+        if (input.action === 'hire') {
+          add('Employee', input.name);
+          add('Role', input.role);
+          add('Manager', input.parentAgentId);
+        } else if (input.action === 'reassign') {
+          add('Employee', input.agentId);
+          add('Manager', input.newParentId);
+        }
         break;
-      case 'TaskAssign':
-      case 'TaskClaim':
-        add('Agent', input.agentName || input.agentId || input.agent_id);
-        add('Task ID', input.taskId || input.task_id);
-        add('Priority', input.priority);
-        add('Task', input.task || input.prompt || input.description, 180);
-        break;
-      case 'TaskUpdate':
-      case 'TaskGet':
-      case 'TaskOutput':
-      case 'TaskStop':
-        add('Task ID', input.task_id || input.taskId);
-        break;
-      case 'TaskList':
-        add('Filter', input.status || input.agentId || input.agent_id);
-        break;
-      case 'SubAgentSpawn':
-        add('Type', input.type);
-        add('Prompt', input.prompt || input.task || input.description, 180);
+      case 'Task':
+        add('Action', input.action);
+        if (input.action === 'create') {
+          add('Subject', input.subject);
+          add('Agent', input.targetAgentId);
+          add('Priority', input.priority);
+        } else if (input.action === 'spawn') {
+          add('Type', input.type);
+          add('Prompt', input.prompt || input.description, 180);
+        } else if (input.action === 'list') {
+          add('Filter', input.status || input.assigneeAgentId || input.teamId);
+        } else {
+          add('Task ID', input.taskId);
+          add('Agent', input.targetAgentId);
+        }
         break;
       case 'AgentMessage':
         add('Agent', input.agentId || input.subAgentId || input.to || input.subAgentName);
         add('Message', input.message || input.content, 180);
         break;
-      case 'TeamCreate':
-      case 'TeamUpdate':
-      case 'TeamStatus':
-      case 'TeamDelete':
-        add('Team', input.name || input.teamId || input.team_id);
+      case 'Team':
+        add('Action', input.action);
+        add('Team', input.name || input.teamId);
         break;
       case 'JobOutput':
       case 'JobStop':

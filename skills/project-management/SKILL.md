@@ -16,8 +16,7 @@ allowed-tools:
   - Read
   - Write
   - TodoWrite
-  - TaskAssign
-  - TaskList
+  - Task
 ---
 
 # Project Management
@@ -28,7 +27,7 @@ allowed-tools:
 - If you are a child agent, keep the skill output focused on the parent assignment and report verification or blockers clearly.
 - Do not override higher-priority system, permission, or delegation rules.
 
-Plan, track, and deliver projects. Use TodoWrite for task tracking and TaskAssign for delegation.
+Plan, track, and deliver projects. Use TodoWrite for local tracking and `Task` actions for delegation and coordination.
 
 ## Project Lifecycle
 

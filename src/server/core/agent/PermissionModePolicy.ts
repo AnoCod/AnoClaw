@@ -11,8 +11,8 @@ export type { PermissionMode, ToolExecutionMode } from '../../../shared/types/se
 export const FULL_AUTO_PERMISSION_MODE: PermissionMode = 'AutoEdit';
 
 export interface ToolPermissionSubject {
-  isReadOnly(): boolean;
-  riskLevel(): RiskLevel | string;
+  isReadOnly(params?: Record<string, unknown>): boolean;
+  riskLevel(params?: Record<string, unknown>): RiskLevel | string;
 }
 
 function parsePermissionModeValue(value: unknown): PermissionMode | undefined {
@@ -93,8 +93,9 @@ export function isAutoApprovedExecutionMode(mode: unknown): boolean {
 export function toolRequiresConfirmation(
   mode: PermissionMode,
   tool: ToolPermissionSubject,
+  params?: Record<string, unknown>,
 ): boolean {
-  if (tool.isReadOnly()) return false;
+  if (tool.isReadOnly(params)) return false;
   switch (mode) {
     case 'Ask':
       return true;
@@ -102,7 +103,7 @@ export function toolRequiresConfirmation(
     case 'Plan':
       return false;
     case 'Auto': {
-      const risk = String(tool.riskLevel());
+      const risk = String(tool.riskLevel(params));
       return risk === 'High' || risk === 'Critical';
     }
     default:

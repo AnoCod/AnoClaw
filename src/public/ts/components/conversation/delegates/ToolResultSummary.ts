@@ -95,9 +95,19 @@ export function generateToolResultSummary(event: ToolResultData): string {
       const resultCount = content.split('\n').filter(l => l.trim()).length;
       return `Found ${resultCount} memory entries`;
     }
-    case 'TaskAssign':
-    case 'SubAgentSpawn':
-      return 'Task started';
+    case 'Task': {
+      const action = String(event.toolInput?.action || '');
+      if (action === 'spawn' || action === 'assign' || (action === 'create' && event.toolInput?.targetAgentId)) {
+        return 'Task started';
+      }
+      if (action === 'list') return 'Tasks listed';
+      if (action === 'output') return 'Task output loaded';
+      return `Task ${action || 'operation'} completed`;
+    }
+    case 'Team':
+      return `Team ${String(event.toolInput?.action || 'operation')} completed`;
+    case 'Organization':
+      return `Organization ${String(event.toolInput?.action || 'operation')} completed`;
     default: {
       const firstLine = content.split('\n')[0].slice(0, 100);
       return firstLine || 'Completed';

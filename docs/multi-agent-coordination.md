@@ -112,7 +112,7 @@ acceptance criteria, constraints, selected parent-session excerpts, dependency
 results and evidence, workspace, Team roster, write scope, and available tools.
 
 The result stores a summary, evidence, and an `outputRef` to the worker session
-transcript. `TaskOutput` reads that durable transcript after in-memory caches
+transcript. `Task` action `output` reads that durable transcript after in-memory caches
 expire or the server restarts.
 
 Temporary SubAgents support:

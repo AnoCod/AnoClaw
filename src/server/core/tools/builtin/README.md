@@ -7,32 +7,31 @@
 
 | Group | Tools |
 |---|---|
-| Team roster | `ListEmployees`, `HireEmployee`, `UpdateOrg` |
-| Session Team | `TeamCreate`, `TeamUpdate`, `TeamStatus`, `TeamDelete` |
-| Durable task | `TaskCreate`, `TaskAssign`, `TaskClaim`, `TaskUpdate`, `TaskGet`, `TaskList`, `TaskOutput`, `TaskStop` |
+| Team roster | `Organization` actions `list`, `hire`, `reassign` |
+| Session Team | `Team` actions `create`, `update`, `status`, `delete` |
+| Durable task | `Task` actions `create`, `assign`, `claim`, `update`, `list`, `output`, `stop` |
 | Messaging | `AgentMessage` |
-| Temporary worker | `SubAgentSpawn` |
+| Temporary worker | `Task` action `spawn` |
 | Process job | `JobList`, `JobOutput`, `JobStop` |
 
 Tasks and process Jobs are intentionally separate. Agent work is always stored
 by `CoordinationService`; `BackgroundTaskManager` is only for Bash and native
 program processes.
 
-All roster, session-Team, and messaging tools appear under the `Agent Teams`
-tool group. The roster is durable across sessions: `HireEmployee` creates an
-agent and `UpdateOrg` changes reporting lines. A session Team is temporary and
-only references existing active employees for the current root session.
+Organization, Team, and messaging appear under the `Agent Teams` tool group.
+The Organization is durable across sessions. A Team is temporary and only
+references existing active employees for the current root session.
 
-`TaskCreate` declares acceptance criteria, dependencies, read-only mode, and
-write scope. `TaskAssign` chooses an eligible worker but does not mark work
-complete. The scheduler claims and runs ready tasks, and the runtime commits a
+`Task` action `create` declares acceptance criteria, dependencies, read-only
+mode, and write scope. Supplying `targetAgentId` creates and assigns in one
+call. The scheduler claims and runs ready tasks, and the runtime commits a
 terminal state only after actual execution.
 
 `AgentMessage` writes to a durable FIFO mailbox. Team members can address peers
 or broadcast; outside a Team the organization parent/child restriction applies.
 `steer` requires a running recipient, while `note` may wait for the next task.
 
-`SubAgentSpawn` accepts `contextMode: isolated | summary | fork` and optional
+`Task` action `spawn` accepts `contextMode: isolated | summary | fork` and optional
 read/write scope. Temporary agent configuration is never persisted after the
 run, but its task, session transcript, and output are durable.
 

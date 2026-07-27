@@ -16,7 +16,7 @@ export class TaskCreateTool extends Tool {
   static category = 'Task Coordination';
   static toolDescription = 'Creates a durable task with acceptance criteria, dependencies, and workspace scope.';
   name(): string { return 'TaskCreate'; }
-  description(): string { return 'Create a durable hierarchy or team task. Use TaskAssign separately to select an owner.'; }
+  description(): string { return 'Create a durable hierarchy or team task.'; }
   prompt(): string {
     return [
       'Create one Task per independently verifiable unit of work.',

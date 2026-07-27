@@ -20,26 +20,21 @@ export const TOOL_REGISTRY: Record<string, { verb: string; result: (t: ToolActiv
   Skill:         { verb: 'used',      result: t => { const c = (t.result || '').trim(); return c ? c.slice(0, 120) : 'Done'; } },
   SkillList:     { verb: 'listed',    result: t => { const n = (t.result || '').split('\n').filter(Boolean).length; return n ? `${n} skills` : 'Done'; } },
   SkillInspect:  { verb: 'inspected', result: t => { const c = (t.result || '').trim(); return c ? `${c.split('\n').length} lines` : 'Done'; } },
-  TeamCreate:    { verb: 'created',   result: () => 'Team created' },
-  TeamUpdate:    { verb: 'updated',   result: () => 'Team updated' },
-  TeamStatus:    { verb: 'inspected', result: () => 'Team status loaded' },
-  TeamDelete:    { verb: 'disbanded', result: () => 'Team disbanded' },
-  TaskCreate:    { verb: 'created',   result: () => 'Task created' },
-  TaskAssign:    { verb: 'assigned',  result: () => 'Task assigned' },
-  TaskClaim:     { verb: 'claimed',   result: () => 'Task claimed' },
-  TaskUpdate:    { verb: 'updated',   result: () => 'Task updated' },
-  TaskGet:       { verb: 'inspected', result: () => 'Task loaded' },
-  TaskList:      { verb: 'listed',    result: () => 'Tasks listed' },
-  TaskStop:      { verb: 'stopped',   result: () => 'Task stopped' },
-  TaskOutput:    { verb: 'read',      result: t => { const c = (t.result || '').trim(); return c ? `${c.split('\n').length} lines` : 'Done'; } },
-  SubAgentSpawn: { verb: 'delegated', result: () => 'Sub-agent running' },
+  Organization:  { verb: 'managed',   result: t => `${String(t.toolInput?.action || 'operation')} complete` },
+  Team:          { verb: 'managed',   result: t => `${String(t.toolInput?.action || 'operation')} complete` },
+  Task:          { verb: 'managed',   result: t => {
+    const action = String(t.toolInput?.action || '');
+    if (action === 'spawn') return 'Sub-agent task started';
+    if (action === 'output') {
+      const c = (t.result || '').trim();
+      return c ? `${c.split('\n').length} lines` : 'Done';
+    }
+    return `${action || 'operation'} complete`;
+  } },
   JobList:       { verb: 'listed',    result: () => 'Jobs listed' },
   JobOutput:     { verb: 'read',      result: () => 'Job output loaded' },
   JobStop:       { verb: 'stopped',   result: () => 'Job stopped' },
   AgentMessage:  { verb: 'messaged',  result: t => { const c = (t.result || '').trim(); return c ? c.slice(0, 80) : 'Sent'; } },
-  HireEmployee:  { verb: 'hired',     result: () => 'Employee created' },
-  ListEmployees: { verb: 'listed',    result: () => 'Employees listed' },
-  UpdateOrg:     { verb: 'updated',   result: () => 'Org chart updated' },
   // ── Memory tools ──
   memory_save:   { verb: 'saved',    result: () => 'Memory saved' },
   memory_search: { verb: 'searched', result: t => { const n = (t.result || '').split('\n').filter(Boolean).length; return n ? `${n} entries` : 'None found'; } },

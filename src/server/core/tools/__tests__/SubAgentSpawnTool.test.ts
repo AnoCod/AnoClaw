@@ -8,7 +8,7 @@ import { AgentRuntime } from '../../agent/AgentRuntime.js';
 import { CoordinationService } from '../../coordination/CoordinationService.js';
 import { WorkspaceLeaseService } from '../../coordination/WorkspaceLeaseService.js';
 import { SessionManager } from '../../session/SessionManager.js';
-import { SubAgentSpawnTool } from '../builtin/SubAgentSpawnTool.js';
+import { SubAgentSpawnTool } from '../operations/SubAgentSpawnTool.js';
 
 const ctx: ExecutionContext = {
   sessionId: 'root-1',

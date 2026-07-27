@@ -318,8 +318,9 @@ Agent 的核心执行循环：
 - SubAgent (level 3+): 临时生成，有时限
 
 ### 工具权限
-- Manager+: HireEmployee, UpdateOrg, TaskAssign
-- Member+: SubAgentSpawn
+- Manager+: Organization（list/hire）, Team, Task
+- MainAgent: Organization（额外支持 reassign）
+- Member+: Team, Task（含 spawn）
 - SubAgent+: 所有常规工具
 - Delegation timeout: 10 分钟 → InterruptController 触发中断`,
   },

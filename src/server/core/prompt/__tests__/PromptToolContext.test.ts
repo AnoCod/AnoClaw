@@ -186,7 +186,7 @@ describe('prompt tool context', () => {
     );
 
     expect(prompt).toContain('Hierarchical delegation and temporary Team collaboration share one durable task state machine');
-    expect(prompt).toContain('Create work with TaskCreate');
+    expect(prompt).toContain('Create work with Task action="create"');
     expect(prompt).toContain('AgentMessage is for mid-task clarification');
     expect(prompt).not.toContain('One agent = one active task');
   });

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { UpdateOrgTool } from '../builtin/UpdateOrgTool.js';
+import { UpdateOrgTool } from '../operations/UpdateOrgTool.js';
 import { AgentRegistry } from '../../agent/AgentRegistry.js';
 import { Agent } from '../../agent/Agent.js';
 import { AgentRole, AgentState } from '../../../../shared/types/agent.js';

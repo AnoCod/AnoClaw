@@ -207,9 +207,9 @@ sequenceDiagram
 ### Agent Hierarchy
 
 - **MainAgent** (CEO, level 0): Always exists. Decomposes tasks, delegates to Managers/Members. Can communicate with user.
-- **Manager** (level 1): Manages a team of Members. Can hire/fire Members via `HireEmployeeTool`.
+- **Manager** (level 1): Manages a team of Members. Can hire Members via `Organization` action `hire`.
 - **Member** (level 2): Leaf workers. Execute tasks, cannot manage others. Can create SubAgents.
-- **SubAgent**: Temporary, not persisted. Created/spawned by any agent via `SubAgentSpawnTool`. Destroyed when done.
+- **SubAgent**: Temporary, not persisted. Created by `Task` action `spawn`. Destroyed when done.
 
 ```mermaid
 graph TB
@@ -222,16 +222,16 @@ graph TB
     SA1["SubAgent<br/>(temporary)"]
     SA2["SubAgent<br/>(temporary)"]
 
-    CEO -->|"HireEmployeeTool"| MGR1
-    CEO -->|"HireEmployeeTool"| MGR2
-    MGR1 -->|"HireEmployeeTool"| MEM1
-    MGR1 -->|"HireEmployeeTool"| MEM2
-    MGR2 -->|"HireEmployeeTool"| MEM3
-    MEM1 -->|"SubAgentSpawnTool"| SA1
-    MEM2 -->|"SubAgentSpawnTool"| SA2
+    CEO -->|"Organization: hire"| MGR1
+    CEO -->|"Organization: hire"| MGR2
+    MGR1 -->|"Organization: hire"| MEM1
+    MGR1 -->|"Organization: hire"| MEM2
+    MGR2 -->|"Organization: hire"| MEM3
+    MEM1 -->|"Task: spawn"| SA1
+    MEM2 -->|"Task: spawn"| SA2
 
-    CEO -..->|"TaskCreate + TaskAssign"| MGR1
-    MGR1 -..->|"TaskCreate + TaskAssign"| MEM1
+    CEO -..->|"Task: create + targetAgentId"| MGR1
+    MGR1 -..->|"Task: create + targetAgentId"| MEM1
 ```
 
 Agents are NOT single-threaded — one agent can serve multiple sessions simultaneously because LLM APIs are stateless. Each session has independent context and its own `AgentLoop` instance.
@@ -306,7 +306,7 @@ graph TB
 
 ### Tool System
 
-Built-in tools are registered in `registerAllTools()` via directory scan of `builtin/`. Every tool extends the abstract `Tool` class (EventEmitter-based). Additional tools are registered by plugins at runtime via `anoclaw.tools.register()` (RPC → PluginToolProxy → ToolRegistry). Each agent has an `allowedTools` whitelist. Key categories: File I/O (Read/Write/Edit/Glob/Grep), shell execution (Bash), native program launch (RunProgram), Web (Fetch/Search), agent management (HireEmployee/SubAgentSpawn), cross-agent communication (TaskAssign/AgentMessage), Plan mode, Memory, Skills, MCP, and Gateway.
+Built-in tools are registered in `registerAllTools()` via directory scan of `builtin/`. Every tool extends the abstract `Tool` class (EventEmitter-based). Additional tools are registered by plugins at runtime via `anoclaw.tools.register()` (RPC → PluginToolProxy → ToolRegistry). Each agent has an `allowedTools` whitelist. Coordination uses four public tools: `Organization` (list/hire/reassign), `Team` (create/update/status/delete), `Task` (create/assign/claim/update/list/output/stop/spawn), and `AgentMessage`. Other categories include File I/O, shell/process execution, Web, Plan mode, Memory, Skills, MCP, and Gateway.
 
 ### Storage: JSONL Append-Only
 

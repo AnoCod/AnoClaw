@@ -8,7 +8,7 @@ export class TeamStatusTool extends Tool {
   static toolDescription = 'Returns the current collaboration team and its task/member state.';
   name(): string { return 'TeamStatus'; }
   description(): string {
-    return 'Inspect the current session collaboration team, its tasks, messages, and leases. Use ListEmployees for the complete durable roster.';
+    return 'Inspect the current session collaboration team, its tasks, messages, and leases. Use Organization action="list" for the durable roster.';
   }
   minRole(): string { return 'Member'; }
   riskLevel(): RiskLevel { return RiskLevel.Safe; }

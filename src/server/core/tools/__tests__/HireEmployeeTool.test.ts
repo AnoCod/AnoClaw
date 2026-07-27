@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
-import { HireEmployeeTool } from '../builtin/HireEmployeeTool.js';
+import { HireEmployeeTool } from '../operations/HireEmployeeTool.js';
 import { AgentRegistry } from '../../agent/AgentRegistry.js';
 import { AgentRole } from '../../../../shared/types/agent.js';
 import type { Agent } from '../../agent/Agent.js';

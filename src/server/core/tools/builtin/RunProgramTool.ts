@@ -292,7 +292,7 @@ export class RunProgramTool extends Tool {
 
     child.unref();
     return this.makeResult(
-      `Program started.\nTask ID: ${taskId}\nPID: ${child.pid ?? 'unknown'}\nProgram: ${commandLabel}\n\nUse TaskList or TaskOutput to inspect it, and TaskStop with taskId="${taskId}" to stop it.`,
+      `Program started.\nJob ID: ${taskId}\nPID: ${child.pid ?? 'unknown'}\nProgram: ${commandLabel}\n\nUse JobList or JobOutput to inspect it, and JobStop with jobId="${taskId}" to stop it.`,
       {
         startedAt,
         structured: {

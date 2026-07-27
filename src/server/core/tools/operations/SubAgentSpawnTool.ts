@@ -24,7 +24,7 @@ export class SubAgentSpawnTool extends Tool {
   }
   prompt(): string {
     return [
-      'Use SubAgentSpawn only for bounded temporary work, not as a permanent team member.',
+      'Use Task action="spawn" only for bounded temporary work, not as a permanent team member.',
       'The temporary Agent is always destroyed after execution; its durable Task and transcript remain available.',
       'summary is the default context mode. fork inherits full conversation and cannot be invoked by another SubAgent.',
     ].join('\n');

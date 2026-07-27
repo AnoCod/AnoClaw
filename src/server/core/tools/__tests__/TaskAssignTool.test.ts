@@ -7,7 +7,8 @@ import { AgentRegistry } from '../../agent/AgentRegistry.js';
 import { CoordinationService } from '../../coordination/CoordinationService.js';
 import { WorkspaceLeaseService } from '../../coordination/WorkspaceLeaseService.js';
 import { SessionManager } from '../../session/SessionManager.js';
-import { TaskAssignTool } from '../builtin/TaskAssignTool.js';
+import { TaskTool } from '../builtin/TaskTool.js';
+import { TaskAssignTool } from '../operations/TaskAssignTool.js';
 
 const ctx: ExecutionContext = {
   sessionId: 'root-1',
@@ -93,5 +94,30 @@ describe('TaskAssignTool durable contract', () => {
     expect(result.success).toBe(false);
     expect(result.errorMessage).toContain('direct subordinate');
     expect(service.getTask('root-1', task.id)?.assigneeAgentId).toBeUndefined();
+  });
+
+  it('creates and assigns in one Task action', async () => {
+    vi.spyOn(AgentRegistry, 'getInstance').mockReturnValue({
+      findAgent: vi.fn((id: string) => id === 'member-1'
+        ? { id, isActive: true, parentAgentId: ctx.agentId }
+        : undefined),
+    } as unknown as AgentRegistry);
+
+    const result = await new TaskTool().execute({
+      action: 'create',
+      subject: 'Inspect',
+      description: 'Inspect code',
+      acceptanceCriteria: ['Evidence'],
+      readOnly: true,
+      targetAgentId: 'member-1',
+    }, ctx);
+
+    expect(result.success).toBe(true);
+    const [task] = service.listTasks('root-1');
+    expect(task).toMatchObject({
+      subject: 'Inspect',
+      assigneeAgentId: 'member-1',
+      status: 'pending',
+    });
   });
 });

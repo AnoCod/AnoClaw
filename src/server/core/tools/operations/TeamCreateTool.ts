@@ -20,8 +20,8 @@ export class TeamCreateTool extends Tool {
   }
   prompt(): string {
     return [
-      'Use TeamCreate when at least two independent tasks benefit from parallel execution.',
-      'Call ListEmployees first, then invite existing active employee IDs. Use HireEmployee first only when durable capacity is missing.',
+      'Use Team action="create" when at least two independent tasks benefit from parallel execution.',
+      'Call Organization action="list" first, then invite existing active employee IDs. Hire only when durable capacity is missing.',
       'The creator becomes the team leader. Team membership is session-scoped and does not change the organization roster.',
       'A root session can have only one active team; reuse it instead of creating another.',
     ].join('\n');

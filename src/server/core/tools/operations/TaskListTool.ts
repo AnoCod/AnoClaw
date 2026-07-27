@@ -10,7 +10,7 @@ export class TaskListTool extends Tool {
   name(): string { return 'TaskList'; }
   description(): string { return 'List coordination tasks by team, status, or assignee. Completion notifications are automatic.'; }
   prompt(): string {
-    return 'Use TaskList at coordination milestones or when investigating blocked work; do not poll after every assignment.';
+    return 'Use Task action="list" at coordination milestones or when investigating blocked work; do not poll.';
   }
   minRole(): string { return 'Member'; }
   riskLevel(): RiskLevel { return RiskLevel.Safe; }

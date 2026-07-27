@@ -15,10 +15,10 @@ export class TaskAssignTool extends Tool {
   static category = 'Task Coordination';
   static toolDescription = 'Assigns an existing durable task to an eligible hierarchy or team member.';
   name(): string { return 'TaskAssign'; }
-  description(): string { return 'Assign a TaskCreate result to a direct subordinate or active team member.'; }
+  description(): string { return 'Assign an existing task to a direct subordinate or active team member.'; }
   prompt(): string {
     return [
-      'TaskAssign no longer creates a task. Call TaskCreate first, then assign its taskId.',
+      'Use Task action="create" with targetAgentId for the common create-and-assign path.',
       'Hierarchy tasks may target only direct subordinates. Team tasks may target any active member of that team.',
       'The scheduler starts ready tasks automatically; completion arrives as a coordination event.',
     ].join('\n');

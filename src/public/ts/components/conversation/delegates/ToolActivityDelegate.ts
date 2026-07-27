@@ -165,9 +165,37 @@ export class ToolActivityDelegate {
 
   /** Build the action phrase: verb + subject. */
   private _actionText(s: ToolActivityState): string {
+    const routedVerb = this._routedVerb(s);
+    if (routedVerb) {
+      const subject = this._subject(s);
+      return subject ? `${routedVerb} ${subject}` : routedVerb;
+    }
     const verb = this._meta(s.toolName).verb;
     const subj = this._subject(s);
     return subj ? `${verb} ${subj}` : `${verb}`;
+  }
+
+  private _routedVerb(s: ToolActivityState): string | null {
+    const action = String(s.toolInput.action || '');
+    if (s.toolName === 'Organization') {
+      return ({ list: 'listed', hire: 'hired', reassign: 'reassigned' } as Record<string, string>)[action] || 'managed';
+    }
+    if (s.toolName === 'Team') {
+      return ({ create: 'created', update: 'updated', status: 'inspected', delete: 'disbanded' } as Record<string, string>)[action] || 'managed';
+    }
+    if (s.toolName === 'Task') {
+      return ({
+        create: 'created',
+        assign: 'assigned',
+        claim: 'claimed',
+        update: 'updated',
+        list: 'listed',
+        output: 'read',
+        stop: 'stopped',
+        spawn: 'spawned',
+      } as Record<string, string>)[action] || 'managed';
+    }
+    return null;
   }
 
   /** Toggle body visibility: show full result when expanded, hide when collapsed. */
@@ -240,26 +268,25 @@ export class ToolActivityDelegate {
       case 'Skill':        return ((inp.skill || inp.name || '') as string).slice(0, 30) || 'skill';
       case 'SkillInspect': return ((inp.skill || inp.name || '') as string).slice(0, 30) || 'skill';
       case 'SkillList':    return 'skills';
-      case 'TeamCreate':
-      case 'TeamUpdate':
-      case 'TeamStatus':
-      case 'TeamDelete':   return ((inp.name || inp.teamId || '') as string).slice(0, 20) || 'team';
-      case 'TaskCreate':   return ((inp.subject || '') as string).slice(0, 30) || 'task';
-      case 'TaskAssign':
-      case 'TaskClaim':
-      case 'TaskUpdate':
-      case 'TaskGet':      return ((inp.taskId || inp.task_id || '') as string).slice(0, 20) || 'task';
-      case 'TaskList':     return 'tasks';
-      case 'TaskStop':     return ((inp.taskId || inp.task_id || '') as string).slice(0, 20) || 'task';
-      case 'TaskOutput':   return ((inp.taskId || inp.task_id || '') as string).slice(0, 20) || 'task';
-      case 'SubAgentSpawn':return ((inp.type || '') as string).slice(0, 20) || 'sub-agent';
+      case 'Organization': {
+        const action = String(inp.action || '');
+        if (action === 'list') return 'employees';
+        if (action === 'hire') return String(inp.name || 'employee').slice(0, 20);
+        return String(inp.agentId || 'org chart').slice(0, 20);
+      }
+      case 'Team':
+        return String(inp.name || inp.teamId || 'team').slice(0, 20);
+      case 'Task': {
+        const action = String(inp.action || '');
+        if (action === 'list') return 'tasks';
+        if (action === 'create') return String(inp.subject || 'task').slice(0, 30);
+        if (action === 'spawn') return String(inp.type || 'sub-agent').slice(0, 20);
+        return String(inp.taskId || 'task').slice(0, 20);
+      }
       case 'JobList':      return 'jobs';
       case 'JobOutput':
       case 'JobStop':      return ((inp.jobId || inp.job_id || '') as string).slice(0, 20) || 'job';
       case 'AgentMessage': return ((inp.subAgentName || inp.to || '') as string).slice(0, 20) || 'agent';
-      case 'HireEmployee': return ((inp.name || inp.employeeName || '') as string).slice(0, 20) || 'employee';
-      case 'ListEmployees': return 'employees';
-      case 'UpdateOrg':    return 'org chart';
       case 'memory_save':   return ((inp.key || inp.name || '') as string).slice(0, 30) || 'memory';
       case 'memory_search': return ((inp.query || '') as string).slice(0, 40) || 'memory';
       case 'memory_delete': return ((inp.key || inp.name || '') as string).slice(0, 30) || 'memory';

@@ -8,10 +8,10 @@ import { CoordinationService } from '../../coordination/CoordinationService.js';
 import { WorkspaceLeaseService } from '../../coordination/WorkspaceLeaseService.js';
 import { SessionManager } from '../../session/SessionManager.js';
 import { JobListTool } from '../builtin/JobListTool.js';
-import { TaskListTool } from '../builtin/TaskListTool.js';
-import { TaskOutputTool } from '../builtin/TaskOutputTool.js';
-import { TaskStopTool } from '../builtin/TaskStopTool.js';
-import { TaskUpdateTool } from '../builtin/TaskUpdateTool.js';
+import { TaskListTool } from '../operations/TaskListTool.js';
+import { TaskOutputTool } from '../operations/TaskOutputTool.js';
+import { TaskStopTool } from '../operations/TaskStopTool.js';
+import { TaskUpdateTool } from '../operations/TaskUpdateTool.js';
 
 const ctx: ExecutionContext = {
   sessionId: 'root-1',

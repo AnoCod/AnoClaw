@@ -60,7 +60,7 @@ export class TaskUpdateTool extends Tool {
       ) {
         throw new CoordinationError(
           'conflict',
-          'A running task is finalized by its runtime after the AgentLoop exits; use TaskStop to cancel it',
+          'A running task is finalized by its runtime after the AgentLoop exits; use Task action="stop" to cancel it',
         );
       }
       const task = await service.updateTask(rootSessionId, taskId, {

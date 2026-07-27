@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { ListEmployeesTool } from '../builtin/ListEmployeesTool.js';
+import { ListEmployeesTool } from '../operations/ListEmployeesTool.js';
 import { AgentRegistry } from '../../agent/AgentRegistry.js';
 import { Agent } from '../../agent/Agent.js';
 import { AgentRole, AgentState } from '../../../../shared/types/agent.js';

@@ -359,10 +359,10 @@ A caller at level N can use any tool requiring level ≥ N. Returns `true` if `c
 
 | Role | Tools |
 |---|---|
-| `MainAgent` (0) only | `AskUserQuestion`, `UpdateOrg` |
-| `Manager` (1)+ | `HireEmployee`, `TaskAssign` |
-| `Member` (2)+ | `SubAgentSpawn` |
-| `SubAgent` (3)+ | All other tools (the default) |
+| `MainAgent` (0) only | `AskUserQuestion`; `Organization` action `reassign` |
+| `Manager` (1)+ | `Organization` action `hire` |
+| `Member` (2)+ | `Team`, `Task`, `AgentMessage`; Organization access still follows the allowlist |
+| `SubAgent` (3)+ | Regular non-coordination tools |
 
 ---
 
@@ -464,8 +464,8 @@ Choose one of the 8 existing categories (or a new one — new categories auto-cr
 |---|---|
 | `File & Code` | Bash, Read, Write, Edit, Glob, Grep, NotebookEdit |
 | `Search & Web` | WebFetch, WebSearch |
-| `Agent Teams` | ListEmployees, HireEmployee, UpdateOrg, TeamCreate, TeamUpdate, TeamStatus, TeamDelete, AgentMessage |
-| `Task Coordination` | TaskCreate, TaskAssign, TaskClaim, TaskUpdate, TaskGet, TaskList, TaskOutput, TaskStop, SubAgentSpawn |
+| `Agent Teams` | Organization, Team, AgentMessage |
+| `Task Coordination` | Task |
 | `Planning & Communication` | TodoWrite, Sleep, AskUserQuestion, EnterPlanMode |
 | `Memory & Skills` | MemorySave, MemorySearch, Skill, SkillList |
 | `Browser` | BrowserAgent |

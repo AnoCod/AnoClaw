@@ -9,7 +9,7 @@ coordination plane in `src/server/core/coordination/`.
 - User turns call `AgentRuntime.processMessage()`.
 - Durable hierarchy and Team tasks are claimed by `CoordinationScheduler` and
   executed by `AgentRuntime.runCoordinationTask()`.
-- `SubAgentSpawn` creates a durable coordination task and a temporary agent,
+- `Task` action `spawn` creates a durable coordination task and a temporary agent,
   executes it with `isolated`, `summary`, or `fork` context, and always destroys
   the temporary agent after termination.
 - Bash and native background processes remain in `BackgroundTaskManager` and

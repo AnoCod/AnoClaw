@@ -362,7 +362,7 @@ snapshots, and detects irreversible side effects.
 
   Check if a tool call has irreversible side effects. Detects Bash commands
   like `git push`, `npm publish`, `docker push`, `rm -rf`, `drop table`, etc.
-  Also flags `TaskAssign`, `TaskStop`, and `WebFetch` as irreversible.
+  Also conservatively treats `Organization`, `Team`, and `Task` calls as irreversible.
 
 **Irreversible detection patterns**:
 ```

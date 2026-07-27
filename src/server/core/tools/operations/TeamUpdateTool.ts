@@ -24,8 +24,8 @@ export class TeamUpdateTool extends Tool {
   }
   prompt(): string {
     return [
-      'Use TeamUpdate to add or remove existing employees from the active session Team, or transfer its leadership.',
-      'Use HireEmployee to add durable capacity and UpdateOrg to change persistent reporting relationships.',
+      'Use Team action="update" to add or remove existing employees, or transfer leadership.',
+      'Use Organization action="hire" for durable capacity and action="reassign" for reporting relationships.',
       'Removing a member from this Team never removes that employee from the organization roster.',
     ].join('\n');
   }

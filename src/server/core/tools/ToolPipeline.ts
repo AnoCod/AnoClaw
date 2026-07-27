@@ -234,7 +234,7 @@ export class ToolPipeline {
     }
 
     // Block non-read-only tools in read-only mode
-    if (!tool.isReadOnly()) {
+    if (!tool.isReadOnly(params)) {
       if (mode === 'read_only' || mode === 'readOnly') {
         return makeError(
           `Tool "${tool.name()}" is not read-only; blocked in ${mode} mode.`,
@@ -244,7 +244,7 @@ export class ToolPipeline {
     }
 
     // Block non-read-only tools in plan mode (except EnterPlanMode/ExitPlanMode gatekeepers)
-    if ((ToolPipeline.isPlanMode(ctx.sessionId) || ToolPipeline.isPlanMode()) && !tool.isReadOnly()) {
+    if ((ToolPipeline.isPlanMode(ctx.sessionId) || ToolPipeline.isPlanMode()) && !tool.isReadOnly(params)) {
       const name = tool.name();
       if (name !== 'EnterPlanMode' && name !== 'ExitPlanMode') {
         return makeError(
@@ -261,9 +261,9 @@ export class ToolPipeline {
     const hasAutoEditApproval = isAutoApprovedExecutionMode(mode);
     const permissionMode = executionModeToPermissionMode(mode);
     const requiresModeConfirmation = permissionMode
-      ? toolRequiresConfirmation(permissionMode, tool)
+      ? toolRequiresConfirmation(permissionMode, tool, params)
       : false;
-    const requiresToolConfirmation = tool.requiresConfirmation(ctx);
+    const requiresToolConfirmation = tool.requiresConfirmation(ctx, params);
 
     // The selected mode and the tool's own safety policy both participate.
     // Auto Edit is an explicit pre-authorization for both layers.
@@ -274,7 +274,7 @@ export class ToolPipeline {
       && (requiresModeConfirmation || requiresToolConfirmation)
     ) {
       return makeError(
-        `Tool "${tool.name()}" requires user confirmation (risk: ${tool.riskLevel()}).`,
+        `Tool "${tool.name()}" requires user confirmation (risk: ${tool.riskLevel(params)}).`,
         { toolCallId: '' },
       );
     }

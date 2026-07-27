@@ -46,13 +46,10 @@ describe('buildDefaultAgentConfigs', () => {
 
     expect(ceo.allowedTools).toEqual(expect.arrayContaining([
       'RunProgram',
-      'TeamCreate',
-      'TaskCreate',
-      'TaskAssign',
-      'TaskClaim',
-      'TaskUpdate',
+      'Team',
+      'Task',
       'JobList',
-      'ListEmployees',
+      'Organization',
       'memory_save',
       'memory_search',
       'Skill',
@@ -60,17 +57,15 @@ describe('buildDefaultAgentConfigs', () => {
       'Browser',
       'ApiCall',
     ]));
-    expect(manager.allowedTools).toContain('TaskAssign');
+    expect(manager.allowedTools).toContain('Task');
     expect(manager.allowedTools).toContain('RunProgram');
-    expect(manager.allowedTools).toContain('HireEmployee');
-    expect(manager.allowedTools).not.toContain('UpdateOrg');
-    expect(ceo.allowedTools).toContain('UpdateOrg');
-    expect(member.allowedTools).toContain('SubAgentSpawn');
-    expect(member.allowedTools).toContain('TeamCreate');
-    expect(member.allowedTools).toContain('TaskClaim');
+    expect(manager.allowedTools).toContain('Organization');
+    expect(ceo.allowedTools).toContain('Organization');
+    expect(member.allowedTools).toContain('Task');
+    expect(member.allowedTools).toContain('Team');
     expect(member.allowedTools).toContain('RunProgram');
     expect(member.allowedTools).not.toContain('SubAgentDelete');
-    expect(member.allowedTools).not.toContain('HireEmployee');
+    expect(member.allowedTools).not.toContain('Organization');
   });
 
   it('enables focused default skills instead of leaving skills blank', () => {
@@ -104,17 +99,21 @@ describe('buildDefaultAgentConfigs', () => {
     const legacy = {
       ...config,
       allowedTools: ['Read', 'TaskAssign', 'SubAgentDelete'],
+      agentPrompt: 'Use ListEmployees, TaskAssign, and SubAgentSpawn.',
     };
     const migrated = migrateCoordinationToolAllowlist(legacy);
     expect(migrated.changed).toBe(true);
     expect(migrated.config.allowedTools).toEqual(expect.arrayContaining([
       'Read',
-      'TeamCreate',
-      'TaskCreate',
-      'TaskClaim',
+      'Team',
+      'Task',
       'JobList',
     ]));
+    expect(migrated.config.allowedTools).not.toContain('TaskAssign');
     expect(migrated.config.allowedTools).not.toContain('SubAgentDelete');
+    expect(migrated.config.agentPrompt).toBe(
+      'Use Organization action="list", Task action="assign", and Task action="spawn".',
+    );
 
     const restricted = { ...config, allowedTools: ['Read'] };
     expect(migrateCoordinationToolAllowlist(restricted)).toEqual({

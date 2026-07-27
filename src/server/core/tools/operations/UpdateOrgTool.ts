@@ -1,4 +1,4 @@
-// UpdateOrgTool - reassign an agent to a new parent in the org tree
+// Internal Organization "reassign" operation.
 // Validates there are no circular references before reassigning.
 
 import { Tool, RiskLevel, InterruptBehavior } from '../Tool.js';

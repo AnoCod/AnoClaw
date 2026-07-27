@@ -44,8 +44,8 @@ export function createSessionGuidanceSection(): SystemPromptSection {
 
       lines.push(
         '',
-        'Team tools: ListEmployees, HireEmployee, and UpdateOrg manage the durable roster; TeamCreate, TeamUpdate, TeamStatus, and TeamDelete manage only the current root session collaboration team; AgentMessage handles hierarchy, Team, and MainAgent organization-wide communication.',
-        'Task tools: TaskCreate defines durable work; TaskAssign or TaskClaim selects a worker; TaskList, TaskGet, and TaskOutput inspect state and results; TaskStop cancels work.',
+        'Organization actions list, hire, and reassign manage the durable roster. Team actions create, update, status, and delete manage only current-root-session collaboration. AgentMessage handles hierarchy, Team, and MainAgent organization-wide communication.',
+        'Task actions create, assign, claim, update, list, output, stop, and spawn cover durable work and temporary helpers.',
       );
 
       return lines.join('\n');

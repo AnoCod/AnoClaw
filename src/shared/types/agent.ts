@@ -70,6 +70,6 @@ export interface SubAgentConfig {
   contextMode?: 'isolated' | 'summary' | 'fork';
   readOnly?: boolean;
   writeScope?: string[];
-  /** Internal durable task created by SubAgentSpawnTool. */
+  /** Internal durable task created by Task action="spawn". */
   coordinationTaskId?: string;
 }

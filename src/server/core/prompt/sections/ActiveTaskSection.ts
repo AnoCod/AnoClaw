@@ -60,8 +60,8 @@ export function createActiveTaskSection(): SystemPromptSection {
         'Active task rules:',
         '- Do not duplicate equivalent running work.',
         '- Use AgentMessage to amend or clarify an active child task.',
-        '- Use TaskCreate for separate work, then TaskAssign to select a worker.',
-        '- Use TaskList or TaskOutput when coordinating many tasks or when progress appears stuck.',
+        '- Use Task action="create" with targetAgentId for separate delegated work.',
+        '- Use Task action="list" or action="output" when coordinating many tasks or when progress appears stuck.',
         '- JobList/JobOutput/JobStop manage only Bash and RunProgram background processes.',
       );
 

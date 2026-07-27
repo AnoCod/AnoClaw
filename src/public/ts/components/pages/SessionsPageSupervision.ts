@@ -1,13 +1,11 @@
 /**
  * AnoClaw — SessionsPage Supervision
  * Builds supervision controls (Stop, View Logs) for sub-sessions,
- * manages sub-session card delegates, and handles delegation status updates.
+ * and shows the session chain for delegated work.
  */
 import { App } from '../../app.js';
-import { escapeHtml, formatAgentName } from './SessionsPageUtils.js';
+import { escapeHtml } from './SessionsPageUtils.js';
 import { ConfirmDialog } from '../ConfirmDialog.js';
-import { SubSessionCardDelegate } from '../conversation/delegates/SubSessionCardDelegate.js';
-import type { Message } from '../../types.js';
 import type { SessionNode } from '../../types.js';
 import { ClientLogger } from '../../ClientLogger.js';
 
@@ -111,54 +109,4 @@ export function buildSupervisionButtons(node: SessionNode, overviewPane: HTMLEle
   }
 
   overviewPane.appendChild(controls);
-}
-
-/** Manages sub-session card lifecycle: creation and delegation status updates. */
-export class SubSessionCardManager {
-  private _cards = new Map<string, SubSessionCardDelegate>();
-
-  /** Create a sub-session card from a TaskAssign tool result, if applicable. */
-  maybeAddCard(msg: Message, parentEl: HTMLElement): void {
-    if (msg.type !== 'tool_call' || msg.toolName !== 'TaskAssign' || msg.status !== 'success') return;
-
-    const content = msg.content || '';
-    const subSessionMatch = content.match(/Sub-session:\s*(\S+)/);
-    const agentMatch = content.match(/agent\s+'([^']+)'/);
-    const subSessionId = subSessionMatch ? subSessionMatch[1] : '';
-    const agentName = agentMatch ? agentMatch[1] : '';
-
-    if (!subSessionId) return;
-
-    const sessionVM = App.getInstance().sessionVM;
-    const subNode = sessionVM.sessions.getById(subSessionId);
-    const messageCount = subNode ? (subNode as any).messageCount || 0 : 0;
-    const parentSid = (subNode as any)?.parentSessionId as string | undefined;
-    const parentNode = parentSid ? sessionVM.sessions.getById(parentSid) : undefined;
-
-    const delegate = new SubSessionCardDelegate({
-      subSessionId,
-      subAgentId: agentName || subSessionId.split('-').slice(1).join('-'),
-      subAgentName: formatAgentName(agentName || subSessionId),
-      taskDescription: (msg.toolInput as any)?.task || '',
-      messageCount,
-      status: 'running',
-      parentSessionId: parentSid,
-      parentSessionTitle: parentNode?.title,
-      onNavigate: (sid: string) => { App.getInstance().sessionVM.selectSession(sid); },
-    });
-    parentEl.appendChild(delegate.element);
-    this._cards.set(subSessionId, delegate);
-  }
-
-  /** Update card status from WS delegation_status event. */
-  onDelegationStatus(data: { subSessionId: string; phase: string }): void {
-    const card = this._cards.get(data.subSessionId);
-    if (!card) return;
-    if (data.phase === 'completed') card.updateStatus('completed');
-    else if (data.phase === 'error') card.updateStatus('error');
-    else if (data.phase === 'started' || data.phase === 'working') card.updateStatus('running');
-  }
-
-  /** Clear all tracked cards (e.g. on session reset). */
-  clear(): void { this._cards.clear(); }
 }

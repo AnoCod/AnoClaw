@@ -37,8 +37,9 @@ export interface WithdrawalResult {
 
 const IRREVERSIBLE_TOOLS = new Set([
   'Bash',
-  'SubAgentSpawn',
-  'HireEmployee',
+  'Organization',
+  'Team',
+  'Task',
   'RestartServer',
   'ApiCall',
   'MemorySave',

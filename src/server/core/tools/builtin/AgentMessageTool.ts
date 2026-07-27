@@ -35,7 +35,7 @@ export class AgentMessageTool extends Tool {
       'Use steer only for a currently running recipient session.',
       'Use a note when a response or review is expected. Use to="*" only inside an active session Team.',
       'The MainAgent may address any employee directly or use to="@organization" to broadcast to every active employee.',
-      'Task work itself belongs in TaskCreate/TaskAssign.',
+      'Task work itself belongs in Task action="create" or action="assign".',
     ].join('\n');
   }
   minRole(): string { return 'Member'; }

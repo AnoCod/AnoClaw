@@ -1,4 +1,4 @@
-// ListEmployeesTool - list the current organization structure
+// Internal Organization "list" operation.
 // Returns the full org tree from the MainAgent down.
 
 import { Tool, RiskLevel } from '../Tool.js';
@@ -40,14 +40,14 @@ export class ListEmployeesTool extends Tool {
   }
 
   description(): string {
-    return 'List the durable Team roster from MainAgent down, including roles, reporting lines, specialties, and status. Use TeamStatus for the current session collaboration team.';
+    return 'List the durable Organization from MainAgent down, including roles, reporting lines, specialties, and status. Use Team action="status" for session collaboration.';
   }
 
   prompt(): string {
     return '## ListEmployees Usage\n' +
       'See your organization chart. Shows all agents, their roles, teams, and reporting chains.\n\n' +
       '**When to use:** Before delegating (check who\'s available and what they specialize in). When planning team structure. When the user asks "who works for me?".\n\n' +
-      'Use this BEFORE HireEmployee, TeamCreate, TeamUpdate, TaskAssign, or AgentMessage. Know the durable roster before you form a temporary collaboration team.';
+      'Use this before Organization action="hire", Team changes, Task assignment, or AgentMessage.';
   }
 
   parametersSchema(): Record<string, unknown> {

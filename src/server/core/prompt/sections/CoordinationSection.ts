@@ -47,7 +47,7 @@ export function createCoordinationSection(): SystemPromptSection {
         lines.push(
           'You are the Team Coordinator for this root session.',
           '- Create durable tasks before work starts. Give each task explicit acceptance criteria, dependencies, readOnly mode, and the narrowest practical writeScope.',
-          '- Call TaskCreate, then TaskAssign when choosing a member. Do not treat assignment as completion.',
+          '- Call Task action="create" with targetAgentId when choosing a member. Do not treat assignment as completion.',
           '- Prefer independent parallel tasks; keep yourself available for coordination unless no eligible member can execute.',
           '- Watch coordination events for completion, failure, blockage, workspace conflicts, shutdown, and member availability.',
           '- Use AgentMessage for notes, live steering, or team broadcast. Do not use it as a substitute for a durable task.',
@@ -107,7 +107,7 @@ function autoSwarmGuidance(agentId: string): string {
     '# Automatic Team Coordination',
     '',
     `When the request contains at least ${minTasks} genuinely independent tasks, create or reuse a temporary Team and represent the work on the durable task board.`,
-    'Call ListEmployees to inspect the durable roster. Use existing active employees; HireEmployee is only for missing long-term capacity.',
+    'Call Organization action="list" to inspect the durable roster. Use existing active employees; Organization action="hire" is only for missing long-term capacity.',
     'Team membership never changes the persistent organization tree.',
     'If work is sequential, tiny, or must modify one shared area, continue normally without creating a Team.',
   ].join('\n');

@@ -1,4 +1,4 @@
-// HireEmployeeTool - create a new Agent in the organization
+// Internal Organization "hire" operation.
 // Only CEO and Managers can hire. Creates an Agent, registers with
 // AgentRegistry, and persists config to disk.
 
@@ -33,14 +33,14 @@ export class HireEmployeeTool extends Tool {
   }
 
   description(): string {
-    return 'Add a durable employee to the Team tool group roster. Use TeamCreate separately when existing employees only need a temporary collaboration team for one root session.';
+    return 'Add a durable employee to the Organization roster. Use Team action="create" when existing employees only need temporary collaboration.';
   }
 
   prompt(): string {
     return [
       '## Team roster hiring',
-      'Hire only for durable responsibilities, not for a one-off task. Use SubAgentSpawn for temporary helpers and TaskAssign for existing employees.',
-      'This changes the persistent organization roster. It does not add the employee to the current session Team; use TeamUpdate for that.',
+      'Hire only for durable responsibilities, not for a one-off task. Use Task action="spawn" for temporary helpers and Task action="create" for existing employees.',
+      'This changes the persistent organization roster. It does not add the employee to the current session Team; use Team action="update" for that.',
       '',
       'Good hires have:',
       '- A professional role-based name, such as Frontend Engineer, QA Tester, or Security Auditor.',
@@ -56,7 +56,7 @@ export class HireEmployeeTool extends Tool {
       'Tool allocation guidance:',
       '- Read-only reviewers: Read, Glob, Grep, WebFetch, WebSearch.',
       '- Code implementers: add Write, Edit, Bash where appropriate.',
-      '- Team leads: add TaskAssign, TaskList, TaskOutput, TaskStop.',
+      '- Team leads: add Task.',
       '- Avoid broad destructive capability unless the role truly needs it.',
     ].join('\n');
   }
@@ -117,8 +117,8 @@ export class HireEmployeeTool extends Tool {
           description: 'Tools the agent can use. Give ONLY what\'s needed for their job. '
             + 'Read-only roles: Read, Glob, Grep, WebFetch, WebSearch. '
             + 'Code roles: add Write, Edit, Bash. '
-            + 'Team leads: add TaskAssign, TaskList, TaskOutput, TaskStop. '
-            + 'NEVER give HireEmployee/SubAgentSpawn to Members. '
+            + 'Team leads: add Task. '
+            + 'Organization hiring remains restricted to MainAgent and Managers. '
             + 'Defaults to your tools if left empty.',
         },
         enabledSkills: {

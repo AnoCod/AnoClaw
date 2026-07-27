@@ -30,7 +30,7 @@ MainSession: 用户 <-> MainAgent
 关键规则：
 
 - 一个 parent-agent pair 复用一个持久 child session。
-- `TaskAssign` 用于启动或排队明确任务。
+- `Task` 的 `create` action 用于创建任务，并可通过 `targetAgentId` 同时分配。
 - `AgentMessage` 用于补充上下文、纠偏、澄清或中断已有任务。
 - 不要对同一个子 agent 重复开相同任务。
 
@@ -50,7 +50,7 @@ MainSession: 用户 <-> MainAgent
 - 需求还不清楚。
 - 任务强依赖顺序执行，分派会增加协调成本。
 
-## 好的 TaskAssign
+## 好的 Task create
 
 每个任务都应包含：
 

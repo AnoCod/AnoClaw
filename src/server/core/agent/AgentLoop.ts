@@ -701,7 +701,7 @@ export class AgentLoop {
 
 
         // If this agent dispatched blocking background work (Bash run_in_background,
-        // TaskAssign, SubAgentSpawn), don't exit the loop. Detached program launches
+        // delegated Task work), don't exit the loop. Detached program launches
         // remain trackable but do not hold the conversation open.
         const bgm = BackgroundTaskManager.getInstance();
         const pendingTasks = bgm.getTasksForParent(this.sessionId);
@@ -820,7 +820,7 @@ export class AgentLoop {
         const permissionMode = this._permissionMode();
 
         let userRejected = false;
-        const needsConfirmation = !!tool && this._needsConfirmation(tool, permissionMode);
+        const needsConfirmation = !!tool && this._needsConfirmation(tool, permissionMode, args);
         let userConfirmed = !needsConfirmation;
         if (tool && needsConfirmation) {
           const sessionManager = SessionManager.getInstance();
@@ -844,7 +844,7 @@ export class AgentLoop {
             toolCallId: tc.id,
             toolName: tool.name(),
             displayName: tool.displayName?.() ?? tool.name(),
-            riskLevel: tool.riskLevel(),
+            riskLevel: tool.riskLevel(args),
             params: args,
           });
           const approved = await ConfirmationRegistry.getInstance().waitForConfirmation(tc.id, 60000, signal);
@@ -1190,8 +1190,15 @@ export class AgentLoop {
     return permissionModeToExecutionMode(this._permissionMode());
   }
 
-  private _needsConfirmation(tool: { isReadOnly(): boolean; riskLevel(): string }, mode: PermissionMode): boolean {
-    return toolRequiresConfirmation(mode, tool);
+  private _needsConfirmation(
+    tool: {
+      isReadOnly(params?: Record<string, unknown>): boolean;
+      riskLevel(params?: Record<string, unknown>): string;
+    },
+    mode: PermissionMode,
+    params?: Record<string, unknown>,
+  ): boolean {
+    return toolRequiresConfirmation(mode, tool, params);
   }
 
   private _compressionTriggerRatio(): number {

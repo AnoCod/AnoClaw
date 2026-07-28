@@ -19,22 +19,13 @@ import { PluginsPage } from './components/pages/PluginsPage.js';
 import { PluginPageContainer } from './components/pages/PluginPageContainer.js';
 import { PluginViewModel } from './viewmodel/PluginViewModel.js';
 import { ToolConfirmationQueue } from './viewmodel/ToolConfirmationQueue.js';
-import {
-  combineFloatingBallWaiting,
-  summarizeAskUserWaiting,
-  type AskUserSessionMessages,
-  type FloatingBallWaitingSnapshot,
-} from './viewmodel/FloatingBallWaiting.js';
-import type { AppSettings, PluginPageContribution, SessionNode } from './types.js';
-import type { GoalState } from './components/conversation/types.js';
+import type { AppSettings, PluginPageContribution } from './types.js';
 import { ClientLogger } from './ClientLogger.js';
 import { initAnoClawAPI } from './anoclaw-api.js';
 import { localeDirection, normalizeLocale, setLocale } from './i18n/index.js';
 import { normalizeUserMode } from './userMode.js';
 
 const SETTINGS_KEY = 'anoclaw-settings';
-const FLOATING_BALL_ACTIVITY_LIMIT = 6;
-const FLOATING_BALL_ACTIVITY_PHASE_MS = 10 * 60 * 1000;
 
 const DEFAULT_SETTINGS: AppSettings = {
   lang: 'zh-CN',
@@ -45,34 +36,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   accentColor: '#0b8ce9',
   compactionThreshold: 70,
 };
-
-type FloatingBallActivityStatus = 'completed' | 'failed';
-
-interface FloatingBallActivityItem {
-  id: string;
-  sessionId: string | null;
-  title: string;
-  detail?: string;
-  status: FloatingBallActivityStatus;
-  timestamp: number;
-}
-
-type FloatingBallNoticeKind = 'info' | 'success' | 'error';
-type FloatingBallPhase = 'thinking' | 'tool' | 'waiting' | 'done' | 'failed' | 'idle' | 'goal' | 'paused';
-type FloatingBallGoalStatus = GoalState['status'];
-
-interface FloatingBallGoalPulse {
-  sessionId: string | null;
-  status: FloatingBallGoalStatus;
-  objective: string;
-  runCount?: number;
-  maxRuns?: number;
-  progress?: number;
-  lastSummary?: string;
-  statusReason?: string;
-  updatedAt?: string;
-  lastRunAt?: string;
-}
 
 /**
  * Singleton App class — the frontend bootstrap.
@@ -85,7 +48,7 @@ interface FloatingBallGoalPulse {
  * 5. Load sessions → restore active session
  * 6. Load agents, plugins → sync plugin pages into navigation
  * 7. Wire WS events: WSClient → WSMessageRouter → ChatHandlers → ConversationViewModel
- * 8. Set up hash-based routing, floating-ball listeners, resize flag
+ * 8. Set up hash-based routing and resize flag
  *
  * Settings: persisted to localStorage, synced to server via PUT /api/v1/settings/ui.
  * Theme: data-theme + data-accent attributes on <html>, CSS variables handle rest.
@@ -103,8 +66,6 @@ class App {
   private _sessionsPage: SessionsPage | null = null;
   private _registeredPluginPages: string[] = [];
   private _pendingNav: string | null = null;
-  private _floatingBallStateTimer: ReturnType<typeof setTimeout> | null = null;
-  private _floatingBallActivity: FloatingBallActivityItem[] = [];
 
   private constructor() {
     this._settings = this._loadSettings();
@@ -226,7 +187,6 @@ class App {
 
     // Navigate to page from URL hash, default to workspace (sessions always visible on right)
     this._setupHashNav();
-    this._setupFloatingBallBridge();
     if (window.location.hash) {
       const page = window.location.hash.slice(1);
       if (page === 'sessions' || pageRegistry.getPage(page)) this.navigateTo(page);
@@ -272,7 +232,7 @@ class App {
   }
 
   private _setupHashNav(): void {
-    // Listen for hash changes (browser back/forward) + TitleBar nav events + floating-ball events
+    // Listen for hash changes (browser back/forward) + TitleBar nav events
     window.addEventListener('hashchange', () => {
       const page = window.location.hash.slice(1);
       if (page) this.navigateTo(page);
@@ -282,21 +242,6 @@ class App {
     window.addEventListener('navigate-to', ((e: CustomEvent) => {
       const page = e.detail?.page;
       if (page) this.navigateTo(page);
-    }) as EventListener);
-
-    // Floating ball — new session
-    window.addEventListener('floating-ball-new-session', () => {
-      this.navigateTo('sessions');
-      this._sessionVM.createSession(undefined, undefined).catch(() => {});
-    });
-
-    // Floating ball — open a recent session.
-    window.addEventListener('floating-ball-open-session', ((e: CustomEvent) => {
-      this.navigateTo('sessions');
-      const detail = (e.detail || {}) as { sessionId?: string; index?: number };
-      if (detail.sessionId) {
-        this._sessionVM.selectSession(detail.sessionId);
-      }
     }) as EventListener);
   }
 
@@ -659,7 +604,6 @@ class App {
     // Connection state changes → update TitleBar status dot
     this._sseClient.on('connectionStateChanged', (state: unknown) => {
       this._titleBar.setConnectionState(state as WSConnectionState);
-      this._scheduleFloatingBallStateUpdate();
     });
 
     // WS connection lost → clean up streaming state
@@ -674,7 +618,6 @@ class App {
     // Wire ToolConfirmationQueue to WS client
     const toolConfirmQueue = ToolConfirmationQueue.getInstance();
     toolConfirmQueue.setSender((data) => this._sseClient.send(data));
-    toolConfirmQueue.onChange(() => this._scheduleFloatingBallStateUpdate());
 
     // Every received WS message → dispatch by type. session-less events pass empty sessionId.
     this._sseClient.on('event', (data: unknown) => {
@@ -682,8 +625,6 @@ class App {
       console.log('[App] WS event received, dispatching:', d.type, 'sessionId:', d.sessionId);
       // Events not tied to a specific session (sessionId empty) go through as-is
       router.dispatch(d.type, d.data || {}, d.sessionId || '');
-      this._recordFloatingBallActivity(d.type, d.data || {}, d.sessionId || '');
-      this._scheduleFloatingBallStateUpdate();
     });
 
     // On page close/refresh, let the WS disconnect naturally.
@@ -693,465 +634,6 @@ class App {
 
     // Subscribe AgentViewModel to real-time agent status/lifecycle events via WS
     this._agentVM.subscribeToAgentEvents(this._sseClient);
-  }
-
-  private _setupFloatingBallBridge(): void {
-    const api = (window as any).electronAPI;
-    if (!api) return;
-
-    if (api.onFloatingBallCommand) {
-      api.onFloatingBallCommand((payload: { action?: string; data?: unknown }) => {
-        this._handleFloatingBallCommand(payload).catch((err) => {
-          ClientLogger.app.error('Floating ball command failed', { error: (err as Error).message });
-          this._pushFloatingBallNotice('error', (err as Error).message || 'FloatingBall action failed');
-        });
-      });
-    }
-
-    const schedule = () => this._scheduleFloatingBallStateUpdate();
-    this._sessionVM.on('sessionsLoaded', schedule);
-    this._sessionVM.on('sessionAdded', schedule);
-    this._sessionVM.on('sessionUpdated', schedule);
-    this._sessionVM.on('sessionRemoved', schedule);
-    this._sessionVM.on('sessionSelected', schedule);
-    this._conversationVM.on('activeSessionChanged', schedule);
-    this._conversationVM.on('permissionModeChanged', schedule);
-    this._conversationVM.on('goalChanged', schedule);
-    this._conversationVM.on('messagesChanged', schedule);
-    window.addEventListener('focus', schedule);
-    schedule();
-  }
-
-  private _scheduleFloatingBallStateUpdate(): void {
-    if (this._floatingBallStateTimer) clearTimeout(this._floatingBallStateTimer);
-    this._floatingBallStateTimer = setTimeout(() => {
-      this._floatingBallStateTimer = null;
-      this._pushFloatingBallState();
-    }, 80);
-  }
-
-  private _pushFloatingBallState(): void {
-    const api = (window as any).electronAPI;
-    if (!api?.floatingBallUpdateState) return;
-
-    const active = this._sessionVM.activeSession;
-    const streamingIds = this._conversationVM.getStreamingSessionIds();
-    const waitingSnapshot = combineFloatingBallWaiting(
-      ToolConfirmationQueue.getInstance().snapshot,
-      this._floatingBallAskUserSnapshot(),
-    );
-    const waitingItem = waitingSnapshot.first;
-    const waitingCount = waitingSnapshot.count;
-    const recentSessions = [...this._sessionVM.sessions.all]
-      .sort((a, b) => new Date(b.lastActiveAt || 0).getTime() - new Date(a.lastActiveAt || 0).getTime())
-      .slice(0, 5)
-      .map((session) => ({
-        id: session.id,
-        title: session.title || 'Session',
-        status: this._conversationVM.isSessionStreaming(session.id) ? 'running' : (session.status || 'idle'),
-      }));
-
-    const waitingSessionId = waitingItem?.sessionId || null;
-    const taskSessionId = waitingSessionId || active?.id || streamingIds[0] || null;
-    const taskNode = taskSessionId ? this._sessionVM.sessions.getById(taskSessionId) : null;
-    const goalPulse = this._floatingBallGoalSnapshot(
-      [waitingSessionId, taskSessionId, active?.id, ...streamingIds],
-      waitingSessionId,
-      waitingCount,
-    );
-    const isRunning = taskSessionId ? this._conversationVM.isSessionStreaming(taskSessionId) : false;
-    const latestActivity = this._recentFloatingBallActivity()[0] || null;
-    const latestActivityIsFresh = latestActivity ? Date.now() - latestActivity.timestamp < FLOATING_BALL_ACTIVITY_PHASE_MS : false;
-    const activityPhase = latestActivityIsFresh
-      ? latestActivity?.status === 'failed' ? 'failed' : latestActivity?.status === 'completed' ? 'done' : 'idle'
-      : 'idle';
-    const goalPhase = goalPulse?.status === 'active'
-      ? 'goal'
-      : goalPulse?.status === 'paused'
-        ? 'paused'
-        : goalPulse?.status === 'blocked'
-          ? 'waiting'
-          : goalPulse?.status === 'completed'
-            ? 'done'
-            : null;
-    const phase: FloatingBallPhase = waitingCount > 0
-      ? 'waiting'
-      : isRunning
-        ? (goalPulse?.status === 'active' ? 'goal' : 'thinking')
-        : goalPhase || activityPhase;
-    const detail = waitingCount > 0
-      ? waitingItem
-        ? waitingItem.source === 'ask-user'
-          ? 'Question needs your answer'
-          : `${waitingItem.displayName} approval needed${waitingItem.riskLevel ? ` · ${waitingItem.riskLevel}` : ''}`
-        : `${waitingCount} waiting`
-      : goalPulse && goalPulse.status !== 'deleted'
-        ? goalPulse.objective || (goalPulse.status === 'paused' ? 'Goal paused' : 'Active goal')
-        : isRunning
-          ? 'Agent is working'
-          : latestActivityIsFresh && latestActivity
-            ? latestActivity.title
-            : 'Ready';
-
-    api.floatingBallUpdateState({
-      activeSessionId: active?.id || null,
-      activeTitle: active?.title || null,
-      connection: this._sseClient.connectionState,
-      runningCount: streamingIds.length,
-      waitingCount,
-      recentSessions,
-      activityItems: this._recentFloatingBallActivity().slice(0, 3),
-      waitingInbox: waitingCount > 0 ? {
-        count: waitingCount,
-        sessionId: waitingSessionId,
-        title: waitingItem
-          ? waitingItem.source === 'ask-user'
-            ? 'Question needs answer'
-            : `${waitingItem.displayName} needs approval`
-          : `${waitingCount} items need attention`,
-        detail: waitingItem?.detail || detail,
-        riskLevel: waitingItem?.riskLevel,
-        toolCallId: waitingItem?.toolCallId,
-        canInlineResolve: waitingItem?.canInlineResolve === true,
-      } : undefined,
-      goalPulse,
-      currentTask: taskSessionId ? {
-        sessionId: taskSessionId,
-        title: taskNode?.title || active?.title || 'Session',
-        phase,
-        detail,
-      } : undefined,
-    });
-  }
-
-  private _recordFloatingBallActivity(type: string, data: Record<string, unknown>, fallbackSessionId: string): void {
-    const sessionId = String((data.sessionId as string | undefined) || fallbackSessionId || '') || null;
-    const idBase = `${type}-${sessionId || 'global'}-${Date.now()}`;
-    let item: FloatingBallActivityItem | null = null;
-
-    if (type === 'tool_execution_completed') {
-      const toolName = String(data.toolName || 'Tool');
-      const success = data.success !== false;
-      const durationMs = Number(data.durationMs || 0);
-      item = {
-        id: `${idBase}-${toolName}`,
-        sessionId,
-        title: `${toolName} ${success ? 'completed' : 'failed'}`,
-        detail: durationMs > 0 ? `${Math.round(durationMs / 100) / 10}s` : undefined,
-        status: success ? 'completed' : 'failed',
-        timestamp: Date.now(),
-      };
-    } else if (type === 'task_notification') {
-      const rawStatus = String(data.taskStatus || data.status || 'completed');
-      const failed = rawStatus === 'failed';
-      const summary = String(data.taskSummary || data.summary || 'Background task');
-      item = {
-        id: `${idBase}-${String(data.taskId || '')}`,
-        sessionId,
-        title: failed ? 'Task failed' : 'Task completed',
-        detail: summary,
-        status: failed ? 'failed' : 'completed',
-        timestamp: Date.now(),
-      };
-    } else if (type === 'command_result') {
-      const command = String(data.command || 'Command');
-      const success = data.success !== false;
-      item = {
-        id: `${idBase}-${command}`,
-        sessionId,
-        title: `${command} ${success ? 'completed' : 'failed'}`,
-        detail: String(data.output || data.errorMessage || '').trim() || undefined,
-        status: success ? 'completed' : 'failed',
-        timestamp: Date.now(),
-      };
-    } else if (type === 'error') {
-      item = {
-        id: idBase,
-        sessionId,
-        title: 'Agent error',
-        detail: String(data.message || data.error || data.content || 'Unknown error'),
-        status: 'failed',
-        timestamp: Date.now(),
-      };
-    } else if (type === 'loop_completed') {
-      const turns = Number(data.turnCount || 0);
-      const tokens = Number(data.totalTokens || 0);
-      item = {
-        id: `${idBase}-${String(data.agentId || '')}`,
-        sessionId,
-        title: 'Agent turn completed',
-        detail: [turns > 0 ? `${turns} turns` : '', tokens > 0 ? `${tokens} tokens` : ''].filter(Boolean).join(' · ') || undefined,
-        status: 'completed',
-        timestamp: Date.now(),
-      };
-    }
-
-    if (!item) return;
-    this._floatingBallActivity = [
-      item,
-      ...this._floatingBallActivity.filter((existing) => existing.id !== item!.id),
-    ].slice(0, FLOATING_BALL_ACTIVITY_LIMIT);
-  }
-
-  private _recentFloatingBallActivity(): FloatingBallActivityItem[] {
-    return this._floatingBallActivity
-      .slice()
-      .sort((a, b) => b.timestamp - a.timestamp)
-      .slice(0, FLOATING_BALL_ACTIVITY_LIMIT);
-  }
-
-  private _floatingBallAskUserSnapshot(): FloatingBallWaitingSnapshot {
-    const knownAgents = this._conversationVM.getKnownAgents();
-    if (knownAgents.length === 0) return { count: 0, first: null };
-
-    const sessions: AskUserSessionMessages[] = knownAgents.map((agent) => {
-      const node = this._sessionVM.sessions.getById(agent.sessionId);
-      return {
-        sessionId: agent.sessionId,
-        title: node?.title,
-        lastActiveAt: node?.lastActiveAt,
-        messages: agent.state.messages.messages,
-      };
-    });
-
-    return summarizeAskUserWaiting(sessions);
-  }
-
-  private _floatingBallGoalSnapshot(
-    preferredSessionIds: Array<string | null | undefined>,
-    waitingSessionId: string | null,
-    waitingCount: number,
-  ): FloatingBallGoalPulse | null {
-    const checkedRoots = new Set<string>();
-
-    const fromNode = (node: SessionNode | null | undefined): FloatingBallGoalPulse | null => {
-      const root = this._floatingBallRootForSession(node);
-      if (!root || checkedRoots.has(root.id)) return null;
-      checkedRoots.add(root.id);
-      const goal = root.metadata?.goal as GoalState | null | undefined;
-      if (!goal || goal.status === 'deleted') return null;
-
-      const waitingRoot = waitingSessionId
-        ? this._floatingBallRootForSession(this._sessionVM.sessions.getById(waitingSessionId))
-        : null;
-      const blocked = goal.status === 'active' && waitingCount > 0 && (!waitingRoot || waitingRoot.id === root.id);
-      return {
-        sessionId: root.id,
-        status: blocked ? 'blocked' : goal.status,
-        objective: goal.objective || 'Active goal',
-        runCount: goal.runCount,
-        maxRuns: goal.maxRuns,
-        progress: goal.progress,
-        lastSummary: goal.lastSummary,
-        statusReason: goal.statusReason,
-        updatedAt: goal.updatedAt,
-        lastRunAt: goal.lastRunAt,
-      };
-    };
-
-    for (const sessionId of preferredSessionIds) {
-      const snapshot = sessionId ? fromNode(this._sessionVM.sessions.getById(sessionId)) : null;
-      if (snapshot) return snapshot;
-    }
-
-    const recent = [...this._sessionVM.sessions.all]
-      .sort((a, b) => new Date(b.lastActiveAt || 0).getTime() - new Date(a.lastActiveAt || 0).getTime());
-    for (const session of recent) {
-      const snapshot = fromNode(session);
-      if (snapshot) return snapshot;
-    }
-    return null;
-  }
-
-  private _floatingBallRootForSession(node: SessionNode | null | undefined): SessionNode | null {
-    if (!node) return null;
-    let current: SessionNode | null | undefined = node;
-    while (current && !this._isFloatingBallRootSession(current)) {
-      const parentId: string | null = current.parentId || current.parentSessionId || null;
-      current = parentId ? this._sessionVM.sessions.getById(parentId) : null;
-    }
-    return current || node;
-  }
-
-  private _isFloatingBallRootSession(node: SessionNode): boolean {
-    return !node.parentId && !node.parentSessionId && (node.level === undefined || node.level === 0);
-  }
-
-  private _currentFloatingBallGoalSnapshot(): FloatingBallGoalPulse | null {
-    const active = this._sessionVM.activeSession;
-    const waitingSnapshot = combineFloatingBallWaiting(
-      ToolConfirmationQueue.getInstance().snapshot,
-      this._floatingBallAskUserSnapshot(),
-    );
-    return this._floatingBallGoalSnapshot(
-      [waitingSnapshot.first?.sessionId || null, active?.id || null, ...this._conversationVM.getStreamingSessionIds()],
-      waitingSnapshot.first?.sessionId || null,
-      waitingSnapshot.count,
-    );
-  }
-
-  private async _handleFloatingBallCommand(payload: { action?: string; data?: unknown }): Promise<void> {
-    const action = payload?.action || '';
-    const data = (payload?.data || {}) as {
-      sessionId?: string;
-      question?: string;
-      text?: string;
-      kind?: string;
-      status?: FloatingBallGoalStatus;
-      toolCallId?: string;
-      approved?: boolean;
-    };
-
-    switch (action) {
-      case 'open-current':
-      case 'open-waiting': {
-        this.navigateTo('sessions');
-        const target = data.sessionId || this._sessionVM.activeSessionId;
-        if (target) this._sessionVM.selectSession(target);
-        break;
-      }
-      case 'open-goal': {
-        this.navigateTo('sessions');
-        const goal = data.sessionId
-          ? this._floatingBallGoalSnapshot([data.sessionId], null, 0)
-          : this._currentFloatingBallGoalSnapshot();
-        const target = goal?.sessionId || data.sessionId || this._sessionVM.activeSessionId;
-        if (target) this._sessionVM.selectSession(target);
-        break;
-      }
-      case 'goal-toggle': {
-        const goal = data.sessionId
-          ? this._floatingBallGoalSnapshot([data.sessionId], null, 0)
-          : this._currentFloatingBallGoalSnapshot();
-        const target = goal?.sessionId || data.sessionId || null;
-        if (!target) {
-          this._pushFloatingBallNotice('info', 'No active goal');
-          break;
-        }
-        if (target !== this._sessionVM.activeSessionId) this._sessionVM.selectSession(target);
-        const status = goal?.status || data.status;
-        if (status === 'paused' || status === 'blocked' || status === 'failed') {
-          this._conversationVM.setGoal('resume');
-          this._pushFloatingBallNotice('success', 'Goal resumed');
-        } else if (status === 'active' || status === 'waiting_confirmation' || status === 'waiting_user') {
-          this._conversationVM.setGoal('pause');
-          this._pushFloatingBallNotice('success', 'Goal paused');
-        } else {
-          this._pushFloatingBallNotice('info', 'Goal is not active');
-        }
-        break;
-      }
-      case 'waiting-resolve': {
-        const approved = data.approved === true;
-        const ok = ToolConfirmationQueue.getInstance().respondToFirst(approved, data.toolCallId);
-        if (ok) {
-          this._pushFloatingBallNotice('success', approved ? 'Approved waiting item' : 'Rejected waiting item');
-        } else {
-          this._pushFloatingBallNotice('info', 'Open AnoClaw to review this item');
-          this.navigateTo('sessions');
-          const target = data.sessionId || this._sessionVM.activeSessionId;
-          if (target) this._sessionVM.selectSession(target);
-        }
-        break;
-      }
-      case 'continue-current': {
-        const sessionId = await this._sendFloatingBallPrompt(
-          '继续当前任务，先用一句话说明你接下来会做什么，然后直接推进。',
-          data.sessionId || null,
-        );
-        if (sessionId) this._pushFloatingBallNotice('success', `Continuing ${this._floatingBallSessionTitle(sessionId)}`);
-        break;
-      }
-      case 'stop-current': {
-        const target = data.sessionId || this._sessionVM.activeSessionId;
-        if (target) {
-          await this._conversationVM.getAgent(target).stopGeneration();
-          this._pushFloatingBallNotice('success', `Stopped ${this._floatingBallSessionTitle(target)}`);
-        } else {
-          this._pushFloatingBallNotice('info', 'No active session to stop');
-        }
-        break;
-      }
-      case 'quick-ask': {
-        const question = (data.question || '').trim();
-        if (question) {
-          const sessionId = await this._sendFloatingBallPrompt(question, data.sessionId || null);
-          if (sessionId) this._pushFloatingBallNotice('success', `Sent to ${this._floatingBallSessionTitle(sessionId)}`);
-        }
-        break;
-      }
-      case 'text-action': {
-        const prompt = this._buildTextActionPrompt(data.kind || 'ask', data.text || '', data.question || '');
-        if (prompt) {
-          const sessionId = await this._sendFloatingBallPrompt(prompt, data.sessionId || null);
-          if (sessionId) this._pushFloatingBallNotice('success', `Text sent to ${this._floatingBallSessionTitle(sessionId)}`);
-        }
-        break;
-      }
-    }
-    this._scheduleFloatingBallStateUpdate();
-  }
-
-  private _buildTextActionPrompt(kind: string, text: string, question: string): string {
-    const selected = text.trim();
-    if (!selected) return question.trim();
-    const block = `\n\n---\n${selected}\n---`;
-    switch (kind) {
-      case 'translate':
-        return `请把下面这段选中文本翻译成中文。保留专有名词、代码、路径和格式，只输出清晰自然的译文。${block}`;
-      case 'polish':
-        return `请润色下面这段选中文本。保持原意，改得更清晰、更专业；如果原文是中文就润色中文，如果是英文就润色英文。${block}`;
-      case 'summarize':
-        return `请总结下面这段选中文本，给出要点和下一步建议。${block}`;
-      case 'ask':
-      default:
-        return question.trim()
-          ? `${question.trim()}\n\n请基于下面这段选中文本回答：${block}`
-          : `请解释下面这段选中文本，并指出它对当前任务可能有什么用。${block}`;
-    }
-  }
-
-  private _pushFloatingBallNotice(kind: FloatingBallNoticeKind, text: string): void {
-    const api = (window as any).electronAPI;
-    if (!api?.floatingBallUpdateState) return;
-    api.floatingBallUpdateState({
-      helperNotice: {
-        kind,
-        text: text.trim().slice(0, 140),
-        timestamp: Date.now(),
-      },
-    });
-  }
-
-  private _floatingBallSessionTitle(sessionId: string): string {
-    return (this._sessionVM.sessions.getById(sessionId)?.title || 'session').slice(0, 48);
-  }
-
-  private async _sendFloatingBallPrompt(prompt: string, preferredSessionId?: string | null): Promise<string | null> {
-    const content = prompt.trim();
-    if (!content) return null;
-    const sessionId = await this._ensureFloatingBallSession(preferredSessionId);
-    if (!sessionId) return null;
-    await this._sessionVM.ensureRunnableAgentForSession(sessionId);
-    if (!this._sseClient.connected) throw new Error('WebSocket is not connected. Please wait for reconnection or refresh the page.');
-    this.navigateTo('sessions');
-    this._sessionVM.selectSession(sessionId);
-    const agent = this._conversationVM.getAgent(sessionId);
-    const sent = await agent.sendMessage(content, this._conversationVM.permissionMode, this._conversationVM.effortMode, []);
-    return sent ? sessionId : null;
-  }
-
-  private async _ensureFloatingBallSession(preferredSessionId?: string | null): Promise<string | null> {
-    if (preferredSessionId && this._sessionVM.sessions.getById(preferredSessionId)) return preferredSessionId;
-    if (this._sessionVM.activeSessionId) return this._sessionVM.activeSessionId;
-    const recent = [...this._sessionVM.sessions.all]
-      .sort((a, b) => new Date(b.lastActiveAt || 0).getTime() - new Date(a.lastActiveAt || 0).getTime());
-    if (recent[0]?.id) {
-      this._sessionVM.selectSession(recent[0].id);
-      return recent[0].id;
-    }
-    const created = await this._sessionVM.createSession('Quick Ask', undefined);
-    return created?.id || null;
   }
 
 }

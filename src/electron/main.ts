@@ -4,7 +4,6 @@ import type {
 } from 'electron';
 import { WindowManager } from './WindowManager.js';
 import { TrayManager } from './TrayManager.js';
-import { FloatingBallManager } from './FloatingBallManager.js';
 import { BrowserViewManager } from './BrowserViewManager.js';
 import { AppLifecycleController } from './AppLifecycleController.js';
 import { getAutoStart, setAutoStart } from './AutoStart.js';
@@ -40,14 +39,12 @@ export async function createApp(electron: typeof import('electron')) {
   // Init singletons with Electron deps
   WindowManager.init(BW);
   TrayManager.init(Tray, Menu, app, nativeImage);
-  FloatingBallManager.init(BW, ipcMain);
   BrowserViewManager.init(() => WindowManager.getInstance().getMainWindow());
 
   const lifecycle = new AppLifecycleController({
     quit: () => app.quit(),
     forceExit: (exitCode) => app.exit(exitCode),
     listWindows: () => BW.getAllWindows(),
-    hideFloatingBall: () => FloatingBallManager.getInstance().hide(),
     markQuitting: () => { globalThis._quitting = true; },
     gracefulShutdown: async () => {
       try {
@@ -65,39 +62,10 @@ export async function createApp(electron: typeof import('electron')) {
     reportError: (message, error) => console.error(`[shutdown] ${message}`, error ?? ''),
   });
 
-  // Provide recent sessions to the floating ball
-  let sessionManager: any = null;
-  FloatingBallManager.getInstance().setSessionProvider(async () => {
-    try {
-      const { SessionManager } = await import('../server/core/session/SessionManager.js');
-      sessionManager = SessionManager.getInstance();
-      const all = sessionManager.getAllSessions();
-      // Return recent sessions (last 5 active)
-      const recent = all
-        .sort((a: any, b: any) => new Date(b.lastActiveAt || 0).getTime() - new Date(a.lastActiveAt || 0).getTime())
-        .slice(0, 5)
-        .map((s: any) => ({ id: s.id, title: s.title || 'Session' }));
-      return recent;
-    } catch { return []; }
-  });
-
   // ── Window control IPC ──
-  // window-minimize-animate: triggered by TitleBar ─ shrink main window to 56x56, then show floating ball.
-  ipcMain.on('window-minimize-animate', () => {
-    const mainWin = WindowManager.getInstance().getMainWindow();
-    if (mainWin && !globalThis._quitting) {
-      FloatingBallManager.getInstance().animateMinimize(mainWin);
-    }
-  });
-  // window-minimize: direct hide (no animation) + show floating ball.
   ipcMain.on('window-minimize', (e: IpcMainEvent) => {
     const win = BW.fromWebContents(e.sender);
-    if (win && !globalThis._quitting) {
-      const bounds = win.getBounds();
-      FloatingBallManager.getInstance().saveMainWindowBounds(bounds);
-      win.hide();
-      FloatingBallManager.getInstance().show();
-    }
+    if (win && !globalThis._quitting) win.minimize();
   });
   ipcMain.on('window-maximize', (e: IpcMainEvent) => {
     const win = BW.fromWebContents(e.sender);
@@ -178,18 +146,6 @@ export async function createApp(electron: typeof import('electron')) {
 
   // ── WebContentsView management IPC (delegates to BrowserViewManager) ──
   const bvm = BrowserViewManager.getInstance();
-
-  const wireFloatingBallMinimize = (win: any): void => {
-    if (!win || win.__floatingBallMinimizeWired) return;
-    win.__floatingBallMinimizeWired = true;
-    win.on('minimize', (event: { preventDefault: () => void }) => {
-      if (globalThis._quitting) return;
-      event.preventDefault();
-      FloatingBallManager.getInstance().saveMainWindowBounds(win.getBounds());
-      win.hide();
-      FloatingBallManager.getInstance().show();
-    });
-  };
 
   ipcMain.handle('wv-create', async (_e: IpcMainInvokeEvent, url: string, options?: { sessionId?: string; workspacePath?: string }) => {
     try { return { viewId: bvm.create(url, options || {}) }; }
@@ -337,7 +293,7 @@ export async function createApp(electron: typeof import('electron')) {
         await startServer();
       }
 
-      wireFloatingBallMinimize(WindowManager.getInstance().createWindow());
+      WindowManager.getInstance().createWindow();
       lifecycle.setSetupTransitionInProgress(false);
       TrayManager.getInstance().createTray();
 
@@ -367,6 +323,6 @@ export async function createApp(electron: typeof import('electron')) {
     callback(false);
   });
   app.on('activate', () => {
-    if (!WindowManager.getInstance().getMainWindow()) wireFloatingBallMinimize(WindowManager.getInstance().createWindow());
+    if (!WindowManager.getInstance().getMainWindow()) WindowManager.getInstance().createWindow();
   });
 }

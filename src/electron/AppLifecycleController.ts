@@ -11,7 +11,6 @@ export interface AppLifecycleDependencies {
   quit(): void;
   forceExit(exitCode: number): void;
   listWindows(): LifecycleWindow[];
-  hideFloatingBall(): void;
   markQuitting(): void;
   gracefulShutdown(): Promise<void>;
   quitTimeoutMs?: number;
@@ -81,7 +80,6 @@ export class AppLifecycleController {
 
   private prepareVisibleStateForQuit(): void {
     this.dependencies.markQuitting();
-    this.dependencies.hideFloatingBall();
     for (const window of this.dependencies.listWindows()) {
       try {
         if (!window.isDestroyed?.()) window.hide();

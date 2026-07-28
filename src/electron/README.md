@@ -2,7 +2,7 @@
 
 ## Overview
 
-Windows desktop shell: single-instance lock, frameless main window, system tray, floating ball (minimize animation), WebContentsView management (browser tabs with CDP port 9222), first-run setup wizard, and a contextBridge preload script exposing 34 IPC channels to the renderer.
+Windows desktop shell: single-instance lock, frameless main window, system tray, WebContentsView management (browser tabs with CDP port 9222), first-run setup wizard, and a contextBridge preload script exposing native capabilities to the renderer.
 
 ## Entry Point
 
@@ -26,7 +26,7 @@ export async function createApp(electron: typeof Electron): Promise<void>;
 ```
 
 **Initialization order:**
-1. Initialize `WindowManager`, `TrayManager`, `FloatingBallManager` with Electron constructors
+1. Initialize `WindowManager`, `TrayManager`, and `BrowserViewManager` with Electron constructors
 2. Wire all IPC handlers (window control, dialog, file opening, notifications, WebContentsView, app info)
 3. `app.whenReady()` → start HTTP server → check `needsSetup()` → run wizard if needed → create main window → create tray → set application menu
 
@@ -34,10 +34,9 @@ export async function createApp(electron: typeof Electron): Promise<void>;
 
 | Channel | Direction | Description |
 |---------|-----------|-------------|
-| `window-minimize` | on | Hide window, show floating ball |
-| `window-minimize-animate` | on | Shrink to 56×56 then show ball (250ms, 10 steps) |
+| `window-minimize` | on | Minimize the native window |
 | `window-maximize` | on | Toggle maximize/unmaximize |
-| `window-close` | on | Set `_quitting`, hide ball, quit |
+| `window-close` | on | Set `_quitting` and quit |
 | `window-is-maximized` | handle | Returns boolean |
 | `dialog-open` | handle | Native file open dialog |
 | `dialog-save` | handle | Native file save dialog |
@@ -49,7 +48,7 @@ export async function createApp(electron: typeof Electron): Promise<void>;
 | `show-notification` | handle | Native Notification with click-to-focus |
 | `wv-*` (11 channels) | handle | Delegated to BrowserViewManager |
 
-**Close behavior:** `×` quits the app, `─` minimizes to floating ball (handled by frontend title bar calling `window-minimize-animate`).
+**Window controls:** `×` quits the app, while `─` performs a normal native minimize.
 
 ---
 
@@ -84,30 +83,6 @@ class TrayManager {
 ```
 
 System tray icon from `build/icon.ico` (16×16). Context menu: "Open AnoClaw", "New Session Window", separator, "Quit". Tray click shows main window.
-
----
-
-### FloatingBallManager (Singleton)
-
-Transparent 400×400 frameless always-on-top window shown when main window is minimized.
-
-```ts
-class FloatingBallManager {
-  static getInstance(): FloatingBallManager;
-  init(BrowserWindow, ipcMain): void;
-  setSessionProvider(fn: () => Promise<SessionInfo[]>): void;
-
-  show(): void;
-  hide(): void;
-  destroy(): void;
-  animateMinimize(mainWin: BrowserWindow): void;  // Shrinks 10-step ease-in over 250ms
-  isVisible: boolean;
-}
-```
-
-**Ball window:** 400×400, transparent, frameless, always-on-top, skip taskbar, `backgroundColor: '#00000000'`. Loads `http://localhost:3456/floating-ball/index.html`.
-
-**IPC:** Handles `floating-ball-action` (new/open session) and `floating-ball-sessions` (session list).
 
 ---
 
@@ -180,7 +155,6 @@ Exposes `window.electronAPI` to renderer:
 interface ElectronAPI {
   // Window control
   windowMinimize(): void;
-  windowMinimizeAnimate(): void;
   windowMaximize(): void;
   windowClose(): void;
   isMaximized(): Promise<boolean>;
@@ -206,10 +180,6 @@ interface ElectronAPI {
   saveSetup(data: SetupData): Promise<any>;
   setupDone(): void;
   quitSetup(): void;
-
-  // Floating ball events
-  onFloatingBallNewSession(cb: () => void): () => void;
-  onFloatingBallOpenSession(cb: (index: number) => void): () => void;
 
   // WebContentsView management (11 channels)
   wvCreate(url: string): Promise<{ viewId: string }>;
@@ -249,8 +219,8 @@ All `wv-*` channels delegate to `BrowserViewManager`. Cleanup functions returned
 
 ```
 bridge.js     → main.js (dynamic import), electron
-main.ts       → WindowManager, TrayManager, FloatingBallManager,
-                BrowserViewManager, AutoStart, SetupWizard,
+main.ts       → WindowManager, TrayManager, BrowserViewManager,
+                AutoStart, SetupWizard,
                 ../server/main (startServer/shutdown)
 All managers  → electron (BrowserWindow, Tray, Menu, app, etc.)
 preload.cjs   → electron (contextBridge, ipcRenderer)

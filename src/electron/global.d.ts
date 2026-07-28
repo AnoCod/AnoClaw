@@ -2,66 +2,12 @@
 // Frontend code should use preload.d.ts for the electronAPI interface.
 export {};
 
-type FloatingBallConnection = 'connected' | 'connecting' | 'disconnected';
-type FloatingBallPhase = 'thinking' | 'tool' | 'waiting' | 'done' | 'failed' | 'idle' | 'goal' | 'paused';
-type FloatingBallSession = { id: string; title: string; status?: string };
-type FloatingBallActivityItem = {
-  id: string;
-  sessionId: string | null;
-  title: string;
-  detail?: string;
-  status: 'completed' | 'failed';
-  timestamp: number;
-};
-type FloatingBallHelperNotice = {
-  kind: 'info' | 'success' | 'error';
-  text: string;
-  timestamp: number;
-};
-type FloatingBallGoalPulse = {
-  sessionId: string | null;
-  status: 'active' | 'paused' | 'blocked' | 'completed' | 'deleted';
-  objective: string;
-  runCount?: number;
-  updatedAt?: string;
-  lastRunAt?: string;
-};
-type FloatingBallState = {
-  activeSessionId: string | null;
-  activeTitle: string | null;
-  connection: FloatingBallConnection;
-  runningCount: number;
-  waitingCount: number;
-  recentSessions: FloatingBallSession[];
-  activityItems?: FloatingBallActivityItem[];
-  helperNotice?: FloatingBallHelperNotice | null;
-  waitingInbox?: {
-    count: number;
-    sessionId: string | null;
-    title: string;
-    detail?: string;
-    riskLevel?: string;
-    toolCallId?: string;
-    canInlineResolve?: boolean;
-  };
-  goalPulse?: FloatingBallGoalPulse | null;
-  currentTask?: {
-    sessionId: string;
-    title: string;
-    phase: FloatingBallPhase;
-    detail?: string;
-  };
-  clipboardText?: string;
-};
-type FloatingBallCommand = { action: string; data?: unknown };
-
 declare global {
   var _quitting: boolean | undefined;
 
   // Re-export ElectronAPI so frontend TypeScript can reference it
   interface ElectronAPI {
     windowMinimize: () => void;
-    windowMinimizeAnimate: () => void;
     windowMaximize: () => void;
     windowClose: () => void;
     isMaximized: () => Promise<boolean>;
@@ -71,14 +17,6 @@ declare global {
     getAppVersion: () => Promise<string>;
     getAutoStart: () => Promise<boolean>;
     setAutoStart: (enabled: boolean) => void;
-    onFloatingBallNewSession: (cb: () => void) => void;
-    onFloatingBallOpenSession: (cb: (payload: number | { sessionId?: string; index?: number | null }) => void) => void;
-    onFloatingBallCommand: (cb: (payload: FloatingBallCommand) => void) => () => void;
-    onFloatingBallStateChanged: (cb: (state: FloatingBallState) => void) => () => void;
-    floatingBallAction: (action: string, data?: unknown) => void;
-    floatingBallGetSessions: () => Promise<FloatingBallSession[]>;
-    floatingBallGetState: () => Promise<FloatingBallState>;
-    floatingBallUpdateState: (state: Partial<FloatingBallState>) => void;
     openExternal: (url: string) => Promise<{ ok: boolean; error?: string }>;
     openPath: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
     showNotification: (title: string, body: string) => Promise<{ ok: boolean; error?: string }>;

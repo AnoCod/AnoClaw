@@ -11,7 +11,6 @@ function createDependencies(
     quit: vi.fn(),
     forceExit: vi.fn(),
     listWindows: vi.fn(() => []),
-    hideFloatingBall: vi.fn(),
     markQuitting: vi.fn(),
     gracefulShutdown: vi.fn(async () => undefined),
     reportError: vi.fn(),
@@ -48,7 +47,6 @@ describe('AppLifecycleController', () => {
     lifecycle.requestQuit();
 
     expect(dependencies.markQuitting).toHaveBeenCalledOnce();
-    expect(dependencies.hideFloatingBall).toHaveBeenCalledOnce();
     expect(visibleWindow.hide).toHaveBeenCalledOnce();
     expect(destroyedWindow.hide).not.toHaveBeenCalled();
     expect(dependencies.quit).toHaveBeenCalledOnce();

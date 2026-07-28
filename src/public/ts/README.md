@@ -171,7 +171,7 @@ Singleton bootstrap. Initializes all services on `DOMContentLoaded`.
 class App {
   static getInstance(): App;
   // Initializes WS, pages, sessions, agents, plugins, theme,
-  // hash routing, floating ball events
+  // and hash routing
   async init(): Promise<void>;
 }
 ```

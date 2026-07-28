@@ -40,7 +40,11 @@ export class TrayManager {
 
   private _showMain(): void {
     const win = WindowManager.getInstance().getMainWindow();
-    if (win) { win.show(); win.focus(); }
+    if (win) {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+    }
     else WindowManager.getInstance().createWindow();
   }
 }

@@ -54,29 +54,6 @@ export class TitleBar {
     this._statusDot = this.element.querySelector('.connection-status-dot') as HTMLElement;
     this._pageNameEl = this.element.querySelector('.topbar-page-name') as HTMLElement;
     this._switcherAnchor = this.element.querySelector('.topbar-page-switcher') as HTMLElement;
-    this._listenFloatingBall();
-  }
-
-  /** Listen for floating ball actions from the main process. */
-  private _listenFloatingBall(): void {
-    const api = (window as any).electronAPI;
-    if (api?.onFloatingBallNewSession) {
-      api.onFloatingBallNewSession(() => {
-        window.dispatchEvent(new CustomEvent('navigate-to', { detail: { page: 'sessions' } }));
-        setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('floating-ball-new-session'));
-        }, 100);
-      });
-    }
-    if (api?.onFloatingBallOpenSession) {
-      api.onFloatingBallOpenSession((payload: unknown) => {
-        window.dispatchEvent(new CustomEvent('navigate-to', { detail: { page: 'sessions' } }));
-        const detail = typeof payload === 'object' && payload !== null
-          ? payload
-          : { index: typeof payload === 'number' ? payload : undefined };
-        window.dispatchEvent(new CustomEvent('floating-ball-open-session', { detail }));
-      });
-    }
   }
 
   /** Update the status dot color + pulse animation based on WS connection state. */
@@ -176,7 +153,7 @@ export class TitleBar {
     };
 
     makeBtn('win-minimize', SVG_WIN_MINIMIZE, 'Minimize', () => {
-      (window as any).electronAPI?.windowMinimizeAnimate();
+      (window as any).electronAPI?.windowMinimize();
     });
     const maxBtn = makeBtn('win-maximize', SVG_WIN_MAXIMIZE, 'Maximize', () => (window as any).electronAPI?.windowMaximize());
     makeBtn('win-close', SVG_WIN_CLOSE, 'Close', () => (window as any).electronAPI?.windowClose());

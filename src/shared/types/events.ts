@@ -112,7 +112,6 @@ export interface CoreEventMap {
 
   // loop
   'loop:completed': { sessionId: string; agentId: string; turnCount: number; totalTokens: number };
-  'loop:keyword_turn': { sessionId: string; agentId: string; turnNumber: number; userMessages: string[]; assistantMessages: string[] };
   'loop:compaction_triggered': { sessionId: string; beforeTokens: number; afterTokens: number };
 
   // llm
@@ -125,10 +124,6 @@ export interface CoreEventMap {
   // skill
   'skill:loaded': { agentId: string; skillNames: string[] };
   'skill:changed': { action: 'created' | 'updated' | 'deleted' | 'reloaded'; name: string };
-
-  // evolution
-  'evolution:score_saved': { score: { id: string; sessionId: string; agentId: string; messageId: string; score: number } };
-  'evolution:analysis_complete': { reportId: string; mode: string; totalFindings: number; criticalFindings: number };
 
   // talent pool
   'talent_pool:changed': { action: 'group_created' | 'group_updated' | 'group_deleted' | 'template_created' | 'template_deleted' | 'hired'; entityId: string };
@@ -207,7 +202,6 @@ export enum WsMessageType {
   RunCommand    = 'run_command',
   SetSessionMode = 'set_session_mode',
   SetGoal       = 'set_goal',
-  QualityScore  = 'quality_score',
   EditorContext = 'editor_context',
   ToolConfirmResponse = 'tool_confirm_response',
   // Server → Client (delegation / commands)
@@ -250,8 +244,6 @@ export enum WsMessageType {
   CoordinationMessage = 'coordination_message',
   WorkspaceConflict = 'workspace_conflict',
   CoordinationSnapshotRequired = 'coordination_snapshot_required',
-  QualityScoreAck = 'quality_score_ack',
-  QualityScoreError = 'quality_score_error',
 }
 
 /** Generic WebSocket message shape for event dispatch (backward compat). */
@@ -284,7 +276,6 @@ export type WsTypedMessage =
   | { type: WsMessageType.RunCommand; command?: string; args?: Record<string, string>; [key: string]: unknown }
   | { type: WsMessageType.SetSessionMode; mode?: string; effort?: boolean; [key: string]: unknown }
   | { type: WsMessageType.SetGoal; action?: string; objective?: string; acceptanceCriteria?: string; workspace?: string; /** @deprecated Goal always uses AutoEdit. */ permissionMode?: string; maxRuns?: number; maxConsecutiveFailures?: number; wakeIntervalMs?: number; completionMode?: 'review' | 'automatic'; [key: string]: unknown }
-  | { type: WsMessageType.QualityScore; score?: number; [key: string]: unknown }
   | { type: WsMessageType.EditorContext; openFiles?: string[]; [key: string]: unknown }
   | { type: WsMessageType.ToolConfirmResponse; toolCallId: string; approved: boolean; [key: string]: unknown }
   | { type: WsMessageType.DelegationProgress; content?: string; [key: string]: unknown }

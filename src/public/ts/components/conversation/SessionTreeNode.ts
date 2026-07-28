@@ -181,27 +181,6 @@ export class SessionTreeNode {
       row.appendChild(countBadge);
     }
 
-    // Tag chips — from session metadata.evolutionTags
-    const meta = this.node.metadata as Record<string, unknown> | undefined;
-    const tags = (meta?.evolutionTags || []) as Array<{ label: string; category: string }>;
-    if (tags.length > 0) {
-      const tagContainer = document.createElement('span');
-      tagContainer.className = 'stn-tags';
-      for (const tag of tags.slice(0, 3)) { // max 3 tags visible
-        const chip = document.createElement('span');
-        chip.className = 'stn-tag' + (tag.category === 'auto' ? ' stn-tag--auto' : ' stn-tag--user');
-        chip.textContent = tag.label;
-        tagContainer.appendChild(chip);
-      }
-      if (tags.length > 3) {
-        const more = document.createElement('span');
-        more.className = 'stn-tag-more';
-        more.textContent = `+${tags.length - 3}`;
-        tagContainer.appendChild(more);
-      }
-      row.appendChild(tagContainer);
-    }
-
     // Action buttons (fade on hover)
     this.actionsEl = document.createElement('div');
     this.actionsEl.className = 'stn-actions';

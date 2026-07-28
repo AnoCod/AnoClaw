@@ -1154,20 +1154,6 @@ class App {
     return created?.id || null;
   }
 
-  /** Send a quality score rating via WebSocket. */
-  sendQualityScore(data: {
-    messageId: string;
-    sessionId: string;
-    agentId: string;
-    turnNumber: number;
-    score: number;
-    comment: string;
-  }): void {
-    this._sseClient.send({
-      type: 'quality_score',
-      ...data,
-    });
-  }
 }
 
   // Bootstrap

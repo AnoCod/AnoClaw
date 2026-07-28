@@ -326,7 +326,6 @@ export type StreamEventType =
   | 'session_created' | 'message_appended' | 'workspace_changed'
   | 'tool_execution_started' | 'tool_execution_completed'
   | 'loop_completed' | 'compaction_triggered'
-  | 'quality_score_ack' | 'quality_score_error'
   | 'task_notification'
   | 'task_resolution'
   | 'task_list_update'

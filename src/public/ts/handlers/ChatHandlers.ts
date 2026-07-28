@@ -121,15 +121,6 @@ export function registerChatHandlers(
     }
   });
 
-  router.on('quality_score_ack', (_ctx) => {
-    ClientLogger.ui.info('Quality score saved');
-  });
-
-  router.on('quality_score_error', (ctx) => {
-    const d = ctx.data as { error: string };
-    ClientLogger.ui.warn('Quality score failed', d);
-  });
-
   router.on('plugin_load_failed', (ctx) => {
     const d = ctx.data as { pluginName?: string; error?: string };
     const name = d.pluginName || 'plugin';

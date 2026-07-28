@@ -358,7 +358,6 @@ One TS file per message type in `components/conversation/delegates/`:
 - `components/pages/` — Full-page views (Sessions, Workspace, Agents, Settings, Skills, Memory, Plugins)
 - `components/pages/workspace/` — Workspace file tree, tabs, split view
 - `components/tabs/` — Shared tab helpers (FilePreview, Overview, Plan)
-- `components/evolution/` — Star rating widget
 - `components/ui/` — Reusable UI kit (Button, Card, Dialog, Toggle, Input, Select, Badge, Toast, etc.)
 - `handlers/` — WS event → SessionAgent dispatch
 - `utils/` — Color utilities, clickable path handler

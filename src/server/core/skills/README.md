@@ -182,7 +182,6 @@ Triggered when a single turn exceeds 5 tool calls. The system:
 - `SkillsSection` (prompt) — injects loaded skill list
 - `SkillRoutes` / `SkillExecuteRoute` — HTTP API
 - `PluginHost` — loads plugin skills on activation
-- `EvolutionManager` — auto-generates skills from patterns
 - `AgentLoop` — calls `matchingSkills()` for conditional activation
 
 ### Depends on

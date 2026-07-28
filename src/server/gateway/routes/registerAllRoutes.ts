@@ -33,7 +33,6 @@ import {
   RenameWorkspaceFileRoute, MoveWorkspaceFileRoute, WriteWorkspaceFileRoute,
   ConvertOfficeRoute,
 } from './WorkspaceRoutes.js';
-import { EvolutionAnalyzeRoute, EvolutionApplyRoute, EvolutionStatsRoute } from './EvolutionRoute.js';
 import { AgentExecuteRoute, AgentExecuteRedirectRoute } from './AgentExecuteRoute.js';
 import { SessionMessageRoute, SessionMessageRedirectRoute } from './SessionMessageRoute.js';
 import { ToolExecuteRoute, ToolExecuteRedirectRoute } from './ToolExecuteRoute.js';
@@ -220,11 +219,6 @@ export function registerAllRoutes(api: ApiServer): void {
   api.registerRoute(new MoveWorkspaceFileRoute());
   api.registerRoute(new WriteWorkspaceFileRoute());
   api.registerRoute(new ConvertOfficeRoute());
-
-  // Evolution
-  api.registerRoute(new EvolutionStatsRoute());
-  api.registerRoute(new EvolutionAnalyzeRoute());
-  api.registerRoute(new EvolutionApplyRoute());
 
   // Agent — general-purpose agent execution for plugins
   api.registerRoute(new AgentExecuteRoute());

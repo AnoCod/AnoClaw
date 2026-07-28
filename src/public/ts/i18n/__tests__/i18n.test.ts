@@ -22,9 +22,9 @@ describe('frontend i18n', () => {
 
   it('interpolates values in localized strings', () => {
     setLocale('en-US');
-    expect(t('settings.evolution.toast', { total: 3 })).toBe('Evolution analysis: 3 findings');
+    expect(t('taskResolution.subtitle', { capability: 'calendar' })).toBe('"calendar" needs a plugin capability first.');
 
     setLocale('zh-CN');
-    expect(t('settings.evolution.toast', { total: 3 })).toBe('进化分析：3 个发现');
+    expect(t('taskResolution.subtitle', { capability: '日历' })).toBe('“日历” 需要先准备插件能力。');
   });
 });

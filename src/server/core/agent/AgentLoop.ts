@@ -273,7 +273,6 @@ export class AgentLoop {
     let turn = 0;
     let compactCheckCounter = 0;
     let lastCompactionTokenCount = 0;
-    let memExtractTurn = 0;
     let skillNudgeTurn = 0;
     let postWait = false;
     let consecutiveFatalErrors = 0;
@@ -644,34 +643,6 @@ export class AgentLoop {
 
       // Append assistant message to transcript
       messages.push(assistantMessage);
-
-      /** Keyword extraction (every 10 turns) */
-      memExtractTurn++;
-      if (memExtractTurn >= 10) {
-        memExtractTurn = 0;
-        try {
-          // Collect recent user + assistant messages for keyword extraction
-          const userMsgs = messages
-            .filter(m => m.role === 'user')
-            .slice(-5)
-            .map(m => m.content || '');
-          const assistantMsgs = messages
-            .filter(m => m.role === 'assistant')
-            .slice(-5)
-            .map(m => m.content || '');
-          if (userMsgs.length > 0 || assistantMsgs.length > 0) {
-            TypedEventBus.emit('loop:keyword_turn', {
-              sessionId: this.sessionId,
-              agentId: this.agentId,
-              turnNumber: turn,
-              userMessages: userMsgs,
-              assistantMessages: assistantMsgs,
-            });
-          }
-        } catch {
-
-        }
-      }
 
       /** Autonomous skill nudge (every 20 turns) */
       skillNudgeTurn++;

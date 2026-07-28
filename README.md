@@ -47,7 +47,6 @@ AnoClaw is an LLM-native desktop platform. AI agents use tools (Read, Write, Bas
 - **Background tasks** — Fire-and-forget with notification when complete
 - **Native program launch** — Start installed desktop or command-line programs with tracked PIDs and explicit arguments
 - **Memory system** — Persistent per-agent and team memory
-- **Evolution tracking** — Pattern detection, quality scoring, session tagging
 
 ## Configuration
 

@@ -13,8 +13,6 @@ import { Toggle } from '../ui/Toggle.js';
 import { normalizeLocale, SUPPORTED_LOCALES, t } from '../../i18n/index.js';
 import { normalizeUserMode, USER_MODE_OPTIONS } from '../../userMode.js';
 
-const SVG_REVIEW = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18h8"/><path d="M3 22h18"/><path d="M14 22a7 7 0 0 0-7-7"/><path d="M10 14 21 3"/><path d="m21 3-4 12-7-5z"/></svg>`;
-
 export class SettingsPage implements Page {
   name = 'settings';
   container: HTMLElement;
@@ -33,101 +31,9 @@ export class SettingsPage implements Page {
 
   onEnter(): void {
     this._buildForm();
-    this._loadEvolutionStats();
   }
 
   onExit(): void {}
-
-  private async _loadEvolutionStats(): Promise<void> {
-    const el = (id: string) => this.container.querySelector(id);
-    try {
-      const resp = await fetch('/api/v1/evolution/stats');
-      if (!resp.ok) return;
-      const data = await resp.json();
-
-      // Stats grid
-      const grid = el('#evo-stats');
-      if (grid) {
-        grid.innerHTML = `
-          <div class="evo-stat-card">
-            <div class="evo-stat-value">${data.toolCount}</div>
-            <div class="evo-stat-label">${t('settings.evolution.toolsTracked')}</div>
-          </div>
-          <div class="evo-stat-card">
-            <div class="evo-stat-value">${data.patterns.total}</div>
-            <div class="evo-stat-label">${t('settings.evolution.patternsFound')}</div>
-          </div>
-          <div class="evo-stat-card">
-            <div class="evo-stat-value">${data.scores.totalScores}</div>
-            <div class="evo-stat-label">${t('settings.evolution.scoresCollected')}</div>
-          </div>
-          <div class="evo-stat-card">
-            <div class="evo-stat-value">${data.tags.totalPairs}</div>
-            <div class="evo-stat-label">${t('settings.evolution.tagsApplied')}</div>
-          </div>
-          <div class="evo-stat-card">
-            <div class="evo-stat-value">${data.tags.uniqueLabels}</div>
-            <div class="evo-stat-label">${t('settings.evolution.uniqueTags')}</div>
-          </div>
-          <div class="evo-stat-card">
-            <div class="evo-stat-value">${data.skills.tracked}</div>
-            <div class="evo-stat-label">${t('settings.evolution.skillsTracked')}</div>
-          </div>
-        `;
-      }
-
-      // Tool table
-      const toolsEl = el('#evo-tools');
-      if (toolsEl && data.tools.length > 0) {
-        let th = `<table class="evo-tool-table"><thead><tr><th>${t('settings.evolution.table.tool')}</th><th>${t('settings.evolution.table.calls')}</th><th>${t('settings.evolution.table.success')}</th><th>${t('settings.evolution.table.avgTokens')}</th><th>${t('settings.evolution.table.avgMs')}</th></tr></thead><tbody>`;
-        for (const t of data.tools) {
-          const pct = Math.round(t.successRate * 100);
-          th += `<tr><td>${t.name}</td><td>${t.callCount}</td><td>${pct}%</td><td>${t.avgTokens}</td><td>${t.avgDurationMs}</td></tr>`;
-        }
-        th += '</tbody></table>';
-        toolsEl.innerHTML = th;
-      } else if (toolsEl) {
-        toolsEl.innerHTML = `<div class="evo-empty">${t('settings.evolution.noToolData')}</div>`;
-      }
-
-      // Patterns
-      const patEl = el('#evo-patterns');
-      if (patEl) {
-        const p = data.patterns;
-        if (p.total === 0) {
-          patEl.innerHTML = `<div class="evo-empty">${t('settings.evolution.noPatterns')}</div>`;
-        } else {
-          patEl.innerHTML = `<div style="font-size:11px;color:var(--color-cinema-text-secondary);">${t('settings.evolution.patternSummary', { total: p.total, skillCandidates: p.skillCandidates, withSkills: p.withSkills })}</div>`;
-        }
-      }
-
-      // Scores
-      const scrEl = el('#evo-scores');
-      if (scrEl) {
-        const s = data.scores;
-        if (s.totalScores === 0) {
-          scrEl.innerHTML = `<div class="evo-empty">${t('settings.evolution.noScores')}</div>`;
-        } else {
-          const agentCount = Object.keys(s.byAgent).length;
-          scrEl.innerHTML = `<div style="font-size:11px;color:var(--color-cinema-text-secondary);">${t('settings.evolution.scoreSummary', { avg: s.globalAvg.toFixed(2), total: s.totalScores, agents: agentCount })}</div>`;
-        }
-      }
-
-      // Tags
-      const tagEl = el('#evo-tags');
-      if (tagEl) {
-        const tags = data.tags;
-        if (tags.totalPairs === 0) {
-          tagEl.innerHTML = `<div class="evo-empty">${t('settings.evolution.noTags')}</div>`;
-        } else {
-          const chips = (tags.labels as string[]).slice(0, 10).map((l: string) =>
-            `<span class="stn-tag stn-tag--auto" style="margin-right:4px;">${l}</span>`
-          ).join('');
-          tagEl.innerHTML = `<div style="font-size:11px;color:var(--color-cinema-text-secondary);">${chips}</div>`;
-        }
-      }
-    } catch { /* evolution stats unavailable — non-critical */ }
-  }
 
   private _buildForm(): void {
     console.log('[Settings] buildForm started');
@@ -215,36 +121,6 @@ export class SettingsPage implements Page {
         <div class="settings-section-body settings-action-row">
           <button type="button" id="btn-export" class="cinema-btn">${t('settings.exportSettings')}</button>
           <button type="button" id="btn-clear" class="cinema-btn">${t('settings.clearAllSessions')}</button>
-        </div>
-      </div>
-
-      <div class="cinema-section settings-section settings-section-evolution">
-        <div class="cinema-section-legend">${t('settings.evolution')}</div>
-        <div class="settings-section-body settings-evolution-body">
-          <div id="evo-stats" class="evo-stats-grid">
-            <div class="evo-stat-card">
-              <div class="evo-stat-value"><span class="evo-spinner"></span></div>
-              <div class="evo-stat-label">${t('settings.evolution.loading')}</div>
-            </div>
-          </div>
-
-          <div class="evo-section-title">${t('settings.evolution.toolUsage')}</div>
-          <div id="evo-tools"><div class="evo-empty">${t('settings.evolution.loading')}</div></div>
-
-          <div class="evo-section-title">${t('settings.evolution.patterns')}</div>
-          <div id="evo-patterns"><div class="evo-empty">${t('settings.evolution.loading')}</div></div>
-
-          <div class="evo-section-title">${t('settings.evolution.qualityScores')}</div>
-          <div id="evo-scores"><div class="evo-empty">${t('settings.evolution.loading')}</div></div>
-
-          <div class="evo-section-title">${t('settings.evolution.sessionTags')}</div>
-          <div id="evo-tags"><div class="evo-empty">${t('settings.evolution.loading')}</div></div>
-
-          <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
-            <button type="button" id="btn-evolve" class="cinema-btn cinema-btn-with-icon">${SVG_REVIEW}<span>${t('settings.evolution.review')}</span></button>
-            <span id="evolve-status" style="font-size:11px;color:var(--color-cinema-text-tertiary);">${t('settings.evolution.idle')}</span>
-          </div>
-          <div id="evolve-results" style="display:none;font-size:11px;color:var(--color-cinema-text-secondary);line-height:1.6;"></div>
         </div>
       </div>
 
@@ -353,7 +229,6 @@ export class SettingsPage implements Page {
       ToastManager.getInstance().success(t('settings.saved'));
       ClientLogger.ui.info('Settings saved');
       this._buildForm();
-      this._loadEvolutionStats();
     });
 
     form.querySelector('#btn-export')?.addEventListener('click', () => {
@@ -373,101 +248,6 @@ export class SettingsPage implements Page {
       }
     });
 
-    // ── Evolution: trigger analysis ──
-    form.querySelector('#btn-evolve')?.addEventListener('click', async () => {
-      const status = form.querySelector('#evolve-status') as HTMLElement;
-      const results = form.querySelector('#evolve-results') as HTMLElement;
-      if (!status || !results) return;
-
-      status.textContent = t('settings.evolution.analyzing');
-      results.style.display = 'none';
-
-      try {
-        const resp = await fetch('/api/v1/evolution/analyze', { method: 'POST' });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const report = await resp.json();
-
-        status.textContent = t('settings.evolution.complete', {
-          total: report.summary.totalFindings,
-          critical: report.summary.criticalFindings,
-        });
-        results.style.display = 'block';
-
-        let html = '';
-        if (report.skillChanges.length > 0) {
-          html += `<div style="margin-top:4px;"><strong>${t('settings.evolution.skills')}:</strong> `;
-          html += report.skillChanges.map((c: any) =>
-            `${c.skillId} → ${c.action}${c.reason ? ': ' + c.reason.slice(0, 60) : ''}`
-          ).join('<br>');
-          html += '</div>';
-        }
-        if (report.memoryFindings.length > 0) {
-          html += `<div style="margin-top:4px;"><strong>${t('settings.evolution.memory')}:</strong> `;
-          html += report.memoryFindings.map((m: any) =>
-            `${m.memoryId} → ${m.action}`
-          ).join('<br>');
-          html += '</div>';
-        }
-        if (report.tokenFindings.length > 0) {
-          html += `<div style="margin-top:4px;"><strong>${t('settings.evolution.tokenWaste')}:</strong> `;
-          html += report.tokenFindings.map((finding: any) =>
-            `${finding.toolName}: ${t('settings.evolution.tokenSavings', { tokens: finding.estimatedSavings })}`
-          ).join('<br>');
-          html += '</div>';
-        }
-        if (report.promptSuggestions.length > 0) {
-          html += `<div style="margin-top:4px;"><strong>${t('settings.evolution.promptTweaks')}:</strong> `;
-          html += report.promptSuggestions.map((p: any) =>
-            `${p.agentId} — ${p.reason.slice(0, 60)}`
-          ).join('<br>');
-          html += '</div>';
-        }
-        if (!html) html = `<em>${t('settings.evolution.noFindings')}</em>`;
-        results.innerHTML = html;
-
-        // Apply button for skill archives
-        if (report.skillChanges && report.skillChanges.some(function (c: any) { return c.action === 'archive'; })) {
-          const applyDiv = document.createElement('div');
-          applyDiv.style.cssText = 'margin-top:8px;display:flex;gap:8px;align-items:center;';
-          var applyBtn = document.createElement('button');
-          applyBtn.type = 'button';
-          applyBtn.className = 'cinema-btn';
-          applyBtn.style.cssText = 'border-color:var(--color-hairline-strong);color:var(--color-text-primary);';
-          applyBtn.textContent = t('settings.evolution.applySkillArchives');
-          applyBtn.addEventListener('click', async function () {
-            try {
-              applyBtn.textContent = t('settings.evolution.applying');
-              var r = await fetch('/api/v1/evolution/apply', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(report),
-              });
-              if (!r.ok) throw new Error('Apply failed');
-              var res = await r.json();
-              if (res.success) {
-                applyBtn.textContent = t('settings.evolution.applied');
-                applyBtn.disabled = true;
-                ToastManager.getInstance().success(t('settings.evolution.skillsArchived'));
-              } else { throw new Error(res.error || 'Apply failed'); }
-            } catch (e) {
-              applyBtn.textContent = t('settings.evolution.applySkillArchives');
-              ToastManager.getInstance().error(t('settings.evolution.applyFailed'));
-            }
-          });
-          var note = document.createElement('span');
-          note.style.cssText = 'font-size:10px;color:rgba(255,255,255,0.3);';
-          note.textContent = t('settings.evolution.archiveNote');
-          applyDiv.appendChild(applyBtn);
-          applyDiv.appendChild(note);
-          results.appendChild(applyDiv);
-        }
-
-        ToastManager.getInstance().success(t('settings.evolution.toast', { total: report.summary.totalFindings }));
-      } catch (err) {
-        status.textContent = t('settings.evolution.failed');
-        results.style.display = 'block';
-        results.innerHTML = `<span style="color:var(--color-error);">${t('settings.evolution.errorPrefix')}: ${(err as Error).message}</span>`;
-      }
-    });
   }
 
 }

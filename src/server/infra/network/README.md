@@ -86,7 +86,6 @@ Registered via `registerAllWsHandlers(router)`.
 | `run_command` | RunCommandHandler | Execute slash command |
 | `set_session_mode` | SetSessionModeHandler | Persist root-session permission and effort mode |
 | `set_goal` | SetGoalHandler | Start, pause, resume, edit, or delete the root-session goal loop |
-| `quality_score` | QualityScoreHandler | Persist 1–5 rating to `EvolutionManager` |
 | `editor_context` | EditorContextHandler | Store editor state (open files, cursor, selection) on session metadata |
 
 ---
@@ -150,7 +149,7 @@ WsMessageRouter   → Transport (type only)
 WsForwardSubscriber → TypedEventBus, WsServer, SessionManager
 WebFetchHelper    → LogManager
 Handlers          → WsMessageRouter, SessionManager, AgentRuntime, AgentRegistry,
-                    InterruptController, EvolutionManager, CommandRegistry, etc.
+                    InterruptController, CommandRegistry, etc.
 ```
 
 ## Usage

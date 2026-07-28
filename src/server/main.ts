@@ -637,10 +637,8 @@ async function initialize(): Promise<void> {
 
     const { SkillsExtension } = await import('./core/skills/SkillsExtension.js');
     const { MemoryExtension } = await import('./core/memory/MemoryExtension.js');
-    const { EvolutionExtension } = await import('./core/evolution/EvolutionExtension.js');
     extMgr.register(new SkillsExtension());
     extMgr.register(new MemoryExtension());
-    extMgr.register(new EvolutionExtension());
 
     await extMgr.startAll();
 

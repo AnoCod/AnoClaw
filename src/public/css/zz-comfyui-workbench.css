@@ -771,7 +771,6 @@ html[data-theme="dark"] .think-card,
 html[data-theme="dark"] .workspace-binding-card,
 html[data-theme="dark"] .detail-card,
 html[data-theme="dark"] .cinema-section,
-html[data-theme="dark"] .evo-stat-card,
 html[data-theme="dark"] .tab-overview-section,
 html[data-theme="dark"] .input-goal-card.visible {
   border: 1px solid var(--comfy-charcoal-400) !important;
@@ -2291,26 +2290,6 @@ html[data-theme="dark"] .appearance-swatch.active {
   box-shadow: 0 0 0 2px rgba(11, 140, 233, 0.22);
 }
 
-html[data-theme="dark"] .evo-tool-table {
-  border: 1px solid var(--comfy-charcoal-400);
-  border-radius: 6px;
-  overflow: hidden;
-  background: var(--comfy-charcoal-800);
-}
-
-html[data-theme="dark"] .evo-tool-table th {
-  background: var(--comfy-menu-secondary-bg);
-  color: var(--comfy-text-muted);
-}
-
-html[data-theme="dark"] .evo-tool-table td {
-  border-color: var(--comfy-charcoal-500);
-}
-
-html[data-theme="dark"] .evo-tool-table tr:hover td {
-  background: var(--comfy-charcoal-700);
-}
-
 /* Settings page: compact ComfyUI-style inspector panels */
 html[data-theme="dark"] [data-page="settings"] .cinema-static-inner {
   max-width: 780px;
@@ -2453,53 +2432,6 @@ html[data-theme="dark"] [data-page="settings"] .appearance-swatch.active {
 html[data-theme="dark"] [data-page="settings"] .settings-action-row {
   flex-direction: row;
   flex-wrap: wrap;
-}
-
-html[data-theme="dark"] [data-page="settings"] .settings-evolution-body {
-  gap: 8px;
-}
-
-html[data-theme="dark"] [data-page="settings"] .evo-stats-grid {
-  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
-  gap: 0;
-  margin: 0 0 8px;
-  overflow: hidden;
-  border: 1px solid var(--comfy-charcoal-400);
-  border-radius: 4px;
-  background: var(--comfy-menu-secondary-bg);
-}
-
-html[data-theme="dark"] [data-page="settings"] .evo-stat-card {
-  min-height: 50px;
-  padding: 7px 8px !important;
-  border: 0 !important;
-  border-right: 1px solid var(--comfy-charcoal-500) !important;
-  border-bottom: 1px solid var(--comfy-charcoal-500) !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-}
-
-html[data-theme="dark"] [data-page="settings"] .evo-stat-value {
-  font-size: 17px;
-  line-height: 1.15;
-}
-
-html[data-theme="dark"] [data-page="settings"] .evo-stat-label,
-html[data-theme="dark"] [data-page="settings"] .evo-section-title,
-html[data-theme="dark"] [data-page="settings"] .evo-empty {
-  color: var(--comfy-text-muted);
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-html[data-theme="dark"] [data-page="settings"] .evo-section-title {
-  margin: 6px 0 2px;
-  font-size: 10px;
-}
-
-html[data-theme="dark"] [data-page="settings"] .evo-empty {
-  padding: 2px 0;
-  font-style: normal;
 }
 
 html[data-theme="dark"] [data-page="settings"] .settings-save-row {
@@ -3115,16 +3047,6 @@ html[data-theme="dark"] .cinema-inline-code {
 html[data-theme="dark"] .ui-toolcard-body {
   padding: 8px 10px;
   margin: 6px 0 10px;
-}
-
-html[data-theme="dark"] .star-rating__input {
-  border-color: var(--comfy-charcoal-300);
-  background: var(--comfy-input-bg);
-  color: var(--comfy-text-primary);
-}
-
-html[data-theme="dark"] .star-rating__submit {
-  color: #0b0b0c;
 }
 
 /* Workspace tabs: closer to ComfyUI's compact, flat tab strip. */

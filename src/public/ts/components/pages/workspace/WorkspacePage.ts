@@ -96,6 +96,7 @@ export class WorkspacePage implements Page {
   private _tabMount!: HTMLElement;
   private _currentGroup: WorkspaceSplitContainer | null = null;
   private _onSessionChange: ((node: any) => void) | null = null;
+  private _onSessionsRemoved: ((sessionIds: unknown) => void) | null = null;
   private _onRevealWorkspacePath: ((event: Event) => void) | null = null;
   private _onWorkspaceDownloadComplete: ((event: Event) => void) | null = null;
   private _tabCache = new Map<string, WorkspaceSplitContainer>();
@@ -153,11 +154,18 @@ export class WorkspacePage implements Page {
   }
 
   onEnter(): void {
-    if (this._onSessionChange) { App.getInstance().sessionVM?.off('sessionSelected', this._onSessionChange); this._onSessionChange = null; }
+    this._unwireSessionEvents();
     if (this._onRevealWorkspacePath) { window.removeEventListener('ws-reveal-workspace-path', this._onRevealWorkspacePath); this._onRevealWorkspacePath = null; }
     if (this._onWorkspaceDownloadComplete) { window.removeEventListener('ws-workspace-download-complete', this._onWorkspaceDownloadComplete); this._onWorkspaceDownloadComplete = null; }
     this._onSessionChange = () => { void this._onSessionSwitched(); };
-    App.getInstance().sessionVM?.on('sessionSelected', this._onSessionChange);
+    const sessionVM = App.getInstance().sessionVM;
+    sessionVM?.on('sessionSelected', this._onSessionChange);
+    sessionVM?.on('sessionDeselected', this._onSessionChange);
+    this._onSessionsRemoved = (sessionIds: unknown) => {
+      if (!Array.isArray(sessionIds)) return;
+      this._handleSessionsRemoved(sessionIds.filter((id): id is string => typeof id === 'string'));
+    };
+    sessionVM?.on('sessionsRemoved', this._onSessionsRemoved);
     this._onRevealWorkspacePath = (event: Event) => {
       const detail = (event as CustomEvent).detail || {};
       void this._revealWorkspacePath(String(detail.path || ''), Boolean(detail.open));
@@ -168,14 +176,15 @@ export class WorkspacePage implements Page {
     };
     window.addEventListener('ws-reveal-workspace-path', this._onRevealWorkspacePath);
     window.addEventListener('ws-workspace-download-complete', this._onWorkspaceDownloadComplete);
-    const sid = App.getInstance().sessionVM?.activeSessionId || '';
+    this._pruneStaleSessionCaches();
+    const sid = sessionVM?.activeSessionId || '';
     if (sid) { void this._loadWorkspaceForSession(sid); }
-    else { this._sessionId = ''; this._workspacePath = ''; this._toolbarPath.textContent = 'No workspace'; this._showWorkspaceIdle(); }
+    else { this._clearWorkspaceView(); }
   }
 
   onExit(): void {
     try {
-      if (this._onSessionChange) { App.getInstance().sessionVM?.off('sessionSelected', this._onSessionChange); this._onSessionChange = null; }
+      this._unwireSessionEvents();
       if (this._onRevealWorkspacePath) { window.removeEventListener('ws-reveal-workspace-path', this._onRevealWorkspacePath); this._onRevealWorkspacePath = null; }
       if (this._onWorkspaceDownloadComplete) { window.removeEventListener('ws-workspace-download-complete', this._onWorkspaceDownloadComplete); this._onWorkspaceDownloadComplete = null; }
       if (this._extChangeTimer) { clearInterval(this._extChangeTimer); this._extChangeTimer = 0; }
@@ -190,15 +199,64 @@ export class WorkspacePage implements Page {
   private async _onSessionSwitched(): Promise<void> {
     const newSid = App.getInstance().sessionVM?.activeSessionId || '';
     if (!newSid) {
-      this._sessionId = '';
-      this._workspacePath = '';
-      this._toolbarPath.textContent = 'No workspace';
-      this._fileTree.suspend();
-      this._showWorkspaceIdle();
+      this._clearWorkspaceView();
       return;
     }
     if (newSid === this._sessionId) return;
     await this._loadWorkspaceForSession(newSid);
+  }
+
+  private _unwireSessionEvents(): void {
+    const sessionVM = App.getInstance().sessionVM;
+    if (this._onSessionChange) {
+      sessionVM?.off('sessionSelected', this._onSessionChange);
+      sessionVM?.off('sessionDeselected', this._onSessionChange);
+      this._onSessionChange = null;
+    }
+    if (this._onSessionsRemoved) {
+      sessionVM?.off('sessionsRemoved', this._onSessionsRemoved);
+      this._onSessionsRemoved = null;
+    }
+  }
+
+  private _clearWorkspaceView(): void {
+    this._loadGeneration++;
+    this._loadAbortController?.abort();
+    this._loadAbortController = null;
+    if (this._extChangeTimer) { clearInterval(this._extChangeTimer); this._extChangeTimer = 0; }
+    this._currentGroup?.suspend();
+    this._currentGroup = null;
+    this._sessionId = '';
+    this._workspacePath = '';
+    this._toolbarPath.textContent = 'No workspace';
+    void this._fileTree.loadRoot('');
+    this._showWorkspaceIdle();
+  }
+
+  private _handleSessionsRemoved(sessionIds: string[]): void {
+    const removedCurrentSession = Boolean(this._sessionId && sessionIds.includes(this._sessionId));
+    this._disposeSessionCaches(sessionIds);
+    if (!removedCurrentSession) return;
+
+    const activeSessionId = App.getInstance().sessionVM?.activeSessionId || '';
+    if (activeSessionId) void this._loadWorkspaceForSession(activeSessionId);
+    else this._clearWorkspaceView();
+  }
+
+  private _pruneStaleSessionCaches(): void {
+    const liveIds = new Set(App.getInstance().sessionVM?.sessions.all.map((session) => session.id) || []);
+    const staleIds = Array.from(this._tabCache.keys()).filter((sessionId) => !liveIds.has(sessionId));
+    this._disposeSessionCaches(staleIds);
+  }
+
+  private _disposeSessionCaches(sessionIds: Iterable<string>): void {
+    for (const sessionId of sessionIds) {
+      const group = this._tabCache.get(sessionId);
+      if (!group) continue;
+      if (this._currentGroup === group) this._currentGroup = null;
+      group.dispose();
+      this._tabCache.delete(sessionId);
+    }
   }
 
   private async _loadWorkspaceForSession(sid: string): Promise<void> {

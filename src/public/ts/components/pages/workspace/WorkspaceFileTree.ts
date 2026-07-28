@@ -163,6 +163,8 @@ export class WorkspaceFileTree {
     this._stopPolling();
     this._sessionId = sessionId; this._treeBody.innerHTML = ''; this._nodeMap.clear();
     this._rootNodes = [];
+    this._fileCount = 0;
+    this._selectedPath = '';
     this._expandedPaths.clear();
     this._lastFileFingerprint = '';
     this._syncFilterButtons();

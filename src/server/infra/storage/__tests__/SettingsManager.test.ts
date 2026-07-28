@@ -67,7 +67,7 @@ describe('SettingsManager', () => {
     expect(manager.get('agent.maxTurns')).toBe(0);
     expect(manager.get('features.enableMCP')).toBe(true);
     expect(manager.get('ui.lang')).toBe('zh-CN');
-    expect(manager.get('ui.userMode')).toBe('simple');
+    expect(manager.get('ui.theme')).toBe('dark');
   });
 
   // -----------------------------------------------------------------------

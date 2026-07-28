@@ -39,7 +39,7 @@ describe('TaskResolver', () => {
     expect(result.recommendedPlugins).toContain('widget-provider');
   });
 
-  it('uses office mode to prefer office capabilities when matches are otherwise close', async () => {
+  it('uses capability priority when matches are otherwise close', async () => {
     const registry = CapabilityRegistry.getInstance();
     registry.setCatalogCapabilities([
       {
@@ -60,22 +60,16 @@ describe('TaskResolver', () => {
       },
     ]);
 
-    const result = await new TaskResolver(registry).resolve({
-      message: 'make a report',
-      userMode: 'office',
-    });
+    const result = await new TaskResolver(registry).resolve({ message: 'make a report' });
 
-    expect(result.userMode).toBe('office');
-    expect(result.bestCapability?.id).toBe('office.report');
+    expect(result.bestCapability?.id).toBe('knowledge.report');
   });
 
-  it('uses child mode to route learning requests to the education capability', async () => {
+  it('routes learning requests to the education capability', async () => {
     const result = await new TaskResolver().resolve({
       message: '给我孩子讲一下这道数学题',
-      userMode: 'child',
     });
 
-    expect(result.userMode).toBe('child');
     expect(result.bestCapability?.id).toBe('education.explain');
     expect(result.nextAction).toBe('recommend_plugin');
     expect(result.recommendedPlugins).toContain('education');
@@ -84,10 +78,8 @@ describe('TaskResolver', () => {
   it('routes programming requests to code implementation capability', async () => {
     const result = await new TaskResolver().resolve({
       message: '帮我修复这个 bug 并跑测试',
-      userMode: 'programming',
     });
 
-    expect(result.userMode).toBe('coding');
     expect(result.bestCapability?.id).toBe('code.implement');
   });
 
@@ -96,7 +88,6 @@ describe('TaskResolver', () => {
 
     const result = await new TaskResolver().resolve({
       message: '帮我修复 src/server/core/foo.ts 里的 bug 并跑测试',
-      userMode: 'programming',
     });
 
     expect(result.bestCapability?.id).toBe('code.implement');
@@ -113,7 +104,6 @@ describe('TaskResolver', () => {
 
     const result = await new TaskResolver().resolve({
       message: 'review code changes before commit',
-      userMode: 'programming',
     });
 
     expect(result.bestCapability?.id).toBe('code.review');

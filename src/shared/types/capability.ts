@@ -15,8 +15,6 @@ export type CapabilityKind =
   | 'memory'
   | 'utility';
 
-export type UserMode = 'simple' | 'office' | 'coding' | 'child' | 'professional';
-
 export type CapabilityPluginRecommendationStatus =
   | 'activated'
   | 'installed'
@@ -110,7 +108,6 @@ export interface CapabilityListFilters {
 
 export interface TaskResolveRequest {
   message: string;
-  userMode?: UserMode | string;
   locale?: string;
   includeUnavailable?: boolean;
 }
@@ -141,7 +138,6 @@ export type TaskResolveNextAction =
 export interface TaskResolveResult {
   intent: TaskResolveIntent;
   query: string;
-  userMode: UserMode;
   locale?: string;
   confidence: number;
   nextAction: TaskResolveNextAction;

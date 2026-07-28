@@ -24,7 +24,7 @@ describe('SessionManager goal context', () => {
     }
   });
 
-  it('records each active goal run with workspace and mode context', async () => {
+  it('records each active goal run with workspace and execution context', async () => {
     const workspaceA = path.join(tmpDir, 'workspace-a');
     const workspaceB = path.join(tmpDir, 'workspace-b');
     const session = await manager.createMainSession('agent-main', 'Goal Session', workspaceA);
@@ -35,18 +35,16 @@ describe('SessionManager goal context', () => {
     const started = await manager.setGoal(session.id, '强化 workspace 和 goal mode');
     expect(started.runCount).toBe(0);
 
-    const firstRun = await manager.touchGoalRun(session.id, { userMode: 'coding' });
+    const firstRun = await manager.touchGoalRun(session.id);
     expect(firstRun?.runCount).toBe(1);
     expect(firstRun?.lastWorkspace).toBe(workspaceA);
     expect(firstRun?.lastPermissionMode).toBe('AutoEdit');
     expect(firstRun?.lastEffort).toBe('NORMAL');
-    expect(firstRun?.lastUserMode).toBe('coding');
 
     await manager.setWorkspace(session.id, workspaceB);
     const secondRun = await manager.touchGoalRun(session.id, {
       permissionMode: 'AutoEdit',
       effort: 'HIGH',
-      userMode: 'office',
     });
 
     expect(secondRun?.runCount).toBe(2);
@@ -54,7 +52,6 @@ describe('SessionManager goal context', () => {
     expect(secondRun?.lastWorkspace).toBe(workspaceA);
     expect(secondRun?.lastPermissionMode).toBe('AutoEdit');
     expect(secondRun?.lastEffort).toBe('HIGH');
-    expect(secondRun?.lastUserMode).toBe('office');
 
     const meta = JSON.parse(
       await fsp.readFile(path.join(tmpDir, 'sessions', session.id, 'meta.json'), 'utf-8'),

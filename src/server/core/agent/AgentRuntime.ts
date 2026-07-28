@@ -433,12 +433,10 @@ export class AgentRuntime extends EventEmitter {
         const freshPermissionMode = activeGoalPermissionMode(currentGoal.permissionMode);
         const freshEffort = resolveSessionEffort(sessionManager, sessionId);
         const settings = SettingsManager.getInstance();
-        const userMode = settings.get<string>('ui.userMode', 'simple');
         const locale = settings.get<string>('ui.lang', 'zh-CN');
         const root = sessionManager.getRootSession(sessionId);
         const taskResolution = await this._resolveGoalTask(
           `${currentGoal.objective}\nAcceptance criteria: ${currentGoal.acceptanceCriteria}`,
-          userMode,
           locale,
         );
         const resolutionBlocker = goalResolutionBlocker(taskResolution);
@@ -458,7 +456,6 @@ export class AgentRuntime extends EventEmitter {
           workspace: currentGoal.workspace,
           permissionMode: freshPermissionMode,
           effort: freshEffort,
-          userMode,
         });
         if (!runGoal || runGoal.status !== 'active' || !runGoal.currentRunId) {
           WsServer.getInstance().send(root.id, {
@@ -481,7 +478,6 @@ export class AgentRuntime extends EventEmitter {
           workspace: runGoal.workspace,
           permissionMode: freshPermissionMode,
           effort: freshEffort,
-          userMode,
           locale,
           taskResolution,
         });
@@ -567,7 +563,6 @@ export class AgentRuntime extends EventEmitter {
       const settings = SettingsManager.getInstance();
       const result = await new TaskResolver().resolve({
         message: message.content,
-        userMode: settings.get<string>('ui.userMode', 'simple'),
         locale: settings.get<string>('ui.lang', 'zh-CN'),
         includeUnavailable: true,
       });
@@ -593,13 +588,11 @@ export class AgentRuntime extends EventEmitter {
 
   private async _resolveGoalTask(
     objective: string,
-    userMode: string,
     locale: string,
   ): Promise<TaskResolveResult | null> {
     try {
       const result = await new TaskResolver().resolve({
         message: objective,
-        userMode,
         locale,
         includeUnavailable: true,
       });
@@ -1352,7 +1345,6 @@ export interface GoalContinuationContext {
   workspace: string;
   permissionMode: string;
   effort: 'HIGH' | 'NORMAL';
-  userMode: string;
   locale?: string;
   taskResolution?: TaskResolveResult | null;
 }
@@ -1375,7 +1367,6 @@ export function buildGoalContinuationContent(ctx: GoalContinuationContext): stri
     `Workspace: ${ctx.workspace || '(default workspace)'}`,
     `Permission mode: ${ctx.permissionMode}`,
     `Effort: ${ctx.effort}`,
-    `User mode: ${ctx.userMode}`,
     ctx.locale ? `Locale: ${ctx.locale}` : '',
   ].filter(Boolean);
 
@@ -1395,17 +1386,14 @@ export function buildGoalContinuationContent(ctx: GoalContinuationContext): stri
     '- Use waiting_review when the acceptance criteria appear satisfied. Do not keep working after submitting a terminal or waiting outcome.',
   );
 
-  if (ctx.userMode === 'coding') {
+  const routedDomain = ctx.taskResolution?.bestCapability?.domain;
+  if (routedDomain === 'coding') {
     lines.push(
-      '- Coding mode: start from the current IDE/workspace context, inspect relevant files before edits, and run focused build/test checks after changes.',
+      '- Coding task: start from the current IDE/workspace context, inspect relevant files before edits, and run focused build/test checks after changes.',
     );
-  } else if (ctx.userMode === 'office') {
+  } else if (routedDomain && ['office', 'pdf', 'data'].includes(routedDomain)) {
     lines.push(
-      '- Office mode: prefer downloadable and Workspace outputs such as documents, reports, slides, spreadsheets, previews, and files.',
-    );
-  } else if (ctx.userMode === 'professional') {
-    lines.push(
-      '- Professional mode: expose concise tool/log reasoning when it helps verify correctness, plugin behavior, or workflow state.',
+      '- Document task: prefer downloadable and Workspace outputs such as documents, reports, slides, spreadsheets, previews, and files.',
     );
   }
 
@@ -1497,7 +1485,6 @@ function buildTaskResolutionContext(taskResolution: UserTaskResolution): string 
     `Capability title: ${capability.title}`,
     `Domain: ${capability.domain}`,
     `Kind: ${capability.kind || 'utility'}`,
-    `User mode: ${result.userMode}`,
     `Confidence: ${result.confidence.toFixed(2)}`,
     `Reason: ${result.reason}`,
   ];
@@ -1540,7 +1527,6 @@ function summarizeTaskResolution(result: TaskResolveResult): Record<string, unkn
   return {
     intent: result.intent,
     query: result.query,
-    userMode: result.userMode,
     locale: result.locale,
     confidence: result.confidence,
     nextAction: result.nextAction,

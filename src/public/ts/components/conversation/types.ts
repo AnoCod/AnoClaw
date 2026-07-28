@@ -52,7 +52,6 @@ export interface GoalState {
   lastWorkspace?: string;
   lastPermissionMode?: string;
   lastEffort?: 'HIGH' | 'NORMAL';
-  lastUserMode?: string;
 }
 
 export interface GoalContractDraft {

@@ -124,7 +124,6 @@ export interface SessionGoal {
   lastWorkspace?: string;
   lastPermissionMode?: PermissionMode;
   lastEffort?: 'HIGH' | 'NORMAL';
-  lastUserMode?: string;
   completedAt?: string;
   deletedAt?: string;
 }

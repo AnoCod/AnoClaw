@@ -977,7 +977,6 @@ export class SessionManager extends EventEmitter {
       workspace?: string;
       permissionMode?: string;
       effort?: 'HIGH' | 'NORMAL';
-      userMode?: string;
     } = {},
   ): Promise<SessionGoal | null> {
     const root = this.getRootSession(sessionId);
@@ -1042,7 +1041,6 @@ export class SessionManager extends EventEmitter {
         lastWorkspace: context.workspace || base.workspace || root.workspace,
         lastPermissionMode: FULL_AUTO_PERMISSION_MODE,
         lastEffort: context.effort || (root.metadata.effortMode === false ? 'NORMAL' : 'HIGH'),
-        lastUserMode: context.userMode || (typeof root.metadata.userMode === 'string' ? root.metadata.userMode : undefined),
         nextRunAt: undefined,
         recentRuns,
         updatedAt: now,
@@ -1058,7 +1056,6 @@ export class SessionManager extends EventEmitter {
       workspace?: string;
       permissionMode?: string;
       effort?: 'HIGH' | 'NORMAL';
-      userMode?: string;
     } = {},
   ): Promise<SessionGoal | null> {
     return this.beginGoalRun(sessionId, context);

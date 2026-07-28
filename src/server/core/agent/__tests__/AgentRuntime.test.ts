@@ -753,7 +753,7 @@ describe('AgentRuntime', () => {
       }
     });
 
-    it('builds a workspace-aware goal wake prompt with mode and capability routing', () => {
+    it('builds a workspace-aware goal wake prompt with execution context and capability routing', () => {
       const content = buildGoalContinuationContent({
         sessionId: 'session-1',
         goal: {
@@ -777,12 +777,10 @@ describe('AgentRuntime', () => {
         workspace: 'F:/Projects/AnoClaw',
         permissionMode: 'Plan',
         effort: 'NORMAL',
-        userMode: 'coding',
         locale: 'zh-CN',
         taskResolution: {
           intent: 'capability',
           query: '修复 workspace 中的构建错误',
-          userMode: 'coding',
           locale: 'zh-CN',
           confidence: 0.82,
           nextAction: 'execute_capability',
@@ -821,10 +819,9 @@ describe('AgentRuntime', () => {
       expect(content).toContain('Run count: 3');
       expect(content).toContain('Workspace: F:/Projects/AnoClaw');
       expect(content).toContain('Permission mode: Plan');
-      expect(content).toContain('User mode: coding');
       expect(content).toContain('Resolved capability: code.implement');
       expect(content).toContain('Suggested first tool call: Glob');
-      expect(content).toContain('Coding mode: start from the current IDE/workspace context');
+      expect(content).toContain('Coding task: start from the current IDE/workspace context');
       expect(content).toContain('Plan mode is active');
     });
   });

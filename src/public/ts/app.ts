@@ -23,13 +23,11 @@ import type { AppSettings, PluginPageContribution } from './types.js';
 import { ClientLogger } from './ClientLogger.js';
 import { initAnoClawAPI } from './anoclaw-api.js';
 import { localeDirection, normalizeLocale, setLocale } from './i18n/index.js';
-import { normalizeUserMode } from './userMode.js';
 
 const SETTINGS_KEY = 'anoclaw-settings';
 
 const DEFAULT_SETTINGS: AppSettings = {
   lang: 'zh-CN',
-  userMode: 'simple',
   showThinkCards: true,
   showToolCards: true,
   theme: 'dark',
@@ -297,7 +295,16 @@ class App {
     try {
       const raw = localStorage.getItem(SETTINGS_KEY);
       if (raw) {
-        return this._normalizeSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(raw) });
+        const normalized = this._normalizeSettings(JSON.parse(raw) as Partial<AppSettings>);
+        const serialized = JSON.stringify(normalized);
+        if (serialized !== raw) {
+          try {
+            localStorage.setItem(SETTINGS_KEY, serialized);
+          } catch {
+            // Keep the normalized in-memory settings when storage is read-only.
+          }
+        }
+        return normalized;
       }
     } catch (e) {
       ClientLogger.app.warn('Failed to load settings, using defaults', { error: (e as Error).message });
@@ -344,12 +351,18 @@ class App {
   private _normalizeSettings(settings: Partial<AppSettings>): AppSettings {
     const accentColor = this._normalizeAccentColor((settings as { accentColor?: unknown }).accentColor);
     return {
-      ...DEFAULT_SETTINGS,
-      ...settings,
       lang: normalizeLocale((settings as { lang?: unknown }).lang),
-      userMode: normalizeUserMode((settings as { userMode?: unknown }).userMode),
+      showThinkCards: typeof settings.showThinkCards === 'boolean'
+        ? settings.showThinkCards
+        : DEFAULT_SETTINGS.showThinkCards,
+      showToolCards: typeof settings.showToolCards === 'boolean'
+        ? settings.showToolCards
+        : DEFAULT_SETTINGS.showToolCards,
       theme: settings.theme === 'light' ? 'light' : 'dark',
       accentColor,
+      compactionThreshold: typeof settings.compactionThreshold === 'number'
+        ? settings.compactionThreshold
+        : DEFAULT_SETTINGS.compactionThreshold,
     };
   }
 

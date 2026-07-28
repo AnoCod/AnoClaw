@@ -12,13 +12,24 @@ import { LogManager } from '../../infra/logging/LogManager.js';
 
 const UI_DEFAULTS: Record<string, unknown> = {
   lang: 'zh-CN',
-  userMode: 'simple',
   theme: 'dark',
   accentColor: '#0b8ce9',
   showThinkCards: true,
   showToolCards: true,
   compactionThreshold: 70,
 };
+
+function normalizeUiSettings(...sources: unknown[]): Record<string, unknown> {
+  const normalized = { ...UI_DEFAULTS };
+  for (const source of sources) {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) continue;
+    const record = source as Record<string, unknown>;
+    for (const key of Object.keys(UI_DEFAULTS)) {
+      if (record[key] !== undefined) normalized[key] = record[key];
+    }
+  }
+  return normalized;
+}
 
 export class GetSettingsRoute implements RouteHandler {
   method = 'GET' as const;
@@ -29,8 +40,13 @@ export class GetSettingsRoute implements RouteHandler {
     _match: RouteMatch, _req: IncomingMessage, res: ServerResponse, _token: ApiToken | null,
   ): Promise<boolean> {
     const sm = SettingsManager.getInstance();
-    const ui = sm.get<Record<string, unknown>>('ui', {});
-    sendJson(res, 200, { ...UI_DEFAULTS, ...ui });
+    const stored = sm.get<Record<string, unknown>>('ui', {});
+    const ui = normalizeUiSettings(stored);
+    if (JSON.stringify(stored) !== JSON.stringify(ui)) {
+      await sm.set('ui', ui);
+      await sm.save();
+    }
+    sendJson(res, 200, ui);
     return true;
   }
 }
@@ -48,7 +64,7 @@ export class PutSettingsRoute implements RouteHandler {
       const body = await readBody(req);
       const sm = SettingsManager.getInstance();
       const current = sm.get<Record<string, unknown>>('ui', {});
-      const merged = { ...UI_DEFAULTS, ...current, ...body };
+      const merged = normalizeUiSettings(current, body);
       await sm.set('ui', merged);
       await sm.save();
       LogManager.getInstance().logger('anochat.api').info('Settings updated', { keys: Object.keys(body) });

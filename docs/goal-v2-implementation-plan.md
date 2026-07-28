@@ -119,7 +119,7 @@ Agent 不能直接把 Goal 标记为最终 completed；默认只能提交 `waiti
 - 使用量：`runCount`, `consecutiveFailures`, `nextRunAt`
 - 当前运行：`currentRunId`, `currentRunStartedAt`, `lastReportedRunId`
 - 最近成果：`progress`, `lastSummary`, `nextStep`, `evidence`, `lastError`
-- 上下文：`lastWorkspace`, `lastPermissionMode`, `lastEffort`, `lastUserMode`
+- 上下文：`lastWorkspace`, `lastPermissionMode`, `lastEffort`
 
 兼容旧 metadata：加载旧 Goal 时补齐新字段，不要求用户迁移数据文件。
 

@@ -5,7 +5,6 @@ import type {
   TaskResolveRequest,
   TaskResolveResult,
   TaskResolveToolCallSuggestion,
-  UserMode,
 } from '../../../shared/types/capability.js';
 import { CapabilityRegistry } from './CapabilityRegistry.js';
 import { CapabilityPluginRecommender } from './CapabilityPluginRecommender.js';
@@ -50,15 +49,14 @@ export class TaskResolver {
 
   async resolve(request: TaskResolveRequest): Promise<TaskResolveResult> {
     const query = (request.message || '').trim();
-    const userMode = normalizeUserMode(request.userMode);
-    if (!query) return emptyResult(query, 'Empty message', userMode, request.locale);
+    if (!query) return emptyResult(query, 'Empty message', request.locale);
 
     const { capabilities } = await this._capabilities.allCapabilities({
       includeUnavailable: request.includeUnavailable !== false,
       limit: 500,
     });
     const candidates = capabilities
-      .map((capability) => scoreCapability(capability, query, userMode))
+      .map((capability) => scoreCapability(capability, query))
       .filter((candidate) => candidate.score > 0)
       .sort(compareCandidates)
       .slice(0, 8);
@@ -68,7 +66,6 @@ export class TaskResolver {
       return {
         intent: 'chat',
         query,
-        userMode,
         locale: request.locale,
         confidence: 0.2,
         nextAction: 'chat',
@@ -102,7 +99,6 @@ export class TaskResolver {
     return {
       intent: 'capability',
       query,
-      userMode,
       locale: request.locale,
       confidence: best.confidence,
       nextAction,
@@ -121,7 +117,7 @@ export class TaskResolver {
   }
 }
 
-function scoreCapability(capability: CapabilityRecord, query: string, userMode: UserMode): TaskResolveCandidate {
+function scoreCapability(capability: CapabilityRecord, query: string): TaskResolveCandidate {
   const normalizedQuery = normalize(query);
   const matchedTerms = new Set<string>();
   let score = 0;
@@ -154,7 +150,6 @@ function scoreCapability(capability: CapabilityRecord, query: string, userMode: 
   const fileTypeBoost = explicitFileTypeBoost(capability, normalizedQuery);
   if (fileTypeBoost > 0) score += fileTypeBoost;
 
-  score += userModeScoreBoost(capability, userMode);
   if (capability.status === 'available') score += 2;
   if (capability.status === 'error') score -= 3;
 
@@ -413,11 +408,10 @@ function compareCandidates(a: TaskResolveCandidate, b: TaskResolveCandidate): nu
   return (b.capability.priority || 0) - (a.capability.priority || 0);
 }
 
-function emptyResult(query: string, reason: string, userMode: UserMode, locale?: string): TaskResolveResult {
+function emptyResult(query: string, reason: string, locale?: string): TaskResolveResult {
   return {
     intent: 'unknown',
     query,
-    userMode,
     locale,
     confidence: 0,
     nextAction: 'chat',
@@ -431,37 +425,6 @@ function emptyResult(query: string, reason: string, userMode: UserMode, locale?:
     reason,
     suggestedResponse: 'Tell me what you want AnoClaw to create, analyze, organize, research, or automate.',
   };
-}
-
-function normalizeUserMode(value: unknown): UserMode {
-  const raw = String(value || '').trim().toLowerCase();
-  if (raw === 'office' || raw === 'work') return 'office';
-  if (raw === 'coding' || raw === 'programming' || raw === 'developer' || raw === 'dev') return 'coding';
-  if (raw === 'child' || raw === 'kids' || raw === 'education') return 'child';
-  if (raw === 'professional' || raw === 'pro' || raw === 'expert') return 'professional';
-  return 'simple';
-}
-
-function userModeScoreBoost(capability: CapabilityRecord, userMode: UserMode): number {
-  if (userMode === 'office') {
-    if (['office', 'pdf', 'data'].includes(capability.domain)) return 4;
-    if (capability.outputs?.some((output) => ['presentation', 'document', 'spreadsheet', 'report'].includes(normalize(output.type)))) return 2;
-  }
-  if (userMode === 'child') {
-    if (capability.domain === 'education') return 5;
-    if (capability.id.startsWith('education.')) return 5;
-    if (capability.kind === 'knowledge') return 1;
-  }
-  if (userMode === 'coding') {
-    if (capability.domain === 'coding') return 6;
-    if (capability.kind === 'automation' || capability.domain === 'files') return 1;
-  }
-  if (userMode === 'professional') {
-    if (capability.domain === 'coding') return 5;
-    if (['automation', 'memory', 'files'].includes(capability.domain)) return 2;
-    if (capability.kind === 'automation' || capability.kind === 'utility') return 2;
-  }
-  return 0;
 }
 
 function normalize(value: string): string {

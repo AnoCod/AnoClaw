@@ -12,8 +12,6 @@
 
 import type { LocaleCode } from './i18n/index.js';
 
-export type UserMode = 'simple' | 'office' | 'coding' | 'child' | 'professional';
-
 export type MessageRole = 'user' | 'assistant' | 'system';
 
 export type MessageType =
@@ -199,7 +197,6 @@ export interface Page {
 
 export interface AppSettings {
   lang: LocaleCode;
-  userMode: UserMode;
   showThinkCards: boolean;
   showToolCards: boolean;
   theme: 'dark' | 'light';
@@ -260,7 +257,6 @@ export interface CapabilityPluginRecommendation {
 export interface TaskResolutionSummary {
   intent?: string;
   query?: string;
-  userMode?: UserMode;
   locale?: string;
   confidence?: number;
   nextAction?: string;

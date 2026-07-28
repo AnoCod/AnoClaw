@@ -55,7 +55,6 @@ export class ResolveTaskRoute implements RouteHandler {
     const resolver = new TaskResolver();
     const result = await resolver.resolve({
       message,
-      userMode: typeof body.userMode === 'string' ? body.userMode : undefined,
       locale: typeof body.locale === 'string' ? body.locale : undefined,
       includeUnavailable: typeof body.includeUnavailable === 'boolean' ? body.includeUnavailable : true,
     });

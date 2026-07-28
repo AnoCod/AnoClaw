@@ -44,6 +44,7 @@ vi.mock('electron', async () => {
   class FakeWebContentsView {
     _webContents?: FakeWebContents;
     setBounds = vi.fn();
+    setVisible = vi.fn();
 
     constructor() {
       this._webContents = new FakeWebContents(this);
@@ -99,5 +100,23 @@ describe('BrowserViewManager', () => {
 
     webContents.emit('did-start-loading');
     expect(mainWindow.webContents.send).not.toHaveBeenCalled();
+  });
+
+  it('hides browser views when renderer bounds collapse and restores them when positioned', () => {
+    BrowserViewManager.init(() => mainWindow as any);
+    const manager = BrowserViewManager.getInstance();
+
+    const viewId = manager.create('https://example.com');
+    const fakeView = electronMock.views.at(-1);
+
+    expect(fakeView.setVisible).toHaveBeenCalledWith(false);
+
+    manager.setBounds(viewId, 260, 198, 580, 720);
+    expect(fakeView.setBounds).toHaveBeenLastCalledWith({ x: 260, y: 198, width: 580, height: 720 });
+    expect(fakeView.setVisible).toHaveBeenLastCalledWith(true);
+
+    manager.setBounds(viewId, -1, -1, 0, 0);
+    expect(fakeView.setVisible).toHaveBeenLastCalledWith(false);
+    expect(fakeView.setBounds).toHaveBeenCalledTimes(2);
   });
 });

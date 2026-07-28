@@ -59,6 +59,18 @@ After verified code, docs, config, or skill changes:
 4. Push the current branch to `origin`; if no upstream exists, use `git push -u origin HEAD`.
 5. Report verification, commit hash, branch, and push status to the user.
 
+### Push Failure and History Safety
+
+- A failed `git push` is a remote synchronization failure. By itself it does not alter the local worktree, index, branch, or commits, no matter how many retries fail.
+- After a network-related push failure, preserve the local state, report the failure, and retry later. Do not use `git reset` (especially `--hard`), `git clean`, destructive `git checkout`/`git restore`, branch deletion, rebase, amend, or force-push merely to make a push succeed.
+- Keep verified work committed locally. Committed work remains available while its branch or another backup reference is retained; uncommitted work is easier to overwrite accidentally.
+- A large number of local commits can normally be pushed together. Commit count does not cause merge conflicts; conflicts arise when local and remote history have diverged.
+- Squashing is optional history cleanup, not a network repair. Use it only when the selected commits are local, unpushed, and not shared with or based upon by anyone else.
+- Before any squash or other history rewrite, fetch remote state, inspect the exact base and commit range, create a clearly named backup branch or tag at the current `HEAD`, and obtain explicit user approval. Keep the backup until the rewritten branch is verified and successfully pushed.
+- If the remote branch advanced, stop and report the divergence. Resolve it through an explicitly chosen merge or rebase; never discard local commits or force-push as a shortcut.
+- Before a destructive or history-rewriting Git command, show the current branch/status and a short decorated commit graph, state exactly which refs and commits will change, and verify that no unrelated or uncommitted work is at risk.
+- If a destructive command is run accidentally, stop making further history or cleanup changes and inspect `git reflog` first. Recovery tools are a last resort, not a substitute for preserving a backup reference.
+
 ## Architecture
 
 ### Four-Layer Design

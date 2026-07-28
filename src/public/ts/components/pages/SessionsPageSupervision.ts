@@ -39,6 +39,7 @@ export function buildSupervisionButtons(node: SessionNode, overviewPane: HTMLEle
 
   // Stop Task button
   const stopBtn = document.createElement('button');
+  stopBtn.className = 'supervision-stop-btn';
   stopBtn.style.cssText = `
     padding: 8px 12px;
     background: rgba(239,68,68,0.1);
@@ -68,6 +69,7 @@ export function buildSupervisionButtons(node: SessionNode, overviewPane: HTMLEle
 
   // View Logs button
   const logBtn = document.createElement('button');
+  logBtn.className = 'supervision-log-btn';
   logBtn.style.cssText = `
     padding: 8px 12px;
     background: rgba(255,255,255,0.06);

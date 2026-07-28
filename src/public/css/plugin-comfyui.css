@@ -85,40 +85,73 @@ textarea {
 button,
 .btn,
 .button,
-[role="button"] {
+[role="button"],
+[role="tab"],
+[role="menuitem"],
+[role="menuitemradio"] {
   min-height: 30px;
-  border: 1px solid var(--comfy-charcoal-400);
-  border-radius: 4px;
-  background: var(--comfy-menu-secondary-bg);
+  border: 0 !important;
+  border-radius: 6px;
+  outline: 0 !important;
+  background: transparent !important;
   color: var(--comfy-text-secondary);
   cursor: pointer;
+  box-shadow: none !important;
 }
 
 button:hover,
 .btn:hover,
 .button:hover,
-[role="button"]:hover {
-  border-color: var(--comfy-charcoal-200);
-  background: var(--comfy-charcoal-600);
+[role="button"]:hover,
+[role="tab"]:hover,
+[role="menuitem"]:hover,
+[role="menuitemradio"]:hover,
+button:focus-visible,
+.btn:focus-visible,
+.button:focus-visible,
+[role="button"]:focus-visible,
+[role="tab"]:focus-visible,
+[role="menuitem"]:focus-visible,
+[role="menuitemradio"]:focus-visible {
+  border: 0 !important;
+  outline: 0 !important;
+  background: var(--comfy-charcoal-600) !important;
   color: var(--comfy-text-primary);
+  box-shadow: none !important;
 }
 
 button.primary,
 .btn-primary,
 .button-primary,
 [data-variant="primary"] {
-  border-color: var(--comfy-blue);
-  background: var(--comfy-blue);
-  color: #ffffff;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--comfy-text-primary);
+  font-weight: 600;
+  box-shadow: none !important;
 }
 
 button.primary:hover,
 .btn-primary:hover,
 .button-primary:hover,
 [data-variant="primary"]:hover {
-  border-color: var(--comfy-blue-hover);
-  background: var(--comfy-blue-hover);
-  color: #ffffff;
+  border: 0 !important;
+  background: var(--comfy-charcoal-600) !important;
+  color: var(--comfy-text-primary);
+}
+
+button:is(.active, .selected, [aria-pressed="true"], [aria-selected="true"], [aria-checked="true"]),
+.btn:is(.active, .selected, [aria-pressed="true"], [aria-selected="true"], [aria-checked="true"]),
+.button:is(.active, .selected, [aria-pressed="true"], [aria-selected="true"], [aria-checked="true"]),
+[role="button"]:is(.active, .selected, [aria-pressed="true"], [aria-selected="true"], [aria-checked="true"]),
+[role="tab"]:is(.active, .selected, [aria-selected="true"]),
+[role="menuitem"]:is(.active, .selected, [aria-selected="true"]),
+[role="menuitemradio"]:is(.active, .selected, [aria-checked="true"]) {
+  border: 0 !important;
+  outline: 0 !important;
+  background: var(--comfy-charcoal-500) !important;
+  color: var(--comfy-text-primary);
+  box-shadow: none !important;
 }
 
 input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),

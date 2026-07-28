@@ -146,6 +146,7 @@ export class AskUserQuestionCard {
             btnGroup.appendChild(btn);
           }
           const confirmBtn = document.createElement('button');
+          confirmBtn.className = 'aq-confirm-btn';
           confirmBtn.textContent = 'Confirm';
           confirmBtn.style.cssText = `
             padding: 6px 16px; font-size: 12px; cursor: pointer;
@@ -190,6 +191,7 @@ export class AskUserQuestionCard {
           color:var(--color-text-primary, #fff);font:12px var(--font-sans);
         `;
         const submit = document.createElement('button');
+        submit.className = 'aq-submit-btn';
         submit.textContent = 'Submit';
         submit.style.cssText = `
           padding:7px 12px;border-radius:4px;cursor:pointer;
@@ -275,6 +277,7 @@ export class AskUserQuestionCard {
 
   private static _optionBtn(text: string, disabled: boolean, onClick: () => void): HTMLButtonElement {
     const btn = document.createElement('button');
+    btn.className = 'aq-option-btn';
     btn.textContent = text;
     btn.style.cssText = `
       padding: 6px 14px; font-size: 12px; cursor: pointer;

@@ -313,7 +313,7 @@ export class SettingsPage implements Page {
         const swatch = document.createElement('button');
         swatch.type = 'button';
         swatch.className = 'appearance-swatch' + (currentAccent === a.value ? ' active' : '');
-        swatch.style.background = a.value;
+        swatch.style.setProperty('--appearance-swatch-color', a.value);
         swatch.title = a.label;
         swatch.addEventListener('click', () => {
           currentAccent = a.value;

@@ -22,7 +22,7 @@ import { ToolConfirmationQueue } from './viewmodel/ToolConfirmationQueue.js';
 import type { AppSettings, PluginPageContribution } from './types.js';
 import { ClientLogger } from './ClientLogger.js';
 import { initAnoClawAPI } from './anoclaw-api.js';
-import { localeDirection, normalizeLocale, setLocale } from './i18n/index.js';
+import { getLocale, localeDirection, normalizeLocale, onLocaleChange, setLocale, t } from './i18n/index.js';
 
 const SETTINGS_KEY = 'anoclaw-settings';
 
@@ -77,6 +77,7 @@ class App {
     this._sessionVM.setAgentVM(this._agentVM);
     this._titleBar = new TitleBar();
     this._pluginVM = new PluginViewModel();
+    onLocaleChange(() => this._syncPluginPages());
 
     // Initialize anoclaw UI API (components, registry, slots)
     initAnoClawAPI();
@@ -402,14 +403,17 @@ class App {
   }
 
   private _applyLocale(): void {
+    const previousLocale = getLocale();
     const locale = setLocale(this._settings.lang);
     this._settings.lang = locale;
     const root = document.documentElement;
     root.lang = locale;
     root.dir = localeDirection(locale);
-    window.dispatchEvent(new CustomEvent('locale-changed', {
-      detail: { locale },
-    }));
+    if (locale !== previousLocale) {
+      window.dispatchEvent(new CustomEvent('locale-changed', {
+        detail: { locale, previousLocale },
+      }));
+    }
   }
 
   private _getAccentName(hex: string): string {
@@ -540,7 +544,7 @@ class App {
   /** Sync plugin-contributed pages to TitleBar PAGES dropdown and PageRegistry. */
   private _syncPluginPages(): void {
     const entries: Array<{ page: string; label: string }> = [];
-    entries.push({ page: 'plugins', label: 'Plugins' });
+    entries.push({ page: 'plugins', label: t('nav.section.plugins') });
 
     const pageArea = document.getElementById('page-area');
     if (!pageArea) return;

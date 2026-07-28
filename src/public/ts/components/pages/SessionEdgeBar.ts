@@ -1,6 +1,7 @@
 // AnoClaw Cinema — persistent, collapsible session navigation tree.
 
 import type { SessionNode, SessionStatus } from '../../types.js';
+import { onLocaleChange, t } from '../../i18n/index.js';
 
 const SVG_SEARCH = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="6.5" cy="6.5" r="4.5"/><path d="M10 10l3.5 3.5"/></svg>`;
 const SVG_PLUS = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 2v12M2 8h12"/></svg>`;
@@ -134,23 +135,23 @@ function statusLabel(status: SessionStatus): string {
     case 'working':
     case 'started':
     case 'tool_executing':
-      return 'Working';
+      return t('session.status.working');
     case 'paused':
-      return 'Paused';
+      return t('session.status.paused');
     case 'error':
-      return 'Error';
+      return t('session.status.error');
     case 'Idle':
-      return 'Idle';
+      return t('session.status.idle');
     case 'Archived':
-      return 'Archived';
+      return t('session.status.archived');
     default:
-      return 'Active';
+      return t('session.status.active');
   }
 }
 
 function displayTitle(node: SessionNode): string {
   const title = (node.title || node.id).trim();
-  if (isCoordinationSession(node)) return title.replace(COORDINATION_PREFIX, '').trim() || 'Coordination update';
+  if (isCoordinationSession(node)) return title.replace(COORDINATION_PREFIX, '').trim() || t('session.coordinationUpdate');
   return title;
 }
 
@@ -179,25 +180,26 @@ export class SessionEdgeBar {
     this._callbacks = callbacks;
     this.element = this._build();
     this._applyCollapsedState(false);
+    onLocaleChange(() => this._refreshLocale());
   }
 
   private _build(): HTMLElement {
     const sidebar = document.createElement('aside');
     sidebar.className = 'cinema-edge-left';
-    sidebar.setAttribute('aria-label', 'Session navigation');
+    sidebar.setAttribute('aria-label', t('session.navigation'));
 
     const header = document.createElement('div');
     header.className = 'edge-sidebar-header';
 
     const title = document.createElement('div');
     title.className = 'edge-sidebar-title';
-    title.textContent = 'Sessions';
+    title.textContent = t('session.sessions');
     header.appendChild(title);
 
     const actions = document.createElement('div');
     actions.className = 'edge-sidebar-actions';
 
-    this._searchButton = this._iconButton(SVG_SEARCH, 'Search sessions', 'edge-sidebar-action edge-search');
+    this._searchButton = this._iconButton(SVG_SEARCH, t('session.search'), 'edge-sidebar-action edge-search');
     this._searchButton.setAttribute('aria-expanded', 'false');
     this._searchButton.addEventListener('click', () => {
       if (this._collapsed) this._setCollapsed(false);
@@ -205,7 +207,7 @@ export class SessionEdgeBar {
     });
     actions.appendChild(this._searchButton);
 
-    const newButton = this._iconButton(SVG_PLUS, 'New session', 'edge-sidebar-action edge-new-btn');
+    const newButton = this._iconButton(SVG_PLUS, t('session.new'), 'edge-sidebar-action edge-new-btn');
     newButton.addEventListener('click', () => this._callbacks.onNewSession());
     actions.appendChild(newButton);
 
@@ -218,8 +220,8 @@ export class SessionEdgeBar {
 
     this._searchInput = document.createElement('input');
     this._searchInput.type = 'search';
-    this._searchInput.placeholder = 'Search sessions and messages';
-    this._searchInput.setAttribute('aria-label', 'Search sessions and messages');
+    this._searchInput.placeholder = t('session.searchPlaceholder');
+    this._searchInput.setAttribute('aria-label', t('session.searchPlaceholder'));
     this._searchInput.addEventListener('input', () => this._onSearchInput());
     this._searchInput.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') this._setSearchOpen(false);
@@ -230,7 +232,7 @@ export class SessionEdgeBar {
     });
     this._searchPanel.appendChild(this._searchInput);
 
-    const closeSearch = this._iconButton(SVG_CLOSE, 'Close search', 'edge-search-close');
+    const closeSearch = this._iconButton(SVG_CLOSE, t('session.closeSearch'), 'edge-search-close');
     closeSearch.addEventListener('click', () => this._setSearchOpen(false));
     this._searchPanel.appendChild(closeSearch);
     sidebar.appendChild(this._searchPanel);
@@ -238,15 +240,15 @@ export class SessionEdgeBar {
     this._treeContainer = document.createElement('div');
     this._treeContainer.className = 'edge-session-tree';
     this._treeContainer.setAttribute('role', 'tree');
-    this._treeContainer.setAttribute('aria-label', 'Sessions');
+    this._treeContainer.setAttribute('aria-label', t('session.sessions'));
     sidebar.appendChild(this._treeContainer);
 
     const footer = document.createElement('div');
     footer.className = 'edge-sidebar-footer';
-    this._collapseButton = this._iconButton(SVG_COLLAPSE, 'Collapse session navigation', 'edge-sidebar-collapse');
+    this._collapseButton = this._iconButton(SVG_COLLAPSE, t('session.collapseNavigation'), 'edge-sidebar-collapse');
     this._collapseButton.setAttribute('aria-expanded', 'true');
     this._collapseLabel = document.createElement('span');
-    this._collapseLabel.textContent = 'Collapse';
+    this._collapseLabel.textContent = t('session.collapse');
     this._collapseButton.appendChild(this._collapseLabel);
     this._collapseButton.addEventListener('click', () => this._setCollapsed(!this._collapsed));
     footer.appendChild(this._collapseButton);
@@ -263,6 +265,29 @@ export class SessionEdgeBar {
     button.title = title;
     button.setAttribute('aria-label', title);
     return button;
+  }
+
+  private _refreshLocale(): void {
+    this.element.setAttribute('aria-label', t('session.navigation'));
+    const title = this.element.querySelector<HTMLElement>('.edge-sidebar-title');
+    if (title) title.textContent = t('session.sessions');
+    this._searchButton.title = t('session.search');
+    this._searchButton.setAttribute('aria-label', t('session.search'));
+    const newButton = this.element.querySelector<HTMLButtonElement>('.edge-new-btn');
+    if (newButton) {
+      newButton.title = t('session.new');
+      newButton.setAttribute('aria-label', t('session.new'));
+    }
+    this._searchInput.placeholder = t('session.searchPlaceholder');
+    this._searchInput.setAttribute('aria-label', t('session.searchPlaceholder'));
+    const closeSearch = this.element.querySelector<HTMLButtonElement>('.edge-search-close');
+    if (closeSearch) {
+      closeSearch.title = t('session.closeSearch');
+      closeSearch.setAttribute('aria-label', t('session.closeSearch'));
+    }
+    this._treeContainer.setAttribute('aria-label', t('session.sessions'));
+    this._applyCollapsedState(false);
+    this._renderContent();
   }
 
   renderTree(tree: SessionNode[], activeId: string | null): void {
@@ -305,7 +330,7 @@ export class SessionEdgeBar {
       if (!this._collapsed) {
         const empty = document.createElement('div');
         empty.className = 'edge-session-empty';
-        empty.textContent = 'No sessions yet';
+        empty.textContent = t('session.none');
         this._treeContainer.appendChild(empty);
       }
       return;
@@ -372,7 +397,7 @@ export class SessionEdgeBar {
     row.style.setProperty('--session-depth', String(depth));
     row.title = node.title || node.id;
 
-    const toggle = this._iconButton(SVG_CHEVRON, expanded ? 'Collapse branch' : 'Expand branch', 'session-tree-toggle');
+    const toggle = this._iconButton(SVG_CHEVRON, expanded ? t('session.collapseBranch') : t('session.expandBranch'), 'session-tree-toggle');
     toggle.classList.toggle('expanded', expanded);
     toggle.disabled = !hasChildren;
     toggle.tabIndex = -1;
@@ -407,11 +432,11 @@ export class SessionEdgeBar {
       const count = document.createElement('span');
       count.className = 'session-tree-count';
       count.textContent = String(summary.descendants);
-      count.title = `${summary.descendants} child sessions`;
+      count.title = t('session.childCount', { count: summary.descendants });
       row.appendChild(count);
     }
 
-    const archive = this._iconButton(SVG_DELETE, 'Archive session', 'session-tree-archive');
+    const archive = this._iconButton(SVG_DELETE, t('session.archive'), 'session-tree-archive');
     archive.tabIndex = -1;
     row.setAttribute('aria-keyshortcuts', 'Delete');
     archive.addEventListener('click', (event) => {
@@ -453,7 +478,7 @@ export class SessionEdgeBar {
     row.tabIndex = -1;
     row.style.setProperty('--session-depth', String(depth));
 
-    const toggle = this._iconButton(SVG_CHEVRON, expanded ? 'Collapse coordination history' : 'Expand coordination history', 'session-tree-toggle');
+    const toggle = this._iconButton(SVG_CHEVRON, expanded ? t('session.collapseCoordination') : t('session.expandCoordination'), 'session-tree-toggle');
     toggle.classList.toggle('expanded', expanded);
     toggle.tabIndex = -1;
     row.appendChild(toggle);
@@ -467,11 +492,11 @@ export class SessionEdgeBar {
     copy.className = 'session-tree-copy';
     const title = document.createElement('span');
     title.className = 'session-tree-title';
-    title.textContent = 'Coordination history';
+    title.textContent = t('session.coordinationHistory');
     copy.appendChild(title);
     const meta = document.createElement('span');
     meta.className = 'session-tree-meta';
-    meta.textContent = 'System activity';
+    meta.textContent = t('session.systemActivity');
     copy.appendChild(meta);
     row.appendChild(copy);
 
@@ -512,10 +537,10 @@ export class SessionEdgeBar {
   private _summaryText(node: SessionNode, summary: SessionTreeSummary): string {
     const parts: string[] = [];
     if (node.agentName) parts.push(node.agentName);
-    if (summary.working > 0) parts.push(`${summary.working} working`);
-    if (summary.errors > 0) parts.push(`${summary.errors} errors`);
+    if (summary.working > 0) parts.push(t('session.summaryWorking', { count: summary.working }));
+    if (summary.errors > 0) parts.push(t('session.summaryErrors', { count: summary.errors }));
     if (summary.working === 0 && summary.errors === 0) {
-      if (summary.descendants > 0) parts.push(`${summary.descendants} sessions`);
+      if (summary.descendants > 0) parts.push(t('session.summarySessions', { count: summary.descendants }));
       else parts.push(statusLabel(node.status));
     }
     return parts.join(' · ');
@@ -621,9 +646,9 @@ export class SessionEdgeBar {
     this.element.setAttribute('data-collapsed', String(this._collapsed));
     this._collapseButton.innerHTML = this._collapsed ? SVG_EXPAND : SVG_COLLAPSE;
     this._collapseLabel = document.createElement('span');
-    this._collapseLabel.textContent = this._collapsed ? 'Expand' : 'Collapse';
+    this._collapseLabel.textContent = this._collapsed ? t('session.expand') : t('session.collapse');
     this._collapseButton.appendChild(this._collapseLabel);
-    this._collapseButton.title = this._collapsed ? 'Expand session navigation' : 'Collapse session navigation';
+    this._collapseButton.title = this._collapsed ? t('session.expandNavigation') : t('session.collapseNavigation');
     this._collapseButton.setAttribute('aria-label', this._collapseButton.title);
     this._collapseButton.setAttribute('aria-expanded', String(!this._collapsed));
     if (this._collapsed) this._setSearchOpen(false, false);
@@ -716,7 +741,7 @@ export class SessionEdgeBar {
     if (!results.length) {
       const empty = document.createElement('div');
       empty.className = 'edge-session-empty';
-      empty.textContent = 'No matching sessions';
+      empty.textContent = t('session.noMatches');
       this._treeContainer.appendChild(empty);
       return;
     }
@@ -742,7 +767,7 @@ export class SessionEdgeBar {
       copy.appendChild(title);
       const meta = document.createElement('span');
       meta.className = 'session-tree-meta';
-      meta.textContent = result.excerpt || [node?.agentName, node ? statusLabel(node.status) : 'Message match'].filter(Boolean).join(' · ');
+      meta.textContent = result.excerpt || [node?.agentName, node ? statusLabel(node.status) : t('session.messageMatch')].filter(Boolean).join(' · ');
       copy.appendChild(meta);
       row.appendChild(copy);
 

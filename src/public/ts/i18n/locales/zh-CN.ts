@@ -1,4 +1,15 @@
+import { corePagesZhCN } from './core-pages.js';
+import { coreSessionZhCN } from './core-session.js';
+import { agentsPluginsZhCN } from './agents-plugins.js';
+import { conversationZhCN } from './conversation.js';
+import { workspaceMiscZhCN } from './workspace-misc.js';
+
 export const zhCN = {
+  ...corePagesZhCN,
+  ...coreSessionZhCN,
+  ...agentsPluginsZhCN,
+  ...conversationZhCN,
+  ...workspaceMiscZhCN,
   'settings.appearance': '外观',
   'settings.theme': '主题',
   'settings.theme.dark': '深色',
@@ -12,7 +23,7 @@ export const zhCN = {
   'settings.accent.orange': '橙色',
   'settings.language': '语言',
   'settings.interfaceLanguage': '界面语言',
-  'settings.languageHint': '设置会保存到本机，并逐步应用到更多界面。',
+  'settings.languageHint': '设置会保存到本机，并立即应用到整个界面。',
   'settings.display': '显示',
   'settings.showThinkingCards': '显示思考卡片',
   'settings.showToolCards': '显示工具卡片',

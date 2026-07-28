@@ -6,6 +6,7 @@ import { App } from '../../app.js';
 import { handlePathClick } from '../../utils/ClickablePathHandler.js';
 import { ToastManager } from '../../ToastManager.js';
 import { slotRegistry } from '../../SlotRegistry.js';
+import { onLocaleChange, t } from '../../i18n/index.js';
 
 export class SessionsPageOverfly {
   private _panel: HTMLElement | null = null;
@@ -19,6 +20,9 @@ export class SessionsPageOverfly {
 
   constructor(onClose?: () => void) {
     this._onClose = onClose || null;
+    onLocaleChange(() => {
+      if (this._currentPanel) this.show(this._currentPanel, this._activeSessionId, this._workspacePath);
+    });
   }
 
   get isOpen(): boolean { return this._panel !== null; }
@@ -112,7 +116,7 @@ export class SessionsPageOverfly {
   private _renderOverviewPanel(overfly: HTMLElement, activeSessionId: string | null): void {
     const title = document.createElement('div');
     title.className = 'cinema-overfly-title';
-    title.textContent = 'Session Overview';
+    title.textContent = t('overview.title');
     overfly.appendChild(title);
 
     const convVM = App.getInstance().conversationVM;
@@ -126,11 +130,11 @@ export class SessionsPageOverfly {
     };
 
     const items = [
-      { label: 'Messages', value: stats.messages },
-      { label: 'User Messages', value: stats.users },
-      { label: 'Tool Calls', value: stats.tools },
-      { label: 'Thinking Steps', value: stats.thinks },
-      { label: 'Session ID', value: activeSessionId?.slice(0, 8) || '-', mono: true },
+      { label: t('overview.messages'), value: stats.messages },
+      { label: t('overview.userMessages'), value: stats.users },
+      { label: t('overview.toolCalls'), value: stats.tools },
+      { label: t('overview.thinkingSteps'), value: stats.thinks },
+      { label: t('overview.sessionId'), value: activeSessionId?.slice(0, 8) || '-', mono: true },
     ];
 
     for (const item of items) {
@@ -148,7 +152,7 @@ export class SessionsPageOverfly {
   private _renderPlanPanel(overfly: HTMLElement): void {
     const title = document.createElement('div');
     title.className = 'cinema-overfly-title';
-    title.textContent = 'Plan';
+    title.textContent = t('plan.title');
     overfly.appendChild(title);
 
     const convVM = App.getInstance().conversationVM;
@@ -161,7 +165,7 @@ export class SessionsPageOverfly {
     if (!todos.length && !latestPlanBoundary) {
       const empty = document.createElement('div');
       empty.style.cssText = 'color:var(--cinema-text-welcome-desc);font-size:11px;padding:12px;text-align:center;';
-      empty.textContent = 'No active plan';
+      empty.textContent = t('plan.none');
       overfly.appendChild(empty);
       return;
     }
@@ -171,8 +175,8 @@ export class SessionsPageOverfly {
       row.style.cssText = 'display:flex;gap:8px;align-items:flex-start;padding:4px 0;font-size:11px;';
       const isExit = latestPlanBoundary.type === 'plan_exit';
       row.innerHTML = `
-        <span style="color:${isExit ? 'var(--cinema-text-muted)' : 'var(--color-success)'}">${isExit ? '[done]' : '[active]'}</span>
-        <span style="color:var(--cinema-text-overlay)">${_esc(isExit ? 'Plan mode exited' : (latestPlanBoundary.planTitle || latestPlanBoundary.content || 'Plan mode active'))}</span>
+        <span style="color:${isExit ? 'var(--cinema-text-muted)' : 'var(--color-success)'}">${isExit ? t('plan.done') : t('plan.active')}</span>
+        <span style="color:var(--cinema-text-overlay)">${_esc(isExit ? t('plan.exited') : (latestPlanBoundary.planTitle || latestPlanBoundary.content || t('plan.modeActive')))}</span>
       `;
       overfly.appendChild(row);
     }

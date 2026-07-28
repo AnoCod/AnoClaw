@@ -3,6 +3,8 @@
  * Displays as a colored notification card in the chat flow.
  */
 
+import { t } from '../../../i18n/index.js';
+
 export interface TaskNotificationData {
   subSessionId: string;
   subAgentId: string;
@@ -21,8 +23,8 @@ export class TaskNotificationDelegate {
     const w = window as any;
     if (options.notify && w.electronAPI?.showNotification) {
       const title = data.status === 'completed'
-        ? `Completed: ${data.summary}`
-        : `Failed: ${data.summary}`;
+        ? t('message.task.notification.completed', { summary: data.summary })
+        : t('message.task.notification.failed', { summary: data.summary });
       w.electronAPI.showNotification(title, data.result.slice(0, 200)).catch(() => {});
     }
   }
@@ -39,7 +41,11 @@ export class TaskNotificationDelegate {
     const header = this.element.firstElementChild as HTMLElement | null;
     if (header) {
       const agentName = data.subAgentId || 'sub-agent';
-      header.textContent = `${status === 'completed' ? 'Task completed' : 'Task failed'}: ${agentName} — ${data.summary}`;
+      const key = status === 'completed' ? 'message.task.header.completed' : 'message.task.header.failed';
+      const params = { agent: agentName, summary: data.summary };
+      header.textContent = t(key, params);
+      header.setAttribute('data-i18n-key', key);
+      header.setAttribute('data-i18n-params', JSON.stringify(params));
     }
     let body = this.element.querySelector<HTMLElement>('.task-notification-body');
     if (data.result) {
@@ -77,9 +83,12 @@ export class TaskNotificationDelegate {
       font-weight: 600; margin-bottom: 4px;
       color: var(--color-text-primary, #eee);
     `;
-    const statusLabel = data.status === 'completed' ? 'Task completed' : 'Task failed';
     const agentName = data.subAgentId || 'sub-agent';
-    header.textContent = `${statusLabel}: ${agentName} — ${data.summary}`;
+    const key = data.status === 'completed' ? 'message.task.header.completed' : 'message.task.header.failed';
+    const params = { agent: agentName, summary: data.summary };
+    header.textContent = t(key, params);
+    header.setAttribute('data-i18n-key', key);
+    header.setAttribute('data-i18n-params', JSON.stringify(params));
     wrapper.appendChild(header);
 
     if (data.result) {

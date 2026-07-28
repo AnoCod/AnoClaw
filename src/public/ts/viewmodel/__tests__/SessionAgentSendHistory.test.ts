@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastManager } from '../../ToastManager.js';
 import { SessionAgent } from '../SessionAgent.js';
 import type { SessionViewModel } from '../SessionViewModel.js';
+import { setLocale } from '../../i18n/index.js';
 
 function makeAgent(sendMessage: ReturnType<typeof vi.fn>): SessionAgent {
   const sessionVM = {
@@ -15,7 +16,10 @@ function makeAgent(sendMessage: ReturnType<typeof vi.fn>): SessionAgent {
   return new SessionAgent('session-1', sessionVM);
 }
 
+beforeEach(() => setLocale('zh-CN'));
+
 afterEach(() => {
+  setLocale('zh-CN');
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -32,6 +36,8 @@ describe('SessionAgent send transaction and history reconstruction', () => {
     expect(agent.state.isStreaming).toBe(false);
     expect(agent.state.messages.messages.some((message) => message.role === 'user')).toBe(false);
     expect(agent.state.messages.messages.at(-1)?.type).toBe('error');
+    expect(agent.state.messages.messages.at(-1)?.content).toContain('消息发送失败');
+    expect(agent.state.messages.messages.at(-1)?.content).toContain('WebSocket 无法接收消息');
     expect(added).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }));
   });
 

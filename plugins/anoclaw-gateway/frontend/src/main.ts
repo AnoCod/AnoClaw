@@ -4,6 +4,9 @@
 // message detail view, connection wizard, search/filter, message templates,
 // retry queue, real-time message counter.
 
+import { dateLocale, setPluginLocale, t } from './i18n.js';
+import type { PluginTranslationKey } from './i18n.js';
+
 interface GatewayConnection { id: string; platform: string; name: string; connected: boolean; config: Record<string,string>; createdAt?: string; }
 
 interface PlatformDef {
@@ -50,39 +53,54 @@ interface RetryItem {
   nextRetryAt: string;
 }
 
-const PLATFORMS: PlatformDef[] = [
+interface GatewayUiDraft {
+  focusedId?: string;
+  searchText?: string;
+  composeText?: string;
+  composeTarget?: string;
+  form?: {
+    kind: 'connection' | 'template';
+    platform?: string;
+    values: Record<string, string>;
+  };
+  wizardConnectionId?: string;
+}
+
+function platformDefinitions(): PlatformDef[] {
+  return [
   { id: 'telegram', name: 'Telegram', icon: 'telegram', color: '#57c1ff', colorSoft: 'rgba(87,193,255,0.15)', fields: [
-    { key: 'botToken', label: 'Bot Token', type: 'password', placeholder: '123456:ABC-DEF...', required: true, help: 'Get from @BotFather on Telegram' },
-    { key: 'allowedUserIds', label: 'Allowed User IDs', type: 'text', placeholder: '123,456', required: false, help: 'Comma-separated user IDs. Leave empty for all.' },
+    { key: 'botToken', label: t('gateway.platform.telegram.botToken'), type: 'password', placeholder: '123456:ABC-DEF...', required: true, help: t('gateway.platform.telegram.botTokenHelp') },
+    { key: 'allowedUserIds', label: t('gateway.platform.telegram.allowedUsers'), type: 'text', placeholder: '123,456', required: false, help: t('gateway.platform.telegram.allowedUsersHelp') },
   ], setupSteps: [
-    '1. Open Telegram and search for @BotFather',
-    '2. Send /newbot and follow the prompts to create your bot',
-    '3. Copy the bot token from BotFather',
-    '4. Optionally, start a chat with your bot and send /start',
-    '5. Paste the bot token above and click Connect',
+    t('gateway.platform.telegram.step1'),
+    t('gateway.platform.telegram.step2'),
+    t('gateway.platform.telegram.step3'),
+    t('gateway.platform.telegram.step4'),
+    t('gateway.platform.telegram.step5'),
   ]},
   { id: 'wechat', name: 'WeChat', icon: 'wechat', color: '#59d499', colorSoft: 'rgba(89,212,153,0.15)', fields: [
-    { key: 'token', label: 'Token', type: 'password', placeholder: 'iLink Bot Token', required: true, help: 'Your WeChat iLink Bot API token' },
-    { key: 'accountId', label: 'Account ID', type: 'text', placeholder: 'wechat account id', required: true, help: 'Your WeChat account ID' },
+    { key: 'token', label: t('gateway.platform.wechat.token'), type: 'password', placeholder: 'iLink Bot Token', required: true, help: t('gateway.platform.wechat.tokenHelp') },
+    { key: 'accountId', label: t('gateway.platform.wechat.accountId'), type: 'text', placeholder: 'wechat account id', required: true, help: t('gateway.platform.wechat.accountIdHelp') },
   ], setupSteps: [
-    '1. Register at the WeChat iLink Bot API portal',
-    '2. Create a new bot application',
-    '3. Get your API token from the dashboard',
-    '4. Copy your account ID from settings',
-    '5. Enter credentials above and click Connect',
+    t('gateway.platform.wechat.step1'),
+    t('gateway.platform.wechat.step2'),
+    t('gateway.platform.wechat.step3'),
+    t('gateway.platform.wechat.step4'),
+    t('gateway.platform.wechat.step5'),
   ]},
   { id: 'feishu', name: 'Feishu', icon: 'feishu', color: '#ffc533', colorSoft: 'rgba(255,197,51,0.15)', fields: [
-    { key: 'appId', label: 'App ID', type: 'text', placeholder: 'cli_...', required: true, help: 'Your Feishu app ID (starts with cli_)' },
-    { key: 'appSecret', label: 'App Secret', type: 'password', placeholder: '', required: true, help: 'Your Feishu app secret key' },
+    { key: 'appId', label: t('gateway.platform.feishu.appId'), type: 'text', placeholder: 'cli_...', required: true, help: t('gateway.platform.feishu.appIdHelp') },
+    { key: 'appSecret', label: t('gateway.platform.feishu.appSecret'), type: 'password', placeholder: '', required: true, help: t('gateway.platform.feishu.appSecretHelp') },
   ], setupSteps: [
-    '1. Go to the Feishu Open Platform (open.feishu.cn)',
-    '2. Create a new application',
-    '3. Copy the App ID from app credentials',
-    '4. Copy the App Secret from app credentials',
-    '5. Enable bot capabilities in the app settings',
-    '6. Enter credentials above and click Connect',
+    t('gateway.platform.feishu.step1'),
+    t('gateway.platform.feishu.step2'),
+    t('gateway.platform.feishu.step3'),
+    t('gateway.platform.feishu.step4'),
+    t('gateway.platform.feishu.step5'),
+    t('gateway.platform.feishu.step6'),
   ]},
-];
+  ];
+}
 
 const ICONS: Record<string, string> = {
   telegram: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>`,
@@ -128,6 +146,65 @@ class GatewayPage {
     this.container = document.createElement('div');
     this.container.innerHTML = `<div class="gw-inner"></div>`;
     this._injectStyles();
+    window.addEventListener('message', this._onHostMessage);
+  }
+
+  private _onHostMessage = (event: MessageEvent): void => {
+    if (event.source !== window.parent || event.data?.type !== 'anoclaw:locale') return;
+    this._refreshLocale(event.data.locale);
+  };
+
+  private _captureUiDraft(): GatewayUiDraft {
+    const active = document.activeElement as HTMLElement | null;
+    const form = this.container.querySelector('#gw-add-form') as HTMLElement | null;
+    const formValues: Record<string, string> = {};
+    form?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input[id], textarea[id], select[id]').forEach((field) => {
+      formValues[field.id] = field.value;
+    });
+    return {
+      focusedId: active?.id || undefined,
+      searchText: (this.container.querySelector('#gw-search-input') as HTMLInputElement | null)?.value,
+      composeText: (this.container.querySelector('#gw-compose-input') as HTMLTextAreaElement | null)?.value,
+      composeTarget: (this.container.querySelector('#gw-compose-target') as HTMLSelectElement | null)?.value,
+      form: form ? {
+        kind: form.dataset.kind === 'template' ? 'template' : 'connection',
+        platform: form.dataset.platform,
+        values: formValues,
+      } : undefined,
+      wizardConnectionId: this.container.querySelector('#gw-wizard-panel')
+        ? this._wizardConnectionId || undefined
+        : undefined,
+    };
+  }
+
+  private _refreshLocale(locale: unknown): void {
+    const draft = this._captureUiDraft();
+    setPluginLocale(locale);
+    this._render();
+
+    if (draft.form?.kind === 'connection' && draft.form.platform) {
+      this._showAdd(draft.form.platform);
+    } else if (draft.form?.kind === 'template') {
+      (this.container.querySelector('#gw-add-template') as HTMLButtonElement | null)?.click();
+    } else if (draft.wizardConnectionId) {
+      this._showWizard(draft.wizardConnectionId);
+    }
+
+    const search = this.container.querySelector('#gw-search-input') as HTMLInputElement | null;
+    if (search && draft.searchText !== undefined) search.value = draft.searchText;
+    const compose = this.container.querySelector('#gw-compose-input') as HTMLTextAreaElement | null;
+    if (compose && draft.composeText !== undefined) compose.value = draft.composeText;
+    const target = this.container.querySelector('#gw-compose-target') as HTMLSelectElement | null;
+    if (target && draft.composeTarget !== undefined) target.value = draft.composeTarget;
+    if (draft.form) {
+      for (const [id, value] of Object.entries(draft.form.values)) {
+        const field = this.container.querySelector(`#${CSS.escape(id)}`) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null;
+        if (field) field.value = value;
+      }
+    }
+    if (draft.focusedId) {
+      (this.container.querySelector(`#${CSS.escape(draft.focusedId)}`) as HTMLElement | null)?.focus();
+    }
   }
 
   private _injectStyles(): void {
@@ -588,7 +665,7 @@ class GatewayPage {
     const dot = this.container.querySelector('.gw-ws-dot');
     const label = this.container.querySelector('.gw-ws-label');
     if (dot) dot.classList.toggle('connected', this._wsConnected);
-    if (label) label.textContent = this._wsConnected ? 'Live' : 'Reconnecting...';
+    if (label) label.textContent = this._wsConnected ? t('gateway.ws.live') : t('gateway.ws.reconnecting');
   }
 
   private _bumpCounter(): void {
@@ -612,58 +689,67 @@ class GatewayPage {
   }
 
   // ── Rendering ──
+  private _countLabel(count: number, singular: PluginTranslationKey, plural: PluginTranslationKey): string {
+    return t(count === 1 ? singular : plural, { count });
+  }
+
   private _render(): void {
     const inner = this.container.querySelector('.gw-inner')!;
+    const platforms = platformDefinitions();
     inner.innerHTML = `
       <div class="gw-header">
-        <div class="gw-header-title">Gateway</div>
+        <div class="gw-header-title">${t('gateway.title')}</div>
         <div class="gw-header-status">
           <span class="gw-msg-counter">${this._inbox.length}</span>
           <span class="gw-ws-dot ${this._wsConnected ? 'connected' : ''}"></span>
-          <span class="gw-ws-label">${this._wsConnected ? 'Live' : 'Reconnecting...'}</span>
+          <span class="gw-ws-label">${this._wsConnected ? t('gateway.ws.live') : t('gateway.ws.reconnecting')}</span>
         </div>
       </div>
 
-      <div class="gw-platforms-label">Platforms</div>
+      <div class="gw-platforms-label">${t('gateway.platforms')}</div>
       <div class="gw-platforms-grid">
-        ${PLATFORMS.map(p => `
+        ${platforms.map(p => `
           <div class="gw-platform-card" data-platform="${p.id}">
             <div class="gw-platform-icon" style="color:${p.color};">
               ${platformIcon(p.icon)}
             </div>
             <div class="gw-platform-name">${p.name}</div>
-            <div class="gw-platform-desc">${this._connections.filter(c => c.platform === p.id).length} connection${this._connections.filter(c => c.platform === p.id).length !== 1 ? 's' : ''}</div>
+            <div class="gw-platform-desc">${this._countLabel(
+              this._connections.filter(c => c.platform === p.id).length,
+              'gateway.connection.one',
+              'gateway.connection.many',
+            )}</div>
           </div>`).join('')}
       </div>
 
       ${this._connections.length ? `
-        <div class="gw-section-legend" style="margin-bottom:8px;">Connections</div>
+        <div class="gw-section-legend" style="margin-bottom:8px;">${t('gateway.connections')}</div>
         ${this._connections.map(c => `
           <div class="gw-conn-card">
             <div class="gw-conn-info">
               <span class="gw-conn-status ${c.connected ? 'connected' : 'disconnected'}"></span>
               <div>
                 <div class="gw-conn-name">${esc(c.name || c.id)}</div>
-                <div class="gw-conn-meta">${c.platform} · ${c.connected ? 'Connected' : 'Disconnected'}</div>
+                <div class="gw-conn-meta">${c.platform} · ${c.connected ? t('gateway.connection.connected') : t('gateway.connection.disconnected')}</div>
               </div>
             </div>
             <div class="gw-conn-actions">
-              <button class="gw-btn gw-btn-sm" data-act="wizard" data-id="${c.id}" title="Setup Guide">${ICONS.wizard}</button>
+              <button class="gw-btn gw-btn-sm" data-act="wizard" data-id="${c.id}" title="${t('gateway.connection.setupGuide')}">${ICONS.wizard}</button>
               <button class="gw-btn ${c.connected ? 'gw-btn-danger' : 'gw-btn-connect'}" data-act="toggle" data-id="${c.id}">
-                ${c.connected ? `${ICONS.disconnect} Disconnect` : `${ICONS.connect} Connect`}
+                ${c.connected ? `${ICONS.disconnect} ${t('gateway.connection.disconnect')}` : `${ICONS.connect} ${t('gateway.connection.connect')}`}
               </button>
               <button class="gw-btn gw-btn-danger" data-act="remove" data-id="${c.id}">
                 ${ICONS.trash}
               </button>
             </div>
           </div>`).join('')}
-      ` : `<div class="gw-empty">${ICONS.connect}<br>No connections configured.<br>Click a platform above to add one.</div>`}
+      ` : `<div class="gw-empty">${ICONS.connect}<br>${t('gateway.connection.empty')}<br>${t('gateway.connection.emptyHint')}</div>`}
 
       <div class="gw-tabs" style="margin-top:20px;">
-        <button class="gw-tab ${this._activeTab === 'inbox' ? 'active' : ''}" data-tab="inbox">${ICONS.inbox} Inbox <span class="gw-tab-badge">${this._inbox.length}</span></button>
-        <button class="gw-tab ${this._activeTab === 'templates' ? 'active' : ''}" data-tab="templates">${ICONS.template} Templates</button>
-        <button class="gw-tab ${this._activeTab === 'retry' ? 'active' : ''}" data-tab="retry">${ICONS.retry} Retry ${this._retryQueue.length > 0 ? `<span class="gw-tab-badge">${this._retryQueue.length}</span>` : ''}</button>
-        <button class="gw-tab ${this._activeTab === 'health' ? 'active' : ''}" data-tab="health">${ICONS.health} Health</button>
+        <button class="gw-tab ${this._activeTab === 'inbox' ? 'active' : ''}" data-tab="inbox">${ICONS.inbox} ${t('gateway.tab.inbox')} <span class="gw-tab-badge">${this._inbox.length}</span></button>
+        <button class="gw-tab ${this._activeTab === 'templates' ? 'active' : ''}" data-tab="templates">${ICONS.template} ${t('gateway.tab.templates')}</button>
+        <button class="gw-tab ${this._activeTab === 'retry' ? 'active' : ''}" data-tab="retry">${ICONS.retry} ${t('gateway.tab.retry')} ${this._retryQueue.length > 0 ? `<span class="gw-tab-badge">${this._retryQueue.length}</span>` : ''}</button>
+        <button class="gw-tab ${this._activeTab === 'health' ? 'active' : ''}" data-tab="health">${ICONS.health} ${t('gateway.tab.health')}</button>
       </div>
 
       <div id="gw-tab-content"></div>
@@ -731,22 +817,22 @@ class GatewayPage {
     // Search bar
     const searchBar = `
       <div class="gw-search-bar">
-        <input class="gw-search-input" id="gw-search-input" type="text" placeholder="Search messages..." value="${esc(this._searchQuery)}">
+        <input class="gw-search-input" id="gw-search-input" type="text" placeholder="${t('gateway.search.placeholder')}" value="${esc(this._searchQuery)}">
         <select class="gw-search-select" id="gw-search-platform">
-          <option value="">All platforms</option>
+          <option value="">${t('gateway.search.allPlatforms')}</option>
           <option value="telegram" ${this._searchPlatform === 'telegram' ? 'selected' : ''}>Telegram</option>
           <option value="wechat" ${this._searchPlatform === 'wechat' ? 'selected' : ''}>WeChat</option>
           <option value="feishu" ${this._searchPlatform === 'feishu' ? 'selected' : ''}>Feishu</option>
         </select>
-        <button class="gw-btn gw-btn-sm" id="gw-search-btn">${ICONS.search} Search</button>
-        ${this._searchResults !== null ? `<button class="gw-btn gw-btn-sm" id="gw-search-clear">Clear</button>` : ''}
+        <button class="gw-btn gw-btn-sm" id="gw-search-btn">${ICONS.search} ${t('gateway.search.search')}</button>
+        ${this._searchResults !== null ? `<button class="gw-btn gw-btn-sm" id="gw-search-clear">${t('gateway.search.clear')}</button>` : ''}
       </div>`;
 
     // Message detail view
     const detailView = this._selectedMessage ? this._renderMessageDetail(this._selectedMessage) : '';
 
     const bubbleList = msgs.length === 0
-      ? `<div class="gw-empty">${ICONS.inbox}<br>${this._searchResults !== null ? 'No messages match your search.' : 'No messages yet.'}</div>`
+      ? `<div class="gw-empty">${ICONS.inbox}<br>${this._searchResults !== null ? t('gateway.inbox.noMatch') : t('gateway.inbox.empty')}</div>`
       : `<div class="gw-inbox-list">
           ${msgs.map(m => {
             const pc = platformColors[m.platform] || { bg: 'rgba(255,255,255,0.08)', fg: '#9c9c9d' };
@@ -759,7 +845,7 @@ class GatewayPage {
                 <div class="gw-msg-avatar" style="background:${pc.bg};color:${pc.fg};">${initials}</div>
                 <div class="gw-msg-body">
                   <div class="gw-msg-header">
-                    <span class="gw-msg-sender">${esc(m.senderId || 'Unknown')}</span>
+                    <span class="gw-msg-sender">${esc(m.senderId || t('gateway.inbox.unknownSender'))}</span>
                     <span class="gw-msg-platform-badge" style="background:${pc.bg};color:${pc.fg};">${m.platform}</span>
                     <span class="gw-msg-time">${timeAgo(m.timestamp)}</span>
                   </div>
@@ -773,16 +859,16 @@ class GatewayPage {
     const connectedConns = this._connections.filter(c => c.connected);
     const composeBox = connectedConns.length > 0 ? `
       <div class="gw-compose">
-        <div class="gw-compose-label">Send Message</div>
+        <div class="gw-compose-label">${t('gateway.inbox.sendMessage')}</div>
         <div class="gw-compose-target">
-          <label>Target:</label>
+          <label>${t('gateway.inbox.target')}</label>
           <select id="gw-compose-target">
             ${connectedConns.map(c => `<option value="${c.id}">${esc(c.name || c.id)} (${c.platform})</option>`).join('')}
           </select>
         </div>
         <div class="gw-compose-row">
-          <textarea class="gw-compose-input" id="gw-compose-input" placeholder="Type a message..." rows="1"></textarea>
-          <button class="gw-compose-send" id="gw-compose-send">${ICONS.send} Send</button>
+          <textarea class="gw-compose-input" id="gw-compose-input" placeholder="${t('gateway.inbox.messagePlaceholder')}" rows="1"></textarea>
+          <button class="gw-compose-send" id="gw-compose-send">${ICONS.send} ${t('gateway.inbox.send')}</button>
         </div>
       </div>
     ` : '';
@@ -791,8 +877,8 @@ class GatewayPage {
       ${searchBar}
       ${detailView}
       <div class="gw-inbox-header">
-        <div class="gw-inbox-count">${displayMessages.length} message${displayMessages.length !== 1 ? 's' : ''}${this._searchResults !== null ? ' (filtered)' : ''}</div>
-        ${this._inbox.length > 0 ? `<button class="gw-btn gw-btn-danger gw-btn-sm" id="gw-clear-inbox">${ICONS.trash} Clear</button>` : ''}
+        <div class="gw-inbox-count">${this._countLabel(displayMessages.length, 'gateway.inbox.count.one', 'gateway.inbox.count.many')}${this._searchResults !== null ? ` (${t('gateway.inbox.filtered')})` : ''}</div>
+        ${this._inbox.length > 0 ? `<button class="gw-btn gw-btn-danger gw-btn-sm" id="gw-clear-inbox">${ICONS.trash} ${t('gateway.inbox.clear')}</button>` : ''}
       </div>
       ${bubbleList}
       ${composeBox}
@@ -804,23 +890,23 @@ class GatewayPage {
     return `
       <div class="gw-detail-panel">
         <div class="gw-detail-header">
-          <div class="gw-detail-title">${ICONS.detail} Message Detail</div>
-          <button class="gw-btn gw-btn-sm" id="gw-detail-close">${ICONS.close} Close</button>
+          <div class="gw-detail-title">${ICONS.detail} ${t('gateway.detail.title')}</div>
+          <button class="gw-btn gw-btn-sm" id="gw-detail-close">${ICONS.close} ${t('gateway.detail.close')}</button>
         </div>
         <div class="gw-detail-meta">
-          <span class="gw-detail-label">Platform</span>
+          <span class="gw-detail-label">${t('gateway.detail.platform')}</span>
           <span class="gw-detail-value"><span class="gw-msg-platform-badge" style="background:${pc.bg};color:${pc.fg};">${msg.platform}</span></span>
-          <span class="gw-detail-label">Sender</span>
-          <span class="gw-detail-value">${esc(msg.senderId || 'Unknown')}</span>
-          <span class="gw-detail-label">Chat ID</span>
-          <span class="gw-detail-value">${esc(msg.chatId || 'N/A')}</span>
-          <span class="gw-detail-label">Time</span>
-          <span class="gw-detail-value">${msg.timestamp ? new Date(msg.timestamp).toLocaleString() : 'N/A'}</span>
-          ${msg.media_type ? `<span class="gw-detail-label">Media</span><span class="gw-detail-value">${esc(msg.media_type)}${msg.media_url ? ` - ${esc(msg.media_url)}` : ''}</span>` : ''}
-          ${msg.callback_data ? `<span class="gw-detail-label">Callback</span><span class="gw-detail-value">${esc(msg.callback_data)}</span>` : ''}
-          ${msg.connectionId ? `<span class="gw-detail-label">Connection</span><span class="gw-detail-value">${esc(msg.connectionId)}</span>` : ''}
+          <span class="gw-detail-label">${t('gateway.detail.sender')}</span>
+          <span class="gw-detail-value">${esc(msg.senderId || t('gateway.inbox.unknownSender'))}</span>
+          <span class="gw-detail-label">${t('gateway.detail.chatId')}</span>
+          <span class="gw-detail-value">${esc(msg.chatId || t('gateway.common.notAvailable'))}</span>
+          <span class="gw-detail-label">${t('gateway.detail.time')}</span>
+          <span class="gw-detail-value">${msg.timestamp ? new Date(msg.timestamp).toLocaleString(dateLocale()) : t('gateway.common.notAvailable')}</span>
+          ${msg.media_type ? `<span class="gw-detail-label">${t('gateway.detail.media')}</span><span class="gw-detail-value">${esc(msg.media_type)}${msg.media_url ? ` - ${esc(msg.media_url)}` : ''}</span>` : ''}
+          ${msg.callback_data ? `<span class="gw-detail-label">${t('gateway.detail.callback')}</span><span class="gw-detail-value">${esc(msg.callback_data)}</span>` : ''}
+          ${msg.connectionId ? `<span class="gw-detail-label">${t('gateway.detail.connection')}</span><span class="gw-detail-value">${esc(msg.connectionId)}</span>` : ''}
         </div>
-        <div class="gw-detail-content">${esc(msg.text || '(no text content)')}</div>
+        <div class="gw-detail-content">${esc(msg.text || t('gateway.detail.noText'))}</div>
       </div>`;
   }
 
@@ -904,23 +990,23 @@ class GatewayPage {
 
   private _renderTemplatesTabHtml(): string {
     if (this._templates.length === 0) {
-      return `<div class="gw-empty">${ICONS.template}<br>No templates yet.<br>Create one to reuse message formats.</div>`;
+      return `<div class="gw-empty">${ICONS.template}<br>${t('gateway.template.empty')}<br>${t('gateway.template.emptyHint')}</div>`;
     }
     return `
       <div class="gw-inbox-header">
-        <div class="gw-inbox-count">${this._templates.length} template${this._templates.length !== 1 ? 's' : ''}</div>
-        <button class="gw-btn gw-btn-sm gw-btn-primary" id="gw-add-template">+ New Template</button>
+        <div class="gw-inbox-count">${this._countLabel(this._templates.length, 'gateway.template.count.one', 'gateway.template.count.many')}</div>
+        <button class="gw-btn gw-btn-sm gw-btn-primary" id="gw-add-template">${t('gateway.template.new')}</button>
       </div>
-      ${this._templates.map(t => `
+      ${this._templates.map(template => `
         <div class="gw-template-card">
           <div class="gw-template-info">
-            <div class="gw-template-name">${esc(t.name)}</div>
-            <div class="gw-template-meta">${t.platform} · ${t.category} · ${t.mediaType}</div>
-            <div class="gw-template-preview">${esc(t.content)}</div>
+            <div class="gw-template-name">${esc(template.name)}</div>
+            <div class="gw-template-meta">${template.platform} · ${template.category} · ${template.mediaType}</div>
+            <div class="gw-template-preview">${esc(template.content)}</div>
           </div>
           <div class="gw-conn-actions">
-            <button class="gw-btn gw-btn-sm" data-act="use-template" data-id="${t.id}">Use</button>
-            <button class="gw-btn gw-btn-sm gw-btn-danger" data-act="delete-template" data-id="${t.id}">${ICONS.trash}</button>
+            <button class="gw-btn gw-btn-sm" data-act="use-template" data-id="${template.id}">${t('gateway.template.use')}</button>
+            <button class="gw-btn gw-btn-sm gw-btn-danger" data-act="delete-template" data-id="${template.id}">${ICONS.trash}</button>
           </div>
         </div>`).join('')}
     `;
@@ -935,32 +1021,33 @@ class GatewayPage {
         if (existing) existing.remove();
         const form = document.createElement('div');
         form.id = 'gw-add-form'; form.className = 'gw-add-form';
+        form.dataset.kind = 'template';
         form.innerHTML = `
-          <div class="gw-add-form-title">Create Template</div>
+          <div class="gw-add-form-title">${t('gateway.template.create')}</div>
           <div class="gw-form-field">
-            <label class="gw-form-label">Name</label>
-            <input class="gw-form-input" id="gw-tpl-name" type="text" placeholder="e.g., Welcome Message">
+            <label class="gw-form-label">${t('gateway.template.name')}</label>
+            <input class="gw-form-input" id="gw-tpl-name" type="text" placeholder="${t('gateway.template.namePlaceholder')}">
           </div>
           <div class="gw-form-field">
-            <label class="gw-form-label">Platform</label>
+            <label class="gw-form-label">${t('gateway.template.platform')}</label>
             <select class="gw-form-input" id="gw-tpl-platform">
-              <option value="any">Any</option>
+              <option value="any">${t('gateway.template.any')}</option>
               <option value="telegram">Telegram</option>
               <option value="wechat">WeChat</option>
               <option value="feishu">Feishu</option>
             </select>
           </div>
           <div class="gw-form-field">
-            <label class="gw-form-label">Content (use {{variable}} for substitution)</label>
-            <textarea class="gw-form-input" id="gw-tpl-content" rows="3" placeholder="Hello {{name}}, welcome to {{group}}!"></textarea>
+            <label class="gw-form-label">${t('gateway.template.content', { syntax: '{{variable}}' })}</label>
+            <textarea class="gw-form-input" id="gw-tpl-content" rows="3" placeholder="${t('gateway.template.contentPlaceholder', { nameToken: '{{name}}', groupToken: '{{group}}' })}"></textarea>
           </div>
           <div class="gw-form-field">
-            <label class="gw-form-label">Category</label>
-            <input class="gw-form-input" id="gw-tpl-category" type="text" placeholder="e.g., welcome, notification" value="general">
+            <label class="gw-form-label">${t('gateway.template.category')}</label>
+            <input class="gw-form-input" id="gw-tpl-category" type="text" placeholder="${t('gateway.template.categoryPlaceholder')}" value="general">
           </div>
           <div class="gw-form-actions">
-            <button class="gw-form-save">Create</button>
-            <button class="gw-form-cancel">Cancel</button>
+            <button class="gw-form-save">${t('gateway.template.createAction')}</button>
+            <button class="gw-form-cancel">${t('gateway.template.cancel')}</button>
           </div>`;
         inner.appendChild(form);
         form.querySelector('.gw-form-save')?.addEventListener('click', async () => {
@@ -981,7 +1068,7 @@ class GatewayPage {
         const id = (btn as HTMLElement).dataset.id;
         try {
           const r = await fetch(`/api/gateway/templates/${id}/apply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
-          if (r.ok) { const d = await r.json(); alert(`Template applied:\n\n${d.content}`); }
+          if (r.ok) { const d = await r.json(); alert(t('gateway.template.applied', { content: d.content })); }
         } catch {}
       });
     });
@@ -990,7 +1077,7 @@ class GatewayPage {
     this.container.querySelectorAll('[data-act="delete-template"]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const id = (btn as HTMLElement).dataset.id;
-        if (!confirm('Delete this template?')) return;
+        if (!confirm(t('gateway.template.deleteConfirm'))) return;
         await fetch(`/api/gateway/templates/${id}`, { method: 'DELETE' });
         this._load();
       });
@@ -999,23 +1086,23 @@ class GatewayPage {
 
   private _renderRetryTabHtml(): string {
     if (this._retryQueue.length === 0) {
-      return `<div class="gw-empty">${ICONS.retry}<br>No pending retries.</div>`;
+      return `<div class="gw-empty">${ICONS.retry}<br>${t('gateway.retry.empty')}</div>`;
     }
     return `
       <div class="gw-inbox-header">
-        <div class="gw-inbox-count">${this._retryQueue.length} item${this._retryQueue.length !== 1 ? 's' : ''} in queue</div>
-        <button class="gw-btn gw-btn-sm gw-btn-danger" id="gw-clear-retry">${ICONS.trash} Clear All</button>
+        <div class="gw-inbox-count">${this._countLabel(this._retryQueue.length, 'gateway.retry.count.one', 'gateway.retry.count.many')}</div>
+        <button class="gw-btn gw-btn-sm gw-btn-danger" id="gw-clear-retry">${ICONS.trash} ${t('gateway.retry.clearAll')}</button>
       </div>
       ${this._retryQueue.map(r => `
         <div class="gw-retry-card">
-          <span class="gw-retry-status ${r.status}">${r.status}</span>
+          <span class="gw-retry-status ${r.status}">${r.status === 'pending' ? t('gateway.retry.status.pending') : r.status === 'failed' ? t('gateway.retry.status.failed') : esc(r.status)}</span>
           <div style="flex:1;min-width:0;">
             <div style="font-size:12px;font-weight:500;color:var(--gw-text-primary);">${esc(r.platform)} -> ${esc(r.chatId)}</div>
-            <div style="font-size:10px;color:var(--gw-text-quaternary);margin-top:2px;">Attempt ${r.attempt}/${r.maxAttempts} · ${r.lastError ? esc(r.lastError) : 'Waiting...'}</div>
+            <div style="font-size:10px;color:var(--gw-text-quaternary);margin-top:2px;">${t('gateway.retry.attempt', { attempt: r.attempt, max: r.maxAttempts })} · ${r.lastError ? esc(r.lastError) : t('gateway.retry.waiting')}</div>
           </div>
           <div style="font-size:9px;color:var(--gw-text-quaternary);text-align:right;">
             <div>${timeAgo(r.createdAt)}</div>
-            ${r.status === 'pending' ? `<div>Next: ${new Date(r.nextRetryAt).toLocaleTimeString()}</div>` : ''}
+            ${r.status === 'pending' ? `<div>${t('gateway.retry.next', { time: new Date(r.nextRetryAt).toLocaleTimeString(dateLocale()) })}</div>` : ''}
           </div>
           <button class="gw-btn gw-btn-sm gw-btn-danger" data-act="remove-retry" data-id="${r.id}">${ICONS.trash}</button>
         </div>`).join('')}
@@ -1040,14 +1127,14 @@ class GatewayPage {
   }
 
   private _renderHealthTabHtml(): string {
-    if (!this._health) return '<div class="gw-empty">No health data available.</div>';
+    if (!this._health) return `<div class="gw-empty">${t('gateway.health.noData')}</div>`;
     const adapters = this._health.adapters || {};
     const keys = Object.keys(adapters);
-    if (!keys.length) return '<div class="gw-empty">No adapters reporting.</div>';
+    if (!keys.length) return `<div class="gw-empty">${t('gateway.health.noAdapters')}</div>`;
 
     return `
       <div class="gw-health-card">
-        <div class="gw-health-title">Adapter Status</div>
+        <div class="gw-health-title">${t('gateway.health.adapterStatus')}</div>
         <div class="gw-health-grid">
           ${keys.map(id => {
             const a = adapters[id];
@@ -1057,11 +1144,11 @@ class GatewayPage {
                 <span class="gw-health-dot" style="background:${dotColor};"></span>
                 <div>
                   <div class="gw-health-name">${esc(id)}</div>
-                  <div class="gw-health-detail">${a.platform} · ${a.connected ? 'Connected' : 'Disconnected'}</div>
+                  <div class="gw-health-detail">${a.platform} · ${a.connected ? t('gateway.connection.connected') : t('gateway.connection.disconnected')}</div>
                 </div>
                 <div class="gw-health-stats">
-                  ${a.totalReceived ? `<div>${a.totalReceived} msgs</div>` : ''}
-                  ${a.uptime ? `<div>up ${formatUptime(a.uptime)}</div>` : ''}
+                  ${a.totalReceived ? `<div>${t('gateway.health.messages', { count: a.totalReceived })}</div>` : ''}
+                  ${a.uptime ? `<div>${t('gateway.health.uptime', { duration: formatUptime(a.uptime) })}</div>` : ''}
                 </div>
               </div>`;
           }).join('')}
@@ -1073,8 +1160,9 @@ class GatewayPage {
   private _showWizard(connectionId: string): void {
     const conn = this._connections.find(c => c.id === connectionId);
     if (!conn) return;
-    const platform = PLATFORMS.find(p => p.id === conn.platform);
+    const platform = platformDefinitions().find(p => p.id === conn.platform);
     if (!platform || !platform.setupSteps) return;
+    this._wizardConnectionId = connectionId;
 
     const inner = this.container.querySelector('.gw-inner')!;
     const existing = inner.querySelector('#gw-wizard-panel');
@@ -1085,10 +1173,10 @@ class GatewayPage {
     panel.innerHTML = `
       <div class="gw-detail-header">
         <div>
-          <div class="gw-wizard-title">${platform.name} Setup Guide</div>
-          <div class="gw-wizard-subtitle">Follow these steps to connect your ${platform.name} bot</div>
+          <div class="gw-wizard-title">${t('gateway.wizard.title', { platform: platform.name })}</div>
+          <div class="gw-wizard-subtitle">${t('gateway.wizard.subtitle', { platform: platform.name })}</div>
         </div>
-        <button class="gw-btn gw-btn-sm" id="gw-wizard-close">${ICONS.close} Close</button>
+        <button class="gw-btn gw-btn-sm" id="gw-wizard-close">${ICONS.close} ${t('gateway.wizard.close')}</button>
       </div>
       <ol class="gw-wizard-steps">
         ${platform.setupSteps.map((step, i) => `
@@ -1098,31 +1186,33 @@ class GatewayPage {
           </li>`).join('')}
       </ol>
       <div style="display:flex;gap:8px;">
-        <button class="gw-btn gw-btn-sm" id="gw-wizard-prev" ${this._wizardStep === 0 ? 'disabled style="opacity:0.3"' : ''}>Previous</button>
-        <button class="gw-btn gw-btn-sm gw-btn-primary" id="gw-wizard-next">${this._wizardStep >= platform.setupSteps.length - 1 ? 'Done' : 'Next'}</button>
+        <button class="gw-btn gw-btn-sm" id="gw-wizard-prev" ${this._wizardStep === 0 ? 'disabled style="opacity:0.3"' : ''}>${t('gateway.wizard.previous')}</button>
+        <button class="gw-btn gw-btn-sm gw-btn-primary" id="gw-wizard-next">${this._wizardStep >= platform.setupSteps.length - 1 ? t('gateway.wizard.done') : t('gateway.wizard.next')}</button>
       </div>
     `;
     inner.appendChild(panel);
 
-    panel.querySelector('#gw-wizard-close')?.addEventListener('click', () => { panel.remove(); this._wizardStep = 0; });
+    panel.querySelector('#gw-wizard-close')?.addEventListener('click', () => { panel.remove(); this._wizardStep = 0; this._wizardConnectionId = null; });
     panel.querySelector('#gw-wizard-prev')?.addEventListener('click', () => { if (this._wizardStep > 0) { this._wizardStep--; this._showWizard(connectionId); } });
     panel.querySelector('#gw-wizard-next')?.addEventListener('click', () => {
       if (this._wizardStep < platform.setupSteps!.length - 1) { this._wizardStep++; this._showWizard(connectionId); }
-      else { panel.remove(); this._wizardStep = 0; }
+      else { panel.remove(); this._wizardStep = 0; this._wizardConnectionId = null; }
     });
   }
 
   // ── Add Connection Form ──
   private _showAdd(platform: string): void {
-    const p = PLATFORMS.find(p => p.id === platform); if (!p) return;
+    const p = platformDefinitions().find(p => p.id === platform); if (!p) return;
     const inner = this.container.querySelector('.gw-inner')!;
     const existing = inner.querySelector('#gw-add-form');
     if (existing) existing.remove();
 
     const form = document.createElement('div');
     form.id = 'gw-add-form'; form.className = 'gw-add-form';
+    form.dataset.kind = 'connection';
+    form.dataset.platform = platform;
     form.innerHTML = `
-      <div class="gw-add-form-title">Add ${p.name} Connection</div>
+      <div class="gw-add-form-title">${t('gateway.connection.add', { platform: p.name })}</div>
       ${p.fields.map(f => `
         <div class="gw-form-field">
           <label class="gw-form-label">${f.label}</label>
@@ -1130,8 +1220,8 @@ class GatewayPage {
           ${f.help ? `<div class="gw-form-help">${esc(f.help)}</div>` : ''}
         </div>`).join('')}
       <div class="gw-form-actions">
-        <button class="gw-form-save">Save</button>
-        <button class="gw-form-cancel">Cancel</button>
+        <button class="gw-form-save">${t('gateway.form.save')}</button>
+        <button class="gw-form-cancel">${t('gateway.form.cancel')}</button>
       </div>`;
     inner.appendChild(form);
 
@@ -1146,7 +1236,7 @@ class GatewayPage {
 
   // ── Actions ──
   async toggle(id: string): Promise<void> { await fetch(`/api/gateway/connections/${id}/toggle`, { method: 'POST' }); this._load(); }
-  async remove(id: string): Promise<void> { if (!confirm('Delete connection?')) return; await fetch(`/api/gateway/connections/${id}`, { method: 'DELETE' }); this._load(); }
+  async remove(id: string): Promise<void> { if (!confirm(t('gateway.connection.deleteConfirm'))) return; await fetch(`/api/gateway/connections/${id}`, { method: 'DELETE' }); this._load(); }
   async clearInbox(): Promise<void> { await fetch('/api/gateway/inbox', { method: 'DELETE' }); this._inbox = []; this._selectedMessage = null; this._searchResults = null; this._renderInboxTab(); }
 }
 
@@ -1155,10 +1245,10 @@ function esc(s: string): string { const el = document.createElement('span'); el.
 
 function timeAgo(ts: string): string {
   const diff = Date.now() - new Date(ts).getTime();
-  if (diff < 60000) return 'just now';
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-  return new Date(ts).toLocaleDateString();
+  if (diff < 60000) return t('gateway.time.justNow');
+  if (diff < 3600000) return t('gateway.time.minutesAgo', { count: Math.floor(diff / 60000) });
+  if (diff < 86400000) return t('gateway.time.hoursAgo', { count: Math.floor(diff / 3600000) });
+  return new Date(ts).toLocaleDateString(dateLocale());
 }
 
 function formatUptime(seconds: number): string {

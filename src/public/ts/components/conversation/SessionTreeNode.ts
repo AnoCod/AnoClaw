@@ -6,6 +6,7 @@
 import type { SessionNode, AgentStatus } from './types.js';
 import type { SessionStatus } from '../../types.js';
 import { ClientLogger } from '../../ClientLogger.js';
+import { onLocaleChange, t, type TranslationKey } from '../../i18n/index.js';
 
 // ── SVG icon builders (inline, no external files) ──
 
@@ -69,6 +70,11 @@ export class SessionTreeNode {
   private actionsEl!: HTMLElement;
   private childContainer: HTMLElement | null;
   private childNodes: SessionTreeNode[];
+  private mainBadge: HTMLElement | null = null;
+  private countBadge: HTMLElement | null = null;
+  private editButton: HTMLButtonElement | null = null;
+  private archiveButton: HTMLButtonElement | null = null;
+  private stopLocaleListener: (() => void) | null = null;
 
   constructor(node: SessionNode, depth: number = 0) {
     this.node = node;
@@ -101,6 +107,7 @@ export class SessionTreeNode {
       this.element.appendChild(this.childContainer);
       this.renderChildren();
     }
+    this.stopLocaleListener = onLocaleChange(() => this.refreshLocale());
   }
 
   // ── Row builder ──
@@ -156,7 +163,11 @@ export class SessionTreeNode {
     } else if (nodeIsMain) {
       const badge = document.createElement('span');
       badge.className = 'stn-badge';
-      badge.textContent = badgeName || 'Main';
+      badge.textContent = badgeName || t('sessionTree.main');
+      if (!badgeName) {
+        badge.dataset.i18nKey = 'sessionTree.main';
+        this.mainBadge = badge;
+      }
       badge.style.color = 'var(--color-text-primary)';
       row.appendChild(badge);
     }
@@ -174,30 +185,30 @@ export class SessionTreeNode {
 
     // Child count badge for parent nodes
     if (this.node.children.length > 0) {
-      const countBadge = document.createElement('span');
-      countBadge.className = 'stn-child-count';
-      countBadge.textContent = String(this.node.children.length);
-      countBadge.title = `${this.node.children.length} sub-sessions`;
-      row.appendChild(countBadge);
+      this.countBadge = document.createElement('span');
+      this.countBadge.className = 'stn-child-count';
+      this.countBadge.textContent = String(this.node.children.length);
+      this.countBadge.title = t('session.childCount', { count: this.node.children.length });
+      row.appendChild(this.countBadge);
     }
 
     // Action buttons (fade on hover)
     this.actionsEl = document.createElement('div');
     this.actionsEl.className = 'stn-actions';
 
-    const editBtn = this.createActionBtn(SVG_EDIT, 'Rename');
-    editBtn.addEventListener('click', (e) => {
+    this.editButton = this.createActionBtn(SVG_EDIT, 'sessionTree.rename');
+    this.editButton.addEventListener('click', (e) => {
       e.stopPropagation();
       this.startRename();
     });
-    this.actionsEl.appendChild(editBtn);
+    this.actionsEl.appendChild(this.editButton);
 
-    const deleteBtn = this.createActionBtn(SVG_DELETE, 'Archive');
-    deleteBtn.addEventListener('click', (e) => {
+    this.archiveButton = this.createActionBtn(SVG_DELETE, 'session.archive');
+    this.archiveButton.addEventListener('click', (e) => {
       e.stopPropagation();
       if (this.onDelete) this.onDelete(this.node.id);
     });
-    this.actionsEl.appendChild(deleteBtn);
+    this.actionsEl.appendChild(this.archiveButton);
 
     row.appendChild(this.actionsEl);
 
@@ -217,10 +228,11 @@ export class SessionTreeNode {
 
   // ── Action button factory ──
 
-  private createActionBtn(svg: string, title: string): HTMLButtonElement {
+  private createActionBtn(svg: string, key: TranslationKey): HTMLButtonElement {
     const btn = document.createElement('button');
     btn.className = 'stn-action-btn';
-    btn.title = title;
+    btn.title = t(key);
+    btn.setAttribute('aria-label', t(key));
     btn.innerHTML = svg;
     return btn;
   }
@@ -239,7 +251,7 @@ export class SessionTreeNode {
     input.type = 'text';
     input.className = 'stn-rename-input';
     input.value = this.node.title;
-    input.setAttribute('aria-label', 'Rename session');
+    input.setAttribute('aria-label', t('sessionTree.renameAria'));
     row.insertBefore(input, this.actionsEl);
 
     input.focus();
@@ -341,6 +353,7 @@ export class SessionTreeNode {
 
   private renderChildren(): void {
     if (!this.childContainer) return;
+    for (const child of this.childNodes) child.dispose();
     this.childContainer.innerHTML = '';
     this.childNodes = [];
     for (let i = 0; i < this.node.children.length; i++) {
@@ -369,5 +382,28 @@ export class SessionTreeNode {
     for (const child of this.childNodes) {
       child.setCallbacks(select, rename, del);
     }
+  }
+
+  dispose(): void {
+    this.stopLocaleListener?.();
+    this.stopLocaleListener = null;
+    for (const child of this.childNodes) child.dispose();
+  }
+
+  private refreshLocale(): void {
+    if (this.mainBadge) this.mainBadge.textContent = t('sessionTree.main');
+    if (this.countBadge) {
+      this.countBadge.title = t('session.childCount', { count: this.node.children.length });
+    }
+    if (this.editButton) {
+      this.editButton.title = t('sessionTree.rename');
+      this.editButton.setAttribute('aria-label', t('sessionTree.rename'));
+    }
+    if (this.archiveButton) {
+      this.archiveButton.title = t('session.archive');
+      this.archiveButton.setAttribute('aria-label', t('session.archive'));
+    }
+    const renameInput = this.element.querySelector<HTMLInputElement>(':scope > .stn-row > .stn-rename-input');
+    renameInput?.setAttribute('aria-label', t('sessionTree.renameAria'));
   }
 }

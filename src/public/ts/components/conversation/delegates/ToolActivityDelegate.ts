@@ -2,6 +2,13 @@
 import type { ToolCall } from '../types.js';
 import { injectStyle } from '../../../utils/domUtils.js';
 import { TOOL_REGISTRY as TOOL } from './ToolRegistry.js';
+import { t, type TranslationKey } from '../../../i18n/index.js';
+
+interface LocalizedAction {
+  key: TranslationKey;
+  params: Record<string, string>;
+}
+
 export interface ToolActivityState {
   toolName: string;
   toolInput: Record<string, unknown>;
@@ -16,6 +23,7 @@ export class ToolActivityDelegate {
   private _bodyEl: HTMLElement | null = null;
   private _fullResult: string = '';
   private _showMoreBtn: HTMLButtonElement | null = null;
+  private _actionEl: HTMLElement | null = null;
 
   constructor(state: ToolActivityState) {
     this._fullResult = state.result || '';
@@ -32,6 +40,7 @@ export class ToolActivityDelegate {
     this.element.classList.toggle('tool-activity-inline--success', state.status === 'success');
     this.element.classList.toggle('tool-activity-inline--error', state.status === 'error');
     if (state.status !== 'running') this._expanded = false;
+    if (this._actionEl) this._applyAction(this._actionEl, this._actionDescriptor(state));
     // Update dot animation
     const dot = this.element.querySelector('span') as HTMLElement | null;
     if (dot) {
@@ -92,8 +101,9 @@ export class ToolActivityDelegate {
 
     // Action phrase: "read foo.ts" or "searched pattern"
     const action = document.createElement('span');
-    action.textContent = this._actionText(s);
     action.style.cssText = `letter-spacing: 0;`;
+    this._applyAction(action, this._actionDescriptor(s));
+    this._actionEl = action;
     indicator.appendChild(action);
 
 
@@ -141,7 +151,8 @@ export class ToolActivityDelegate {
 
       if (isLong) {
         const btn = document.createElement('button');
-        btn.textContent = this._expanded ? 'Show less' : 'Show more';
+        btn.textContent = this._expanded ? t('message.showLess') : t('message.showMore');
+        btn.setAttribute('data-i18n-key', this._expanded ? 'message.showLess' : 'message.showMore');
         btn.style.cssText = `
           display: ${this._expanded ? 'block' : 'none'}; width: 100%; padding: 2px 0 0; margin: 0;
           background: none; border: none; color: var(--cinema-text-muted);
@@ -153,7 +164,8 @@ export class ToolActivityDelegate {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           this._toggle();
-          btn.textContent = this._expanded ? 'Show less' : 'Show more';
+          btn.textContent = this._expanded ? t('message.showLess') : t('message.showMore');
+          btn.setAttribute('data-i18n-key', this._expanded ? 'message.showLess' : 'message.showMore');
         });
         this._showMoreBtn = btn;
         wrapper.appendChild(btn);
@@ -163,37 +175,46 @@ export class ToolActivityDelegate {
     return wrapper;
   }
 
-  /** Build the action phrase: verb + subject. */
-  private _actionText(s: ToolActivityState): string {
-    const routedVerb = this._routedVerb(s);
-    if (routedVerb) {
-      const subject = this._subject(s);
-      return subject ? `${routedVerb} ${subject}` : routedVerb;
-    }
-    const verb = this._meta(s.toolName).verb;
-    const subj = this._subject(s);
-    return subj ? `${verb} ${subj}` : `${verb}`;
+  private _applyAction(element: HTMLElement, action: LocalizedAction): void {
+    element.textContent = t(action.key, action.params).trim();
+    element.dataset.i18nKey = action.key;
+    element.dataset.i18nParams = JSON.stringify(action.params);
   }
 
-  private _routedVerb(s: ToolActivityState): string | null {
+  /** Build a declarative localized action so existing cards refresh in place. */
+  private _actionDescriptor(s: ToolActivityState): LocalizedAction {
+    const key = this._routedActionKey(s) || this._meta(s.toolName).actionKey;
+    return { key, params: { subject: this._subject(s) } };
+  }
+
+  private _routedActionKey(s: ToolActivityState): TranslationKey | null {
     const action = String(s.toolInput.action || '');
     if (s.toolName === 'Organization') {
-      return ({ list: 'listed', hire: 'hired', reassign: 'reassigned' } as Record<string, string>)[action] || 'managed';
+      return ({
+        list: 'message.tool.action.list',
+        hire: 'message.tool.action.create',
+        reassign: 'message.tool.action.assign',
+      } as Record<string, TranslationKey>)[action] || 'message.tool.action.manage';
     }
     if (s.toolName === 'Team') {
-      return ({ create: 'created', update: 'updated', status: 'inspected', delete: 'disbanded' } as Record<string, string>)[action] || 'managed';
+      return ({
+        create: 'message.tool.action.create',
+        update: 'message.tool.action.update',
+        status: 'message.tool.action.inspect',
+        delete: 'message.tool.action.disband',
+      } as Record<string, TranslationKey>)[action] || 'message.tool.action.manage';
     }
     if (s.toolName === 'Task') {
       return ({
-        create: 'created',
-        assign: 'assigned',
-        claim: 'claimed',
-        update: 'updated',
-        list: 'listed',
-        output: 'read',
-        stop: 'stopped',
-        spawn: 'spawned',
-      } as Record<string, string>)[action] || 'managed';
+        create: 'message.tool.action.create',
+        assign: 'message.tool.action.assign',
+        claim: 'message.tool.action.claim',
+        update: 'message.tool.action.update',
+        list: 'message.tool.action.list',
+        output: 'message.tool.action.read',
+        stop: 'message.tool.action.stop',
+        spawn: 'message.tool.action.spawn',
+      } as Record<string, TranslationKey>)[action] || 'message.tool.action.manage';
     }
     return null;
   }
@@ -212,7 +233,8 @@ export class ToolActivityDelegate {
       }
     }
     if (this._showMoreBtn) {
-      this._showMoreBtn.textContent = this._expanded ? 'Show less' : 'Show more';
+      this._showMoreBtn.textContent = this._expanded ? t('message.showLess') : t('message.showMore');
+      this._showMoreBtn.setAttribute('data-i18n-key', this._expanded ? 'message.showLess' : 'message.showMore');
       this._showMoreBtn.style.display = this._expanded ? 'block' : 'none';
     }
   }
@@ -221,7 +243,8 @@ export class ToolActivityDelegate {
     this._expanded = false;
     if (this._bodyEl) this._bodyEl.hidden = true;
     if (this._showMoreBtn) {
-      this._showMoreBtn.textContent = 'Show more';
+      this._showMoreBtn.textContent = t('message.showMore');
+      this._showMoreBtn.setAttribute('data-i18n-key', 'message.showMore');
       this._showMoreBtn.style.display = 'none';
     }
   }
@@ -235,7 +258,8 @@ export class ToolActivityDelegate {
       this._bodyEl.hidden = false;
     }
     if (this._showMoreBtn) {
-      this._showMoreBtn.textContent = 'Show less';
+      this._showMoreBtn.textContent = t('message.showLess');
+      this._showMoreBtn.setAttribute('data-i18n-key', 'message.showLess');
       this._showMoreBtn.style.display = 'block';
     }
   }
@@ -243,7 +267,10 @@ export class ToolActivityDelegate {
 
 
   private _meta(name: string) {
-    return TOOL[name] || { verb: name.toLowerCase().replace(/([A-Z])/g, ' $1').trim(), result: () => null as string | null };
+    return TOOL[name] || {
+      actionKey: 'message.tool.action.use' as TranslationKey,
+      result: () => null as string | null,
+    };
   }
 
   /** Extract a human-readable subject from the tool input. */
@@ -254,49 +281,49 @@ export class ToolActivityDelegate {
       case 'Write':
       case 'Edit': {
         const p = (inp.file_path || inp.path || '') as string;
-        return p.replace(/\\/g, '/').split('/').pop() || p || 'file';
+        return p.replace(/\\/g, '/').split('/').pop() || p;
       }
-      case 'Grep':        return ((inp.pattern || inp.query || '') as string).slice(0, 40) || 'pattern';
-      case 'Glob':        return ((inp.pattern || '') as string).slice(0, 30) || 'files';
-      case 'Bash':        return ((inp.command || '') as string).slice(0, 50) || 'command';
-      case 'WebSearch':   return ((inp.query || '') as string).slice(0, 40) || 'query';
+      case 'Grep':        return ((inp.pattern || inp.query || '') as string).slice(0, 40);
+      case 'Glob':        return ((inp.pattern || '') as string).slice(0, 30);
+      case 'Bash':        return ((inp.command || '') as string).slice(0, 50);
+      case 'WebSearch':   return ((inp.query || '') as string).slice(0, 40);
       case 'WebFetch':
       case 'ApiCall': {
         const url = (inp.url || '') as string;
-        try { return new URL(url).hostname; } catch { return (url || 'URL').slice(0, 30); }
+        try { return new URL(url).hostname; } catch { return url.slice(0, 30); }
       }
-      case 'Skill':        return ((inp.skill || inp.name || '') as string).slice(0, 30) || 'skill';
-      case 'SkillInspect': return ((inp.skill || inp.name || '') as string).slice(0, 30) || 'skill';
-      case 'SkillList':    return 'skills';
+      case 'Skill':        return ((inp.skill || inp.name || '') as string).slice(0, 30);
+      case 'SkillInspect': return ((inp.skill || inp.name || '') as string).slice(0, 30);
+      case 'SkillList':    return '';
       case 'Organization': {
         const action = String(inp.action || '');
-        if (action === 'list') return 'employees';
-        if (action === 'hire') return String(inp.name || 'employee').slice(0, 20);
-        return String(inp.agentId || 'org chart').slice(0, 20);
+        if (action === 'list') return '';
+        if (action === 'hire') return String(inp.name || '').slice(0, 20);
+        return String(inp.agentId || '').slice(0, 20);
       }
       case 'Team':
-        return String(inp.name || inp.teamId || 'team').slice(0, 20);
+        return String(inp.name || inp.teamId || '').slice(0, 20);
       case 'Task': {
         const action = String(inp.action || '');
-        if (action === 'list') return 'tasks';
-        if (action === 'create') return String(inp.subject || 'task').slice(0, 30);
-        if (action === 'spawn') return String(inp.type || 'sub-agent').slice(0, 20);
-        return String(inp.taskId || 'task').slice(0, 20);
+        if (action === 'list') return '';
+        if (action === 'create') return String(inp.subject || '').slice(0, 30);
+        if (action === 'spawn') return String(inp.type || '').slice(0, 20);
+        return String(inp.taskId || '').slice(0, 20);
       }
-      case 'JobList':      return 'jobs';
+      case 'JobList':      return '';
       case 'JobOutput':
-      case 'JobStop':      return ((inp.jobId || inp.job_id || '') as string).slice(0, 20) || 'job';
-      case 'AgentMessage': return ((inp.subAgentName || inp.to || '') as string).slice(0, 20) || 'agent';
-      case 'memory_save':   return ((inp.key || inp.name || '') as string).slice(0, 30) || 'memory';
-      case 'memory_search': return ((inp.query || '') as string).slice(0, 40) || 'memory';
-      case 'memory_delete': return ((inp.key || inp.name || '') as string).slice(0, 30) || 'memory';
+      case 'JobStop':      return ((inp.jobId || inp.job_id || '') as string).slice(0, 20);
+      case 'AgentMessage': return ((inp.subAgentName || inp.to || '') as string).slice(0, 20);
+      case 'memory_save':   return ((inp.key || inp.name || '') as string).slice(0, 30);
+      case 'memory_search': return ((inp.query || '') as string).slice(0, 40);
+      case 'memory_delete': return ((inp.key || inp.name || '') as string).slice(0, 30);
       case 'NotebookEdit': {
         const nbPath = (inp.notebook_path || '') as string;
-        return nbPath.replace(/\\/g, '/').split('/').pop() || 'notebook';
+        return nbPath.replace(/\\/g, '/').split('/').pop() || '';
       }
-      case 'Sleep':        return `${(inp.seconds || inp.duration || '?')}s`;
-      case 'RestartServer': return 'server';
-      case 'TodoWrite':    return 'todo';
+      case 'Sleep':        return inp.seconds || inp.duration ? `${inp.seconds || inp.duration}s` : '';
+      case 'RestartServer':
+      case 'TodoWrite':    return '';
       default:             return '';
     }
   }

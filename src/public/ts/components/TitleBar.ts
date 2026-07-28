@@ -4,18 +4,19 @@
 
 import { WSConnectionState } from '../viewmodel/WSClient.js';
 import { slotRegistry } from '../SlotRegistry.js';
+import { onLocaleChange, t } from '../i18n/index.js';
 
 interface PageEntry {
   page: string;
   label: string;
 }
 
-const KERNEL_PAGES: PageEntry[] = [
-  { page: 'workspace', label: 'Workspace' },
-  { page: 'agents', label: 'Agents' },
-  { page: 'skills', label: 'Skills' },
-  { page: 'memory', label: 'Memory' },
-  { page: 'settings', label: 'Settings' },
+const kernelPages = (): PageEntry[] => [
+  { page: 'workspace', label: t('nav.workspace') },
+  { page: 'agents', label: t('nav.agents') },
+  { page: 'skills', label: t('nav.skills') },
+  { page: 'memory', label: t('nav.memory') },
+  { page: 'settings', label: t('nav.settings') },
 ];
 
 const PAGE_TONES: Record<string, string> = {
@@ -48,12 +49,14 @@ export class TitleBar {
   private _switcherAnchor: HTMLElement;
   private _pluginPages: PageEntry[] = [];
   private _currentPage = 'workspace';
+  private _maximized = false;
 
   constructor() {
     this.element = this._build();
     this._statusDot = this.element.querySelector('.connection-status-dot') as HTMLElement;
     this._pageNameEl = this.element.querySelector('.topbar-page-name') as HTMLElement;
     this._switcherAnchor = this.element.querySelector('.topbar-page-switcher') as HTMLElement;
+    onLocaleChange(() => this._refreshLocale());
   }
 
   /** Update the status dot color + pulse animation based on WS connection state. */
@@ -99,13 +102,13 @@ export class TitleBar {
 
     const nameEl = document.createElement('span');
     nameEl.className = 'topbar-page-name';
-    nameEl.textContent = 'SESSIONS';
+    nameEl.textContent = t('nav.workspace');
     pageGroup.appendChild(nameEl);
 
     const switcherBtn = document.createElement('button');
     switcherBtn.className = 'topbar-page-switcher';
-    switcherBtn.setAttribute('aria-label', 'Open pages menu');
-    switcherBtn.innerHTML = '<span>Pages</span><span class="topbar-page-switcher-chevron" aria-hidden="true"></span>';
+    switcherBtn.setAttribute('aria-label', t('nav.openPages'));
+    switcherBtn.innerHTML = `<span>${t('nav.pages')}</span><span class="topbar-page-switcher-chevron" aria-hidden="true"></span>`;
     switcherBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this._togglePageSwitcher(switcherBtn);
@@ -126,7 +129,7 @@ export class TitleBar {
 
     const dot = document.createElement('span');
     dot.className = 'connection-status-dot';
-    dot.title = 'No active session';
+    dot.title = t('session.noActive');
     statusGroup.appendChild(dot);
 
     el.appendChild(statusGroup);
@@ -152,18 +155,19 @@ export class TitleBar {
       return btn;
     };
 
-    makeBtn('win-minimize', SVG_WIN_MINIMIZE, 'Minimize', () => {
+    makeBtn('win-minimize', SVG_WIN_MINIMIZE, t('window.minimize'), () => {
       (window as any).electronAPI?.windowMinimize();
     });
-    const maxBtn = makeBtn('win-maximize', SVG_WIN_MAXIMIZE, 'Maximize', () => (window as any).electronAPI?.windowMaximize());
-    makeBtn('win-close', SVG_WIN_CLOSE, 'Close', () => (window as any).electronAPI?.windowClose());
+    const maxBtn = makeBtn('win-maximize', SVG_WIN_MAXIMIZE, t('window.maximize'), () => (window as any).electronAPI?.windowMaximize());
+    makeBtn('win-close', SVG_WIN_CLOSE, t('window.close'), () => (window as any).electronAPI?.windowClose());
 
     // Listen for maximize/unmaximize from Electron main process to toggle button icon
     const api = (window as any).electronAPI;
     if (api?.onMaximizeChange) {
       api.onMaximizeChange((maximized: boolean) => {
+        this._maximized = maximized;
         maxBtn.innerHTML = maximized ? SVG_WIN_RESTORE : SVG_WIN_MAXIMIZE;
-        maxBtn.title = maximized ? 'Restore' : 'Maximize';
+        maxBtn.title = maximized ? t('window.restore') : t('window.maximize');
       });
     }
 
@@ -182,12 +186,12 @@ export class TitleBar {
     this._switcherMenu.className = 'page-switcher-menu';
     this._switcherMenu.setAttribute('role', 'menu');
 
-    this._appendSwitcherSection('Core', KERNEL_PAGES);
+    this._appendSwitcherSection(t('nav.section.core'), kernelPages());
     if (this._pluginPages.length > 0) {
       const divider = document.createElement('div');
       divider.className = 'page-switcher-divider';
       this._switcherMenu.appendChild(divider);
-      this._appendSwitcherSection('Plugins', this._pluginPages);
+      this._appendSwitcherSection(t('nav.section.plugins'), this._pluginPages);
     }
 
     this._syncActiveSwitcherItem();
@@ -241,7 +245,22 @@ export class TitleBar {
   }
 
   private _labelForPage(page: string): string {
-    return [...KERNEL_PAGES, ...this._pluginPages].find((entry) => entry.page === page)?.label || page;
+    return [...kernelPages(), ...this._pluginPages].find((entry) => entry.page === page)?.label || page;
+  }
+
+  private _refreshLocale(): void {
+    this._pageNameEl.textContent = this._labelForPage(this._currentPage);
+    this._switcherAnchor.setAttribute('aria-label', t('nav.openPages'));
+    const switcherLabel = this._switcherAnchor.querySelector('span');
+    if (switcherLabel) switcherLabel.textContent = t('nav.pages');
+    this._statusDot.title = t('session.noActive');
+    const minimize = this.element.querySelector<HTMLButtonElement>('.win-minimize');
+    const maximize = this.element.querySelector<HTMLButtonElement>('.win-maximize');
+    const close = this.element.querySelector<HTMLButtonElement>('.win-close');
+    if (minimize) minimize.title = t('window.minimize');
+    if (maximize) maximize.title = this._maximized ? t('window.restore') : t('window.maximize');
+    if (close) close.title = t('window.close');
+    if (this._switcherMenu) this._closeSwitcher();
   }
 
   private _closeSwitcher(): void {

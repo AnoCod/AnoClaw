@@ -34,6 +34,7 @@ import { SessionsPageOverfly } from './SessionsPageOverfly.js';
 import type { SessionAgent } from '../../viewmodel/SessionAgent.js';
 import { handlePathClick } from '../../utils/ClickablePathHandler.js';
 import { ToastManager } from '../../ToastManager.js';
+import { onLocaleChange, refreshLocalizedElements, t } from '../../i18n/index.js';
 
 type ComposerAttachment = Attachment & { content?: string };
 
@@ -210,6 +211,7 @@ export class SessionsPage implements Page {
       this._leftBar.element.appendChild(bottomSlot);
       slotRegistry._onSlotReady('sessions-sidebar-bottom');
     }
+    onLocaleChange(() => this._refreshLocale());
   }
 
   // Welcome
@@ -275,7 +277,7 @@ export class SessionsPage implements Page {
     try {
       await app.agentVM.ensureLoaded();
     } catch (err) {
-      return { ready: false, message: (err as Error).message || 'Failed to load agents.' };
+      return { ready: false, message: (err as Error).message || t('session.readinessLoadFailed') };
     }
     const result = app.agentVM.selectRunnableAgent(app.sessionVM.activeSession?.agentId);
     return result.ok ? { ready: true } : { ready: false, message: result.message };
@@ -290,11 +292,11 @@ export class SessionsPage implements Page {
           <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
         </svg>
       </div>
-      <div class="cinema-welcome-title" data-welcome-title>Welcome to AnoClaw</div>
-      <div class="cinema-welcome-desc" data-welcome-desc>Start a new conversation or select a session from the left bar.</div>
+      <div class="cinema-welcome-title" data-welcome-title>${t('session.welcome.defaultTitle')}</div>
+      <div class="cinema-welcome-desc" data-welcome-desc>${t('session.welcome.defaultDescription')}</div>
       <div class="cinema-welcome-actions">
-        <button type="button" class="cinema-welcome-primary" data-welcome-primary>New Session</button>
-        <button type="button" class="cinema-welcome-secondary" data-welcome-secondary>Agents</button>
+        <button type="button" class="cinema-welcome-primary" data-welcome-primary>${t('session.welcome.newSession')}</button>
+        <button type="button" class="cinema-welcome-secondary" data-welcome-secondary>${t('session.welcome.agents')}</button>
       </div>
     `;
     el.querySelector<HTMLButtonElement>('[data-welcome-primary]')?.addEventListener('click', () => {
@@ -321,9 +323,9 @@ export class SessionsPage implements Page {
 
     const agents = app.agentVM.agents;
     if (agents.length === 0) {
-      title.textContent = 'No CEO configured';
-      desc.textContent = 'Create a CEO/MainAgent and configure its model connection before starting a conversation.';
-      primary.textContent = 'Open Agents';
+      title.textContent = t('session.welcome.noCeoTitle');
+      desc.textContent = t('session.welcome.noCeoDescription');
+      primary.textContent = t('session.welcome.openAgents');
       primary.dataset.action = 'agents';
       secondary.hidden = true;
       return;
@@ -331,19 +333,34 @@ export class SessionsPage implements Page {
 
     const result = app.agentVM.selectRunnableAgent(app.sessionVM.activeSession?.agentId);
     if (!result.ok) {
-      title.textContent = 'Agent needs configuration';
-      desc.textContent = result.message || 'Open Agents and configure a runnable model connection.';
-      primary.textContent = 'Open Agents';
+      title.textContent = t('session.welcome.agentConfigTitle');
+      desc.textContent = result.message || t('session.welcome.agentConfigDescription');
+      primary.textContent = t('session.welcome.openAgents');
       primary.dataset.action = 'agents';
       secondary.hidden = true;
       return;
     }
 
-    title.textContent = 'Ready to work';
-    desc.textContent = 'Create a new conversation or select a session from the left bar.';
-    primary.textContent = 'New Session';
+    title.textContent = t('session.welcome.defaultTitle');
+    desc.textContent = t('session.welcome.defaultDescription');
+    primary.textContent = t('session.welcome.newSession');
     primary.dataset.action = 'session';
     secondary.hidden = false;
+  }
+
+  private _refreshLocale(): void {
+    this._updateWelcome();
+    refreshLocalizedElements(this._flowInner);
+    AskUserQuestionCard.refreshLocale(this._flowInner);
+    if (this._compactionOverlay) {
+      const title = this._compactionOverlay.querySelector<HTMLElement>('.compaction-text');
+      const description = this._compactionOverlay.querySelector<HTMLElement>('.compaction-sub');
+      if (title) title.textContent = t('session.compact.title');
+      if (description) description.textContent = t('session.compact.description');
+    }
+    for (const expand of this._flowInner.querySelectorAll<HTMLButtonElement>('.tool-result-expand')) {
+      if (expand.textContent?.includes('+')) expand.textContent = t('session.showDetails');
+    }
   }
 
   private async _runWelcomePrimaryAction(): Promise<void> {
@@ -664,15 +681,15 @@ export class SessionsPage implements Page {
     const app = App.getInstance();
     const sessionId = app.sessionVM.activeSessionId;
     if (!sessionId) {
-      ToastManager.getInstance().error('Select a session before compacting context.');
+      ToastManager.getInstance().error(t('session.compact.selectFirst'));
       return;
     }
     if (!app.sseClient.connected) {
-      ToastManager.getInstance().error('WebSocket is not connected. Wait for reconnection and try again.');
+      ToastManager.getInstance().error(t('session.compact.disconnected'));
       return;
     }
     if (!app.conversationVM.runCommand('compact')) {
-      ToastManager.getInstance().error('Compaction request could not be sent.');
+      ToastManager.getInstance().error(t('session.compact.sendFailed'));
       return;
     }
     this._compactionSessionId = sessionId;
@@ -687,15 +704,15 @@ export class SessionsPage implements Page {
     overlay.className = 'compaction-overlay';
     overlay.innerHTML = `
       <div class="compaction-spinner"></div>
-      <div class="compaction-text">Compacting context...</div>
-      <div class="compaction-sub">Summarizing conversation history to free up space</div>
+      <div class="compaction-text">${t('session.compact.title')}</div>
+      <div class="compaction-sub">${t('session.compact.description')}</div>
     `;
     document.body.appendChild(overlay);
     this._compactionOverlay = overlay;
     this._compactionSafetyTimer = setTimeout(() => {
       if (!this._compactionInProgress) return;
       this._compactionSafetyTimer = null;
-      ToastManager.getInstance().info('Compaction is still running. History will refresh when the server confirms completion.', 7000);
+      ToastManager.getInstance().info(t('session.compact.stillRunning'), 7000);
       this._removeCompactionOverlay(false);
     }, 45_000);
   }
@@ -1051,7 +1068,7 @@ export class SessionsPage implements Page {
       const toggle = el.querySelector<HTMLElement>('.tool-result-toggle');
       if (toggle) toggle.textContent = '+';
       const expand = el.querySelector<HTMLButtonElement>('.tool-result-expand');
-      if (expand) expand.textContent = 'Show details +';
+      if (expand) expand.textContent = t('session.showDetails');
     }
     for (const body of Array.from(this._flowInner.querySelectorAll<HTMLElement>('.cinema-think-body, .tool-activity-output'))) {
       body.hidden = true;

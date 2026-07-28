@@ -86,6 +86,8 @@ describe('WorkspacePage session lifecycle', () => {
       WorkspaceSplitContainer: class {},
     }));
 
+    const { setLocale } = await import('../../../../i18n/index.js');
+    setLocale('en-US');
     const { WorkspacePage } = await import('../WorkspacePage.js');
     const page = new WorkspacePage();
     page.onEnter();

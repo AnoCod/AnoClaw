@@ -5,6 +5,8 @@
 // Platform injects tokens.css + anoclaw-ui.js into the sandbox iframe.
 // window.anoclaw.ui exposes 25+ components plus mount/slot APIs.
 
+import { getMcpLocale, setMcpLocale, t as tr } from './i18n.js';
+
 declare const window: Window & { anoclaw?: { ui: Record<string, any> } };
 
 const ui = window.anoclaw?.ui;
@@ -330,7 +332,7 @@ function _serverCard(s: MCPServer, isSelected: boolean, h: CardHandlers): HTMLEl
   // Status dot
   const dot = _el("span", "", "");
   dot.className = _dotClass(s.connected);
-  dot.title = s.connected ? "Connected" : "Disconnected";
+  dot.title = s.connected ? tr('mcp.status.connected') : tr('mcp.status.disconnected');
   card.appendChild(dot);
 
   // Content
@@ -345,8 +347,10 @@ function _serverCard(s: MCPServer, isSelected: boolean, h: CardHandlers): HTMLEl
   content.appendChild(nameRow);
 
   const infoText = s.connected
-    ? s.toolCount + " tools" + (s.resourceCount > 0 ? " \u00b7 " + s.resourceCount + " resources" : "") + (s.serverInfo ? " \u00b7 " + s.serverInfo.name + " v" + s.serverInfo.version : "")
-    : "Disconnected";
+    ? tr('mcp.count.tools', { count: s.toolCount })
+      + (s.resourceCount > 0 ? " \u00b7 " + tr('mcp.count.resources', { count: s.resourceCount }) : "")
+      + (s.serverInfo ? " \u00b7 " + s.serverInfo.name + " v" + s.serverInfo.version : "")
+    : tr('mcp.status.disconnected');
   content.appendChild(_el("div", [
     "font-family:" + T.fontSans + ";font-feature-settings:" + T.fontFeature + ";",
     "font-size:12px;color:" + (s.connected ? T.mute : T.stone) + ";",
@@ -362,11 +366,11 @@ function _serverCard(s: MCPServer, isSelected: boolean, h: CardHandlers): HTMLEl
     btn.title = title;
     return btn;
   }
-  const editBtn = mkBtn("\u270e", "Edit");
+  const editBtn = mkBtn("\u270e", tr('mcp.action.edit'));
   editBtn.addEventListener("click", function(e) { e.stopPropagation(); h.onEdit(s); });
-  const reBtn = mkBtn("\u21bb", "Reconnect");
+  const reBtn = mkBtn("\u21bb", tr('mcp.action.reconnect'));
   reBtn.addEventListener("click", function(e) { e.stopPropagation(); h.onReconnect(s.id); });
-  const delBtn = mkBtn("\u2715", "Delete", true);
+  const delBtn = mkBtn("\u2715", tr('mcp.action.delete'), true);
   delBtn.addEventListener("click", function(e) { e.stopPropagation(); h.onDelete(s.id); });
   actions.appendChild(editBtn);
   actions.appendChild(reBtn);
@@ -429,7 +433,7 @@ function _toolCard(t: MCPTool, expanded: boolean, onToggle: () => void): HTMLEle
     sw.appendChild(_el("div", [
       "font-size:10px;font-weight:600;text-transform:uppercase;",
       "letter-spacing:0.8px;color:" + T.ash + ";margin-bottom:8px;",
-    ].join(""), "Input Schema"));
+    ].join(""), tr('mcp.schema.input')));
 
     const props = schema.properties as Record<string, any>;
     const reqSet = new Set(required);
@@ -444,11 +448,11 @@ function _toolCard(t: MCPTool, expanded: boolean, onToggle: () => void): HTMLEle
       ].join(""), key));
       row.appendChild(_el("span", [
         "font-family:" + T.fontMono + ";font-size:11px;color:" + T.stone + ";",
-      ].join(""), val.type || "any"));
+      ].join(""), val.type || tr('mcp.schema.any')));
       if (reqSet.has(key)) {
         row.appendChild(_el("span", [
           "font-size:9px;font-weight:600;text-transform:uppercase;color:" + T.accentYellow + ";letter-spacing:0.5px;",
-        ].join(""), "required"));
+        ].join(""), tr('mcp.schema.required')));
       }
       if (val.description) {
         row.appendChild(_el("span", [
@@ -527,7 +531,7 @@ function _promptRow(p: MCPPrompt): HTMLElement {
 function _logEntryRow(entry: MCPLogEntry): HTMLElement {
   const levelColors: Record<string, string> = { error: T.accentRed, warn: T.accentYellow, info: T.accentBlue, debug: T.ash };
   const color = levelColors[entry.level] || T.mute;
-  const time = new Date(entry.timestamp).toLocaleTimeString();
+  const time = new Date(entry.timestamp).toLocaleTimeString(getMcpLocale());
   const row = _el("div", [
     "display:flex;align-items:baseline;gap:10px;padding:5px 10px;",
     "font-family:" + T.fontMono + ";font-size:11px;",
@@ -560,6 +564,14 @@ class MCPPage {
   private _loading = true;
   private _expandedTools = new Set<string>();
   private _activeTab = 0;
+  private _selectedDetail: MCPDetail | null = null;
+  private _toolSearchQuery = '';
+  private _formOpen = false;
+  private _formEdit?: MCPServer;
+  private _titleEl!: HTMLElement;
+  private _subtitleEl!: HTMLElement;
+  private _logsButtonEl!: HTMLButtonElement;
+  private _addButtonEl!: HTMLButtonElement;
 
   constructor() {
     _injectStyles();
@@ -577,30 +589,34 @@ class MCPPage {
     ].join(""));
 
     const titleWrap = document.createElement("div");
-    titleWrap.appendChild(_el("div", [
+    this._titleEl = _el("div", [
       "font-family:" + T.fontSans + ";font-feature-settings:" + T.fontFeature + ";",
       "font-size:20px;font-weight:500;color:" + T.ink + ";line-height:1.4;",
-    ].join(""), "MCP Servers"));
-    titleWrap.appendChild(_el("div", [
+    ].join(""), tr('mcp.title'));
+    titleWrap.appendChild(this._titleEl);
+    this._subtitleEl = _el("div", [
       "font-family:" + T.fontSans + ";font-feature-settings:" + T.fontFeature + ";",
       "font-size:13px;color:" + T.mute + ";margin-top:2px;",
-    ].join(""), "Model Context Protocol \u2014 connect external tools and services"));
+    ].join(""), tr('mcp.subtitle'));
+    titleWrap.appendChild(this._subtitleEl);
     header.appendChild(titleWrap);
 
     const headerActions = _el("div", "display:flex;align-items:center;gap:12px;");
     const logsBtn = new ui.Button({
-      label: "\u25b8 Logs", variant: "default", size: "sm",
+      label: "\u25b8 " + tr('mcp.logs'), variant: "default", size: "sm",
       onClick: () => {
         this._showLogs = !this._showLogs;
         if (this._showLogs) this._fetchLogs();
         else this._logEl.style.display = "none";
       },
     });
+    this._logsButtonEl = logsBtn.element;
     headerActions.appendChild(logsBtn.element);
     const addBtn = new ui.Button({
-      label: "+ Connect Server", variant: "primary", size: "sm",
+      label: tr('mcp.connectServer'), variant: "primary", size: "sm",
       onClick: () => this._showForm(),
     });
+    this._addButtonEl = addBtn.element;
     headerActions.appendChild(addBtn.element);
     header.appendChild(headerActions);
     this.container.appendChild(header);
@@ -615,6 +631,40 @@ class MCPPage {
       "margin-top:24px;border-top:1px solid " + T.hairline + ";padding-top:16px;display:none;",
     ].join(""));
     this.container.appendChild(this._logEl);
+    window.addEventListener('message', this._onHostMessage);
+  }
+
+  private _onHostMessage = (event: MessageEvent): void => {
+    if (event.source !== window.parent || event.data?.type !== 'anoclaw:locale') return;
+    this._refreshLocale(event.data.locale);
+  };
+
+  private _refreshLocale(locale: unknown): void {
+    const formFields = this._formOpen
+      ? Array.from(this._detailEl.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input, textarea, select')).map(field => field.value)
+      : [];
+    const activeIndex = this._formOpen
+      ? Array.from(this._detailEl.querySelectorAll('input, textarea, select')).indexOf(document.activeElement as Element)
+      : -1;
+
+    setMcpLocale(locale);
+    this._titleEl.textContent = tr('mcp.title');
+    this._subtitleEl.textContent = tr('mcp.subtitle');
+    this._logsButtonEl.textContent = "\u25b8 " + tr('mcp.logs');
+    this._addButtonEl.textContent = tr('mcp.connectServer');
+    this._buildList();
+    if (this._showLogs) this._renderLogs();
+
+    if (this._formOpen) {
+      this._showForm(this._formEdit);
+      const nextFields = Array.from(this._detailEl.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input, textarea, select'));
+      nextFields.forEach((field, index) => {
+        if (formFields[index] !== undefined) field.value = formFields[index];
+      });
+      if (activeIndex >= 0) nextFields[activeIndex]?.focus();
+    } else if (this._selectedDetail) {
+      this._buildDetail(this._selectedDetail, true);
+    }
   }
 
   onEnter(): void { this._load(); this._connectWebSocket(); }
@@ -680,7 +730,7 @@ class MCPPage {
       "font-family:" + T.fontSans + ";font-feature-settings:" + T.fontFeature + ";",
       "font-size:14px;font-weight:500;color:" + T.ink + ";",
       "display:flex;align-items:center;gap:8px;",
-    ].join(""), '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="' + T.accentBlue + '" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> Connection Logs <span style="font-size:11px;color:' + T.stone + ';font-weight:400;">(' + this._logs.length + ')</span>');
+    ].join(""), '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="' + T.accentBlue + '" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> ' + tr('mcp.logs.title') + ' <span style="font-size:11px;color:' + T.stone + ';font-weight:400;">(' + this._logs.length + ')</span>');
     hdr.appendChild(hTitle);
     const closeBtn = _el("button", "class:mcp-btn-icon;", "\u2715");
     closeBtn.addEventListener("click", () => { this._showLogs = false; this._logEl.style.display = "none"; });
@@ -693,7 +743,7 @@ class MCPPage {
     ].join(""));
 
     if (this._logs.length === 0) {
-      list.appendChild(_el("div", "color:" + T.stone + ";padding:24px;text-align:center;font-size:12px;", "No connection logs yet."));
+      list.appendChild(_el("div", "color:" + T.stone + ";padding:24px;text-align:center;font-size:12px;", tr('mcp.logs.empty')));
     } else {
       for (const entry of this._logs.slice().reverse()) {
         list.appendChild(_logEntryRow(entry));
@@ -717,7 +767,7 @@ class MCPPage {
     } catch (err) {
       this._loading = false;
       if (!silent) {
-        new ui.Toast({ text: "Failed to load: " + (err as Error).message, type: "error", duration: 4000 });
+        new ui.Toast({ text: tr('mcp.load.failed', { message: (err as Error).message }), type: "error", duration: 4000 });
         this._buildList();
       }
     }
@@ -734,10 +784,10 @@ class MCPPage {
     }
 
     if (this._servers.length === 0 && !this._loading) {
-      const btn = new ui.Button({ label: "+ Connect Server", variant: "primary", size: "sm", onClick: () => this._showForm() });
+      const btn = new ui.Button({ label: tr('mcp.connectServer'), variant: "primary", size: "sm", onClick: () => this._showForm() });
       this._listEl.appendChild(_emptyState(
-        "No MCP servers connected",
-        "Connect to filesystem servers, API gateways, databases, and more to extend your AI agents with external tools.",
+        tr('mcp.empty.title'),
+        tr('mcp.empty.description'),
         btn.element.outerHTML,
       ));
       const emptyBtn = this._listEl.querySelector("button") as HTMLButtonElement;
@@ -759,12 +809,12 @@ class MCPPage {
     const connDot = _el("span", "");
     connDot.className = _dotClass(connectedCount > 0);
     connInd.appendChild(connDot);
-    connInd.appendChild(document.createTextNode(connectedCount + "/" + this._servers.length + " connected"));
+    connInd.appendChild(document.createTextNode(tr('mcp.count.connected', { connected: connectedCount, total: this._servers.length })));
     summary.appendChild(connInd);
     summary.appendChild(_el("div", "width:1px;height:16px;background:" + T.hairline + ";"));
 
     const toolCountEl = _elHtml("div", "font-size:12px;color:" + T.mute + ";display:flex;align-items:center;gap:6px;",
-      '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="' + T.ash + '" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> ' + totalTools + " tools available");
+      '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="' + T.ash + '" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> ' + tr('mcp.count.toolsAvailable', { count: totalTools }));
     summary.appendChild(toolCountEl);
     this._listEl.appendChild(summary);
 
@@ -784,6 +834,8 @@ class MCPPage {
 
   private async _selectServer(id: string): Promise<void> {
     this._selectedId = id;
+    this._formOpen = false;
+    this._formEdit = undefined;
     this._buildList();
 
     // Loading skeleton
@@ -801,6 +853,7 @@ class MCPPage {
       const resp = await fetch("/api/mcp/servers/" + id);
       if (!resp.ok) throw new Error("HTTP " + resp.status);
       const data = await resp.json() as MCPDetail;
+      this._selectedDetail = data;
       this._buildDetail(data);
     } catch (err) {
       this._detailEl.innerHTML = "";
@@ -808,15 +861,18 @@ class MCPPage {
         "padding:16px 20px;border:1px solid " + T.accentRedBg + ";border-radius:" + T.rMd + ";",
         "background:" + T.card + ";color:" + T.accentRed + ";font-size:13px;",
         "display:flex;align-items:center;gap:8px;animation:mcp-fadeIn 200ms ease;",
-      ].join(""), "\u26a0 Failed to load server: " + (err as Error).message);
+      ].join(""), "\u26a0 " + tr('mcp.detail.loadFailed', { message: (err as Error).message }));
       this._detailEl.appendChild(errEl);
     }
   }
 
-  private _buildDetail(d: MCPDetail): void {
+  private _buildDetail(d: MCPDetail, preserveView = false): void {
     this._detailEl.innerHTML = "";
-    this._expandedTools = new Set();
-    this._activeTab = 0;
+    if (!preserveView) {
+      this._expandedTools = new Set();
+      this._activeTab = 0;
+      this._toolSearchQuery = '';
+    }
 
     const detailWrap = _el("div", [
       "border:1px solid " + T.hairline + ";border-radius:" + T.rLg + ";",
@@ -848,15 +904,24 @@ class MCPPage {
     // Status line
     const statusLine = _el("div", "font-size:12px;color:" + (d.connected ? T.accentGreen : T.accentRed) + ";display:flex;align-items:center;gap:6px;");
     if (d.connected) {
-      statusLine.innerHTML = '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:' + T.accentGreen + ';"></span> Connected \u00b7 ' + d.tools.length + " tools \u00b7 " + d.resources.length + " resources \u00b7 " + d.prompts.length + " prompts";
+      statusLine.innerHTML = '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:' + T.accentGreen + ';"></span> '
+        + tr('mcp.status.connected') + ' \u00b7 '
+        + tr('mcp.count.tools', { count: d.tools.length }) + " \u00b7 "
+        + tr('mcp.count.resources', { count: d.resources.length }) + " \u00b7 "
+        + tr('mcp.count.prompts', { count: d.prompts.length });
     } else {
-      statusLine.innerHTML = '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:' + T.accentRed + ';"></span> Disconnected \u2014 server is offline';
+      statusLine.innerHTML = '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:' + T.accentRed + ';"></span> ' + tr('mcp.status.offline');
     }
     hLeft.appendChild(statusLine);
     header.appendChild(hLeft);
 
     const closeBtn = _el("button", "class:mcp-btn-icon;", "\u2715");
-    closeBtn.addEventListener("click", () => { this._selectedId = null; this._detailEl.innerHTML = ""; this._buildList(); });
+    closeBtn.addEventListener("click", () => {
+      this._selectedId = null;
+      this._selectedDetail = null;
+      this._detailEl.innerHTML = "";
+      this._buildList();
+    });
     header.appendChild(closeBtn);
     detailWrap.appendChild(header);
 
@@ -867,9 +932,9 @@ class MCPPage {
     ].join(""));
 
     const tabLabels = [
-      "Tools (" + d.tools.length + ")",
-      "Resources (" + d.resources.length + ")",
-      "Prompts (" + d.prompts.length + ")",
+      tr('mcp.detail.toolsTab', { count: d.tools.length }),
+      tr('mcp.detail.resourcesTab', { count: d.resources.length }),
+      tr('mcp.detail.promptsTab', { count: d.prompts.length }),
     ];
 
     const tabContent = _el("div", "padding:16px 24px 24px;min-height:80px;");
@@ -885,7 +950,7 @@ class MCPPage {
       if (idx === 0) {
         // Tools tab
         if (d.tools.length === 0) {
-          tabContent.appendChild(_el("div", "text-align:center;padding:32px;color:" + T.stone + ";font-size:13px;", "No tools exposed by this server."));
+          tabContent.appendChild(_el("div", "text-align:center;padding:32px;color:" + T.stone + ";font-size:13px;", tr('mcp.detail.noTools')));
           return;
         }
         // Search
@@ -894,7 +959,8 @@ class MCPPage {
           '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="' + T.stone + '" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>');
         searchWrap.appendChild(searchIcon);
         const searchInput = document.createElement("input") as HTMLInputElement;
-        searchInput.placeholder = "Search tools...";
+        searchInput.placeholder = tr('mcp.detail.searchTools');
+        searchInput.value = self._toolSearchQuery;
         searchInput.className = "mcp-search-input";
         searchInput.style.cssText = [
           "width:100%;padding:8px 12px 8px 32px;background:" + T.inputBg + ";",
@@ -914,7 +980,7 @@ class MCPPage {
             ? d.tools.filter(t => t.name.toLowerCase().indexOf(q.toLowerCase()) !== -1 || (t.description || "").toLowerCase().indexOf(q.toLowerCase()) !== -1)
             : d.tools;
           if (filtered.length === 0) {
-            toolListWrap.appendChild(_el("div", "text-align:center;padding:24px;color:" + T.stone + ";font-size:12px;", 'No tools matching "' + q + '"'));
+            toolListWrap.appendChild(_el("div", "text-align:center;padding:24px;color:" + T.stone + ";font-size:12px;", tr('mcp.detail.noMatchingTools', { query: q })));
             return;
           }
           for (const t of filtered) {
@@ -927,13 +993,16 @@ class MCPPage {
             toolListWrap.appendChild(tc);
           }
         }
-        renderTools("");
-        searchInput.addEventListener("input", () => { renderTools(searchInput.value); });
+        renderTools(searchInput.value);
+        searchInput.addEventListener("input", () => {
+          self._toolSearchQuery = searchInput.value;
+          renderTools(searchInput.value);
+        });
         tabContent.appendChild(toolListWrap);
 
       } else if (idx === 1) {
         if (d.resources.length === 0) {
-          tabContent.appendChild(_el("div", "text-align:center;padding:32px;color:" + T.stone + ";font-size:13px;", "No resources exposed by this server."));
+          tabContent.appendChild(_el("div", "text-align:center;padding:32px;color:" + T.stone + ";font-size:13px;", tr('mcp.detail.noResources')));
           return;
         }
         const list = _el("div", "display:flex;flex-direction:column;gap:6px;");
@@ -942,7 +1011,7 @@ class MCPPage {
 
       } else {
         if (d.prompts.length === 0) {
-          tabContent.appendChild(_el("div", "text-align:center;padding:32px;color:" + T.stone + ";font-size:13px;", "No prompts exposed by this server."));
+          tabContent.appendChild(_el("div", "text-align:center;padding:32px;color:" + T.stone + ";font-size:13px;", tr('mcp.detail.noPrompts')));
           return;
         }
         const list = _el("div", "display:flex;flex-direction:column;gap:6px;");
@@ -960,12 +1029,14 @@ class MCPPage {
     detailWrap.appendChild(tabContainer);
     detailWrap.appendChild(tabContent);
     this._detailEl.appendChild(detailWrap);
-    renderTab(0);
+    renderTab(Math.min(this._activeTab, tabLabels.length - 1));
   }
 
   // --- Form ---
 
   private _showForm(edit?: MCPServer): void {
+    this._formOpen = true;
+    this._formEdit = edit;
     this._detailEl.innerHTML = "";
 
     const formWrap = _el("div", [
@@ -982,9 +1053,13 @@ class MCPPage {
     hdr.appendChild(_el("div", [
       "font-size:18px;font-weight:500;color:" + T.ink + ";",
       "font-family:" + T.fontSans + ";font-feature-settings:" + T.fontFeature + ";",
-    ].join(""), edit ? "Edit Server" : "Connect MCP Server"));
+    ].join(""), edit ? tr('mcp.form.editTitle') : tr('mcp.form.connectTitle')));
     const closeBtn = _el("button", "class:mcp-btn-icon;", "\u2715");
-    closeBtn.addEventListener("click", () => { this._detailEl.innerHTML = ""; });
+    closeBtn.addEventListener("click", () => {
+      this._formOpen = false;
+      this._formEdit = undefined;
+      this._detailEl.innerHTML = "";
+    });
     hdr.appendChild(closeBtn);
     formWrap.appendChild(hdr);
 
@@ -997,16 +1072,16 @@ class MCPPage {
       options: [{ value: "stdio", label: "stdio" }, { value: "sse", label: "sse" }, { value: "http", label: "http" }],
       value: edit ? edit.transport : "stdio",
     });
-    row1.appendChild(new ui.FormField({ label: "Name", input: nameInput.element }).element);
-    row1.appendChild(new ui.FormField({ label: "Transport", input: transportSelect.element }).element);
+    row1.appendChild(new ui.FormField({ label: tr('mcp.form.name'), input: nameInput.element }).element);
+    row1.appendChild(new ui.FormField({ label: tr('mcp.form.transport'), input: transportSelect.element }).element);
     body.appendChild(row1);
 
     // Row 2: Command + URL
     const row2 = _el("div", "display:flex;gap:16px;margin-bottom:16px;");
     const commandInput = new ui.Input({ placeholder: "npx -y @modelcontextprotocol/server-filesystem /path", value: edit ? edit.command || "" : "" });
     const urlInput = new ui.Input({ placeholder: "http://localhost:3000", value: edit ? edit.url || "" : "" });
-    row2.appendChild(new ui.FormField({ label: "Command (stdio)", input: commandInput.element, help: "Shell command to launch the MCP server process" }).element);
-    row2.appendChild(new ui.FormField({ label: "URL (sse/http)", input: urlInput.element, help: "HTTP endpoint for SSE or HTTP transport" }).element);
+    row2.appendChild(new ui.FormField({ label: tr('mcp.form.command'), input: commandInput.element, help: tr('mcp.form.commandHelp') }).element);
+    row2.appendChild(new ui.FormField({ label: tr('mcp.form.url'), input: urlInput.element, help: tr('mcp.form.urlHelp') }).element);
     body.appendChild(row2);
 
     // Row 3: Environment
@@ -1014,7 +1089,7 @@ class MCPPage {
     envWrap.appendChild(_el("label", [
       "font-size:13px;font-weight:500;color:" + T.ink + ";display:block;margin-bottom:6px;",
       "font-family:" + T.fontSans + ";font-feature-settings:" + T.fontFeature + ";",
-    ].join(""), "Environment Variables"));
+    ].join(""), tr('mcp.form.environment')));
     const envInput = document.createElement("textarea");
     envInput.placeholder = "KEY=value\nOTHER_KEY=other_value";
     envInput.rows = 3;
@@ -1029,19 +1104,19 @@ class MCPPage {
       envInput.value = Object.entries((edit as any).env).map(function(kv) { return kv[0] + "=" + kv[1]; }).join("\n");
     }
     envWrap.appendChild(envInput);
-    envWrap.appendChild(_el("div", "font-size:12px;color:" + T.stone + ";margin-top:6px;", "One KEY=value per line. Merged over system env for stdio servers."));
+    envWrap.appendChild(_el("div", "font-size:12px;color:" + T.stone + ";margin-top:6px;", tr('mcp.form.environmentHelp')));
     body.appendChild(envWrap);
 
     // Actions
     const actions = _el("div", "display:flex;gap:10px;");
     const self = this;
     const saveBtn = new ui.Button({
-      label: edit ? "Update & Reconnect" : "Save & Connect",
+      label: edit ? tr('mcp.form.update') : tr('mcp.form.save'),
       variant: "primary",
       size: "sm",
       onClick: async function() {
         const name = (nameInput.element as HTMLInputElement).value.trim();
-        if (!name) { new ui.Toast({ text: "Name is required", type: "warning", duration: 3000 }); return; }
+        if (!name) { new ui.Toast({ text: tr('mcp.form.nameRequired'), type: "warning", duration: 3000 }); return; }
         const transport = (transportSelect.element as HTMLSelectElement).value;
         const body: Record<string, any> = { name: name, transport: transport };
         if (transport === "stdio") body.command = (commandInput.element as HTMLInputElement).value;
@@ -1068,16 +1143,34 @@ class MCPPage {
             resp = await fetch("/api/mcp/servers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
           }
           if (!resp.ok) throw new Error("HTTP " + resp.status);
-          new ui.Toast({ text: 'Server "' + name + '" ' + (edit ? "updated" : "saved"), type: "success", duration: 3000 });
+          new ui.Toast({
+            text: tr('mcp.form.saved', {
+              name,
+              action: edit ? tr('mcp.form.updatedAction') : tr('mcp.form.savedAction'),
+            }),
+            type: "success",
+            duration: 3000,
+          });
+          self._formOpen = false;
+          self._formEdit = undefined;
           self._detailEl.innerHTML = "";
           self._load();
         } catch (err) {
-          new ui.Toast({ text: "Save failed: " + (err as Error).message, type: "error", duration: 5000 });
+          new ui.Toast({ text: tr('mcp.form.saveFailed', { message: (err as Error).message }), type: "error", duration: 5000 });
         }
       },
     });
     actions.appendChild(saveBtn.element);
-    actions.appendChild(new ui.Button({ label: "Cancel", variant: "default", size: "sm", onClick: function() { self._detailEl.innerHTML = ""; } }).element);
+    actions.appendChild(new ui.Button({
+      label: tr('mcp.form.cancel'),
+      variant: "default",
+      size: "sm",
+      onClick: function() {
+        self._formOpen = false;
+        self._formEdit = undefined;
+        self._detailEl.innerHTML = "";
+      },
+    }).element);
     body.appendChild(actions);
     formWrap.appendChild(body);
     this._detailEl.appendChild(formWrap);
@@ -1100,26 +1193,27 @@ class MCPPage {
     dialog.appendChild(_el("div", [
       "font-size:16px;font-weight:500;color:" + T.ink + ";",
       "font-family:" + T.fontSans + ";font-feature-settings:" + T.fontFeature + ";margin-bottom:8px;",
-    ].join(""), "Delete Server"));
+    ].join(""), tr('mcp.delete.title')));
     dialog.appendChild(_el("div", "font-size:13px;color:" + T.mute + ";line-height:1.5;margin-bottom:20px;",
-      "This MCP server and all its tools will no longer be available to agents. This action cannot be undone."));
+      tr('mcp.delete.description')));
 
     const btnRow = _el("div", "display:flex;gap:10px;justify-content:flex-end;");
-    const cancelBtn = new ui.Button({ label: "Cancel", variant: "default", size: "sm", onClick: function() { overlay.remove(); } });
+    const cancelBtn = new ui.Button({ label: tr('mcp.delete.cancel'), variant: "default", size: "sm", onClick: function() { overlay.remove(); } });
     btnRow.appendChild(cancelBtn.element);
     const self = this;
     const confirmBtn = new ui.Button({
-      label: "Delete", variant: "danger", size: "sm",
+      label: tr('mcp.delete.confirm'), variant: "danger", size: "sm",
       onClick: async function() {
         overlay.remove();
         try {
           await fetch("/api/mcp/servers/" + id, { method: "DELETE" });
-          new ui.Toast({ text: "Server deleted", type: "success", duration: 3000 });
+          new ui.Toast({ text: tr('mcp.delete.done'), type: "success", duration: 3000 });
           self._selectedId = null;
+          self._selectedDetail = null;
           self._detailEl.innerHTML = "";
           self._load();
         } catch (err) {
-          new ui.Toast({ text: "Delete failed: " + (err as Error).message, type: "error", duration: 5000 });
+          new ui.Toast({ text: tr('mcp.delete.failed', { message: (err as Error).message }), type: "error", duration: 5000 });
         }
       },
     });
@@ -1134,11 +1228,11 @@ class MCPPage {
     try {
       const resp = await fetch("/api/mcp/servers/" + id + "/reconnect", { method: "POST" });
       if (!resp.ok) throw new Error("HTTP " + resp.status);
-      new ui.Toast({ text: "Reconnected", type: "success", duration: 3000 });
+      new ui.Toast({ text: tr('mcp.reconnect.done'), type: "success", duration: 3000 });
       this._load();
       if (this._selectedId === id) this._selectServer(id);
     } catch (err) {
-      new ui.Toast({ text: "Reconnect failed: " + (err as Error).message, type: "error", duration: 5000 });
+      new ui.Toast({ text: tr('mcp.reconnect.failed', { message: (err as Error).message }), type: "error", duration: 5000 });
     }
   }
 }

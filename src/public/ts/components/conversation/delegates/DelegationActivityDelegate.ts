@@ -4,6 +4,7 @@
  */
 
 import { injectStyle } from '../../../utils/domUtils.js';
+import { t } from '../../../i18n/index.js';
 
 export interface DelegationActivityEvent {
   id: string;
@@ -40,7 +41,8 @@ export class DelegationActivityDelegate {
 
     // Label
     const label = document.createElement('span');
-    label.textContent = 'DELEGATE';
+    label.textContent = t('message.delegate');
+    label.setAttribute('data-i18n-key', 'message.delegate');
     label.style.cssText = 'color: var(--cinema-text-edge);';
     indicator.appendChild(label);
 

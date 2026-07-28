@@ -1,4 +1,5 @@
 import { EventEmitter } from '../EventEmitter.js';
+import { t } from '../i18n/index.js';
 
 export interface TeamView {
   id: string;
@@ -113,7 +114,7 @@ export class CoordinationStore extends EventEmitter {
   private _sessionRoots = new Map<string, string>();
 
   async loadForSession(sessionId: string): Promise<CoordinationState> {
-    if (!sessionId) throw new Error('A session is required');
+    if (!sessionId) throw new Error(t('runtime.coordination.sessionRequired'));
     const rootSessionId = await this._resolveRoot(sessionId);
     return this.loadRoot(rootSessionId);
   }
@@ -128,13 +129,13 @@ export class CoordinationStore extends EventEmitter {
     try {
       const response = await fetch(`/api/v1/sessions/${encodeURIComponent(rootSessionId)}/tasks`);
       const body = await response.json() as Partial<CoordinationState> & { error?: string };
-      if (!response.ok) throw new Error(body.error || `Snapshot request failed (${response.status})`);
+      if (!response.ok) throw new Error(body.error || t('runtime.coordination.snapshotFailed', { status: response.status }));
       const revision = Number(body.revision || 0);
       const eventResponse = await fetch(
         `/api/v1/sessions/${encodeURIComponent(rootSessionId)}/coordination-events?afterRevision=${Math.max(0, revision - 250)}`,
       );
       const eventBody = await eventResponse.json() as { events?: CoordinationEventView[]; error?: string };
-      if (!eventResponse.ok) throw new Error(eventBody.error || `Event replay request failed (${eventResponse.status})`);
+      if (!eventResponse.ok) throw new Error(eventBody.error || t('runtime.coordination.eventReplayFailed', { status: eventResponse.status }));
       const state: CoordinationState = {
         rootSessionId,
         revision,
@@ -226,7 +227,7 @@ export class CoordinationStore extends EventEmitter {
     if (cached) return cached;
     const response = await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/root`);
     const body = await response.json() as { sessionId?: string; error?: string };
-    if (!response.ok || !body.sessionId) throw new Error(body.error || 'Unable to resolve root session');
+    if (!response.ok || !body.sessionId) throw new Error(body.error || t('runtime.coordination.rootFailed'));
     this._sessionRoots.set(sessionId, body.sessionId);
     this._sessionRoots.set(body.sessionId, body.sessionId);
     return body.sessionId;

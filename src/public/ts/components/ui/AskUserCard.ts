@@ -1,6 +1,8 @@
 // Shared UI: AskUserCard — interactive question panel with options.
 // Raycast-like cinema style. Auto-builds option buttons with single/multi-select.
 
+import { onLocaleChange, refreshLocalizedElements, t } from '../../i18n/index.js';
+
 export interface AskUserOption { label: string; description: string; preview?: string; }
 
 export interface AskUserCardConfig {
@@ -10,13 +12,17 @@ export interface AskUserCardConfig {
 
 export class AskUserCard {
   readonly element: HTMLElement;
+  private _stopLocaleListener: (() => void) | null = null;
 
   constructor(config: AskUserCardConfig) {
     const wrapper = document.createElement('div'); wrapper.className = 'ui-askusercard';
 
     const header = document.createElement('div'); header.className = 'ui-askusercard-header';
     const dot = document.createElement('span'); dot.className = 'ui-askusercard-dot'; header.appendChild(dot);
-    const title = document.createElement('span'); title.textContent = 'Ask User'; header.appendChild(title);
+    const title = document.createElement('span');
+    title.textContent = t('askUser.title');
+    title.dataset.i18nKey = 'askUser.title';
+    header.appendChild(title);
     wrapper.appendChild(header);
 
     const body = document.createElement('div'); body.className = 'ui-askusercard-body';
@@ -28,6 +34,12 @@ export class AskUserCard {
     wrapper.appendChild(body);
     this.element = wrapper;
     this._injectStyles();
+    this._stopLocaleListener = onLocaleChange(() => refreshLocalizedElements(this.element));
+  }
+
+  dispose(): void {
+    this._stopLocaleListener?.();
+    this._stopLocaleListener = null;
   }
 
   private _buildQuestion(q: AskUserCardConfig['questions'][0]): HTMLElement {

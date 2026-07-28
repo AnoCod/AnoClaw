@@ -2,6 +2,7 @@
 // Status dot + tool name + title + bullet list of results.
 
 import { ToolCard, type ToolCardState } from './ToolCard.js';
+import { t } from '../../i18n/index.js';
 
 export class ToolCardResult extends ToolCard {
   constructor(state: ToolCardState) {
@@ -32,7 +33,10 @@ export class ToolCardResult extends ToolCard {
       if (items.length > 15) {
         const more = document.createElement('li');
         more.className = 'ui-toolcard-result-more';
-        more.textContent = `+ ${items.length - 15} more results`;
+        const params = { count: items.length - 15 };
+        more.textContent = t('message.tool.moreResults', params);
+        more.dataset.i18nKey = 'message.tool.moreResults';
+        more.dataset.i18nParams = JSON.stringify(params);
         list.appendChild(more);
       }
       wrapper.appendChild(list);

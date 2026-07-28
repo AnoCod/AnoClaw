@@ -1,3 +1,5 @@
+import { t } from '../../i18n/index.js';
+
 export type CoordinationEnvelopeType = 'message' | 'event' | 'task';
 
 export type CoordinationDisplayState =
@@ -88,8 +90,8 @@ export function parseCoordinationEnvelope(content: string): CoordinationPresenta
         ...base,
         state: 'mailbox_only',
         tone: 'info',
-        heading: summary || 'Mailbox message',
-        statusLabel: 'Delivered · mailbox only',
+        heading: summary || t('coordination.heading.mailbox'),
+        statusLabel: t('coordination.status.mailboxOnly'),
       };
     }
     if (kind === 'steer') {
@@ -97,16 +99,16 @@ export function parseCoordinationEnvelope(content: string): CoordinationPresenta
         ...base,
         state: 'delivered',
         tone: 'info',
-        heading: summary || 'Live intervention',
-        statusLabel: 'Delivered to active session',
+        heading: summary || t('coordination.heading.liveIntervention'),
+        statusLabel: t('coordination.status.activeSession'),
       };
     }
     return {
       ...base,
       state: 'delivered',
       tone: 'info',
-      heading: summary || coordinationKindHeading(kind, 'Coordination message'),
-      statusLabel: 'Delivered',
+      heading: summary || coordinationKindHeading(kind, t('coordination.heading.message')),
+      statusLabel: t('coordination.status.delivered'),
     };
   }
 
@@ -115,8 +117,8 @@ export function parseCoordinationEnvelope(content: string): CoordinationPresenta
       ...base,
       state: 'assigned',
       tone: 'pending',
-      heading: assignment || goal || 'Coordination task',
-      statusLabel: 'Assigned · waiting to run',
+      heading: assignment || goal || t('coordination.heading.task'),
+      statusLabel: t('coordination.status.assigned'),
     };
   }
 
@@ -128,8 +130,8 @@ export function parseCoordinationEnvelope(content: string): CoordinationPresenta
       ...base,
       state: 'mailbox_only',
       tone: 'info',
-      heading: summary || 'Mailbox message',
-      statusLabel: 'Delivered · mailbox only',
+      heading: summary || t('coordination.heading.mailbox'),
+      statusLabel: t('coordination.status.mailboxOnly'),
     };
   }
   if (kind === 'steer') {
@@ -137,56 +139,56 @@ export function parseCoordinationEnvelope(content: string): CoordinationPresenta
       ...base,
       state: 'delivered',
       tone: 'info',
-      heading: summary || 'Live intervention',
-      statusLabel: 'Delivered to active session',
+      heading: summary || t('coordination.heading.liveIntervention'),
+      statusLabel: t('coordination.status.activeSession'),
     };
   }
 
-  const heading = subject || cleanSummaryStatus(summary) || coordinationKindHeading(kind, 'Coordination update');
+  const heading = subject || cleanSummaryStatus(summary) || coordinationKindHeading(kind, t('coordination.heading.update'));
   if (explicitStatus === 'cancelled' || explicitStatus === 'canceled') {
-    return { ...base, state: 'cancelled', tone: 'warning', heading, statusLabel: 'Task cancelled' };
+    return { ...base, state: 'cancelled', tone: 'warning', heading, statusLabel: t('coordination.status.cancelled') };
   }
   if (explicitStatus === 'failed') {
-    return { ...base, state: 'failed', tone: 'error', heading, statusLabel: 'Task failed' };
+    return { ...base, state: 'failed', tone: 'error', heading, statusLabel: t('coordination.status.failed') };
   }
   if (explicitStatus === 'completed') {
-    return { ...base, state: 'completed', tone: 'success', heading, statusLabel: 'Task completed' };
+    return { ...base, state: 'completed', tone: 'success', heading, statusLabel: t('coordination.status.completed') };
   }
   if (explicitStatus === 'blocked' && /workspace_conflict|workspace conflict|等待工作区/.test(searchable)) {
-    return { ...base, state: 'waiting_workspace', tone: 'pending', heading, statusLabel: 'Waiting for workspace' };
+    return { ...base, state: 'waiting_workspace', tone: 'pending', heading, statusLabel: t('coordination.status.waitingWorkspace') };
   }
   if (explicitStatus === 'blocked') {
-    return { ...base, state: 'blocked', tone: 'warning', heading, statusLabel: 'Task blocked' };
+    return { ...base, state: 'blocked', tone: 'warning', heading, statusLabel: t('coordination.status.blocked') };
   }
   if (explicitStatus === 'running') {
-    return { ...base, state: 'running', tone: 'pending', heading, statusLabel: 'Task running' };
+    return { ...base, state: 'running', tone: 'pending', heading, statusLabel: t('coordination.status.running') };
   }
 
   if (/\b(cancelled|canceled)\b|已取消/.test(searchable)) {
-    return { ...base, state: 'cancelled', tone: 'warning', heading, statusLabel: 'Task cancelled' };
+    return { ...base, state: 'cancelled', tone: 'warning', heading, statusLabel: t('coordination.status.cancelled') };
   }
   if (/\bfailed\b|失败/.test(searchable)) {
-    return { ...base, state: 'failed', tone: 'error', heading, statusLabel: 'Task failed' };
+    return { ...base, state: 'failed', tone: 'error', heading, statusLabel: t('coordination.status.failed') };
   }
   if (/\bcompleted\b|已完成/.test(searchable)) {
-    return { ...base, state: 'completed', tone: 'success', heading, statusLabel: 'Task completed' };
+    return { ...base, state: 'completed', tone: 'success', heading, statusLabel: t('coordination.status.completed') };
   }
   if (/workspace_conflict|workspace conflict|等待工作区/.test(searchable)) {
-    return { ...base, state: 'waiting_workspace', tone: 'pending', heading, statusLabel: 'Waiting for workspace' };
+    return { ...base, state: 'waiting_workspace', tone: 'pending', heading, statusLabel: t('coordination.status.waitingWorkspace') };
   }
   if (/\bblocked\b|受阻/.test(searchable)) {
-    return { ...base, state: 'blocked', tone: 'warning', heading, statusLabel: 'Task blocked' };
+    return { ...base, state: 'blocked', tone: 'warning', heading, statusLabel: t('coordination.status.blocked') };
   }
   if (/\brunning\b|执行中/.test(searchable)) {
-    return { ...base, state: 'running', tone: 'pending', heading, statusLabel: 'Task running' };
+    return { ...base, state: 'running', tone: 'pending', heading, statusLabel: t('coordination.status.running') };
   }
   if (kind === 'task_assignment') {
-    return { ...base, state: 'assigned', tone: 'pending', heading, statusLabel: 'Assigned · waiting to run' };
+    return { ...base, state: 'assigned', tone: 'pending', heading, statusLabel: t('coordination.status.assigned') };
   }
   if (kind === 'task_result') {
-    return { ...base, state: 'completed', tone: 'success', heading, statusLabel: 'Task result delivered' };
+    return { ...base, state: 'completed', tone: 'success', heading, statusLabel: t('coordination.status.resultDelivered') };
   }
-  return { ...base, state: 'info', tone: 'info', heading, statusLabel: 'Coordination update' };
+  return { ...base, state: 'info', tone: 'info', heading, statusLabel: t('coordination.status.update') };
 }
 
 /** Map persisted/runtime interruption markers to an explicit UI explanation. */
@@ -196,58 +198,58 @@ export function parseInterruptNotice(content: string): InterruptPresentation | n
     '(Agent cancelled its own task)': {
       reason: 'task_self_cancel',
       tone: 'warning',
-      heading: 'Task cancelled',
-      statusLabel: 'Cancelled by this agent',
-      detail: 'The agent executing this task cancelled its own assignment.',
+      heading: t('interrupt.heading.taskCancelled'),
+      statusLabel: t('interrupt.status.selfCancelled'),
+      detail: t('interrupt.detail.selfCancelled'),
     },
     '(Task cancelled by its creator)': {
       reason: 'task_creator_cancel',
       tone: 'warning',
-      heading: 'Task cancelled',
-      statusLabel: 'Cancelled by task creator',
-      detail: 'The agent that created this task cancelled it.',
+      heading: t('interrupt.heading.taskCancelled'),
+      statusLabel: t('interrupt.status.creatorCancelled'),
+      detail: t('interrupt.detail.creatorCancelled'),
     },
     '(Task cancelled by the team coordinator)': {
       reason: 'task_coordinator_cancel',
       tone: 'warning',
-      heading: 'Task cancelled',
-      statusLabel: 'Cancelled by team coordinator',
-      detail: 'The team coordinator cancelled this task.',
+      heading: t('interrupt.heading.taskCancelled'),
+      statusLabel: t('interrupt.status.coordinatorCancelled'),
+      detail: t('interrupt.detail.coordinatorCancelled'),
     },
     '(User stopped)': {
       reason: 'user_stop',
       tone: 'warning',
-      heading: 'Generation stopped',
-      statusLabel: 'Stopped by user',
-      detail: 'The user stopped this session.',
+      heading: t('interrupt.heading.generationStopped'),
+      statusLabel: t('interrupt.status.userStopped'),
+      detail: t('interrupt.detail.userStopped'),
     },
     '(Parent session stopped)': {
       reason: 'parent_stop',
       tone: 'warning',
-      heading: 'Session stopped',
-      statusLabel: 'Parent session stopped',
-      detail: 'This session stopped because its parent session was stopped.',
+      heading: t('interrupt.heading.sessionStopped'),
+      statusLabel: t('interrupt.status.parentStopped'),
+      detail: t('interrupt.detail.parentStopped'),
     },
     '(Session timed out)': {
       reason: 'timeout',
       tone: 'warning',
-      heading: 'Session timed out',
-      statusLabel: 'Timeout',
-      detail: 'This session exceeded its execution time limit.',
+      heading: t('interrupt.heading.sessionTimedOut'),
+      statusLabel: t('interrupt.status.timeout'),
+      detail: t('interrupt.detail.timeout'),
     },
     '(Request interrupted)': {
       reason: 'interrupted',
       tone: 'warning',
-      heading: 'Request interrupted',
-      statusLabel: 'Interrupted',
-      detail: 'This request was interrupted before it completed.',
+      heading: t('interrupt.heading.requestInterrupted'),
+      statusLabel: t('interrupt.status.interrupted'),
+      detail: t('interrupt.detail.interrupted'),
     },
     'Halted.': {
       reason: 'halted',
       tone: 'warning',
-      heading: 'Session halted',
-      statusLabel: 'Halted',
-      detail: 'This session halted before producing a complete response.',
+      heading: t('interrupt.heading.sessionHalted'),
+      statusLabel: t('interrupt.status.halted'),
+      detail: t('interrupt.detail.halted'),
     },
   };
   if (exact[normalized]) return exact[normalized];
@@ -296,11 +298,11 @@ function cleanSummaryStatus(summary: string): string {
 function coordinationKindHeading(kind: string | undefined, fallback: string): string {
   if (!kind) return fallback;
   const headings: Record<string, string> = {
-    task_assignment: 'Task assignment',
-    task_update: 'Task update',
-    task_result: 'Task result',
-    broadcast: 'Team broadcast',
-    organization: 'Organization message',
+    task_assignment: t('coordination.kind.taskAssignment'),
+    task_update: t('coordination.kind.taskUpdate'),
+    task_result: t('coordination.kind.taskResult'),
+    broadcast: t('coordination.kind.broadcast'),
+    organization: t('coordination.kind.organization'),
   };
   return headings[kind] || fallback;
 }

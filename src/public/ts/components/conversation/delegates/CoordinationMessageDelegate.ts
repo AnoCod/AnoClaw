@@ -1,50 +1,99 @@
 import { renderMarkdown } from '../../../MarkdownRenderer.js';
 import type { ConversationMessage } from '../types.js';
-import type {
-  CoordinationPresentation,
-  InterruptPresentation,
+import {
+  parseCoordinationEnvelope,
+  parseInterruptNotice,
+  type CoordinationPresentation,
+  type InterruptPresentation,
 } from '../CoordinationPresentation.js';
+import { getLocale, onLocaleChange, t } from '../../../i18n/index.js';
 
 export class CoordinationMessageDelegate {
   element: HTMLElement;
+  private readonly _msg: ConversationMessage;
 
   constructor(
     msg: ConversationMessage,
     presentation: CoordinationPresentation,
   ) {
-    this.element = renderNoticeCard({
+    this._msg = msg;
+    this.element = document.createElement('div');
+    this._render(presentation);
+    this._subscribeToLocale(() => {
+      const localized = parseCoordinationEnvelope(this._msg.content);
+      if (localized) this._render(localized);
+    });
+  }
+
+  private _render(presentation: CoordinationPresentation): void {
+    renderNoticeCard({
       tone: presentation.tone,
       category: categoryLabel(presentation.envelopeType),
       heading: presentation.heading,
       statusLabel: presentation.statusLabel,
       body: presentation.body,
-      route: routeLabel(msg.agentName || presentation.fromAgentId, presentation.toAgentId),
-      footer: presentation.taskId ? `Task ${presentation.taskId}` : '',
-      timestamp: msg.timestamp,
+      route: routeLabel(this._msg.agentName || presentation.fromAgentId, presentation.toAgentId),
+      footer: presentation.taskId ? t('coordination.footer.task', { taskId: presentation.taskId }) : '',
+      timestamp: this._msg.timestamp,
       dataKind: presentation.envelopeType,
       dataState: presentation.state,
-      sessionId: msg.sessionId,
+      sessionId: this._msg.sessionId,
+    }, this.element);
+  }
+
+  private _subscribeToLocale(refresh: () => void): void {
+    let unsubscribe: (() => void) | null = null;
+    unsubscribe = onLocaleChange(() => {
+      if ('isConnected' in this.element && !this.element.isConnected) {
+        unsubscribe?.();
+        unsubscribe = null;
+        return;
+      }
+      refresh();
     });
   }
 }
 
 export class InterruptNoticeDelegate {
   element: HTMLElement;
+  private readonly _msg: ConversationMessage;
 
   constructor(
     msg: ConversationMessage,
     presentation: InterruptPresentation,
   ) {
-    this.element = renderNoticeCard({
+    this._msg = msg;
+    this.element = document.createElement('div');
+    this._render(presentation);
+    this._subscribeToLocale(() => {
+      const localized = parseInterruptNotice(this._msg.content);
+      if (localized) this._render(localized);
+    });
+  }
+
+  private _render(presentation: InterruptPresentation): void {
+    renderNoticeCard({
       tone: presentation.tone,
-      category: 'Session status',
+      category: t('coordination.category.sessionStatus'),
       heading: presentation.heading,
       statusLabel: presentation.statusLabel,
       body: presentation.detail,
-      timestamp: msg.timestamp,
+      timestamp: this._msg.timestamp,
       dataKind: 'interrupt',
       dataState: presentation.reason,
-      sessionId: msg.sessionId,
+      sessionId: this._msg.sessionId,
+    }, this.element);
+  }
+
+  private _subscribeToLocale(refresh: () => void): void {
+    let unsubscribe: (() => void) | null = null;
+    unsubscribe = onLocaleChange(() => {
+      if ('isConnected' in this.element && !this.element.isConnected) {
+        unsubscribe?.();
+        unsubscribe = null;
+        return;
+      }
+      refresh();
     });
   }
 }
@@ -63,8 +112,11 @@ interface NoticeCardOptions {
   sessionId?: string;
 }
 
-function renderNoticeCard(options: NoticeCardOptions): HTMLElement {
-  const card = document.createElement('div');
+function renderNoticeCard(
+  options: NoticeCardOptions,
+  card: HTMLElement = document.createElement('div'),
+): HTMLElement {
+  card.replaceChildren();
   card.className = `coordination-transcript-card coordination-transcript-card--${options.tone}`;
   card.dataset.coordinationKind = options.dataKind;
   card.dataset.coordinationState = options.dataState;
@@ -117,15 +169,15 @@ function renderNoticeCard(options: NoticeCardOptions): HTMLElement {
 }
 
 function categoryLabel(type: CoordinationPresentation['envelopeType']): string {
-  if (type === 'message') return 'Agent message';
-  if (type === 'task') return 'Task';
-  return 'Coordination';
+  if (type === 'message') return t('coordination.category.agentMessage');
+  if (type === 'task') return t('coordination.category.task');
+  return t('coordination.category.coordination');
 }
 
 function routeLabel(fromAgentId?: string, toAgentId?: string): string {
   if (fromAgentId && toAgentId) return `${fromAgentId} → ${toAgentId}`;
-  if (fromAgentId) return `From ${fromAgentId}`;
-  if (toAgentId) return `To ${toAgentId}`;
+  if (fromAgentId) return t('coordination.route.from', { agent: fromAgentId });
+  if (toAgentId) return t('coordination.route.to', { agent: toAgentId });
   return '';
 }
 
@@ -133,5 +185,5 @@ function formatTime(timestamp?: string): string {
   if (!timestamp) return '';
   const time = new Date(timestamp);
   if (!Number.isFinite(time.getTime())) return '';
-  return time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return time.toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' });
 }

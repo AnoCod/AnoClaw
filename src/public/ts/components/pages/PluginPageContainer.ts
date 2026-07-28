@@ -3,6 +3,7 @@
 
 import type { Page, PluginPageContribution } from '../../types.js';
 import { ConfirmDialog } from '../ConfirmDialog.js';
+import { getLocale } from '../../i18n/index.js';
 
 export class PluginPageContainer implements Page {
   readonly name: string;
@@ -20,6 +21,7 @@ export class PluginPageContainer implements Page {
     this._htmlPath = contribution.htmlPath;
 
     window.addEventListener('theme-changed', this._onThemeChanged);
+    window.addEventListener('locale-changed', this._onLocaleChanged);
     this._installDialogBridge();
     this._installSessionBridge();
   }
@@ -83,6 +85,10 @@ export class PluginPageContainer implements Page {
     this._syncTheme();
   };
 
+  private _onLocaleChanged = (): void => {
+    this._syncLocale();
+  };
+
   onEnter(): void {
     if (!this._htmlPath) return;
     if (!this._loaded) {
@@ -92,6 +98,7 @@ export class PluginPageContainer implements Page {
     if (this._iframe) {
       this._iframe.style.display = '';
       this._syncTheme();
+      this._syncLocale();
     }
   }
 
@@ -107,6 +114,16 @@ export class PluginPageContainer implements Page {
     }, '*');
     // Also update data attributes on iframe's html element for CSS selectors
     this._updateIframeThemeAttrs();
+  }
+
+  private _syncLocale(): void {
+    if (!this._iframe?.contentWindow) return;
+    const locale = getLocale();
+    this._iframe.contentWindow.postMessage({
+      type: 'anoclaw:locale',
+      locale,
+    }, '*');
+    this._updateIframeLocaleAttrs();
   }
 
   onExit(): void {
@@ -139,7 +156,7 @@ export class PluginPageContainer implements Page {
           }
         );
         // Inject shared plugin chrome before the plugin bundle runs.
-        const pluginBoot = `<script>window.__ANOCLAW_PLUGIN_NAME__=${JSON.stringify(this.container.getAttribute('data-plugin') || '')};</script>`;
+        const pluginBoot = `<script>window.__ANOCLAW_PLUGIN_NAME__=${JSON.stringify(this.container.getAttribute('data-plugin') || '')};window.__ANOCLAW_LOCALE__=${JSON.stringify(getLocale())};</script>`;
         const uiTag = [
           pluginBoot,
           `<link rel=\"stylesheet\" href=\"${mainBase}css/tokens.css\">`,
@@ -165,6 +182,7 @@ export class PluginPageContainer implements Page {
           this._iframe.addEventListener('load', () => {
             this._injectAssets();
             this._syncTheme();
+            this._syncLocale();
           }, { once: true });
         }
       });
@@ -172,6 +190,7 @@ export class PluginPageContainer implements Page {
     this._iframe.addEventListener('load', () => {
       console.log(`[Plugin] iframe ready: ${this._htmlPath}`);
       this._syncTheme();
+      this._syncLocale();
     });
 
     this.container.appendChild(this._iframe);
@@ -187,7 +206,7 @@ export class PluginPageContainer implements Page {
     const mainBase = window.location.href.substring(0, window.location.href.lastIndexOf('/') + 1);
 
     const pluginBoot = doc.createElement('script');
-    pluginBoot.textContent = `window.__ANOCLAW_PLUGIN_NAME__=${JSON.stringify(this.container.getAttribute('data-plugin') || '')};`;
+    pluginBoot.textContent = `window.__ANOCLAW_PLUGIN_NAME__=${JSON.stringify(this.container.getAttribute('data-plugin') || '')};window.__ANOCLAW_LOCALE__=${JSON.stringify(getLocale())};`;
     head.appendChild(pluginBoot);
 
     const link = doc.createElement('link');
@@ -201,6 +220,7 @@ export class PluginPageContainer implements Page {
     head.appendChild(pluginSkinLink);
 
     this._updateIframeThemeAttrs();
+    this._updateIframeLocaleAttrs();
 
     const script = doc.createElement('script');
     script.src = mainBase + 'anoclaw-ui.js';
@@ -222,5 +242,10 @@ export class PluginPageContainer implements Page {
     const docEl = this._iframe.contentDocument.documentElement;
     docEl.setAttribute('data-theme', theme);
     docEl.setAttribute('data-accent', accent); // always set, 'white' is harmless in tokens.css
+  }
+
+  private _updateIframeLocaleAttrs(): void {
+    if (!this._iframe?.contentDocument) return;
+    this._iframe.contentDocument.documentElement.lang = getLocale();
   }
 }

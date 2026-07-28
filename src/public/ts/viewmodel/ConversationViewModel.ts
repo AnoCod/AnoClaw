@@ -8,6 +8,7 @@ import type { SessionViewModel } from './SessionViewModel.js';
 import type { GoalContractDraft, GoalState } from '../components/conversation/types.js';
 import { ClientLogger } from '../ClientLogger.js';
 import type { SessionNode } from '../types.js';
+import { t } from '../i18n/index.js';
 
 type PermissionModeUi = 'ask' | 'auto-edit' | 'plan' | 'auto';
 
@@ -93,7 +94,7 @@ export class ConversationViewModel extends EventEmitter {
       this._goalRequestTimer = null;
       this._pendingGoalMessageId = null;
       this.goalPending = false;
-      this.goalError = d.errorMessage || 'Goal update failed';
+      this.goalError = d.errorMessage || t('runtime.goal.updateFailed');
       this.emit('goalPendingChanged', false);
       this.emit('goalError', this.goalError);
     });
@@ -105,7 +106,7 @@ export class ConversationViewModel extends EventEmitter {
   /** Get or create a SessionAgent for the given session. Auto-subscribes streaming tracking. */
   getAgent(sessionId: string): SessionAgent {
     if (!this._sessionVM) {
-      throw new Error('ConversationViewModel: _sessionVM is null. Call setSessionVM() before getAgent().');
+      throw new Error(t('runtime.conversation.notInitialized'));
     }
     let agent = this._agents.get(sessionId);
     if (!agent) {
@@ -248,7 +249,7 @@ export class ConversationViewModel extends EventEmitter {
       this._pendingGoalMessageId = null;
       this._goalRequestTimer = null;
       this.goalPending = false;
-      this.goalError = 'Goal update timed out. Check the connection and try again.';
+      this.goalError = t('runtime.goal.updateTimedOut');
       this.emit('goalPendingChanged', false);
       this.emit('goalError', this.goalError);
     }, 15_000);
@@ -350,18 +351,20 @@ export class ConversationViewModel extends EventEmitter {
     const mode: PermissionModeUi = 'auto-edit';
     const effort = root.metadata?.effortMode === false ? false : true;
     const content = [
-      'Start or continue working toward this active session goal.',
+      t('runtime.goal.prompt.start'),
       '',
-      '# Active Goal',
-      `Objective: ${goal.objective}`,
-      `Run count: ${goal.runCount || 0}`,
+      t('runtime.goal.prompt.heading'),
+      t('runtime.goal.prompt.objective', { objective: goal.objective }),
+      t('runtime.goal.prompt.runCount', { count: goal.runCount || 0 }),
       '',
-      '# Current Execution Context',
-      `Workspace: ${root.workspace || '(default workspace)'}`,
-      `Permission mode: ${this._toCanonicalMode(mode)}`,
-      `Effort: ${effort ? 'HIGH' : 'NORMAL'}`,
+      t('runtime.goal.prompt.contextHeading'),
+      t('runtime.goal.prompt.workspace', { workspace: root.workspace || t('runtime.goal.prompt.defaultWorkspace') }),
+      t('runtime.goal.prompt.permission', { mode: this._toCanonicalMode(mode) }),
+      t('runtime.goal.prompt.effort', {
+        effort: effort ? t('runtime.goal.prompt.high') : t('runtime.goal.prompt.normal'),
+      }),
       '',
-      'Use the current workspace as the primary context. Advance the next useful step; if the goal is already complete or blocked, say so clearly.',
+      t('runtime.goal.prompt.instruction'),
     ].join('\n');
     await agent.sendMessage(content, mode, effort, [], { internalGoal: true });
   }

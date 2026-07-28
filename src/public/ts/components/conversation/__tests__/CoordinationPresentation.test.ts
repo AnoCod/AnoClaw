@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   parseCoordinationEnvelope,
   parseInterruptNotice,
 } from '../CoordinationPresentation.js';
+import { setLocale } from '../../../i18n/index.js';
+
+beforeEach(() => setLocale('en-US'));
+afterEach(() => setLocale('zh-CN'));
 
 describe('parseCoordinationEnvelope', () => {
   it('turns a durable note into a mailbox-only presentation without raw XML', () => {

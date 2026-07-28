@@ -8,6 +8,7 @@ import { escapeHtml } from './SessionsPageUtils.js';
 import { ConfirmDialog } from '../ConfirmDialog.js';
 import type { SessionNode } from '../../types.js';
 import { ClientLogger } from '../../ClientLogger.js';
+import { onLocaleChange, t } from '../../i18n/index.js';
 
 /**
  * Build and append supervision control buttons for a sub-session node
@@ -34,7 +35,7 @@ export function buildSupervisionButtons(node: SessionNode, overviewPane: HTMLEle
     color: var(--color-text-primary);
     margin-bottom: 2px;
   `;
-  heading.textContent = 'Supervision';
+  heading.textContent = t('supervision.title');
   controls.appendChild(heading);
 
   // Stop Task button
@@ -52,10 +53,10 @@ export function buildSupervisionButtons(node: SessionNode, overviewPane: HTMLEle
     font-weight: 500;
     transition: opacity 0.15s;
   `;
-  stopBtn.innerHTML = '<span style="margin-right:4px;">⏹</span> Stop Task';
-  stopBtn.title = `Terminate task for session ${node.id}`;
+  stopBtn.innerHTML = `<span style="margin-right:4px;">⏹</span> ${t('supervision.stop')}`;
+  stopBtn.title = t('supervision.stopTitle', { id: node.id });
   stopBtn.addEventListener('click', async () => {
-    const ok = await ConfirmDialog.show(`Stop task for session "${node.title}"?`, 'Stop Task');
+    const ok = await ConfirmDialog.show(t('supervision.stopConfirm', { title: node.title }), t('supervision.stop'));
     if (ok) {
       const convVM = App.getInstance().conversationVM;
       const sessionVM = App.getInstance().sessionVM;
@@ -82,8 +83,8 @@ export function buildSupervisionButtons(node: SessionNode, overviewPane: HTMLEle
     font-weight: 500;
     transition: background 0.15s;
   `;
-  logBtn.innerHTML = '<span style="margin-right:4px;">📋</span> View Logs';
-  logBtn.title = 'View logs for this sub-session';
+  logBtn.innerHTML = `<span style="margin-right:4px;">📋</span> ${t('supervision.logs')}`;
+  logBtn.title = t('supervision.logsTitle');
   logBtn.addEventListener('click', () => { ClientLogger.ui.debug('View logs clicked', { sid: node.id }); });
   logBtn.addEventListener('mouseenter', () => { logBtn.style.background = 'rgba(255,255,255,0.1)'; });
   logBtn.addEventListener('mouseleave', () => { logBtn.style.background = 'rgba(255,255,255,0.06)'; });
@@ -101,14 +102,38 @@ export function buildSupervisionButtons(node: SessionNode, overviewPane: HTMLEle
       font-size: 11px;
       color: var(--color-text-secondary);
     `;
-    chain.innerHTML = `
-      <div style="font-weight:500;color:var(--color-text-primary);margin-bottom:4px;">Session Chain</div>
-      <div>Parent: ${escapeHtml(node.parentSessionId)}</div>
-      <div>Agent: ${escapeHtml(node.agentName || 'Unknown')}</div>
-      <div>Type: ${node.type || 'Sub'}</div>
-    `;
+    const renderChain = () => {
+      chain.innerHTML = `
+        <div style="font-weight:500;color:var(--color-text-primary);margin-bottom:4px;">${t('supervision.chain')}</div>
+        <div>${t('supervision.parent')}: ${escapeHtml(node.parentSessionId!)}</div>
+        <div>${t('supervision.agent')}: ${escapeHtml(node.agentName || t('supervision.unknown'))}</div>
+        <div>${t('supervision.type')}: ${node.type || t('supervision.sub')}</div>
+      `;
+    };
+    renderChain();
     controls.appendChild(chain);
   }
+
+  const stopLocaleListener = onLocaleChange(() => {
+    if (!controls.isConnected) {
+      stopLocaleListener();
+      return;
+    }
+    heading.textContent = t('supervision.title');
+    stopBtn.innerHTML = `<span style="margin-right:4px;">⏹</span> ${t('supervision.stop')}`;
+    stopBtn.title = t('supervision.stopTitle', { id: node.id });
+    logBtn.innerHTML = `<span style="margin-right:4px;">📋</span> ${t('supervision.logs')}`;
+    logBtn.title = t('supervision.logsTitle');
+    const chain = controls.lastElementChild as HTMLElement | null;
+    if (node.parentSessionId && chain?.style) {
+      chain.innerHTML = `
+        <div style="font-weight:500;color:var(--color-text-primary);margin-bottom:4px;">${t('supervision.chain')}</div>
+        <div>${t('supervision.parent')}: ${escapeHtml(node.parentSessionId)}</div>
+        <div>${t('supervision.agent')}: ${escapeHtml(node.agentName || t('supervision.unknown'))}</div>
+        <div>${t('supervision.type')}: ${node.type || t('supervision.sub')}</div>
+      `;
+    }
+  });
 
   overviewPane.appendChild(controls);
 }

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TaskNotificationDelegate } from '../TaskNotificationDelegate.js';
 
 class FakeElement {
+  readonly dataset: Record<string, string> = {};
   children: FakeElement[] = [];
   className = '';
   textContent = '';

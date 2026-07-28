@@ -7,6 +7,7 @@ import { ClientLogger } from '../../../ClientLogger.js';
 import { ToastManager } from '../../../ToastManager.js';
 import { Badge } from '../../ui/Badge.js';
 import type { TalentPoolGroup, TalentPoolTemplate } from '../../../types.js';
+import { onLocaleChange, t } from '../../../i18n/index.js';
 
 // Domain color mapping for colored dots
 const DOMAIN_COLORS: Record<string, string> = {
@@ -34,10 +35,13 @@ export class TalentPoolPanel extends EventEmitter {
   private _expandedGroups = new Set<string>();
   private _selectedTemplate: TalentPoolTemplate | null = null;
   private _filterText = '';
+  private _previewOverlay: HTMLElement | null = null;
+  private _previewTemplate: TalentPoolTemplate | null = null;
 
   constructor(container: HTMLElement) {
     super();
     this._container = container;
+    onLocaleChange(() => this.refreshLocale());
   }
 
   get visible(): boolean { return this._visible; }
@@ -45,6 +49,20 @@ export class TalentPoolPanel extends EventEmitter {
   /** Reload data if panel is currently visible. */
   reload(): void {
     if (this._visible) this._loadData().catch(() => {});
+  }
+
+  /** Refresh visible chrome without discarding the current search or selection. */
+  refreshLocale(): void {
+    if (this._panel) {
+      const search = this._panel.querySelector<HTMLInputElement>('.tp-search-input');
+      if (search) this._filterText = search.value;
+      this._closeCtxMenu();
+      this._panel.innerHTML = this._buildPanelHTML();
+      this._wireEvents();
+    }
+    if (this._previewOverlay && this._previewTemplate) {
+      this._renderPreview(this._previewOverlay, this._previewTemplate);
+    }
   }
 
   async toggle(): Promise<void> {
@@ -110,17 +128,20 @@ export class TalentPoolPanel extends EventEmitter {
   }
 
   private _buildPanelHTML(): string {
-    const countInfo = `${this._templates.length} templates, ${this._groups.length} domains`;
+    const countInfo = t('talent.summary', {
+      templates: this._templates.length,
+      domains: this._groups.length,
+    });
     return `
       <div class="tp-header">
         <div class="tp-header-top">
-          <span class="tp-title">Talent Pool</span>
+          <span class="tp-title">${t('talent.title')}</span>
           <button class="tp-close-btn">&times;</button>
         </div>
         <div class="tp-search">
-          <input type="text" class="tp-search-input" placeholder="Search templates..." value="${this._esc(this._filterText)}">
+          <input type="text" class="tp-search-input" placeholder="${t('talent.search')}" value="${this._esc(this._filterText)}">
         </div>
-        <button class="tp-add-group-btn">+ New Domain</button>
+        <button class="tp-add-group-btn">${t('talent.newDomain')}</button>
       </div>
       <div class="tp-body">${this._buildTreeHTML()}</div>
       <div class="tp-footer"><span>${countInfo}</span></div>
@@ -129,7 +150,7 @@ export class TalentPoolPanel extends EventEmitter {
 
   private _buildTreeHTML(): string {
     if (this._groups.length === 0) {
-      return '<div class="tp-empty">No domains yet. Click "New Domain" to add one.</div>';
+      return `<div class="tp-empty">${t('talent.empty')}</div>`;
     }
 
     let html = '<div class="tp-tree">';
@@ -152,15 +173,16 @@ export class TalentPoolPanel extends EventEmitter {
         : members;
       for (const tpl of filtered) {
         const roleDotClass = tpl.role === 'Manager' ? 'manager' : 'member';
-        html += `<div class="tp-template" data-template-id="${this._esc(tpl.id)}">
+        const selected = this._selectedTemplate?.id === tpl.id ? ' tp-selected' : '';
+        html += `<div class="tp-template${selected}" data-template-id="${this._esc(tpl.id)}">
           <span class="tp-tpl-role-dot ${roleDotClass}"></span>
           <span class="tp-tpl-name">${this._esc(tpl.name)}</span>
           <span class="tp-tpl-stars">${'★'.repeat(tpl.starRating)}</span>
-          <span class="tp-tpl-role-badge ${roleDotClass}">${tpl.role}</span>
+          <span class="tp-tpl-role-badge ${roleDotClass}">${this._roleLabel(tpl.role)}</span>
         </div>`;
       }
       if (filtered.length === 0 && this._filterText) {
-        html += '<div class="tp-empty-small">No match</div>';
+        html += `<div class="tp-empty-small">${t('talent.noMatch')}</div>`;
       }
       html += `</div></div>`;
     }
@@ -246,7 +268,7 @@ export class TalentPoolPanel extends EventEmitter {
 
     const renameItem = document.createElement('div');
     renameItem.className = 'ui-context-menu-item';
-    renameItem.textContent = 'Rename Domain';
+    renameItem.textContent = t('talent.renameDomain');
     renameItem.addEventListener('click', () => {
       this._closeCtxMenu();
       this._promptRenameGroup(groupId, group?.name || '');
@@ -254,7 +276,7 @@ export class TalentPoolPanel extends EventEmitter {
 
     const deleteItem = document.createElement('div');
     deleteItem.className = 'ui-context-menu-item';
-    deleteItem.textContent = 'Delete Domain';
+    deleteItem.textContent = t('talent.deleteDomain');
     deleteItem.addEventListener('click', async () => {
       this._closeCtxMenu();
       this._deleteGroup(groupId, group?.name || '');
@@ -284,8 +306,8 @@ export class TalentPoolPanel extends EventEmitter {
     menu.appendChild(sep);
 
     const items = [
-      { label: 'Hire Template', action: () => this.emit('hire', tpl) },
-      { label: 'Preview Prompt', action: () => this._showPreview(tpl) },
+      { label: t('talent.hireTemplate'), action: () => this.emit('hire', tpl) },
+      { label: t('talent.previewPrompt'), action: () => this._showPreview(tpl) },
     ];
     for (const item of items) {
       const row = document.createElement('div');
@@ -307,7 +329,7 @@ export class TalentPoolPanel extends EventEmitter {
   // ═══ Dialogs ══════════════════════════════════════════════
 
   private _promptAddGroup(): void {
-    const name = prompt('Enter domain name:');
+    const name = prompt(t('talent.prompt.domainName'));
     if (!name || !name.trim()) return;
     fetch('/api/v1/talent-pool/groups', {
       method: 'POST',
@@ -319,12 +341,12 @@ export class TalentPoolPanel extends EventEmitter {
       this._expandedGroups.add(g.id);
       await this._loadData();
       this._rerenderTree();
-      ToastManager.getInstance().success(`Domain "${g.name}" created`);
-    }).catch(() => ToastManager.getInstance().error('Failed to create domain'));
+      ToastManager.getInstance().success(t('talent.toast.domainCreated', { name: g.name }));
+    }).catch(() => ToastManager.getInstance().error(t('talent.toast.createFailed')));
   }
 
   private _promptRenameGroup(groupId: string, currentName: string): void {
-    const name = prompt('Enter new name:', currentName);
+    const name = prompt(t('talent.prompt.newName'), currentName);
     if (!name || !name.trim() || name.trim() === currentName) return;
     fetch(`/api/v1/talent-pool/groups/${groupId}`, {
       method: 'PATCH',
@@ -334,24 +356,31 @@ export class TalentPoolPanel extends EventEmitter {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await this._loadData();
       this._rerenderTree();
-      ToastManager.getInstance().success('Domain renamed');
-    }).catch(() => ToastManager.getInstance().error('Rename failed'));
+      ToastManager.getInstance().success(t('talent.toast.renamed'));
+    }).catch(() => ToastManager.getInstance().error(t('talent.toast.renameFailed')));
   }
 
   private async _deleteGroup(groupId: string, name: string): Promise<void> {
-    if (!confirm(`Delete domain "${name}"? Templates in this domain will lose their group assignment.`)) return;
+    if (!confirm(t('talent.deleteConfirm', { name }))) return;
     try {
       await fetch(`/api/v1/talent-pool/groups/${groupId}`, { method: 'DELETE' });
       this._expandedGroups.delete(groupId);
       await this._loadData();
       this._rerenderTree();
-      ToastManager.getInstance().success('Domain deleted');
-    } catch { ToastManager.getInstance().error('Delete failed'); }
+      ToastManager.getInstance().success(t('talent.toast.deleted'));
+    } catch { ToastManager.getInstance().error(t('talent.toast.deleteFailed')); }
   }
 
   private _showPreview(tpl: TalentPoolTemplate): void {
     const overlay = document.createElement('div');
     overlay.className = 'tp-preview-overlay';
+    this._previewOverlay = overlay;
+    this._previewTemplate = tpl;
+    this._renderPreview(overlay, tpl);
+    document.body.appendChild(overlay);
+  }
+
+  private _renderPreview(overlay: HTMLElement, tpl: TalentPoolTemplate): void {
     overlay.innerHTML = `
       <div class="tp-preview-modal">
         <div class="tp-preview-header">
@@ -360,43 +389,55 @@ export class TalentPoolPanel extends EventEmitter {
         </div>
         <div class="tp-preview-body">
           <div class="tp-preview-section">
-            <label>Role</label>
-            <span><span class="tp-tpl-role-dot ${tpl.role === 'Manager' ? 'manager' : 'member'}" style="display:inline-block;vertical-align:middle;margin-right:4px;"></span> ${tpl.role}</span>
+            <label>${t('talent.preview.role')}</label>
+            <span><span class="tp-tpl-role-dot ${tpl.role === 'Manager' ? 'manager' : 'member'}" style="display:inline-block;vertical-align:middle;margin-right:4px;"></span> ${this._roleLabel(tpl.role)}</span>
           </div>
           <div class="tp-preview-section">
-            <label>Description</label>
+            <label>${t('talent.preview.description')}</label>
             <span>${this._esc(tpl.description)}</span>
           </div>
           <div class="tp-preview-section">
-            <label>Model</label>
+            <label>${t('talent.preview.model')}</label>
             <span>${this._esc(tpl.model)}</span>
           </div>
           <div class="tp-preview-section">
-            <label>Tags</label>
+            <label>${t('talent.preview.tags')}</label>
             <span>${tpl.tags.map(t => `<span class="tp-preview-tag">${this._esc(t)}</span>`).join(' ')}</span>
           </div>
           <div class="tp-preview-section">
-            <label>System Prompt</label>
+            <label>${t('talent.preview.systemPrompt')}</label>
             <pre class="tp-preview-prompt">${this._esc(tpl.agentPrompt)}</pre>
           </div>
           <div class="tp-preview-section">
-            <label>Allowed Tools (${tpl.allowedTools.length})</label>
-            <span class="tp-preview-tools">${tpl.allowedTools.length > 0 ? tpl.allowedTools.map(t => `<span class="tp-preview-tag">${this._esc(t)}</span>`).join(' ') : 'All'}</span>
+            <label>${t('talent.preview.allowedTools', { count: tpl.allowedTools.length })}</label>
+            <span class="tp-preview-tools">${tpl.allowedTools.length > 0 ? tpl.allowedTools.map(t => `<span class="tp-preview-tag">${this._esc(t)}</span>`).join(' ') : t('talent.preview.all')}</span>
           </div>
         </div>
         <div class="tp-preview-footer">
-          <button class="tp-preview-hire-btn">Hire Template</button>
-          <button class="tp-preview-close-btn">Close</button>
+          <button class="tp-preview-hire-btn">${t('talent.hireTemplate')}</button>
+          <button class="tp-preview-close-btn">${t('talent.preview.close')}</button>
         </div>
       </div>
     `;
-    document.body.appendChild(overlay);
 
-    const close = () => overlay.remove();
+    const close = () => {
+      overlay.remove();
+      if (this._previewOverlay === overlay) {
+        this._previewOverlay = null;
+        this._previewTemplate = null;
+      }
+    };
     overlay.querySelector('.tp-preview-close')?.addEventListener('click', close);
     overlay.querySelector('.tp-preview-close-btn')?.addEventListener('click', close);
     overlay.querySelector('.tp-preview-hire-btn')?.addEventListener('click', () => { close(); this.emit('hire', tpl); });
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+  }
+
+  private _roleLabel(role: string): string {
+    if (role === 'Manager') return t('agents.role.manager');
+    if (role === 'Member') return t('agents.role.member');
+    if (role === 'MainAgent') return t('agents.role.ceo');
+    return role;
   }
 
   private _esc(s: string): string {

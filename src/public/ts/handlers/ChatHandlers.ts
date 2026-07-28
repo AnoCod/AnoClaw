@@ -10,6 +10,7 @@ import { slotRegistry } from '../SlotRegistry.js';
 import { ToastManager } from '../ToastManager.js';
 import { ToolConfirmationQueue } from '../viewmodel/ToolConfirmationQueue.js';
 import { CoordinationStore } from '../viewmodel/CoordinationStore.js';
+import { t } from '../i18n/index.js';
 
 export function registerChatHandlers(
   router: WSMessageRouter,
@@ -47,9 +48,9 @@ export function registerChatHandlers(
       }));
     }
     if (data.success) {
-      ToastManager.getInstance().success(data.output || `${data.command} completed`);
+      ToastManager.getInstance().success(data.output || t('chat.command.completed', { command: data.command }));
     } else {
-      ToastManager.getInstance().error(data.output || `${data.command} failed`);
+      ToastManager.getInstance().error(data.output || t('chat.command.failed', { command: data.command }));
     }
   });
 
@@ -123,8 +124,11 @@ export function registerChatHandlers(
 
   router.on('plugin_load_failed', (ctx) => {
     const d = ctx.data as { pluginName?: string; error?: string };
-    const name = d.pluginName || 'plugin';
-    ToastManager.getInstance().show('error', `Plugin "${name}" failed to load: ${d.error || 'unknown error'}`, 8000);
+    const name = d.pluginName || t('chat.plugin.defaultName');
+    ToastManager.getInstance().show('error', t('chat.plugin.loadFailed', {
+      name,
+      error: d.error || t('chat.plugin.unknownError'),
+    }), 8000);
   });
 
   router.on('tool_execution_started', (ctx) => {

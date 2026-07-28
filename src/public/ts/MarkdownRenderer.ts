@@ -17,6 +17,7 @@
  */
 
 import { highlightCode } from './components/tabs/FilePreview.js';
+import { onLocaleChange, t } from './i18n/index.js';
 import {
   linkifyFilePathsInHtml,
   markdownLinkHtml,
@@ -229,15 +230,22 @@ function renderImage(escapedAlt: string, escapedTarget: string, options: Markdow
 
   const fallbackLabel = alt || (fileRef?.path ?? target) || 'image';
   if (!src) {
-    return `<span class="md-image-wrapper md-image-error"${fileAttr}><span class="md-image-fallback">Image unavailable: ${esc(fallbackLabel)}</span></span>`;
+    return `<span class="md-image-wrapper md-image-error"${fileAttr}><span class="md-image-fallback">${esc(t('image.unavailable', { label: fallbackLabel }))}</span></span>`;
   }
 
   return `<span class="md-image-wrapper"${fileAttr}>`
-    + `<img src="${esc(src)}" alt="${esc(alt)}" class="md-inline-image" loading="lazy" tabindex="0" title="Click to preview" `
+    + `<img src="${esc(src)}" alt="${esc(alt)}" class="md-inline-image" loading="lazy" tabindex="0" data-image-preview-title="true" title="${esc(t('image.clickToPreview'))}" `
     + `onerror="this.style.display='none';this.nextElementSibling.style.display='block'">`
-    + `<span class="md-image-fallback" style="display:none">Image unavailable: ${esc(fallbackLabel)}</span>`
+    + `<span class="md-image-fallback" style="display:none">${esc(t('image.unavailable', { label: fallbackLabel }))}</span>`
     + `</span>`;
 }
+
+onLocaleChange(() => {
+  if (typeof document === 'undefined') return;
+  document.querySelectorAll<HTMLElement>('[data-image-preview-title]').forEach((element) => {
+    element.title = t('image.clickToPreview');
+  });
+});
 
 function processText(text: string, options: MarkdownRenderOptions = {}): string {
   // If the text contains raw HTML, run our sanitizer first

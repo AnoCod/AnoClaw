@@ -9,6 +9,7 @@ import { ClientLogger } from '../ClientLogger.js';
 import type { SessionNode } from '../types.js';
 import { ToastManager } from '../ToastManager.js';
 import type { AgentViewModel } from './AgentViewModel.js';
+import { t } from '../i18n/index.js';
 
 /** localStorage key for persisting the active session across page refreshes. */
 const ACTIVE_SESSION_KEY = 'anoclaw-active-session';
@@ -77,7 +78,7 @@ export class SessionViewModel extends EventEmitter {
     const session = this.sessions.getById(sessionId);
     const result = this._agentVM.selectRunnableAgent(session?.agentId);
     if (!result.ok) {
-      throw new Error(result.message || 'No runnable agent is configured. Open Agents and configure a model connection before sending a message.');
+      throw new Error(result.message || t('runtime.agent.noneRunnableSend'));
     }
   }
 
@@ -130,7 +131,7 @@ export class SessionViewModel extends EventEmitter {
       const resp = await fetch('/api/v1/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name || 'New Session', parentId: parentId || null }),
+        body: JSON.stringify({ name: name || t('runtime.session.newTitle'), parentId: parentId || null }),
       });
       if (!resp.ok) {
         let message = `HTTP ${resp.status}`;
@@ -147,7 +148,7 @@ export class SessionViewModel extends EventEmitter {
       return node;
     } catch (e) {
       ClientLogger.vm.error('Failed to create session', { error: (e as Error).message });
-      ToastManager.getInstance().error((e as Error).message || 'Failed to create session');
+      ToastManager.getInstance().error((e as Error).message || t('runtime.session.createFailed'));
       return null;
     }
   }

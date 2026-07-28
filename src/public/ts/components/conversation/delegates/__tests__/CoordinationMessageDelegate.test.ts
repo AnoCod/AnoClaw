@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { UserMessageDelegate } from '../UserMessageDelegate.js';
+import { setLocale } from '../../../../i18n/index.js';
 
 class FakeElement {
   children: FakeElement[] = [];
@@ -13,6 +14,10 @@ class FakeElement {
     return child;
   }
 
+  replaceChildren(...children: FakeElement[]): void {
+    this.children.splice(0, this.children.length, ...children);
+  }
+
   findByClass(className: string): FakeElement | null {
     if (this.className.split(/\s+/).includes(className)) return this;
     for (const child of this.children) {
@@ -24,12 +29,15 @@ class FakeElement {
 }
 
 beforeEach(() => {
+  setLocale('en-US');
   vi.stubGlobal('document', {
     createElement: () => new FakeElement(),
+    querySelectorAll: () => [],
   });
 });
 
 afterEach(() => {
+  setLocale('zh-CN');
   vi.unstubAllGlobals();
 });
 
@@ -59,5 +67,16 @@ describe('UserMessageDelegate coordination presentation', () => {
     expect(element.findByClass('coordination-transcript-body')?.innerHTML)
       .not.toContain('coordination-message');
     expect(element.findByClass('cinema-user-text')).toBeNull();
+    const englishFooter = element.findByClass('coordination-transcript-footer')?.textContent;
+
+    setLocale('zh-CN');
+    expect(element.findByClass('coordination-transcript-status')?.textContent)
+      .toBe('已送达 · 仅邮箱');
+    expect(element.findByClass('coordination-transcript-category')?.textContent)
+      .toBe('智能体消息');
+    expect(element.findByClass('coordination-transcript-route')?.textContent)
+      .toBe('CEO → frontend-manager');
+    expect(element.findByClass('coordination-transcript-footer')?.textContent)
+      .not.toBe(englishFooter);
   });
 });

@@ -3,6 +3,8 @@
  * Escape, formatting, and markdown sanitization helpers.
  */
 
+import { getLocale, t } from '../../i18n/index.js';
+
 /** Escape HTML entities to prevent XSS. */
 export function escapeHtml(text: string): string {
   return text
@@ -41,13 +43,13 @@ export function formatTime(ts: string | number): string {
   if (isNaN(d.getTime())) return '';
   const now = new Date();
   const diffMs = now.getTime() - d.getTime();
-  if (diffMs < 60000) return 'Just now';
-  if (diffMs < 3600000) return `${Math.floor(diffMs / 60000)}m ago`;
-  if (diffMs < 86400000) return `${Math.floor(diffMs / 3600000)}h ago`;
+  if (diffMs < 60000) return t('session.time.now');
+  if (diffMs < 3600000) return t('session.time.minutesAgo', { count: Math.floor(diffMs / 60000) });
+  if (diffMs < 86400000) return t('session.time.hoursAgo', { count: Math.floor(diffMs / 3600000) });
   if (d.getFullYear() === now.getFullYear()) {
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return d.toLocaleDateString(getLocale(), { month: 'short', day: 'numeric' });
   }
-  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  return d.toLocaleDateString(getLocale(), { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 /** Format an agent ID into a human-readable name. */

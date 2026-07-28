@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CoordinationStore } from '../CoordinationStore.js';
+import { setLocale } from '../../i18n/index.js';
 
 const task = {
   id: 'task-1',
@@ -24,7 +25,10 @@ const task = {
 } as const;
 
 describe('CoordinationStore', () => {
-  beforeEach(() => CoordinationStore.resetInstance());
+  beforeEach(() => {
+    setLocale('zh-CN');
+    CoordinationStore.resetInstance();
+  });
   afterEach(() => {
     CoordinationStore.resetInstance();
     vi.unstubAllGlobals();
@@ -67,6 +71,11 @@ describe('CoordinationStore', () => {
     expect(state.revision).toBe(2);
     expect(state.tasks[0].status).toBe('running');
     expect(state.events).toHaveLength(1);
+  });
+
+  it('localizes a frontend validation error before any request is sent', async () => {
+    await expect(CoordinationStore.getInstance().loadForSession(''))
+      .rejects.toThrow('必须指定会话');
   });
 
   it('applies the next WebSocket revision once and reloads on a revision gap', async () => {

@@ -8,6 +8,7 @@ import { EventEmitter } from '../../EventEmitter.js';
 import type { CommandDefinition } from '../../types.js';
 import { filterCommands } from './SlashCommands.js';
 import { ClientLogger } from '../../ClientLogger.js';
+import { onLocaleChange, t } from '../../i18n/index.js';
 
 export class SlashCommandPanel extends EventEmitter {
   private _el: HTMLElement | null = null;
@@ -18,6 +19,22 @@ export class SlashCommandPanel extends EventEmitter {
   private _textarea: HTMLElement | null = null;
   private _outsideClickHandler: ((event: MouseEvent) => void) | null = null;
   private _outsideClickTimer: ReturnType<typeof setTimeout> | null = null;
+  private _filterText = '';
+
+  constructor() {
+    super();
+    onLocaleChange(() => {
+      const title = this._el?.querySelector<HTMLElement>('.slash-popup-header span');
+      if (title) title.textContent = t('commands.title');
+      const selectedName = this.selectedCommand?.name;
+      this._filtered = filterCommands(this._filterText, this._commands);
+      const selectedIndex = selectedName
+        ? this._filtered.findIndex(command => command.name === selectedName)
+        : -1;
+      this._selectedIndex = selectedIndex >= 0 ? selectedIndex : 0;
+      this._renderList();
+    });
+  }
 
   /** Show the popup anchored to the textarea with the current filter text. */
   open(textarea: HTMLElement, commands: CommandDefinition[], filterText: string): void {
@@ -69,6 +86,7 @@ export class SlashCommandPanel extends EventEmitter {
       this._listEl = null;
       this._textarea = null;
       this._filtered = [];
+      this._filterText = '';
       ClientLogger.ui.debug('Slash popup closed');
     }
   }
@@ -114,7 +132,7 @@ export class SlashCommandPanel extends EventEmitter {
     // Header
     const header = document.createElement('div');
     header.className = 'slash-popup-header';
-    header.innerHTML = '<span>Commands</span><kbd>Esc</kbd>';
+    header.innerHTML = `<span>${t('commands.title')}</span><kbd>Esc</kbd>`;
     popup.appendChild(header);
 
     // List
@@ -132,7 +150,7 @@ export class SlashCommandPanel extends EventEmitter {
     if (this._filtered.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'slash-popup-empty';
-      empty.textContent = 'No matching commands';
+      empty.textContent = t('commands.none');
       this._listEl.appendChild(empty);
       return;
     }
@@ -168,7 +186,7 @@ export class SlashCommandPanel extends EventEmitter {
       // Category badge
       const badge = document.createElement('span');
       badge.className = 'slash-popup-category';
-      badge.textContent = cmd.category;
+      badge.textContent = this._categoryLabel(cmd.category);
       item.appendChild(badge);
 
       // Click handler
@@ -184,6 +202,7 @@ export class SlashCommandPanel extends EventEmitter {
   }
 
   private _applyFilter(query: string): void {
+    this._filterText = query;
     this._filtered = filterCommands(query, this._commands);
     this._renderList();
   }
@@ -229,6 +248,16 @@ export class SlashCommandPanel extends EventEmitter {
       case 'workspace': return 'W';
       case 'help': return '?';
       default: return '•';
+    }
+  }
+
+  private _categoryLabel(cat: string): string {
+    switch (cat) {
+      case 'project': return t('commands.category.project');
+      case 'session': return t('commands.category.session');
+      case 'workspace': return t('commands.category.workspace');
+      case 'help': return t('commands.category.help');
+      default: return cat;
     }
   }
 }

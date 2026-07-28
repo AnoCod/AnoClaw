@@ -2,17 +2,24 @@
 // DOM-based confirm dialog (replaces native confirm() so CDP/browser-automation can detect it).
 // Usage: const ok = await ConfirmDialog.show('Are you sure?');
 
+import { onLocaleChange, t } from '../i18n/index.js';
+
 export class ConfirmDialog {
   /** Show a confirmation dialog.
    *  @param message - Question text displayed in the dialog.
    *  @param title - Optional dialog title (default: 'Confirm').
    *  @returns Resolves true on Confirm, false on Cancel/close.
    */
-  static show(message: string, title = 'Confirm'): Promise<boolean> {
-    console.log('[Dialog] show title:', title);
+  static show(message: string, title?: string): Promise<boolean> {
+    const usesDefaultTitle = title === undefined;
+    const resolvedTitle = title ?? t('common.confirmTitle');
+    console.log('[Dialog] show title:', resolvedTitle);
     return new Promise((resolve) => {
+      let stopLocaleListener = () => {};
       const done = (value: boolean) => {
         console.log('[Dialog] result:', value);
+        stopLocaleListener();
+        document.removeEventListener('keydown', onKey);
         overlay.remove();
         resolve(value);
       };
@@ -22,7 +29,7 @@ export class ConfirmDialog {
       overlay.id = 'confirm-dialog-overlay';
       overlay.className = 'dialog-overlay';
       overlay.setAttribute('role', 'dialog');
-      overlay.setAttribute('aria-label', title);
+      overlay.setAttribute('aria-label', resolvedTitle);
 
       // ── Dialog card ──
       const card = document.createElement('div');
@@ -33,7 +40,7 @@ export class ConfirmDialog {
       const titleEl = document.createElement('h2');
       titleEl.id = 'confirm-dialog-title';
       titleEl.className = 'dialog-title';
-      titleEl.textContent = title;
+      titleEl.textContent = resolvedTitle;
 
       // ── Message ──
       const msgEl = document.createElement('p');
@@ -48,14 +55,14 @@ export class ConfirmDialog {
       const cancelBtn = document.createElement('button');
       cancelBtn.id = 'confirm-dialog-cancel-btn';
       cancelBtn.className = 'btn-dialog-cancel';
-      cancelBtn.textContent = 'Cancel';
+      cancelBtn.textContent = t('common.cancel');
       cancelBtn.type = 'button';
       cancelBtn.addEventListener('click', () => done(false));
 
       const confirmBtn = document.createElement('button');
       confirmBtn.id = 'confirm-dialog-confirm-btn';
       confirmBtn.className = 'btn-dialog-confirm';
-      confirmBtn.textContent = 'Confirm';
+      confirmBtn.textContent = t('common.confirm');
       confirmBtn.type = 'button';
       confirmBtn.addEventListener('click', () => done(true));
 
@@ -83,6 +90,14 @@ export class ConfirmDialog {
       document.addEventListener('keydown', onKey);
 
       document.body.appendChild(overlay);
+      stopLocaleListener = onLocaleChange(() => {
+        cancelBtn.textContent = t('common.cancel');
+        confirmBtn.textContent = t('common.confirm');
+        if (usesDefaultTitle) {
+          titleEl.textContent = t('common.confirmTitle');
+          overlay.setAttribute('aria-label', t('common.confirmTitle'));
+        }
+      });
     });
   }
 }

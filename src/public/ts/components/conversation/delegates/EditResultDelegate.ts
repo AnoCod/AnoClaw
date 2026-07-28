@@ -2,6 +2,8 @@
  * AnoClaw Cinema — EditResultDelegate: diff card for Edit tool results.
  * Cinema style: no border, muted colors, just before|after side-by-side.
  */
+import { t } from '../../../i18n/index.js';
+
 export class EditResultDelegate {
   element: HTMLElement;
   private _bodyEl: HTMLElement | null = null;
@@ -29,7 +31,8 @@ export class EditResultDelegate {
     dot.style.cssText = `width:4px;height:4px;border-radius:50%;flex-shrink:0;background:${success ? 'rgba(134,239,172,0.4)' : 'rgba(248,113,113,0.4)'};`;
     header.appendChild(dot);
     const name = document.createElement('span');
-    name.textContent = 'EDIT';
+    name.textContent = t('message.edit');
+    name.setAttribute('data-i18n-key', 'message.edit');
     name.style.cssText = 'color: var(--cinema-text-welcome);';
     header.appendChild(name);
     const sep = document.createElement('span');

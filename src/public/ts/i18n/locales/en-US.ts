@@ -1,4 +1,15 @@
+import { corePagesEnUS } from './core-pages.js';
+import { coreSessionEnUS } from './core-session.js';
+import { agentsPluginsEnUS } from './agents-plugins.js';
+import { conversationEnUS } from './conversation.js';
+import { workspaceMiscEnUS } from './workspace-misc.js';
+
 export const enUS = {
+  ...corePagesEnUS,
+  ...coreSessionEnUS,
+  ...agentsPluginsEnUS,
+  ...conversationEnUS,
+  ...workspaceMiscEnUS,
   'settings.appearance': 'Appearance',
   'settings.theme': 'Theme',
   'settings.theme.dark': 'Dark',
@@ -12,7 +23,7 @@ export const enUS = {
   'settings.accent.orange': 'Orange',
   'settings.language': 'Language',
   'settings.interfaceLanguage': 'Interface language',
-  'settings.languageHint': 'Saved locally and gradually applied across the interface.',
+  'settings.languageHint': 'Saved locally and applied immediately across the interface.',
   'settings.display': 'Display',
   'settings.showThinkingCards': 'Show thinking cards',
   'settings.showToolCards': 'Show tool cards',

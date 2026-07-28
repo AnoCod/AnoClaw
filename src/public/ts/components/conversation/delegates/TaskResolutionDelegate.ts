@@ -1,4 +1,4 @@
-import { t } from '../../../i18n/index.js';
+import { t, type TranslationKey } from '../../../i18n/index.js';
 import { ToastManager } from '../../../ToastManager.js';
 import type { CapabilityPluginRecommendation, TaskResolutionSummary } from '../../../types.js';
 
@@ -32,6 +32,7 @@ export class TaskResolutionDelegate {
     const titleText = document.createElement('div');
     titleText.style.cssText = 'font-size:12px;font-weight:600;';
     titleText.textContent = t('taskResolution.title');
+    titleText.dataset.i18nKey = 'taskResolution.title';
     title.appendChild(titleText);
 
     const confidence = typeof taskResolution.confidence === 'number'
@@ -48,7 +49,10 @@ export class TaskResolutionDelegate {
     const capability = taskResolution.bestCapability?.title || taskResolution.bestCapability?.id || '';
     const subtitle = document.createElement('div');
     subtitle.style.cssText = 'color:var(--color-text-secondary,#cdcdcd);line-height:1.5;margin-bottom:10px;';
-    subtitle.textContent = t('taskResolution.subtitle', { capability });
+    const subtitleParams = { capability };
+    subtitle.textContent = t('taskResolution.subtitle', subtitleParams);
+    subtitle.dataset.i18nKey = 'taskResolution.subtitle';
+    subtitle.dataset.i18nParams = JSON.stringify(subtitleParams);
     wrapper.appendChild(subtitle);
 
     const recommendations = taskResolution.pluginRecommendations || [];
@@ -63,7 +67,10 @@ export class TaskResolutionDelegate {
     if (missingTools.length > 0) {
       const tools = document.createElement('div');
       tools.style.cssText = 'margin-top:10px;color:var(--color-text-tertiary,#6a6b6c);font-size:11px;line-height:1.45;';
-      tools.textContent = t('taskResolution.missingTools', { tools: missingTools.join(', ') });
+      const toolsParams = { tools: missingTools.join(', ') };
+      tools.textContent = t('taskResolution.missingTools', toolsParams);
+      tools.dataset.i18nKey = 'taskResolution.missingTools';
+      tools.dataset.i18nParams = JSON.stringify(toolsParams);
       wrapper.appendChild(tools);
     }
 
@@ -103,7 +110,9 @@ export class TaskResolutionDelegate {
       border-radius:4px;
       padding:1px 5px;
     `;
-    status.textContent = statusLabel(plugin.status);
+    const statusKey = statusLabelKey(plugin.status);
+    status.textContent = t(statusKey);
+    status.dataset.i18nKey = statusKey;
     name.appendChild(status);
     main.appendChild(name);
 
@@ -122,7 +131,9 @@ export class TaskResolutionDelegate {
   private _buildActionButton(plugin: CapabilityPluginRecommendation): HTMLButtonElement {
     const button = document.createElement('button');
     button.type = 'button';
-    button.textContent = actionLabel(plugin);
+    const actionKey = actionLabelKey(plugin);
+    button.textContent = t(actionKey);
+    button.dataset.i18nKey = actionKey;
     button.style.cssText = `
       height:28px;
       padding:0 10px;
@@ -138,7 +149,6 @@ export class TaskResolutionDelegate {
 
     button.addEventListener('click', async () => {
       button.disabled = true;
-      const original = button.textContent || '';
       button.textContent = '...';
       try {
         await runPluginAction(plugin);
@@ -149,7 +159,7 @@ export class TaskResolutionDelegate {
         ToastManager.getInstance().error(t('taskResolution.actionFailed', { message }));
       } finally {
         button.disabled = false;
-        button.textContent = original;
+        button.textContent = t(actionKey);
       }
     });
 
@@ -192,18 +202,18 @@ async function postJson(url: string, body: Record<string, unknown>): Promise<voi
   }
 }
 
-function actionLabel(plugin: CapabilityPluginRecommendation): string {
-  if (plugin.action === 'activate') return t('taskResolution.activate');
-  if (plugin.action === 'install') return t('taskResolution.install');
-  if (plugin.action === 'reload') return t('taskResolution.reload');
-  if (plugin.action === 'inspect') return t('taskResolution.inspect');
-  return t('taskResolution.openPlugins');
+function actionLabelKey(plugin: CapabilityPluginRecommendation): TranslationKey {
+  if (plugin.action === 'activate') return 'taskResolution.activate';
+  if (plugin.action === 'install') return 'taskResolution.install';
+  if (plugin.action === 'reload') return 'taskResolution.reload';
+  if (plugin.action === 'inspect') return 'taskResolution.inspect';
+  return 'taskResolution.openPlugins';
 }
 
-function statusLabel(status: CapabilityPluginRecommendation['status']): string {
-  if (status === 'activated') return t('taskResolution.status.activated');
-  if (status === 'installed') return t('taskResolution.status.installed');
-  if (status === 'missing') return t('taskResolution.status.missing');
-  if (status === 'error') return t('taskResolution.status.error');
-  return t('taskResolution.status.unknown');
+function statusLabelKey(status: CapabilityPluginRecommendation['status']): TranslationKey {
+  if (status === 'activated') return 'taskResolution.status.activated';
+  if (status === 'installed') return 'taskResolution.status.installed';
+  if (status === 'missing') return 'taskResolution.status.missing';
+  if (status === 'error') return 'taskResolution.status.error';
+  return 'taskResolution.status.unknown';
 }

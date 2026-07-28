@@ -7,6 +7,7 @@ import {
   resolveClickedFilePath,
   resolveWorkspaceRelativePath,
 } from './PathReferences.js';
+import { onLocaleChange, t } from '../i18n/index.js';
 
 interface ElectronAPI {
   openExternal?: (url: string) => Promise<{ ok: boolean; error?: string }>;
@@ -29,6 +30,17 @@ function closeImagePreview(): void {
   activeImagePreview = null;
 }
 
+onLocaleChange(() => {
+  if (!activeImagePreview) return;
+  const image = activeImagePreview.querySelector<HTMLImageElement>('.md-image-preview__image');
+  const close = activeImagePreview.querySelector<HTMLButtonElement>('.md-image-preview__close');
+  activeImagePreview.setAttribute(
+    'aria-label',
+    image?.alt ? t('image.previewWithAlt', { alt: image.alt }) : t('image.preview'),
+  );
+  close?.setAttribute('aria-label', t('image.closePreview'));
+});
+
 function showImagePreview(src: string, alt: string): void {
   closeImagePreview();
 
@@ -36,7 +48,7 @@ function showImagePreview(src: string, alt: string): void {
   overlay.className = 'md-image-preview';
   overlay.setAttribute('role', 'dialog');
   overlay.setAttribute('aria-modal', 'true');
-  overlay.setAttribute('aria-label', alt ? `Image preview: ${alt}` : 'Image preview');
+  overlay.setAttribute('aria-label', alt ? t('image.previewWithAlt', { alt }) : t('image.preview'));
 
   const image = document.createElement('img');
   image.className = 'md-image-preview__image';
@@ -46,7 +58,7 @@ function showImagePreview(src: string, alt: string): void {
   const close = document.createElement('button');
   close.type = 'button';
   close.className = 'md-image-preview__close';
-  close.setAttribute('aria-label', 'Close image preview');
+  close.setAttribute('aria-label', t('image.closePreview'));
   close.textContent = '×';
 
   overlay.append(image, close);
@@ -104,7 +116,7 @@ export function handlePathClick(e: MouseEvent, workspacePath: string, sessionId?
 
       const resolved = resolvePath(rawPath, workspacePath);
       if (!resolved) {
-        ToastManager.getInstance().info('No workspace bound. Open Workspace and bind a folder first.', 4000);
+        ToastManager.getInstance().info(t('path.noWorkspace'), 4000);
         return;
       }
 
@@ -128,11 +140,11 @@ export function handlePathClick(e: MouseEvent, workspacePath: string, sessionId?
       if (api?.openPath) {
         api.openPath(resolved).then((r) => {
           if (!r.ok && r.error) {
-            ToastManager.getInstance().info('File not found: ' + resolved, 3000);
+            ToastManager.getInstance().info(t('path.fileNotFound', { path: resolved }), 3000);
           }
         }).catch(() => {});
       } else {
-        ToastManager.getInstance().info('File opening requires the desktop app.', 3000);
+        ToastManager.getInstance().info(t('path.desktopRequired'), 3000);
       }
       return;
     }

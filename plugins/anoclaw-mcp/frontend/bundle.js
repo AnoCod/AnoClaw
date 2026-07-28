@@ -4,6 +4,153 @@
   var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
   var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
+  // plugins/anoclaw-mcp/frontend/src/i18n.ts
+  var enUS = {
+    "mcp.title": "MCP Servers",
+    "mcp.subtitle": "Model Context Protocol \u2014 connect external tools and services",
+    "mcp.logs": "Logs",
+    "mcp.connectServer": "+ Connect Server",
+    "mcp.status.connected": "Connected",
+    "mcp.status.disconnected": "Disconnected",
+    "mcp.status.offline": "Disconnected \u2014 server is offline",
+    "mcp.count.tools": "{count} tools",
+    "mcp.count.resources": "{count} resources",
+    "mcp.count.prompts": "{count} prompts",
+    "mcp.count.connected": "{connected}/{total} connected",
+    "mcp.count.toolsAvailable": "{count} tools available",
+    "mcp.action.edit": "Edit",
+    "mcp.action.reconnect": "Reconnect",
+    "mcp.action.delete": "Delete",
+    "mcp.schema.input": "Input Schema",
+    "mcp.schema.any": "any",
+    "mcp.schema.required": "required",
+    "mcp.logs.title": "Connection Logs",
+    "mcp.logs.empty": "No connection logs yet.",
+    "mcp.load.failed": "Failed to load: {message}",
+    "mcp.empty.title": "No MCP servers connected",
+    "mcp.empty.description": "Connect to filesystem servers, API gateways, databases, and more to extend your AI agents with external tools.",
+    "mcp.detail.loadFailed": "Failed to load server: {message}",
+    "mcp.detail.toolsTab": "Tools ({count})",
+    "mcp.detail.resourcesTab": "Resources ({count})",
+    "mcp.detail.promptsTab": "Prompts ({count})",
+    "mcp.detail.noTools": "No tools exposed by this server.",
+    "mcp.detail.searchTools": "Search tools...",
+    "mcp.detail.noMatchingTools": 'No tools matching "{query}"',
+    "mcp.detail.noResources": "No resources exposed by this server.",
+    "mcp.detail.noPrompts": "No prompts exposed by this server.",
+    "mcp.form.editTitle": "Edit Server",
+    "mcp.form.connectTitle": "Connect MCP Server",
+    "mcp.form.name": "Name",
+    "mcp.form.transport": "Transport",
+    "mcp.form.command": "Command (stdio)",
+    "mcp.form.commandHelp": "Shell command to launch the MCP server process",
+    "mcp.form.url": "URL (sse/http)",
+    "mcp.form.urlHelp": "HTTP endpoint for SSE or HTTP transport",
+    "mcp.form.environment": "Environment Variables",
+    "mcp.form.environmentHelp": "One KEY=value per line. Merged over system env for stdio servers.",
+    "mcp.form.update": "Update & Reconnect",
+    "mcp.form.save": "Save & Connect",
+    "mcp.form.cancel": "Cancel",
+    "mcp.form.nameRequired": "Name is required",
+    "mcp.form.saved": 'Server "{name}" {action}',
+    "mcp.form.savedAction": "saved",
+    "mcp.form.updatedAction": "updated",
+    "mcp.form.saveFailed": "Save failed: {message}",
+    "mcp.delete.title": "Delete Server",
+    "mcp.delete.description": "This MCP server and all its tools will no longer be available to agents. This action cannot be undone.",
+    "mcp.delete.cancel": "Cancel",
+    "mcp.delete.confirm": "Delete",
+    "mcp.delete.done": "Server deleted",
+    "mcp.delete.failed": "Delete failed: {message}",
+    "mcp.reconnect.done": "Reconnected",
+    "mcp.reconnect.failed": "Reconnect failed: {message}"
+  };
+  var zhCN = {
+    "mcp.title": "MCP \u670D\u52A1\u5668",
+    "mcp.subtitle": "\u6A21\u578B\u4E0A\u4E0B\u6587\u534F\u8BAE \u2014 \u8FDE\u63A5\u5916\u90E8\u5DE5\u5177\u4E0E\u670D\u52A1",
+    "mcp.logs": "\u65E5\u5FD7",
+    "mcp.connectServer": "+ \u8FDE\u63A5\u670D\u52A1\u5668",
+    "mcp.status.connected": "\u5DF2\u8FDE\u63A5",
+    "mcp.status.disconnected": "\u672A\u8FDE\u63A5",
+    "mcp.status.offline": "\u672A\u8FDE\u63A5 \u2014 \u670D\u52A1\u5668\u79BB\u7EBF",
+    "mcp.count.tools": "{count} \u4E2A\u5DE5\u5177",
+    "mcp.count.resources": "{count} \u4E2A\u8D44\u6E90",
+    "mcp.count.prompts": "{count} \u4E2A\u63D0\u793A\u8BCD",
+    "mcp.count.connected": "\u5DF2\u8FDE\u63A5 {connected}/{total}",
+    "mcp.count.toolsAvailable": "{count} \u4E2A\u5DE5\u5177\u53EF\u7528",
+    "mcp.action.edit": "\u7F16\u8F91",
+    "mcp.action.reconnect": "\u91CD\u65B0\u8FDE\u63A5",
+    "mcp.action.delete": "\u5220\u9664",
+    "mcp.schema.input": "\u8F93\u5165\u7ED3\u6784",
+    "mcp.schema.any": "\u4EFB\u610F",
+    "mcp.schema.required": "\u5FC5\u586B",
+    "mcp.logs.title": "\u8FDE\u63A5\u65E5\u5FD7",
+    "mcp.logs.empty": "\u6682\u65E0\u8FDE\u63A5\u65E5\u5FD7\u3002",
+    "mcp.load.failed": "\u52A0\u8F7D\u5931\u8D25\uFF1A{message}",
+    "mcp.empty.title": "\u5C1A\u672A\u8FDE\u63A5 MCP \u670D\u52A1\u5668",
+    "mcp.empty.description": "\u8FDE\u63A5\u6587\u4EF6\u7CFB\u7EDF\u670D\u52A1\u5668\u3001API \u7F51\u5173\u3001\u6570\u636E\u5E93\u7B49\u5916\u90E8\u670D\u52A1\uFF0C\u4E3A AI \u667A\u80FD\u4F53\u6269\u5C55\u5DE5\u5177\u80FD\u529B\u3002",
+    "mcp.detail.loadFailed": "\u52A0\u8F7D\u670D\u52A1\u5668\u5931\u8D25\uFF1A{message}",
+    "mcp.detail.toolsTab": "\u5DE5\u5177\uFF08{count}\uFF09",
+    "mcp.detail.resourcesTab": "\u8D44\u6E90\uFF08{count}\uFF09",
+    "mcp.detail.promptsTab": "\u63D0\u793A\u8BCD\uFF08{count}\uFF09",
+    "mcp.detail.noTools": "\u6B64\u670D\u52A1\u5668\u6CA1\u6709\u516C\u5F00\u5DE5\u5177\u3002",
+    "mcp.detail.searchTools": "\u641C\u7D22\u5DE5\u5177\u2026",
+    "mcp.detail.noMatchingTools": "\u6CA1\u6709\u5339\u914D\u201C{query}\u201D\u7684\u5DE5\u5177",
+    "mcp.detail.noResources": "\u6B64\u670D\u52A1\u5668\u6CA1\u6709\u516C\u5F00\u8D44\u6E90\u3002",
+    "mcp.detail.noPrompts": "\u6B64\u670D\u52A1\u5668\u6CA1\u6709\u516C\u5F00\u63D0\u793A\u8BCD\u3002",
+    "mcp.form.editTitle": "\u7F16\u8F91\u670D\u52A1\u5668",
+    "mcp.form.connectTitle": "\u8FDE\u63A5 MCP \u670D\u52A1\u5668",
+    "mcp.form.name": "\u540D\u79F0",
+    "mcp.form.transport": "\u4F20\u8F93\u65B9\u5F0F",
+    "mcp.form.command": "\u547D\u4EE4\uFF08stdio\uFF09",
+    "mcp.form.commandHelp": "\u7528\u4E8E\u542F\u52A8 MCP \u670D\u52A1\u5668\u8FDB\u7A0B\u7684 Shell \u547D\u4EE4",
+    "mcp.form.url": "URL\uFF08sse/http\uFF09",
+    "mcp.form.urlHelp": "SSE \u6216 HTTP \u4F20\u8F93\u4F7F\u7528\u7684 HTTP \u7AEF\u70B9",
+    "mcp.form.environment": "\u73AF\u5883\u53D8\u91CF",
+    "mcp.form.environmentHelp": "\u6BCF\u884C\u4E00\u4E2A KEY=value\uFF1Bstdio \u670D\u52A1\u5668\u4F1A\u5C06\u5176\u5408\u5E76\u5230\u7CFB\u7EDF\u73AF\u5883\u53D8\u91CF\u4E2D\u3002",
+    "mcp.form.update": "\u66F4\u65B0\u5E76\u91CD\u65B0\u8FDE\u63A5",
+    "mcp.form.save": "\u4FDD\u5B58\u5E76\u8FDE\u63A5",
+    "mcp.form.cancel": "\u53D6\u6D88",
+    "mcp.form.nameRequired": "\u540D\u79F0\u4E3A\u5FC5\u586B\u9879",
+    "mcp.form.saved": "\u670D\u52A1\u5668\u201C{name}\u201D\u5DF2{action}",
+    "mcp.form.savedAction": "\u4FDD\u5B58",
+    "mcp.form.updatedAction": "\u66F4\u65B0",
+    "mcp.form.saveFailed": "\u4FDD\u5B58\u5931\u8D25\uFF1A{message}",
+    "mcp.delete.title": "\u5220\u9664\u670D\u52A1\u5668",
+    "mcp.delete.description": "\u5220\u9664\u540E\uFF0C\u667A\u80FD\u4F53\u5C06\u65E0\u6CD5\u518D\u4F7F\u7528\u6B64 MCP \u670D\u52A1\u5668\u53CA\u5176\u6240\u6709\u5DE5\u5177\u3002\u6B64\u64CD\u4F5C\u65E0\u6CD5\u64A4\u9500\u3002",
+    "mcp.delete.cancel": "\u53D6\u6D88",
+    "mcp.delete.confirm": "\u5220\u9664",
+    "mcp.delete.done": "\u670D\u52A1\u5668\u5DF2\u5220\u9664",
+    "mcp.delete.failed": "\u5220\u9664\u5931\u8D25\uFF1A{message}",
+    "mcp.reconnect.done": "\u5DF2\u91CD\u65B0\u8FDE\u63A5",
+    "mcp.reconnect.failed": "\u91CD\u65B0\u8FDE\u63A5\u5931\u8D25\uFF1A{message}"
+  };
+  var dictionaries = {
+    "zh-CN": zhCN,
+    "en-US": enUS
+  };
+  var locale = normalizeMcpLocale(
+    typeof window === "undefined" ? void 0 : window.__ANOCLAW_LOCALE__
+  );
+  function normalizeMcpLocale(value) {
+    const raw = String(value || "").trim().toLowerCase();
+    return raw === "en" || raw === "en-us" ? "en-US" : "zh-CN";
+  }
+  function setMcpLocale(value) {
+    locale = normalizeMcpLocale(value);
+    if (typeof document !== "undefined") document.documentElement.lang = locale;
+    return locale;
+  }
+  function getMcpLocale() {
+    return locale;
+  }
+  function t(key, params = {}) {
+    return dictionaries[locale][key].replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, name) => {
+      const value = params[name];
+      return value === void 0 || value === null ? "" : String(value);
+    });
+  }
+
   // plugins/anoclaw-mcp/frontend/src/main.ts
   var ui = window.anoclaw?.ui;
   if (!ui) throw new Error("anoclaw-ui.js not loaded - check iframe sandbox permissions");
@@ -267,7 +414,7 @@
     }
     const dot = _el("span", "", "");
     dot.className = _dotClass(s.connected);
-    dot.title = s.connected ? "Connected" : "Disconnected";
+    dot.title = s.connected ? t("mcp.status.connected") : t("mcp.status.disconnected");
     card.appendChild(dot);
     const content = _el("div", "flex:1;min-width:0;");
     const nameRow = _el("div", "display:flex;align-items:center;gap:8px;margin-bottom:4px;");
@@ -278,7 +425,7 @@
     ].join(""), s.name));
     nameRow.appendChild(_el("span", "class:mcp-transport-badge;" + _transportStyle(s.transport), s.transport.toUpperCase()));
     content.appendChild(nameRow);
-    const infoText = s.connected ? s.toolCount + " tools" + (s.resourceCount > 0 ? " \xB7 " + s.resourceCount + " resources" : "") + (s.serverInfo ? " \xB7 " + s.serverInfo.name + " v" + s.serverInfo.version : "") : "Disconnected";
+    const infoText = s.connected ? t("mcp.count.tools", { count: s.toolCount }) + (s.resourceCount > 0 ? " \xB7 " + t("mcp.count.resources", { count: s.resourceCount }) : "") + (s.serverInfo ? " \xB7 " + s.serverInfo.name + " v" + s.serverInfo.version : "") : t("mcp.status.disconnected");
     content.appendChild(_el("div", [
       "font-family:" + T.fontSans + ";font-feature-settings:" + T.fontFeature + ";",
       "font-size:12px;color:" + (s.connected ? T.mute : T.stone) + ";",
@@ -292,17 +439,17 @@
       btn.title = title;
       return btn;
     }
-    const editBtn = mkBtn("\u270E", "Edit");
+    const editBtn = mkBtn("\u270E", t("mcp.action.edit"));
     editBtn.addEventListener("click", function(e) {
       e.stopPropagation();
       h.onEdit(s);
     });
-    const reBtn = mkBtn("\u21BB", "Reconnect");
+    const reBtn = mkBtn("\u21BB", t("mcp.action.reconnect"));
     reBtn.addEventListener("click", function(e) {
       e.stopPropagation();
       h.onReconnect(s.id);
     });
-    const delBtn = mkBtn("\u2715", "Delete", true);
+    const delBtn = mkBtn("\u2715", t("mcp.action.delete"), true);
     delBtn.addEventListener("click", function(e) {
       e.stopPropagation();
       h.onDelete(s.id);
@@ -313,7 +460,7 @@
     card.appendChild(actions);
     return card;
   }
-  function _toolCard(t, expanded, onToggle) {
+  function _toolCard(t2, expanded, onToggle) {
     const card = _el("div", "class:mcp-tool-card" + (expanded ? " mcp-tool-expanded" : "") + ";");
     card.addEventListener("click", onToggle);
     const header = _el("div", "display:flex;align-items:center;justify-content:space-between;gap:12px;");
@@ -327,9 +474,9 @@
       expanded ? "transform:rotate(90deg);" : ""
     ].join(""), "\u25B6");
     nameEl.appendChild(chevron);
-    nameEl.appendChild(document.createTextNode(t.name));
+    nameEl.appendChild(document.createTextNode(t2.name));
     header.appendChild(nameEl);
-    const schema = t.inputSchema;
+    const schema = t2.inputSchema;
     const required = schema && schema.required || [];
     if (required.length > 0) {
       const reqWrap = _el("div", "display:flex;gap:4px;flex-wrap:wrap;");
@@ -343,11 +490,11 @@
       header.appendChild(reqWrap);
     }
     card.appendChild(header);
-    if (t.description) {
+    if (t2.description) {
       card.appendChild(_el("div", [
         "font-family:" + T.fontSans + ";font-feature-settings:" + T.fontFeature + ";",
         "font-size:12px;color:" + T.mute + ";margin-top:6px;line-height:1.4;"
-      ].join(""), t.description));
+      ].join(""), t2.description));
     }
     if (expanded && schema && schema.properties) {
       const sw = _el("div", [
@@ -358,7 +505,7 @@
       sw.appendChild(_el("div", [
         "font-size:10px;font-weight:600;text-transform:uppercase;",
         "letter-spacing:0.8px;color:" + T.ash + ";margin-bottom:8px;"
-      ].join(""), "Input Schema"));
+      ].join(""), t("mcp.schema.input")));
       const props = schema.properties;
       const reqSet = new Set(required);
       for (const key of Object.keys(props)) {
@@ -372,11 +519,11 @@
         ].join(""), key));
         row.appendChild(_el("span", [
           "font-family:" + T.fontMono + ";font-size:11px;color:" + T.stone + ";"
-        ].join(""), val.type || "any"));
+        ].join(""), val.type || t("mcp.schema.any")));
         if (reqSet.has(key)) {
           row.appendChild(_el("span", [
             "font-size:9px;font-weight:600;text-transform:uppercase;color:" + T.accentYellow + ";letter-spacing:0.5px;"
-          ].join(""), "required"));
+          ].join(""), t("mcp.schema.required")));
         }
         if (val.description) {
           row.appendChild(_el("span", [
@@ -443,7 +590,7 @@
   function _logEntryRow(entry) {
     const levelColors = { error: T.accentRed, warn: T.accentYellow, info: T.accentBlue, debug: T.ash };
     const color = levelColors[entry.level] || T.mute;
-    const time = new Date(entry.timestamp).toLocaleTimeString();
+    const time = new Date(entry.timestamp).toLocaleTimeString(getMcpLocale());
     const row = _el("div", [
       "display:flex;align-items:baseline;gap:10px;padding:5px 10px;",
       "font-family:" + T.fontMono + ";font-size:11px;",
@@ -471,6 +618,18 @@
       __publicField(this, "_loading", true);
       __publicField(this, "_expandedTools", /* @__PURE__ */ new Set());
       __publicField(this, "_activeTab", 0);
+      __publicField(this, "_selectedDetail", null);
+      __publicField(this, "_toolSearchQuery", "");
+      __publicField(this, "_formOpen", false);
+      __publicField(this, "_formEdit");
+      __publicField(this, "_titleEl");
+      __publicField(this, "_subtitleEl");
+      __publicField(this, "_logsButtonEl");
+      __publicField(this, "_addButtonEl");
+      __publicField(this, "_onHostMessage", (event) => {
+        if (event.source !== window.parent || event.data?.type !== "anoclaw:locale") return;
+        this._refreshLocale(event.data.locale);
+      });
       _injectStyles();
       this.container.style.cssText = [
         "padding:24px 28px;height:100%;overflow-y:auto;box-sizing:border-box;",
@@ -482,18 +641,20 @@
         "animation:mcp-fadeIn 200ms ease;"
       ].join(""));
       const titleWrap = document.createElement("div");
-      titleWrap.appendChild(_el("div", [
+      this._titleEl = _el("div", [
         "font-family:" + T.fontSans + ";font-feature-settings:" + T.fontFeature + ";",
         "font-size:20px;font-weight:500;color:" + T.ink + ";line-height:1.4;"
-      ].join(""), "MCP Servers"));
-      titleWrap.appendChild(_el("div", [
+      ].join(""), t("mcp.title"));
+      titleWrap.appendChild(this._titleEl);
+      this._subtitleEl = _el("div", [
         "font-family:" + T.fontSans + ";font-feature-settings:" + T.fontFeature + ";",
         "font-size:13px;color:" + T.mute + ";margin-top:2px;"
-      ].join(""), "Model Context Protocol \u2014 connect external tools and services"));
+      ].join(""), t("mcp.subtitle"));
+      titleWrap.appendChild(this._subtitleEl);
       header.appendChild(titleWrap);
       const headerActions = _el("div", "display:flex;align-items:center;gap:12px;");
       const logsBtn = new ui.Button({
-        label: "\u25B8 Logs",
+        label: "\u25B8 " + t("mcp.logs"),
         variant: "default",
         size: "sm",
         onClick: () => {
@@ -502,13 +663,15 @@
           else this._logEl.style.display = "none";
         }
       });
+      this._logsButtonEl = logsBtn.element;
       headerActions.appendChild(logsBtn.element);
       const addBtn = new ui.Button({
-        label: "+ Connect Server",
+        label: t("mcp.connectServer"),
         variant: "primary",
         size: "sm",
         onClick: () => this._showForm()
       });
+      this._addButtonEl = addBtn.element;
       headerActions.appendChild(addBtn.element);
       header.appendChild(headerActions);
       this.container.appendChild(header);
@@ -520,6 +683,28 @@
         "margin-top:24px;border-top:1px solid " + T.hairline + ";padding-top:16px;display:none;"
       ].join(""));
       this.container.appendChild(this._logEl);
+      window.addEventListener("message", this._onHostMessage);
+    }
+    _refreshLocale(locale2) {
+      const formFields = this._formOpen ? Array.from(this._detailEl.querySelectorAll("input, textarea, select")).map((field) => field.value) : [];
+      const activeIndex = this._formOpen ? Array.from(this._detailEl.querySelectorAll("input, textarea, select")).indexOf(document.activeElement) : -1;
+      setMcpLocale(locale2);
+      this._titleEl.textContent = t("mcp.title");
+      this._subtitleEl.textContent = t("mcp.subtitle");
+      this._logsButtonEl.textContent = "\u25B8 " + t("mcp.logs");
+      this._addButtonEl.textContent = t("mcp.connectServer");
+      this._buildList();
+      if (this._showLogs) this._renderLogs();
+      if (this._formOpen) {
+        this._showForm(this._formEdit);
+        const nextFields = Array.from(this._detailEl.querySelectorAll("input, textarea, select"));
+        nextFields.forEach((field, index) => {
+          if (formFields[index] !== void 0) field.value = formFields[index];
+        });
+        if (activeIndex >= 0) nextFields[activeIndex]?.focus();
+      } else if (this._selectedDetail) {
+        this._buildDetail(this._selectedDetail, true);
+      }
     }
     onEnter() {
       this._load();
@@ -592,7 +777,7 @@
         "font-family:" + T.fontSans + ";font-feature-settings:" + T.fontFeature + ";",
         "font-size:14px;font-weight:500;color:" + T.ink + ";",
         "display:flex;align-items:center;gap:8px;"
-      ].join(""), '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="' + T.accentBlue + '" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> Connection Logs <span style="font-size:11px;color:' + T.stone + ';font-weight:400;">(' + this._logs.length + ")</span>");
+      ].join(""), '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="' + T.accentBlue + '" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> ' + t("mcp.logs.title") + ' <span style="font-size:11px;color:' + T.stone + ';font-weight:400;">(' + this._logs.length + ")</span>");
       hdr.appendChild(hTitle);
       const closeBtn = _el("button", "class:mcp-btn-icon;", "\u2715");
       closeBtn.addEventListener("click", () => {
@@ -606,7 +791,7 @@
         "border:1px solid " + T.hairline + ";border-radius:" + T.rMd + ";"
       ].join(""));
       if (this._logs.length === 0) {
-        list.appendChild(_el("div", "color:" + T.stone + ";padding:24px;text-align:center;font-size:12px;", "No connection logs yet."));
+        list.appendChild(_el("div", "color:" + T.stone + ";padding:24px;text-align:center;font-size:12px;", t("mcp.logs.empty")));
       } else {
         for (const entry of this._logs.slice().reverse()) {
           list.appendChild(_logEntryRow(entry));
@@ -631,7 +816,7 @@
       } catch (err) {
         this._loading = false;
         if (!silent) {
-          new ui.Toast({ text: "Failed to load: " + err.message, type: "error", duration: 4e3 });
+          new ui.Toast({ text: t("mcp.load.failed", { message: err.message }), type: "error", duration: 4e3 });
           this._buildList();
         }
       }
@@ -644,10 +829,10 @@
         return;
       }
       if (this._servers.length === 0 && !this._loading) {
-        const btn = new ui.Button({ label: "+ Connect Server", variant: "primary", size: "sm", onClick: () => this._showForm() });
+        const btn = new ui.Button({ label: t("mcp.connectServer"), variant: "primary", size: "sm", onClick: () => this._showForm() });
         this._listEl.appendChild(_emptyState(
-          "No MCP servers connected",
-          "Connect to filesystem servers, API gateways, databases, and more to extend your AI agents with external tools.",
+          t("mcp.empty.title"),
+          t("mcp.empty.description"),
           btn.element.outerHTML
         ));
         const emptyBtn = this._listEl.querySelector("button");
@@ -666,13 +851,13 @@
       const connDot = _el("span", "");
       connDot.className = _dotClass(connectedCount > 0);
       connInd.appendChild(connDot);
-      connInd.appendChild(document.createTextNode(connectedCount + "/" + this._servers.length + " connected"));
+      connInd.appendChild(document.createTextNode(t("mcp.count.connected", { connected: connectedCount, total: this._servers.length })));
       summary.appendChild(connInd);
       summary.appendChild(_el("div", "width:1px;height:16px;background:" + T.hairline + ";"));
       const toolCountEl = _elHtml(
         "div",
         "font-size:12px;color:" + T.mute + ";display:flex;align-items:center;gap:6px;",
-        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="' + T.ash + '" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> ' + totalTools + " tools available"
+        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="' + T.ash + '" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg> ' + t("mcp.count.toolsAvailable", { count: totalTools })
       );
       summary.appendChild(toolCountEl);
       this._listEl.appendChild(summary);
@@ -689,6 +874,8 @@
     // --- Detail Panel ---
     async _selectServer(id) {
       this._selectedId = id;
+      this._formOpen = false;
+      this._formEdit = void 0;
       this._buildList();
       this._detailEl.innerHTML = "";
       const skeleton = _el("div", [
@@ -703,6 +890,7 @@
         const resp = await fetch("/api/mcp/servers/" + id);
         if (!resp.ok) throw new Error("HTTP " + resp.status);
         const data = await resp.json();
+        this._selectedDetail = data;
         this._buildDetail(data);
       } catch (err) {
         this._detailEl.innerHTML = "";
@@ -710,14 +898,17 @@
           "padding:16px 20px;border:1px solid " + T.accentRedBg + ";border-radius:" + T.rMd + ";",
           "background:" + T.card + ";color:" + T.accentRed + ";font-size:13px;",
           "display:flex;align-items:center;gap:8px;animation:mcp-fadeIn 200ms ease;"
-        ].join(""), "\u26A0 Failed to load server: " + err.message);
+        ].join(""), "\u26A0 " + t("mcp.detail.loadFailed", { message: err.message }));
         this._detailEl.appendChild(errEl);
       }
     }
-    _buildDetail(d) {
+    _buildDetail(d, preserveView = false) {
       this._detailEl.innerHTML = "";
-      this._expandedTools = /* @__PURE__ */ new Set();
-      this._activeTab = 0;
+      if (!preserveView) {
+        this._expandedTools = /* @__PURE__ */ new Set();
+        this._activeTab = 0;
+        this._toolSearchQuery = "";
+      }
       const detailWrap = _el("div", [
         "border:1px solid " + T.hairline + ";border-radius:" + T.rLg + ";",
         "background:" + T.surface + ";overflow:hidden;",
@@ -743,15 +934,16 @@
       hLeft.appendChild(nameRow);
       const statusLine = _el("div", "font-size:12px;color:" + (d.connected ? T.accentGreen : T.accentRed) + ";display:flex;align-items:center;gap:6px;");
       if (d.connected) {
-        statusLine.innerHTML = '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:' + T.accentGreen + ';"></span> Connected \xB7 ' + d.tools.length + " tools \xB7 " + d.resources.length + " resources \xB7 " + d.prompts.length + " prompts";
+        statusLine.innerHTML = '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:' + T.accentGreen + ';"></span> ' + t("mcp.status.connected") + " \xB7 " + t("mcp.count.tools", { count: d.tools.length }) + " \xB7 " + t("mcp.count.resources", { count: d.resources.length }) + " \xB7 " + t("mcp.count.prompts", { count: d.prompts.length });
       } else {
-        statusLine.innerHTML = '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:' + T.accentRed + ';"></span> Disconnected \u2014 server is offline';
+        statusLine.innerHTML = '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:' + T.accentRed + ';"></span> ' + t("mcp.status.offline");
       }
       hLeft.appendChild(statusLine);
       header.appendChild(hLeft);
       const closeBtn = _el("button", "class:mcp-btn-icon;", "\u2715");
       closeBtn.addEventListener("click", () => {
         this._selectedId = null;
+        this._selectedDetail = null;
         this._detailEl.innerHTML = "";
         this._buildList();
       });
@@ -762,23 +954,23 @@
         "border-bottom:1px solid " + T.hairline + ";"
       ].join(""));
       const tabLabels = [
-        "Tools (" + d.tools.length + ")",
-        "Resources (" + d.resources.length + ")",
-        "Prompts (" + d.prompts.length + ")"
+        t("mcp.detail.toolsTab", { count: d.tools.length }),
+        t("mcp.detail.resourcesTab", { count: d.resources.length }),
+        t("mcp.detail.promptsTab", { count: d.prompts.length })
       ];
       const tabContent = _el("div", "padding:16px 24px 24px;min-height:80px;");
       const self = this;
       function renderTab(idx) {
         self._activeTab = idx;
         const tabs = tabContainer.querySelectorAll(".mcp-tab");
-        tabs.forEach((t, i) => {
-          t.className = "mcp-tab" + (i === idx ? " mcp-tab-active" : "");
+        tabs.forEach((t2, i) => {
+          t2.className = "mcp-tab" + (i === idx ? " mcp-tab-active" : "");
         });
         tabContent.innerHTML = "";
         tabContent.style.animation = "mcp-fadeIn 150ms ease";
         if (idx === 0) {
           if (d.tools.length === 0) {
-            tabContent.appendChild(_el("div", "text-align:center;padding:32px;color:" + T.stone + ";font-size:13px;", "No tools exposed by this server."));
+            tabContent.appendChild(_el("div", "text-align:center;padding:32px;color:" + T.stone + ";font-size:13px;", t("mcp.detail.noTools")));
             return;
           }
           const searchWrap = _el("div", "margin-bottom:12px;position:relative;");
@@ -789,7 +981,8 @@
           );
           searchWrap.appendChild(searchIcon);
           const searchInput = document.createElement("input");
-          searchInput.placeholder = "Search tools...";
+          searchInput.placeholder = t("mcp.detail.searchTools");
+          searchInput.value = self._toolSearchQuery;
           searchInput.className = "mcp-search-input";
           searchInput.style.cssText = [
             "width:100%;padding:8px 12px 8px 32px;background:" + T.inputBg + ";",
@@ -804,29 +997,30 @@
           const toolListWrap = _el("div", "display:flex;flex-direction:column;gap:6px;");
           const renderTools = (q) => {
             toolListWrap.innerHTML = "";
-            const filtered = q ? d.tools.filter((t) => t.name.toLowerCase().indexOf(q.toLowerCase()) !== -1 || (t.description || "").toLowerCase().indexOf(q.toLowerCase()) !== -1) : d.tools;
+            const filtered = q ? d.tools.filter((t2) => t2.name.toLowerCase().indexOf(q.toLowerCase()) !== -1 || (t2.description || "").toLowerCase().indexOf(q.toLowerCase()) !== -1) : d.tools;
             if (filtered.length === 0) {
-              toolListWrap.appendChild(_el("div", "text-align:center;padding:24px;color:" + T.stone + ";font-size:12px;", 'No tools matching "' + q + '"'));
+              toolListWrap.appendChild(_el("div", "text-align:center;padding:24px;color:" + T.stone + ";font-size:12px;", t("mcp.detail.noMatchingTools", { query: q })));
               return;
             }
-            for (const t of filtered) {
-              const isExpanded = self._expandedTools.has(t.name);
-              const tc = _toolCard(t, isExpanded, () => {
-                if (isExpanded) self._expandedTools.delete(t.name);
-                else self._expandedTools.add(t.name);
+            for (const t2 of filtered) {
+              const isExpanded = self._expandedTools.has(t2.name);
+              const tc = _toolCard(t2, isExpanded, () => {
+                if (isExpanded) self._expandedTools.delete(t2.name);
+                else self._expandedTools.add(t2.name);
                 renderTools(searchInput.value);
               });
               toolListWrap.appendChild(tc);
             }
           };
-          renderTools("");
+          renderTools(searchInput.value);
           searchInput.addEventListener("input", () => {
+            self._toolSearchQuery = searchInput.value;
             renderTools(searchInput.value);
           });
           tabContent.appendChild(toolListWrap);
         } else if (idx === 1) {
           if (d.resources.length === 0) {
-            tabContent.appendChild(_el("div", "text-align:center;padding:32px;color:" + T.stone + ";font-size:13px;", "No resources exposed by this server."));
+            tabContent.appendChild(_el("div", "text-align:center;padding:32px;color:" + T.stone + ";font-size:13px;", t("mcp.detail.noResources")));
             return;
           }
           const list = _el("div", "display:flex;flex-direction:column;gap:6px;");
@@ -834,7 +1028,7 @@
           tabContent.appendChild(list);
         } else {
           if (d.prompts.length === 0) {
-            tabContent.appendChild(_el("div", "text-align:center;padding:32px;color:" + T.stone + ";font-size:13px;", "No prompts exposed by this server."));
+            tabContent.appendChild(_el("div", "text-align:center;padding:32px;color:" + T.stone + ";font-size:13px;", t("mcp.detail.noPrompts")));
             return;
           }
           const list = _el("div", "display:flex;flex-direction:column;gap:6px;");
@@ -850,10 +1044,12 @@
       detailWrap.appendChild(tabContainer);
       detailWrap.appendChild(tabContent);
       this._detailEl.appendChild(detailWrap);
-      renderTab(0);
+      renderTab(Math.min(this._activeTab, tabLabels.length - 1));
     }
     // --- Form ---
     _showForm(edit) {
+      this._formOpen = true;
+      this._formEdit = edit;
       this._detailEl.innerHTML = "";
       const formWrap = _el("div", [
         "border:1px solid " + T.hairline + ";border-radius:" + T.rLg + ";",
@@ -867,9 +1063,11 @@
       hdr.appendChild(_el("div", [
         "font-size:18px;font-weight:500;color:" + T.ink + ";",
         "font-family:" + T.fontSans + ";font-feature-settings:" + T.fontFeature + ";"
-      ].join(""), edit ? "Edit Server" : "Connect MCP Server"));
+      ].join(""), edit ? t("mcp.form.editTitle") : t("mcp.form.connectTitle")));
       const closeBtn = _el("button", "class:mcp-btn-icon;", "\u2715");
       closeBtn.addEventListener("click", () => {
+        this._formOpen = false;
+        this._formEdit = void 0;
         this._detailEl.innerHTML = "";
       });
       hdr.appendChild(closeBtn);
@@ -881,20 +1079,20 @@
         options: [{ value: "stdio", label: "stdio" }, { value: "sse", label: "sse" }, { value: "http", label: "http" }],
         value: edit ? edit.transport : "stdio"
       });
-      row1.appendChild(new ui.FormField({ label: "Name", input: nameInput.element }).element);
-      row1.appendChild(new ui.FormField({ label: "Transport", input: transportSelect.element }).element);
+      row1.appendChild(new ui.FormField({ label: t("mcp.form.name"), input: nameInput.element }).element);
+      row1.appendChild(new ui.FormField({ label: t("mcp.form.transport"), input: transportSelect.element }).element);
       body.appendChild(row1);
       const row2 = _el("div", "display:flex;gap:16px;margin-bottom:16px;");
       const commandInput = new ui.Input({ placeholder: "npx -y @modelcontextprotocol/server-filesystem /path", value: edit ? edit.command || "" : "" });
       const urlInput = new ui.Input({ placeholder: "http://localhost:3000", value: edit ? edit.url || "" : "" });
-      row2.appendChild(new ui.FormField({ label: "Command (stdio)", input: commandInput.element, help: "Shell command to launch the MCP server process" }).element);
-      row2.appendChild(new ui.FormField({ label: "URL (sse/http)", input: urlInput.element, help: "HTTP endpoint for SSE or HTTP transport" }).element);
+      row2.appendChild(new ui.FormField({ label: t("mcp.form.command"), input: commandInput.element, help: t("mcp.form.commandHelp") }).element);
+      row2.appendChild(new ui.FormField({ label: t("mcp.form.url"), input: urlInput.element, help: t("mcp.form.urlHelp") }).element);
       body.appendChild(row2);
       const envWrap = _el("div", "margin-bottom:24px;");
       envWrap.appendChild(_el("label", [
         "font-size:13px;font-weight:500;color:" + T.ink + ";display:block;margin-bottom:6px;",
         "font-family:" + T.fontSans + ";font-feature-settings:" + T.fontFeature + ";"
-      ].join(""), "Environment Variables"));
+      ].join(""), t("mcp.form.environment")));
       const envInput = document.createElement("textarea");
       envInput.placeholder = "KEY=value\nOTHER_KEY=other_value";
       envInput.rows = 3;
@@ -911,18 +1109,18 @@
         }).join("\n");
       }
       envWrap.appendChild(envInput);
-      envWrap.appendChild(_el("div", "font-size:12px;color:" + T.stone + ";margin-top:6px;", "One KEY=value per line. Merged over system env for stdio servers."));
+      envWrap.appendChild(_el("div", "font-size:12px;color:" + T.stone + ";margin-top:6px;", t("mcp.form.environmentHelp")));
       body.appendChild(envWrap);
       const actions = _el("div", "display:flex;gap:10px;");
       const self = this;
       const saveBtn = new ui.Button({
-        label: edit ? "Update & Reconnect" : "Save & Connect",
+        label: edit ? t("mcp.form.update") : t("mcp.form.save"),
         variant: "primary",
         size: "sm",
         onClick: async function() {
           const name = nameInput.element.value.trim();
           if (!name) {
-            new ui.Toast({ text: "Name is required", type: "warning", duration: 3e3 });
+            new ui.Toast({ text: t("mcp.form.nameRequired"), type: "warning", duration: 3e3 });
             return;
           }
           const transport = transportSelect.element.value;
@@ -949,18 +1147,34 @@
               resp = await fetch("/api/mcp/servers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body2) });
             }
             if (!resp.ok) throw new Error("HTTP " + resp.status);
-            new ui.Toast({ text: 'Server "' + name + '" ' + (edit ? "updated" : "saved"), type: "success", duration: 3e3 });
+            new ui.Toast({
+              text: t("mcp.form.saved", {
+                name,
+                action: edit ? t("mcp.form.updatedAction") : t("mcp.form.savedAction")
+              }),
+              type: "success",
+              duration: 3e3
+            });
+            self._formOpen = false;
+            self._formEdit = void 0;
             self._detailEl.innerHTML = "";
             self._load();
           } catch (err) {
-            new ui.Toast({ text: "Save failed: " + err.message, type: "error", duration: 5e3 });
+            new ui.Toast({ text: t("mcp.form.saveFailed", { message: err.message }), type: "error", duration: 5e3 });
           }
         }
       });
       actions.appendChild(saveBtn.element);
-      actions.appendChild(new ui.Button({ label: "Cancel", variant: "default", size: "sm", onClick: function() {
-        self._detailEl.innerHTML = "";
-      } }).element);
+      actions.appendChild(new ui.Button({
+        label: t("mcp.form.cancel"),
+        variant: "default",
+        size: "sm",
+        onClick: function() {
+          self._formOpen = false;
+          self._formEdit = void 0;
+          self._detailEl.innerHTML = "";
+        }
+      }).element);
       body.appendChild(actions);
       formWrap.appendChild(body);
       this._detailEl.appendChild(formWrap);
@@ -980,32 +1194,33 @@
       dialog.appendChild(_el("div", [
         "font-size:16px;font-weight:500;color:" + T.ink + ";",
         "font-family:" + T.fontSans + ";font-feature-settings:" + T.fontFeature + ";margin-bottom:8px;"
-      ].join(""), "Delete Server"));
+      ].join(""), t("mcp.delete.title")));
       dialog.appendChild(_el(
         "div",
         "font-size:13px;color:" + T.mute + ";line-height:1.5;margin-bottom:20px;",
-        "This MCP server and all its tools will no longer be available to agents. This action cannot be undone."
+        t("mcp.delete.description")
       ));
       const btnRow = _el("div", "display:flex;gap:10px;justify-content:flex-end;");
-      const cancelBtn = new ui.Button({ label: "Cancel", variant: "default", size: "sm", onClick: function() {
+      const cancelBtn = new ui.Button({ label: t("mcp.delete.cancel"), variant: "default", size: "sm", onClick: function() {
         overlay.remove();
       } });
       btnRow.appendChild(cancelBtn.element);
       const self = this;
       const confirmBtn = new ui.Button({
-        label: "Delete",
+        label: t("mcp.delete.confirm"),
         variant: "danger",
         size: "sm",
         onClick: async function() {
           overlay.remove();
           try {
             await fetch("/api/mcp/servers/" + id, { method: "DELETE" });
-            new ui.Toast({ text: "Server deleted", type: "success", duration: 3e3 });
+            new ui.Toast({ text: t("mcp.delete.done"), type: "success", duration: 3e3 });
             self._selectedId = null;
+            self._selectedDetail = null;
             self._detailEl.innerHTML = "";
             self._load();
           } catch (err) {
-            new ui.Toast({ text: "Delete failed: " + err.message, type: "error", duration: 5e3 });
+            new ui.Toast({ text: t("mcp.delete.failed", { message: err.message }), type: "error", duration: 5e3 });
           }
         }
       });
@@ -1021,11 +1236,11 @@
       try {
         const resp = await fetch("/api/mcp/servers/" + id + "/reconnect", { method: "POST" });
         if (!resp.ok) throw new Error("HTTP " + resp.status);
-        new ui.Toast({ text: "Reconnected", type: "success", duration: 3e3 });
+        new ui.Toast({ text: t("mcp.reconnect.done"), type: "success", duration: 3e3 });
         this._load();
         if (this._selectedId === id) this._selectServer(id);
       } catch (err) {
-        new ui.Toast({ text: "Reconnect failed: " + err.message, type: "error", duration: 5e3 });
+        new ui.Toast({ text: t("mcp.reconnect.failed", { message: err.message }), type: "error", duration: 5e3 });
       }
     }
   };

@@ -12,6 +12,7 @@ import { ClientLogger } from '../ClientLogger.js';
 import { ToastManager } from '../ToastManager.js';
 import type { SessionViewModel } from './SessionViewModel.js';
 import type { WSClient } from './WSClient.js';
+import { t } from '../i18n/index.js';
 import {
   attachmentDisplayLabel,
   buildPromptContentWithAttachments,
@@ -192,7 +193,7 @@ export function onError(agent: SessionAgent, data: { message?: string; code?: st
 
     const fatalMsg: Message = {
       id: generateId(), sessionId: agent.sessionId, type: 'error',
-      content: message || 'API request failed -- check your API key and URL in Agents settings.',
+      content: message || t('runtime.message.apiFailed'),
       timestamp: Date.now(),
       agentId: agent.agentId,
     };
@@ -206,7 +207,7 @@ export function onError(agent: SessionAgent, data: { message?: string; code?: st
 
   const msg: Message = {
     id: generateId(), sessionId: agent.sessionId, type: 'error',
-    content: message || 'API request failed -- check your API key and URL in Agents settings.',
+    content: message || t('runtime.message.apiFailed'),
     timestamp: Date.now(),
     agentId: agent.agentId,
   };
@@ -218,9 +219,10 @@ export function onError(agent: SessionAgent, data: { message?: string; code?: st
 
 /** Handle a 'plan_enter' event: show a plan mode boundary card. */
 export function onPlanEnter(agent: SessionAgent, title: string): void {
+  const displayTitle = title || t('runtime.plan.defaultTitle');
   const msg: Message = {
-    id: generateId(), sessionId: agent.sessionId, type: 'plan_enter', planTitle: title,
-    content: `Plan mode: ${title}`, timestamp: Date.now(),
+    id: generateId(), sessionId: agent.sessionId, type: 'plan_enter', planTitle: displayTitle,
+    content: t('runtime.plan.mode', { title: displayTitle }), timestamp: Date.now(),
     agentId: agent.agentId,
   };
   agent.state.messages.appendMessage(msg);
@@ -230,7 +232,7 @@ export function onPlanEnter(agent: SessionAgent, title: string): void {
 /** Handle a 'plan_exit' event: show a plan mode exit card. */
 export function onPlanExit(agent: SessionAgent): void {
   const msg: Message = {
-    id: generateId(), sessionId: agent.sessionId, type: 'plan_exit', content: 'Plan mode exited', timestamp: Date.now(),
+    id: generateId(), sessionId: agent.sessionId, type: 'plan_exit', content: t('runtime.plan.exited'), timestamp: Date.now(),
     agentId: agent.agentId,
   };
   agent.state.messages.appendMessage(msg);
@@ -306,7 +308,7 @@ export function onTaskNotification(agent: SessionAgent, data: Record<string, unk
   const parentSessionId = (data.parentSessionId as string) || '';
   const parentAgentId = (data.parentAgentId as string) || '';
   const status = (data.taskStatus as string) || 'completed';
-  const summary = (data.taskSummary as string) || 'Unknown task';
+  const summary = (data.taskSummary as string) || t('runtime.task.unknown');
   const result = (data.taskResult as string) || '';
   const msgId = `task-notif-${taskId || Date.now().toString(36)}`;
 
@@ -353,7 +355,7 @@ export function onStatus(agent: SessionAgent, content?: string): void {
 
 /** Handle a 'sleep' event: show the goal-mode idle card. */
 export function onSleep(agent: SessionAgent, content?: string): void {
-  const msg = content || 'Goal active -- waiting before next step';
+  const msg = content || t('runtime.goal.waiting');
   const statusId = 'goal-status';
   const existingIdx = agent.state.messages.indexOf(statusId);
   if (existingIdx !== -1) {
@@ -370,7 +372,7 @@ export function onSleep(agent: SessionAgent, content?: string): void {
 export function onWake(agent: SessionAgent, content?: string): void {
   agent.state.isStreaming = true;
   finalizeThink(agent);
-  const msg = content || 'Goal wake -- continuing active goal';
+  const msg = content || t('runtime.goal.continuing');
   const statusId = 'goal-status';
   const existingIdx = agent.state.messages.indexOf(statusId);
   if (existingIdx !== -1) {
@@ -411,12 +413,22 @@ function formatDelegationContent(
 ): string {
   const agentLabel = subAgentId.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   switch (originalType) {
-    case 'think': return `[think] ${agentLabel} is thinking...`;
-    case 'text': return `[text] ${agentLabel}: ${content.slice(0, 200)}${content.length > 200 ? '...' : ''}`;
-    case 'tool_call': return `[tool] ${agentLabel} -> ${toolName || 'tool'}()`;
-    case 'tool_result': return `[done] ${agentLabel} <- ${toolName || 'tool'} completed`;
-    case 'error': return `[error] ${agentLabel}: ${content.slice(0, 100)}`;
-    default: return `[busy] ${agentLabel} working...`;
+    case 'think': return t('runtime.delegation.thinking', { agent: agentLabel });
+    case 'text': return t('runtime.delegation.text', {
+      agent: agentLabel,
+      content: content.slice(0, 200),
+      ellipsis: content.length > 200 ? '...' : '',
+    });
+    case 'tool_call': return t('runtime.delegation.toolCall', {
+      agent: agentLabel,
+      tool: toolName || t('runtime.delegation.defaultTool'),
+    });
+    case 'tool_result': return t('runtime.delegation.toolDone', {
+      agent: agentLabel,
+      tool: toolName || t('runtime.delegation.defaultTool'),
+    });
+    case 'error': return t('runtime.delegation.error', { agent: agentLabel, content: content.slice(0, 100) });
+    default: return t('runtime.delegation.working', { agent: agentLabel });
   }
 }
 
@@ -529,7 +541,7 @@ export class SessionAgent extends EventEmitter {
 
     try {
       const vm = this._sessionVM;
-      if (!vm) throw new Error('SessionAgent._sessionVM is null -- agent not properly initialized');
+      if (!vm) throw new Error(t('runtime.session.agentNotInitialized'));
       const targetSessionId = this.sessionId;
       const node = vm.sessions.getById(targetSessionId);
       await vm.ensureRunnableAgentForSession(targetSessionId);
@@ -539,7 +551,7 @@ export class SessionAgent extends EventEmitter {
 
       const wsClient = vm.getWSClient();
       if (!wsClient || !wsClient.connected) {
-        throw new Error('WebSocket is not connected. Please wait for reconnection or refresh the page.');
+        throw new Error(t('runtime.ws.disconnected'));
       }
 
       const accepted = wsClient.sendMessage(
@@ -551,7 +563,7 @@ export class SessionAgent extends EventEmitter {
         options.internalGoal ? 'goal' : undefined,
       );
       if (!accepted) {
-        throw new Error('WebSocket could not accept the message. Please wait for reconnection and try again.');
+        throw new Error(t('runtime.ws.sendRejected'));
       }
 
       if (!options.internalGoal) {
@@ -569,7 +581,13 @@ export class SessionAgent extends EventEmitter {
       this.state.isStreaming = true;
       this.state.generationSeq++;
       this.emit('streamingStarted');
-      if (!options.internalGoal && node && (node.title === 'New Session' || !node.title || node.title === content.slice(0, 30))) {
+      if (!options.internalGoal && node && (
+        node.title === t('runtime.session.newTitle')
+        || node.title === 'New Session'
+        || node.title === '新建会话'
+        || !node.title
+        || node.title === content.slice(0, 30)
+      )) {
         this._generateSessionTitle(targetSessionId, content).then(title => {
           if (title) vm.renameSession(targetSessionId, title).catch(() => {});
         });
@@ -580,7 +598,9 @@ export class SessionAgent extends EventEmitter {
       ClientLogger.vm.error('Send failed', { error: (err as Error).message });
       const errorMsg: Message = {
         id: generateId(), sessionId: this.sessionId, type: 'error',
-        content: `Failed to send message: ${err instanceof Error ? err.message : String(err)}`, timestamp: Date.now(),
+        content: t('runtime.message.sendFailed', {
+          message: err instanceof Error ? err.message : String(err),
+        }), timestamp: Date.now(),
         agentId: this.agentId,
       };
       this.state.messages.appendMessage(errorMsg);
@@ -748,15 +768,15 @@ export class SessionAgent extends EventEmitter {
       return;
     }
     if (m.type === 'error') {
-      s.messages.appendMessage({ id: m.id || generateId(), sessionId, type: 'error', content: String(m.content || m.error || 'Unknown error'), timestamp: ts, agentId, agentName });
+      s.messages.appendMessage({ id: m.id || generateId(), sessionId, type: 'error', content: String(m.content || m.error || t('runtime.message.unknownError')), timestamp: ts, agentId, agentName });
       return;
     }
     if (m.type === 'plan_enter') {
-      s.messages.appendMessage({ id: m.id || generateId(), sessionId, type: 'plan_enter', content: String(m.content || ''), planTitle: String(m.planTitle || m.title || 'Plan Mode'), timestamp: ts, agentId, agentName });
+      s.messages.appendMessage({ id: m.id || generateId(), sessionId, type: 'plan_enter', content: String(m.content || ''), planTitle: String(m.planTitle || m.title || t('runtime.plan.defaultTitle')), timestamp: ts, agentId, agentName });
       return;
     }
     if (m.type === 'plan_exit') {
-      s.messages.appendMessage({ id: m.id || generateId(), sessionId, type: 'plan_exit', content: String(m.content || 'Plan mode exited'), timestamp: ts, agentId, agentName });
+      s.messages.appendMessage({ id: m.id || generateId(), sessionId, type: 'plan_exit', content: String(m.content || t('runtime.plan.exited')), timestamp: ts, agentId, agentName });
       return;
     }
     if (m.type === 'status') {
@@ -877,7 +897,7 @@ export class SessionAgent extends EventEmitter {
     removeStatusCard(this);
     const msg: Message = {
       id: generateId(), sessionId: this.sessionId, type: 'error',
-      content: 'WebSocket connection lost. Please check your network and try again.', timestamp: Date.now(),
+      content: t('runtime.ws.connectionLost'), timestamp: Date.now(),
       agentId: this.agentId,
     };
     this.state.messages.appendMessage(msg);
@@ -926,7 +946,7 @@ function parseTaskNotificationXML(xml: string): { taskId: string; status: string
     return {
       taskId,
       status: tag('status') || 'unknown',
-      summary: tag('summary') || '',
+      summary: tag('summary') || t('runtime.task.unknown'),
       result: tag('result') || '',
     };
   } catch {

@@ -1,10 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { renderMarkdown } from '../../MarkdownRenderer.js';
 import {
   parseFilePathReference,
   resolveClickedFilePath,
   resolveWorkspaceRelativePath,
 } from '../PathReferences.js';
+import { setLocale } from '../../i18n/index.js';
+
+beforeEach(() => setLocale('en-US'));
+afterEach(() => setLocale('zh-CN'));
 
 describe('PathReferences', () => {
   it('strips editor line suffixes from clickable file paths', () => {
@@ -52,7 +56,17 @@ describe('PathReferences', () => {
     expect(html).toContain('class="clickable-path"');
     expect(html).toContain('data-file-path="src/server/core/agent/AgentLoop.ts"');
     expect(html).toContain('data-file-line="148"');
+    expect(html).toContain('title="Open src/server/core/agent/AgentLoop.ts:148"');
     expect(html).toContain('AgentLoop.ts:148');
+  });
+
+  it('localizes clickable path and image preview titles from the current app locale', () => {
+    setLocale('zh-CN');
+    const path = renderMarkdown('src/server/main.ts:10');
+    const image = renderMarkdown('![图表](output/chart.png)', { sessionId: 'session-1' });
+
+    expect(path).toContain('title="打开 src/server/main.ts:10"');
+    expect(image).toContain('title="点击预览"');
   });
 
   it('renders markdown links to files as clickable file paths instead of external URLs', () => {

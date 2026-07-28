@@ -10,11 +10,12 @@ import { ClientLogger } from '../../ClientLogger.js';
 import { ToastManager } from '../../ToastManager.js';
 import { slotRegistry } from '../../SlotRegistry.js';
 import { Toggle } from '../ui/Toggle.js';
-import { normalizeLocale, SUPPORTED_LOCALES, t } from '../../i18n/index.js';
+import { normalizeLocale, onLocaleChange, SUPPORTED_LOCALES, t } from '../../i18n/index.js';
 
 export class SettingsPage implements Page {
   name = 'settings';
   container: HTMLElement;
+  private _draft: AppSettings | null = null;
 
   constructor() {
     this.container = document.createElement('div');
@@ -26,6 +27,10 @@ export class SettingsPage implements Page {
         <form id="settings-form" class="settings-workbench-form"></form>
       </div>
     `;
+    onLocaleChange(({ locale }) => {
+      if (this._draft) this._draft.lang = locale;
+      if (this.container.style.display !== 'none') this._buildForm();
+    });
   }
 
   onEnter(): void {
@@ -37,7 +42,10 @@ export class SettingsPage implements Page {
   private _buildForm(): void {
     console.log('[Settings] buildForm started');
     const app = App.getInstance();
-    const s = app.settings;
+    if (!this._draft) this._draft = { ...app.settings };
+    const s = { ...this._draft };
+    document.documentElement.setAttribute('data-theme', s.theme);
+    document.documentElement.style.setProperty('--user-accent', s.accentColor);
     const form = this.container.querySelector('#settings-form') as HTMLFormElement;
     if (!form) return;
     const currentLocale = normalizeLocale(s.lang);
@@ -118,8 +126,14 @@ export class SettingsPage implements Page {
     slotRegistry._onSlotReady('settings-bottom');
 
     // Create Toggle components for showThinkCards and showToolCards
-    const thinkToggle = new Toggle({ checked: s.showThinkCards });
-    const toolToggle = new Toggle({ checked: s.showToolCards });
+    const thinkToggle = new Toggle({
+      checked: s.showThinkCards,
+      onChange: (checked) => { if (this._draft) this._draft.showThinkCards = checked; },
+    });
+    const toolToggle = new Toggle({
+      checked: s.showToolCards,
+      onChange: (checked) => { if (this._draft) this._draft.showToolCards = checked; },
+    });
     const thinkSlot = form.querySelector('#toggle-think');
     const toolSlot = form.querySelector('#toggle-tool');
     if (thinkSlot) thinkSlot.replaceWith(thinkToggle.element);
@@ -141,6 +155,7 @@ export class SettingsPage implements Page {
         card.innerHTML = `<div class="appearance-theme-preview ${theme}-preview">Aa</div><span class="appearance-theme-label">${label}</span>`;
         card.addEventListener('click', () => {
           currentTheme = theme;
+          if (this._draft) this._draft.theme = theme;
           document.documentElement.setAttribute('data-theme', theme);
           themeCards.querySelectorAll('.appearance-theme-card').forEach(c => c.classList.remove('active'));
           card.classList.add('active');
@@ -175,6 +190,7 @@ export class SettingsPage implements Page {
         swatch.title = a.label;
         swatch.addEventListener('click', () => {
           currentAccent = a.value;
+          if (this._draft) this._draft.accentColor = a.value;
           document.documentElement.style.setProperty('--user-accent', a.value);
           swatchRow.querySelectorAll('.appearance-swatch').forEach(s => s.classList.remove('active'));
           swatch.classList.add('active');
@@ -186,6 +202,16 @@ export class SettingsPage implements Page {
     }
 
     // Bind events
+    form.querySelector<HTMLSelectElement>('select[name="lang"]')?.addEventListener('change', (e) => {
+      const lang = normalizeLocale((e.currentTarget as HTMLSelectElement).value);
+      if (this._draft) this._draft.lang = lang;
+      if (lang !== app.settings.lang) app.updateSettings({ lang });
+    });
+    form.querySelector<HTMLInputElement>('[name="compactionThreshold"]')?.addEventListener('input', (e) => {
+      const value = Number.parseInt((e.currentTarget as HTMLInputElement).value, 10);
+      if (this._draft && Number.isFinite(value)) this._draft.compactionThreshold = value;
+    });
+
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       console.log('[Settings] form submit — theme:', currentTheme, 'accent:', currentAccent);
@@ -198,7 +224,9 @@ export class SettingsPage implements Page {
         showToolCards: toolToggle.checked,
         compactionThreshold: parseInt(fd.get('compactionThreshold') as string),
       };
+      this._draft = { ...app.settings, ...patch } as AppSettings;
       app.updateSettings(patch);
+      this._draft = { ...app.settings };
       ToastManager.getInstance().success(t('settings.saved'));
       ClientLogger.ui.info('Settings saved');
       this._buildForm();

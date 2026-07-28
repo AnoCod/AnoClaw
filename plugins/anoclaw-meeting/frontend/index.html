@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -389,6 +389,165 @@ const $=id=>document.getElementById(id);
 function esc(s){const e=document.createElement('span');e.textContent=String(s==null?'':s);return e.innerHTML}
 function notify(msg){const e=$('notify');e.textContent=msg;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('show'),2500)}
 
+const MEETING_I18N = {
+  'en-US': {
+    title:'Meeting', meetings:'Meetings', testLlm:'Test LLM connection', refresh:'Refresh',
+    compare:'Compare', compareTitle:'Compare selected meetings (select 2+)', table:'Table',
+    tableTitle:'Toggle meeting table view', new:'New', search:'Search',
+    searchPlaceholder:'Search meetings by topic, goal, or keyword...', loading:'Loading meetings...',
+    searchResults:'Search Results', noMatches:'No matching meetings found', backAll:'Back to all meetings',
+    noMeetings:'No meetings yet. Click \"+ New\" to create one.', running:'Running', done:'Done',
+    completed:'Completed', selectCompare:'Select for comparison', participantShort:'p',
+    turns:'turns', turn:'turn', summary:'summary', actions:'actions', action:'action',
+    participants:'participants', participant:'participant', rounds:'rounds', round:'Round {round}',
+    roundCountOne:'{count} round', roundCountMany:'{count} rounds',
+    start:'Start', stop:'Stop', executePlan:'Execute Plan', export:'Export', plainText:'Plain Text',
+    delete:'Delete', meetingProgress:'Meeting in progress', started:'Started', estEnd:'Est. end',
+    progress:'Progress', toolsOff:'tools off', toolEvidence:'tool evidence',
+    projectEvidence:'Project Evidence', filesRead:'files read', searchGroups:'search groups',
+    memories:'memories', noContextTerms:'No context terms extracted yet',
+    contextPending:'Read-only project context will be collected when the meeting starts.',
+    meetingTable:'Meeting Table', seats:'seats', seat:'seat', timeline:'Timeline',
+    active:'Active', complete:'Complete', transcript:'Transcript', noTranscript:'No transcript yet',
+    indexedPlan:'Indexed Plan', debateLedger:'Debate Ledger', position:'Position',
+    challenge:'Challenge', impact:'Impact', toolLedger:'Tool Ledger',
+    speakerAnalytics:'Speaker Analytics', avgChars:'avg chars', mostActive:'Most active',
+    activityHeatmap:'Activity Heatmap', chars:'chars', actionItems:'Action Items',
+    pending:'Pending', inProgress:'In progress', blocked:'Blocked', unknown:'Unknown',
+    noParticipants:'No participants', meeting:'Meeting', moderator:'Moderator', observer:'Observer',
+    duration:'Duration', created:'Created', meetingComparison:'Meeting Comparison', back:'Back',
+    selectCompareMeetings:'Select meetings to compare', selectTwo:'Select 2+ meetings',
+    compareFailed:'Compare failed', genericError:'Error', testingLlm:'Testing LLM connection...',
+    llmOk:'LLM OK ({length} chars, finish: {reason})', llmError:'LLM ERROR: {error}',
+    diagnoseFailed:'Diagnose failed: {error}', newMeeting:'New Meeting',
+    templateOptional:'Template (optional)', custom:'Custom', fromScratch:'Start from scratch',
+    topic:'Topic', topicPlaceholder:'What to discuss', goal:'Goal',
+    goalPlaceholder:'What should be achieved', participantsLabel:'Participants',
+    noAgents:'No agents available', mode:'Mode', roundRobin:'Round Robin', auto:'Auto',
+    meetingStyle:'Meeting Style', dialectic:'Dialectic debate', workshop:'Production workshop',
+    toolEvidenceLabel:'Tool Evidence', readOnlyProbes:'Read-only probes per turn',
+    allowedTools:'Allowed Tools', probeBudget:'Probe Budget', qualityThreshold:'Quality Threshold',
+    qualityGate:'Quality Gate', appendRemediation:'Append remediation if weak',
+    probeTemplates:'Probe Templates JSON', projectEvidenceLabel:'Project Evidence',
+    collectContext:'Collect read-only project context before discussion',
+    contextQueryPlaceholder:'Optional context query, defaults to topic + goal',
+    contextFilesPlaceholder:'Optional extra files, one per line', recurring:'Recurring',
+    repeatMeeting:'Repeat this meeting', daily:'Daily (weekdays)', weekly:'Weekly',
+    biweekly:'Bi-weekly', monthly:'Monthly',
+    compareTip:'Tip: Use compare checkboxes in the meeting list to compare meetings side-by-side.',
+    create:'Create', cancel:'Cancel', preview:'Preview', category:'Category',
+    estimatedDuration:'Est. Duration', topicRequired:'Topic required', goalRequired:'Goal required',
+    selectParticipants:'Select 2+ participants', probeJsonInvalid:'Probe Templates must be valid JSON',
+    probeArrayRequired:'Probe Templates JSON must be an array', failed:'Failed',
+    meetingCreated:'Meeting created', savedMemory:'Saved in memory: {name}',
+    startedNotice:'Started', stoppedNotice:'Stopped', deleteConfirm:'Delete this meeting?',
+    deleteFallback:'Delete?', deleted:'Deleted', creatingSession:'Creating execution session...',
+    executionFailed:'Execution session failed', executionReady:'Execution session ready',
+    executionCreated:'Execution session created', executionError:'Execution setup error: {error}',
+    planExecution:'Plan Execution', promptInjected:'Prompt injected into the execution session.',
+    promptCreated:'Prompt created. Copy it into the execution session if automatic handoff did not occur.',
+    session:'Session', plan:'Plan', copyPrompt:'Copy Prompt', close:'Close',
+    promptCopied:'Prompt copied', copyFailed:'Copy failed', exportFailed:'Export failed',
+    exportedAs:'Exported as {format}', exportError:'Export error', statusUpdated:'Status updated',
+  },
+  'zh-CN': {
+    title:'会议', meetings:'会议', testLlm:'测试大模型连接', refresh:'刷新',
+    compare:'对比', compareTitle:'对比选中的会议（至少选择 2 个）', table:'圆桌',
+    tableTitle:'切换会议圆桌视图', new:'新建', search:'搜索',
+    searchPlaceholder:'按主题、目标或关键词搜索会议…', loading:'正在加载会议…',
+    searchResults:'搜索结果', noMatches:'没有找到匹配的会议', backAll:'返回全部会议',
+    noMeetings:'暂无会议，点击“+ 新建”创建会议。', running:'进行中', done:'已完成',
+    completed:'已完成', selectCompare:'选择进行对比', participantShort:'人',
+    turns:'轮发言', turn:'轮发言', summary:'摘要', actions:'行动项', action:'行动项',
+    participants:'位参与者', participant:'位参与者', rounds:'轮', round:'第 {round} 轮',
+    roundCountOne:'{count} 轮', roundCountMany:'{count} 轮',
+    start:'开始', stop:'停止', executePlan:'执行计划', export:'导出', plainText:'纯文本',
+    delete:'删除', meetingProgress:'会议进行中', started:'开始于', estEnd:'预计结束',
+    progress:'进度', toolsOff:'工具已关闭', toolEvidence:'工具证据',
+    projectEvidence:'项目证据', filesRead:'已读取文件', searchGroups:'搜索组',
+    memories:'记忆', noContextTerms:'尚未提取上下文术语',
+    contextPending:'会议开始时将收集只读项目上下文。',
+    meetingTable:'会议圆桌', seats:'个席位', seat:'个席位', timeline:'时间线',
+    active:'进行中', complete:'已完成', transcript:'会议记录', noTranscript:'暂无会议记录',
+    indexedPlan:'索引计划', debateLedger:'辩论账本', position:'立场',
+    challenge:'质疑', impact:'决策影响', toolLedger:'工具账本',
+    speakerAnalytics:'发言分析', avgChars:'平均字符', mostActive:'最活跃',
+    activityHeatmap:'活跃度热力图', chars:'字符', actionItems:'行动项',
+    pending:'待处理', inProgress:'进行中', blocked:'受阻', unknown:'未知',
+    noParticipants:'暂无参与者', meeting:'会议', moderator:'主持人', observer:'观察员',
+    duration:'时长', created:'创建于', meetingComparison:'会议对比', back:'返回',
+    selectCompareMeetings:'请选择要对比的会议', selectTwo:'请至少选择 2 个会议',
+    compareFailed:'对比失败', genericError:'错误', testingLlm:'正在测试大模型连接…',
+    llmOk:'大模型正常（{length} 字符，结束原因：{reason}）', llmError:'大模型错误：{error}',
+    diagnoseFailed:'诊断失败：{error}', newMeeting:'新建会议',
+    templateOptional:'模板（可选）', custom:'自定义', fromScratch:'从空白开始',
+    topic:'主题', topicPlaceholder:'要讨论什么', goal:'目标',
+    goalPlaceholder:'希望达成什么成果', participantsLabel:'参与者',
+    noAgents:'没有可用的智能体', mode:'发言模式', roundRobin:'轮流发言', auto:'自动',
+    meetingStyle:'会议方式', dialectic:'辩证讨论', workshop:'生产工作坊',
+    toolEvidenceLabel:'工具证据', readOnlyProbes:'每轮使用只读探查',
+    allowedTools:'允许的工具', probeBudget:'探查预算', qualityThreshold:'质量阈值',
+    qualityGate:'质量门禁', appendRemediation:'质量不足时追加修正',
+    probeTemplates:'探查模板 JSON', projectEvidenceLabel:'项目证据',
+    collectContext:'讨论前收集只读项目上下文',
+    contextQueryPlaceholder:'可选上下文查询，默认使用主题和目标',
+    contextFilesPlaceholder:'可选附加文件，每行一个', recurring:'周期会议',
+    repeatMeeting:'重复此会议', daily:'每日（工作日）', weekly:'每周',
+    biweekly:'每两周', monthly:'每月',
+    compareTip:'提示：在会议列表中勾选会议，可并排对比。',
+    create:'创建', cancel:'取消', preview:'预览', category:'分类',
+    estimatedDuration:'预计时长', topicRequired:'请输入主题', goalRequired:'请输入目标',
+    selectParticipants:'请至少选择 2 位参与者', probeJsonInvalid:'探查模板必须是有效 JSON',
+    probeArrayRequired:'探查模板 JSON 必须是数组', failed:'失败',
+    meetingCreated:'会议已创建', savedMemory:'已保存到记忆：{name}',
+    startedNotice:'会议已开始', stoppedNotice:'会议已停止', deleteConfirm:'删除此会议吗？',
+    deleteFallback:'确认删除？', deleted:'会议已删除', creatingSession:'正在创建执行会话…',
+    executionFailed:'创建执行会话失败', executionReady:'执行会话已就绪',
+    executionCreated:'执行会话已创建', executionError:'执行准备错误：{error}',
+    planExecution:'计划执行', promptInjected:'提示词已注入执行会话。',
+    promptCreated:'提示词已创建；如果未自动交接，请将其复制到执行会话。',
+    session:'会话', plan:'计划', copyPrompt:'复制提示词', close:'关闭',
+    promptCopied:'提示词已复制', copyFailed:'复制失败', exportFailed:'导出失败',
+    exportedAs:'已导出为 {format}', exportError:'导出错误', statusUpdated:'状态已更新',
+  },
+};
+let meetingLocale = String(window.__ANOCLAW_LOCALE__ || '').toLowerCase().startsWith('en') ? 'en-US' : 'zh-CN';
+function tr(key, params={}) {
+  const table = MEETING_I18N[meetingLocale] || MEETING_I18N['zh-CN'];
+  const template = table[key] || MEETING_I18N['en-US'][key] || key;
+  return String(template).replace(/\{(\w+)\}/g, (_, name) => params[name] == null ? '' : String(params[name]));
+}
+function meetingRound(value) {
+  return tr(value === 1 ? 'roundCountOne' : 'roundCountMany', {count:value});
+}
+function meetingStatus(value) {
+  const map={running:'running',completed:'completed',done:'done',idle:'pending',cancelled:'stoppedNotice',blocked:'blocked','in-progress':'inProgress',pending:'pending'};
+  return map[value] ? tr(map[value]) : String(value||tr('unknown'));
+}
+function meetingMode(value) {
+  const map={'round-robin':'roundRobin',moderator:'moderator',auto:'auto',dialectic:'dialectic',workshop:'workshop'};
+  return map[value] ? tr(map[value]) : String(value||'');
+}
+function meetingRole(value) {
+  const map={moderator:'moderator',observer:'observer',participant:'participant'};
+  return map[value] ? tr(map[value]) : String(value||'');
+}
+function applyMeetingChrome() {
+  document.documentElement.lang = meetingLocale;
+  document.title = tr('title');
+  document.querySelector('.page-title').textContent = tr('meetings');
+  $('btnDiag').title = tr('testLlm');
+  $('btnRefresh').title = tr('refresh');
+  $('btnCompare').textContent = tr('compare'); $('btnCompare').title = tr('compareTitle');
+  $('btnTableToggle').textContent = `◉ ${tr('table')}`; $('btnTableToggle').title = tr('tableTitle');
+  $('btnNew').textContent = `+ ${tr('new')}`;
+  $('searchInput').placeholder = tr('searchPlaceholder');
+  $('btnSearch').textContent = tr('search');
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = tr(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => { el.placeholder = tr(el.dataset.i18nPlaceholder); });
+  document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = tr(el.dataset.i18nTitle); });
+}
+
 // ── Avatar colors ──
 const AVATAR_COLORS = ['#57c1ff','#59d499','#ffc533','#ff6161','#9c9c9d','#cdcdcd','#6a6b6c','#434345'];
 function avatarColor(name) {
@@ -418,7 +577,7 @@ const MeetingTable = (() => {
     render(){
       this.el.innerHTML='';
       const ps=this.data.participants||[];
-      if(!ps.length){this.el.innerHTML='<div style="text-align:center;padding:24px;font-size:11px;color:var(--c-text-quaternary);">No participants</div>';return}
+      if(!ps.length){this.el.innerHTML=`<div style="text-align:center;padding:24px;font-size:11px;color:var(--c-text-quaternary);">${tr('noParticipants')}</div>`;return}
       const n=ps.length,d=tableDims(n),sr=48;
       const rx=d.w/2+sr+16,ry=d.h/2+sr+16;
       const tw=(rx+sr)*2+32,th=(ry+sr)*2+32;
@@ -435,11 +594,11 @@ const MeetingTable = (() => {
       ts.style.cssText=`width:${d.w}px;height:${d.h}px;position:absolute;left:${cx-d.w/2}px;top:${cy-d.h/2}px;border-radius:50%;background:#121212;border:1px solid #242728;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:4px;transition:width 0.3s ease,height 0.3s ease;`;
       const tl=document.createElement('div');
       tl.style.cssText='font-size:10px;font-weight:500;color:rgba(255,255,255,0.5);letter-spacing:0.5px;text-align:center;max-width:80%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-      tl.textContent=this.data.topic||'Meeting';
+      tl.textContent=this.data.topic||tr('meeting');
       ts.appendChild(tl);
       const cl=document.createElement('div');
       cl.style.cssText='font-size:9px;color:rgba(255,255,255,0.25);letter-spacing:0.5px;';
-      cl.textContent=`${n} participant${n!==1?'s':''}`;
+      cl.textContent=meetingLocale==='zh-CN'?`${n} ${tr('participants')}`:`${n} ${n!==1?tr('participants'):tr('participant')}`;
       ts.appendChild(cl);
       w.appendChild(ts);
       // Seats
@@ -469,7 +628,8 @@ const MeetingTable = (() => {
         const tip=document.createElement('div');
         tip.className='meeting-table-tooltip';
         tip.style.cssText='position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);padding:4px 8px;background:#1a1a1a;border:1px solid #242728;border-radius:4px;font-size:9px;color:rgba(255,255,255,0.8);white-space:nowrap;pointer-events:none;opacity:0;transition:opacity 0.15s;z-index:10;display:flex;align-items:center;gap:4px;font-family:var(--font);';
-        const rt=p.role?`<span style="font-size:7px;color:rgba(255,255,255,0.4);text-transform:uppercase;">${p.role}</span>`:'';
+        const roleLabel=meetingRole(p.role);
+        const rt=p.role?`<span style="font-size:7px;color:rgba(255,255,255,0.4);text-transform:uppercase;">${esc(roleLabel)}</span>`:'';
         tip.innerHTML=`<span style="color:${col};font-weight:500;">${esc(p.name||p.id)}</span>${rt}`;
         se.appendChild(tip);
         se.addEventListener('mouseenter',()=>{se.style.transform='scale(1.15)';tip.style.opacity='1'});
@@ -487,7 +647,18 @@ const MeetingTable = (() => {
 })();
 
 // ── Theme sync ──
-window.addEventListener('message',e=>{if(e.data.type==='anoclaw:theme'){document.documentElement.setAttribute('data-theme',e.data.theme);document.documentElement.setAttribute('data-accent',e.data.accent)}});
+window.addEventListener('message',e=>{
+  if(e.data?.type==='anoclaw:theme'){
+    document.documentElement.setAttribute('data-theme',e.data.theme);
+    document.documentElement.setAttribute('data-accent',e.data.accent);
+  }
+  if(e.data?.type==='anoclaw:locale'){
+    meetingLocale=String(e.data.locale||'').toLowerCase().startsWith('en')?'en-US':'zh-CN';
+    applyMeetingChrome();
+    window.app?._render();
+    applyMeetingChrome();
+  }
+});
 
 // ── App ──
 class MeetingApp {
@@ -564,10 +735,10 @@ class MeetingApp {
     }
 
     if (this._isSearch) {
-      html += '<div style="margin-bottom:12px;font-size:10px;color:var(--c-text-quaternary);letter-spacing:0.5px;">Search Results</div>';
+      html += `<div style="margin-bottom:12px;font-size:10px;color:var(--c-text-quaternary);letter-spacing:0.5px;">${tr('searchResults')}</div>`;
       const res = this._searchResults || [];
       if (res.length === 0) {
-        html += '<div class="empty-state"><div class="empty-state-text">No matching meetings found</div></div>';
+        html += `<div class="empty-state"><div class="empty-state-text">${tr('noMatches')}</div></div>`;
       } else {
         for (const r of res) {
           let label = r.description || '';
@@ -577,7 +748,7 @@ class MeetingApp {
             `<div class="search-result-desc">${esc(label)}</div></button>`;
         }
       }
-      html += '<div style="margin-top:12px;"><button class="btn btn-sm" onclick="app._load()">← Back to all meetings</button></div>';
+      html += `<div style="margin-top:12px;"><button class="btn btn-sm" onclick="app._load()">← ${tr('backAll')}</button></div>`;
       this._el.innerHTML = html;
       // Hide table button in search view
       const tableBtn2 = $('btnTableToggle');
@@ -589,16 +760,20 @@ class MeetingApp {
     html += '<div class="meeting-layout">';
     html += '<div class="meeting-list">';
     if (this._meetings.length === 0) {
-      html += '<div class="empty-state"><div class="empty-state-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div><div class="empty-state-text">No meetings yet. Click "+ New" to create one.</div></div>';
+      html += `<div class="empty-state"><div class="empty-state-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div><div class="empty-state-text">${tr('noMeetings')}</div></div>`;
     } else {
       for (const m of this._meetings) {
         const dot = `<span class="pulse-dot ${m.status}"></span>`;
-        const badge = m.status==='running'?'<span class="meeting-card-badge running">Running</span>'
-          : m.status==='completed'?'<span class="meeting-card-badge completed">Done</span>'
-          : `<span class="meeting-card-badge idle">${m.status}</span>`;
-        const info = `${m.speakerMode} · ${(m.participantIds||[]).length} p · ${(m.transcript||[]).length} turns`;
-        const sum = m.summary ? ' · summary ✓' : '';
-        const ai = (m.actionItems||[]).length > 0 ? ` · ${m.actionItems.length} actions` : '';
+        const badge = m.status==='running'?`<span class="meeting-card-badge running">${tr('running')}</span>`
+          : m.status==='completed'?`<span class="meeting-card-badge completed">${tr('done')}</span>`
+          : `<span class="meeting-card-badge idle">${esc(meetingStatus(m.status))}</span>`;
+        const pCount=(m.participantIds||[]).length, turnCount=(m.transcript||[]).length;
+        const info = meetingLocale==='zh-CN'
+          ? `${meetingMode(m.speakerMode)} · ${pCount} ${tr('participantShort')} · ${turnCount} ${tr('turns')}`
+          : `${meetingMode(m.speakerMode)} · ${pCount} ${tr('participantShort')} · ${turnCount} ${turnCount===1?tr('turn'):tr('turns')}`;
+        const sum = m.summary ? ` · ${tr('summary')} ✓` : '';
+        const aiCount=(m.actionItems||[]).length;
+        const ai = aiCount > 0 ? ` · ${aiCount} ${aiCount===1?tr('action'):tr('actions')}` : '';
 
         // Participant avatars for card
         let avatarsHtml = '';
@@ -616,7 +791,7 @@ class MeetingApp {
 
         // Compare checkbox
         const cmpChecked = this._compareIds.has(m.id) ? ' checked' : '';
-        const cmpHtml = `<div style="position:absolute;top:8px;right:8px;"><div class="action-check${cmpChecked} compare-check" data-mid="${esc(m.id)}" title="Select for comparison"></div></div>`;
+        const cmpHtml = `<div style="position:absolute;top:8px;right:8px;"><div class="action-check${cmpChecked} compare-check" data-mid="${esc(m.id)}" title="${tr('selectCompare')}"></div></div>`;
 
         html += `<button class="meeting-card${this._selectedId===m.id?' active':''}" data-id="${esc(m.id)}" style="position:relative;">` +
           cmpHtml +
@@ -692,9 +867,9 @@ class MeetingApp {
     let html = '';
     const isRunning = m.status==='running';
     const isIdle = m.status==='idle';
-    const statusBadge = isRunning?'<span class="detail-meta-tag" style="color:var(--c-green);">● Running</span>'
-      : m.status==='completed'?'<span class="detail-meta-tag">Completed</span>'
-      : '<span class="detail-meta-tag">'+esc(m.status)+'</span>';
+    const statusBadge = isRunning?`<span class="detail-meta-tag" style="color:var(--c-green);">● ${tr('running')}</span>`
+      : m.status==='completed'?`<span class="detail-meta-tag">${tr('completed')}</span>`
+      : '<span class="detail-meta-tag">'+esc(meetingStatus(m.status))+'</span>';
 
     // Participant chips with avatars
     const participants = (m.participantIds||[]).map(id => {
@@ -704,22 +879,22 @@ class MeetingApp {
 
     // Header + actions
     let acts = '';
-    if (isIdle) acts += `<button class="btn btn-sm btn-success" data-act="start"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg> Start</button>`;
-    if (isRunning) acts += `<button class="btn btn-sm btn-danger" data-act="stop"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Stop</button>`;
-    if (m.status === 'completed' || m.decisionPlan) acts += `<button class="btn btn-sm btn-primary" data-act="execute-plan">Execute Plan</button>`;
+    if (isIdle) acts += `<button class="btn btn-sm btn-success" data-act="start"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg> ${tr('start')}</button>`;
+    if (isRunning) acts += `<button class="btn btn-sm btn-danger" data-act="stop"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> ${tr('stop')}</button>`;
+    if (m.status === 'completed' || m.decisionPlan) acts += `<button class="btn btn-sm btn-primary" data-act="execute-plan">${tr('executePlan')}</button>`;
     // Export with format dropdown
-    acts += `<div class="export-dropdown"><button class="btn btn-sm" data-act="export"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Export ▾</button>`;
+    acts += `<div class="export-dropdown"><button class="btn btn-sm" data-act="export"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> ${tr('export')} ▾</button>`;
     const expOpen = this._exportOpen ? 'block' : 'none';
     acts += `<div class="export-menu" id="exportMenu" style="display:${expOpen};">`;
     acts += `<button class="export-menu-item" data-fmt="markdown">Markdown (.md)</button>`;
     acts += `<button class="export-menu-item" data-fmt="json">{ } JSON (.json)</button>`;
-    acts += `<button class="export-menu-item" data-fmt="text">Plain Text (.txt)</button>`;
+    acts += `<button class="export-menu-item" data-fmt="text">${tr('plainText')} (.txt)</button>`;
     acts += `</div></div>`;
 
-    acts += `<button class="btn btn-sm btn-danger" data-act="delete"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Delete</button>`;
+    acts += `<button class="btn btn-sm btn-danger" data-act="delete"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> ${tr('delete')}</button>`;
 
     const runningBar = isRunning
-      ? `<div class="running-indicator"><div class="running-spinner"></div><span class="running-indicator-text">Meeting in progress${m.currentRound?' — Round '+m.currentRound+'/'+m.maxRounds:''}</span></div>`
+      ? `<div class="running-indicator"><div class="running-spinner"></div><span class="running-indicator-text">${tr('meetingProgress')}${m.currentRound?' — '+tr('round',{round:`${m.currentRound}/${m.maxRounds}`}):''}</span></div>`
       : '';
 
     // Duration bar
@@ -730,7 +905,7 @@ class MeetingApp {
         <span class="duration-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>
         <div class="duration-info">
           <div class="duration-elapsed">${esc(dur.elapsedFormatted || '—')}</div>
-          <div class="duration-detail">Started ${new Date(dur.startedAt).toLocaleTimeString()}${dur.estimatedEnd ? ' · Est. end ' + new Date(dur.estimatedEnd).toLocaleTimeString() : ''}</div>
+          <div class="duration-detail">${tr('started')} ${new Date(dur.startedAt).toLocaleTimeString(meetingLocale)}${dur.estimatedEnd ? ` · ${tr('estEnd')} ` + new Date(dur.estimatedEnd).toLocaleTimeString(meetingLocale) : ''}</div>
         </div>
       </div>`;
     }
@@ -740,7 +915,7 @@ class MeetingApp {
     const completedTurns = (m.transcript||[]).length;
     const progressPct = totalTurns > 0 ? Math.min(100, Math.round((completedTurns / totalTurns) * 100)) : 0;
     const progressHtml = `<div style="margin:8px 0;">
-      <div class="progress-label"><span>Progress</span><span>${completedTurns}/${totalTurns} turns · ${progressPct}%</span></div>
+      <div class="progress-label"><span>${tr('progress')}</span><span>${completedTurns}/${totalTurns} ${tr('turns')} · ${progressPct}%</span></div>
       <div class="progress-bar-wrap"><div class="progress-bar-fill" style="width:${progressPct}%"></div></div>
     </div>`;
 
@@ -749,11 +924,11 @@ class MeetingApp {
         <div class="detail-topic">${esc(m.topic)}</div>
         <div class="detail-goal">${esc(m.goal)}</div>
         <div class="detail-meta">
-          <span class="detail-meta-tag">${esc(m.speakerMode)}</span>
-          <span class="detail-meta-tag">${esc(m.meetingStyle || 'dialectic')}</span>
-          ${m.toolUseEnabled === false ? '<span class="detail-meta-tag">tools off</span>' : '<span class="detail-meta-tag">tool evidence</span>'}
-          <span class="detail-meta-tag">${m.maxRounds||2} rounds</span>
-          <span class="detail-meta-tag">${(m.participantIds||[]).length} participants</span>
+          <span class="detail-meta-tag">${esc(meetingMode(m.speakerMode))}</span>
+          <span class="detail-meta-tag">${esc(meetingMode(m.meetingStyle || 'dialectic'))}</span>
+          ${m.toolUseEnabled === false ? `<span class="detail-meta-tag">${tr('toolsOff')}</span>` : `<span class="detail-meta-tag">${tr('toolEvidence')}</span>`}
+          <span class="detail-meta-tag">${meetingRound(m.maxRounds||2)}</span>
+          <span class="detail-meta-tag">${(m.participantIds||[]).length} ${tr('participants')}</span>
           ${statusBadge}
         </div>
         <div class="participant-chips">${participants}</div>
@@ -767,19 +942,19 @@ class MeetingApp {
         ? `<div style="font-size:10px;color:var(--c-yellow);margin-top:8px;">${esc((ctx.errors || []).slice(0,3).join(' | '))}</div>`
         : '';
       html += `<div class="section">
-        <div class="section-legend">Project Evidence</div>
+        <div class="section-legend">${tr('projectEvidence')}</div>
         <div class="evidence-grid">
-          <div class="evidence-stat"><strong>${ctx.fileCount || 0}</strong><span>files read</span></div>
-          <div class="evidence-stat"><strong>${ctx.grepCount || 0}</strong><span>search groups</span></div>
-          <div class="evidence-stat"><strong>${ctx.memoryCount || 0}</strong><span>memories</span></div>
+          <div class="evidence-stat"><strong>${ctx.fileCount || 0}</strong><span>${tr('filesRead')}</span></div>
+          <div class="evidence-stat"><strong>${ctx.grepCount || 0}</strong><span>${tr('searchGroups')}</span></div>
+          <div class="evidence-stat"><strong>${ctx.memoryCount || 0}</strong><span>${tr('memories')}</span></div>
         </div>
-        ${terms ? `<div class="evidence-terms">${terms}</div>` : '<div style="font-size:10px;color:var(--c-text-quaternary);">No context terms extracted yet</div>'}
+        ${terms ? `<div class="evidence-terms">${terms}</div>` : `<div style="font-size:10px;color:var(--c-text-quaternary);">${tr('noContextTerms')}</div>`}
         ${warnings}
       </div>`;
     } else if (m.contextEnabled !== false) {
       html += `<div class="section">
-        <div class="section-legend">Project Evidence</div>
-        <div style="font-size:11px;color:var(--c-text-quaternary);">Read-only project context will be collected when the meeting starts.</div>
+        <div class="section-legend">${tr('projectEvidence')}</div>
+        <div style="font-size:11px;color:var(--c-text-quaternary);">${tr('contextPending')}</div>
       </div>`;
     }
 
@@ -789,15 +964,15 @@ class MeetingApp {
     html += `<div class="meeting-table-section">
       <div class="meeting-table-toggle" onclick="app._toggleTable()">
         <span class="meeting-table-toggle-icon${tableVisible?' open':''}">${tableToggleIcon}</span>
-        <span style="font-size:9px;color:var(--c-text-quaternary);letter-spacing:1px;text-transform:uppercase;font-weight:500;">Meeting Table</span>
-        <span style="font-size:9px;color:var(--c-text-quaternary);margin-left:auto;">${(m.participantIds||[]).length} seats</span>
+        <span style="font-size:9px;color:var(--c-text-quaternary);letter-spacing:1px;text-transform:uppercase;font-weight:500;">${tr('meetingTable')}</span>
+        <span style="font-size:9px;color:var(--c-text-quaternary);margin-left:auto;">${(m.participantIds||[]).length} ${tr((m.participantIds||[]).length===1?'seat':'seats')}</span>
       </div>
       <div class="meeting-table-container" id="meetingTableContainer" style="display:${tableVisible?'flex':'none'};"></div>
     </div>`;
 
     // Timeline (if running or completed with rounds)
     if (m.maxRounds && m.maxRounds > 1) {
-      html += '<div class="section"><div class="section-legend">Timeline</div><div class="timeline">';
+      html += `<div class="section"><div class="section-legend">${tr('timeline')}</div><div class="timeline">`;
       for (let r = 1; r <= m.maxRounds; r++) {
         const isCurrent = isRunning && m.currentRound === r;
         const isPast = isRunning && m.currentRound > r;
@@ -807,24 +982,24 @@ class MeetingApp {
         const speakerNames = [...new Set(roundEntries.map(e => e.speakerName || e.speakerId))];
         html += `<div class="timeline-item">
           <div class="timeline-dot ${dotClass}"></div>
-          <div class="timeline-label">Round ${r}${isCurrent ? ' — Active' : isPast ? ' — Complete' : ''}</div>
-          <div class="timeline-content">${roundEntries.length} turns${speakerNames.length ? ' · ' + speakerNames.join(', ') : ''}</div>
+          <div class="timeline-label">${tr('round',{round:r})}${isCurrent ? ` — ${tr('active')}` : isPast ? ` — ${tr('complete')}` : ''}</div>
+          <div class="timeline-content">${roundEntries.length} ${roundEntries.length===1?tr('turn'):tr('turns')}${speakerNames.length ? ' · ' + speakerNames.join(', ') : ''}</div>
         </div>`;
       }
       html += '</div></div>';
     }
 
     // Transcript
-    html += '<div class="section"><div class="section-legend">Transcript</div>';
+    html += `<div class="section"><div class="section-legend">${tr('transcript')}</div>`;
     if (m.transcript && m.transcript.length > 0) {
       let lastRound = 0;
       for (const entry of m.transcript) {
         if (entry.round !== lastRound) {
-          html += `<div class="round-header">Round ${entry.round}</div>`;
+          html += `<div class="round-header">${tr('round',{round:entry.round})}</div>`;
           lastRound = entry.round;
         }
         const isErr = entry.content && entry.content.startsWith('[Error:');
-        const speakerName = entry.speakerName || entry.speakerId || 'Unknown';
+        const speakerName = entry.speakerName || entry.speakerId || tr('unknown');
         const speakerColor = avatarColor(speakerName);
         // Role badge for this speaker
         const roles = m.participantRoles || {};
@@ -838,35 +1013,35 @@ class MeetingApp {
           `<div class="transcript-content${isErr?' transcript-error':''}">${esc(entry.content)}</div></div>`;
       }
     } else {
-      html += '<div style="font-size:11px;color:var(--c-text-quaternary);padding:12px 0;">No transcript yet</div>';
+      html += `<div style="font-size:11px;color:var(--c-text-quaternary);padding:12px 0;">${tr('noTranscript')}</div>`;
     }
     html += '</div>';
 
     // Summary
     if (m.summary) {
-      html += `<div class="section"><div class="section-legend">Summary</div><div class="summary-text">${esc(m.summary)}</div></div>`;
+      html += `<div class="section"><div class="section-legend">${tr('summary')}</div><div class="summary-text">${esc(m.summary)}</div></div>`;
     }
 
     if (m.decisionPlan) {
       const planPath = m.planFile?.path || `data/meetings/plans/${esc(m.id)}/plan.md`;
-      html += `<div class="section"><div class="section-legend">Indexed Plan</div><div style="font-size:10px;color:var(--c-text-tertiary);margin-bottom:8px;">${esc(planPath)}</div><div class="plan-text">${esc(m.decisionPlan)}</div></div>`;
+      html += `<div class="section"><div class="section-legend">${tr('indexedPlan')}</div><div style="font-size:10px;color:var(--c-text-tertiary);margin-bottom:8px;">${esc(planPath)}</div><div class="plan-text">${esc(m.decisionPlan)}</div></div>`;
     }
 
     if (m.debateLedger && m.debateLedger.length > 0) {
-      html += '<div class="section"><div class="section-legend">Debate Ledger</div>';
+      html += `<div class="section"><div class="section-legend">${tr('debateLedger')}</div>`;
       for (const d of m.debateLedger.slice(-8)) {
         html += `<div style="padding:8px 0;border-bottom:1px solid var(--c-hairline);">
           <div style="font-size:10px;color:var(--c-text-primary);margin-bottom:4px;">R${d.round} ${esc(d.phase||'')} · ${esc(d.speakerName||d.speakerId||'')}</div>
-          ${d.position ? `<div style="font-size:11px;color:var(--c-text-secondary);"><strong>Position:</strong> ${esc(d.position)}</div>` : ''}
-          ${d.challenge ? `<div style="font-size:11px;color:var(--c-yellow);"><strong>Challenge:</strong> ${esc(d.challenge)}</div>` : ''}
-          ${d.decisionImpact ? `<div style="font-size:11px;color:var(--c-green);"><strong>Impact:</strong> ${esc(d.decisionImpact)}</div>` : ''}
+          ${d.position ? `<div style="font-size:11px;color:var(--c-text-secondary);"><strong>${tr('position')}:</strong> ${esc(d.position)}</div>` : ''}
+          ${d.challenge ? `<div style="font-size:11px;color:var(--c-yellow);"><strong>${tr('challenge')}:</strong> ${esc(d.challenge)}</div>` : ''}
+          ${d.decisionImpact ? `<div style="font-size:11px;color:var(--c-green);"><strong>${tr('impact')}:</strong> ${esc(d.decisionImpact)}</div>` : ''}
         </div>`;
       }
       html += '</div>';
     }
 
     if (m.toolLedger && m.toolLedger.length > 0) {
-      html += '<div class="section"><div class="section-legend">Tool Ledger</div>';
+      html += `<div class="section"><div class="section-legend">${tr('toolLedger')}</div>`;
       for (const turn of m.toolLedger.slice(-6)) {
         html += `<div style="font-size:10px;color:var(--c-text-tertiary);margin:6px 0 4px;">R${turn.round} ${esc(turn.phase||'')} · ${esc(turn.speakerName||turn.speakerId||'')}</div>`;
         for (const entry of (turn.entries||[]).slice(0,3)) {
@@ -879,7 +1054,7 @@ class MeetingApp {
     // Speaker analytics
     const analytics = m.analytics;
     if (analytics && analytics.perSpeaker && Object.keys(analytics.perSpeaker).length > 0) {
-      html += '<div class="section"><div class="section-legend">Speaker Analytics</div>';
+      html += `<div class="section"><div class="section-legend">${tr('speakerAnalytics')}</div>`;
       const maxTurns = Math.max(...Object.values(analytics.perSpeaker).map(s => s.turns), 1);
       for (const [sid, s] of Object.entries(analytics.perSpeaker)) {
         const color = avatarColor(s.name);
@@ -888,27 +1063,27 @@ class MeetingApp {
           <span class="avatar-sm" style="background:${color};">${avatarInitial(s.name)}</span>
           <span class="speaker-stat-name">${esc(s.name)}</span>
           <div class="speaker-bar-wrap"><div class="speaker-bar-fill" style="width:${barW}%;background:${color};"></div></div>
-          <span class="speaker-stat-val">${s.turns} turns · ${s.avgChars} avg chars</span>
+          <span class="speaker-stat-val">${s.turns} ${tr('turns')} · ${s.avgChars} ${tr('avgChars')}</span>
         </div>`;
       }
-      if (analytics.mostActive) html += `<div style="font-size:9px;color:var(--c-text-quaternary);margin-top:6px;">Most active: ${esc(analytics.mostActive.name)} (${analytics.mostActive.turns} turns)</div>`;
+      if (analytics.mostActive) html += `<div style="font-size:9px;color:var(--c-text-quaternary);margin-top:6px;">${tr('mostActive')}: ${esc(analytics.mostActive.name)} (${analytics.mostActive.turns} ${tr('turns')})</div>`;
       html += '</div>';
     }
 
     // Participant activity heatmap
     if (m.transcript && m.transcript.length > 0) {
-      html += '<div class="section"><div class="section-legend">Activity Heatmap</div><div class="heatmap">';
+      html += `<div class="section"><div class="section-legend">${tr('activityHeatmap')}</div><div class="heatmap">`;
       for (const entry of m.transcript) {
         const color = avatarColor(entry.speakerName || entry.speakerId);
         const opacity = Math.min(1, 0.3 + (entry.content || '').length / 800);
-        html += `<div class="heatmap-cell" style="background:${color};opacity:${opacity.toFixed(2)};" data-tip="${esc(entry.speakerName||'')} R${entry.round}: ${(entry.content||'').length} chars"></div>`;
+        html += `<div class="heatmap-cell" style="background:${color};opacity:${opacity.toFixed(2)};" data-tip="${esc(entry.speakerName||'')} R${entry.round}: ${(entry.content||'').length} ${tr('chars')}"></div>`;
       }
       html += '</div></div>';
     }
 
     // Action items with status tracking
     if (m.actionItems && m.actionItems.length > 0) {
-      html += '<div class="section"><div class="section-legend">Action Items</div>';
+      html += `<div class="section"><div class="section-legend">${tr('actionItems')}</div>`;
       const statuses = ['pending','in-progress','done','blocked'];
       const statusColors = {pending:'var(--c-yellow)','in-progress':'var(--c-blue)',done:'var(--c-green)',blocked:'var(--c-red)'};
       for (const item of m.actionItems) {
@@ -918,7 +1093,7 @@ class MeetingApp {
         const completedClass = (item.status==='done'||this._actionChecked.has(taskKey)) ? ' completed' : '';
         const assigneeColor = avatarColor(item.assignee || '');
         const itemStatus = item.status || 'pending';
-        const statusOpts = statuses.map(s => `<option value="${s}"${s===itemStatus?' selected':''}>${s}</option>`).join('');
+        const statusOpts = statuses.map(s => `<option value="${s}"${s===itemStatus?' selected':''}>${esc(meetingStatus(s))}</option>`).join('');
         html += `<div class="action-item">
           <div class="action-check${checked}" data-task="${taskKey}"></div>
           <span class="action-task${completedClass}">${esc(item.task)}</span>
@@ -970,19 +1145,19 @@ class MeetingApp {
     this._meetingTable = new MeetingTable(container, tableData, {
       onParticipantClick: (p) => {
         // Show participant info in a toast
-        const role = roles[p.id] || 'participant';
+        const role = roles[p.id] || tr('participant');
         const turns = (sel.transcript || []).filter(e => (e.speakerId || e.speaker) === p.id).length;
-        notify(`${p.name} — ${role} · ${turns} turns`);
+        notify(`${p.name} — ${meetingRole(role)} · ${turns} ${tr('turns')}`);
       },
     });
     this._meetingTable.render();
   }
-  async _start() { if (!this._selectedId) return; try { const r = await fetch(`/api/v1/meetings/${this._selectedId}/start`,{method:'POST'}); if (!r.ok) { notify('Failed'); return; } notify('Started'); this._load(); } catch { notify('Error'); } }
-  async _stop() { if (!this._selectedId) return; try { await fetch(`/api/v1/meetings/${this._selectedId}/stop`,{method:'POST'}); notify('Stopped'); this._load(); } catch { notify('Error'); } }
-  async _delete() { if (!this._selectedId) return; const dlg = window.anoclaw?.dialog?.confirm; if (!(dlg ? await dlg('Delete this meeting?') : confirm('Delete?'))) return; try { await fetch(`/api/v1/meetings/${this._selectedId}`,{method:'DELETE'}); this._selectedId = null; notify('Deleted'); this._load(); } catch { notify('Error'); } }
+  async _start() { if (!this._selectedId) return; try { const r = await fetch(`/api/v1/meetings/${this._selectedId}/start`,{method:'POST'}); if (!r.ok) { notify(tr('failed')); return; } notify(tr('startedNotice')); this._load(); } catch { notify(tr('genericError')); } }
+  async _stop() { if (!this._selectedId) return; try { await fetch(`/api/v1/meetings/${this._selectedId}/stop`,{method:'POST'}); notify(tr('stoppedNotice')); this._load(); } catch { notify(tr('genericError')); } }
+  async _delete() { if (!this._selectedId) return; const dlg = window.anoclaw?.dialog?.confirm; if (!(dlg ? await dlg(tr('deleteConfirm')) : confirm(tr('deleteFallback')))) return; try { await fetch(`/api/v1/meetings/${this._selectedId}`,{method:'DELETE'}); this._selectedId = null; notify(tr('deleted')); this._load(); } catch { notify(tr('genericError')); } }
   async _executePlan() {
     if (!this._selectedId) return;
-    notify('Creating execution session...');
+    notify(tr('creatingSession'));
     try {
       const r = await fetch(`/api/v1/meetings/${this._selectedId}/plan/session`, {
         method:'POST',
@@ -991,16 +1166,16 @@ class MeetingApp {
       });
       const d = await r.json();
       if (!r.ok) {
-        notify(d.error || 'Execution session failed');
+        notify(d.error || tr('executionFailed'));
         if (d.executionPrompt) this._showExecutionPrompt(d);
         return;
       }
       const handedOff = await this._handoffExecutionPrompt(d);
-      notify(handedOff ? 'Execution session ready' : 'Execution session created');
+      notify(handedOff ? tr('executionReady') : tr('executionCreated'));
       this._showExecutionPrompt(d, handedOff);
       this._load();
     } catch (err) {
-      notify('Execution setup error: ' + err.message);
+      notify(tr('executionError', {error:err.message}));
     }
   }
 
@@ -1038,14 +1213,14 @@ class MeetingApp {
     const planPath = data.planFile?.path || '';
     overlay.innerHTML = `<div class="modal-card">
       <button class="modal-close" id="planPromptClose">x</button>
-      <div class="section-legend" style="margin-bottom:14px;">Plan Execution</div>
-      <div style="font-size:11px;color:${handedOff?'var(--c-green)':'var(--c-yellow)'};margin-bottom:8px;">${handedOff?'Prompt injected into the execution session.':'Prompt created. Copy it into the execution session if automatic handoff did not occur.'}</div>
-      ${sessionId ? `<div style="font-size:11px;color:var(--c-text-secondary);margin-bottom:8px;">Session: <code>${esc(sessionId)}</code></div>` : ''}
-      ${planPath ? `<div style="font-size:11px;color:var(--c-text-secondary);margin-bottom:8px;">Plan: <code>${esc(planPath)}</code></div>` : ''}
+      <div class="section-legend" style="margin-bottom:14px;" data-i18n="planExecution">${tr('planExecution')}</div>
+      <div style="font-size:11px;color:${handedOff?'var(--c-green)':'var(--c-yellow)'};margin-bottom:8px;" data-i18n="${handedOff?'promptInjected':'promptCreated'}">${handedOff?tr('promptInjected'):tr('promptCreated')}</div>
+      ${sessionId ? `<div style="font-size:11px;color:var(--c-text-secondary);margin-bottom:8px;"><span data-i18n="session">${tr('session')}</span>: <code>${esc(sessionId)}</code></div>` : ''}
+      ${planPath ? `<div style="font-size:11px;color:var(--c-text-secondary);margin-bottom:8px;"><span data-i18n="plan">${tr('plan')}</span>: <code>${esc(planPath)}</code></div>` : ''}
       <textarea class="textarea" rows="12" readonly id="planExecutionPrompt">${esc(data.executionPrompt || '')}</textarea>
       <div style="display:flex;gap:8px;margin-top:12px;">
-        <button class="btn btn-primary" id="copyPlanPrompt">Copy Prompt</button>
-        <button class="btn" id="closePlanPrompt">Close</button>
+        <button class="btn btn-primary" id="copyPlanPrompt" data-i18n="copyPrompt">${tr('copyPrompt')}</button>
+        <button class="btn" id="closePlanPrompt" data-i18n="close">${tr('close')}</button>
       </div>
     </div>`;
     document.body.appendChild(overlay);
@@ -1055,8 +1230,8 @@ class MeetingApp {
     overlay.querySelector('#closePlanPrompt')?.addEventListener('click', close);
     overlay.querySelector('#copyPlanPrompt')?.addEventListener('click', async () => {
       const text = overlay.querySelector('#planExecutionPrompt')?.value || '';
-      try { await navigator.clipboard.writeText(text); notify('Prompt copied'); }
-      catch { notify('Copy failed'); }
+      try { await navigator.clipboard.writeText(text); notify(tr('promptCopied')); }
+      catch { notify(tr('copyFailed')); }
     });
   }
   _toggleExportMenu() {
@@ -1085,7 +1260,7 @@ class MeetingApp {
     if (!this._selectedId) return;
     try {
       const r = await fetch(`/api/v1/meetings/${this._selectedId}/export?format=${format}`);
-      if (!r.ok) { notify('Export failed'); return; }
+      if (!r.ok) { notify(tr('exportFailed')); return; }
       const d = await r.json();
       if (format === 'json') {
         const blob = new Blob([JSON.stringify(d.meeting, null, 2)], {type:'application/json'});
@@ -1095,8 +1270,8 @@ class MeetingApp {
         const blob = new Blob([d.text], {type:ct});
         const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = d.filename || 'meeting-export.md'; a.click(); URL.revokeObjectURL(url);
       }
-      notify('Exported as ' + format);
-    } catch { notify('Export error'); }
+      notify(tr('exportedAs', {format}));
+    } catch { notify(tr('exportError')); }
   }
 
   async _updateActionStatus(taskId, status) {
@@ -1106,16 +1281,16 @@ class MeetingApp {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({taskId, status})
       });
-      notify('Status updated');
+      notify(tr('statusUpdated'));
       this._load();
-    } catch { notify('Error'); }
+    } catch { notify(tr('genericError')); }
   }
 
   _renderCompare() {
     if (this._compareData && this._compareData.meetings) {
       let html = '<div style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">';
-      html += '<div style="font-size:10px;color:var(--c-text-quaternary);letter-spacing:0.5px;">Meeting Comparison</div>';
-      html += '<button class="btn btn-sm" onclick="app._showCompare=false;app._render();">← Back</button></div>';
+      html += `<div style="font-size:10px;color:var(--c-text-quaternary);letter-spacing:0.5px;">${tr('meetingComparison')}</div>`;
+      html += `<button class="btn btn-sm" onclick="app._showCompare=false;app._render();">← ${tr('back')}</button></div>`;
       html += '<div class="compare-grid" style="grid-template-columns:repeat(' + this._compareData.meetings.length + ', 1fr);">';
       for (const m of this._compareData.meetings) {
         const dur = m.duration || {};
@@ -1123,46 +1298,46 @@ class MeetingApp {
           <h3>${esc(m.topic)}</h3>
           <div style="font-size:10px;color:var(--c-text-tertiary);margin-bottom:8px;">${esc(m.goal)}</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
-            <span class="detail-meta-tag">${esc(m.speakerMode)}</span>
-            <span class="detail-meta-tag">${m.maxRounds} rounds</span>
-            <span class="detail-meta-tag">${m.participantCount} participants</span>
-            <span class="detail-meta-tag">${m.transcriptCount} turns</span>
-            <span class="detail-meta-tag">${m.actionItemCount} actions</span>
-            ${m.hasSummary ? '<span class="detail-meta-tag">summary ✓</span>' : ''}
+            <span class="detail-meta-tag">${esc(meetingMode(m.speakerMode))}</span>
+            <span class="detail-meta-tag">${meetingRound(m.maxRounds)}</span>
+            <span class="detail-meta-tag">${m.participantCount} ${tr('participants')}</span>
+            <span class="detail-meta-tag">${m.transcriptCount} ${tr('turns')}</span>
+            <span class="detail-meta-tag">${m.actionItemCount} ${tr('actions')}</span>
+            ${m.hasSummary ? `<span class="detail-meta-tag">${tr('summary')} ✓</span>` : ''}
           </div>`;
-        if (dur.elapsedFormatted) html += `<div style="font-size:10px;color:var(--c-text-secondary);margin-bottom:6px;">Duration: ${esc(dur.elapsedFormatted)}</div>`;
-        if (m.analytics && m.analytics.mostActive) html += `<div style="font-size:9px;color:var(--c-text-quaternary);">Most active: ${esc(m.analytics.mostActive.name)} (${m.analytics.mostActive.turns} turns)</div>`;
-        html += `<div style="font-size:9px;color:var(--c-text-quaternary);margin-top:4px;">Created: ${new Date(m.createdAt).toLocaleDateString()}</div>`;
+        if (dur.elapsedFormatted) html += `<div style="font-size:10px;color:var(--c-text-secondary);margin-bottom:6px;">${tr('duration')}: ${esc(dur.elapsedFormatted)}</div>`;
+        if (m.analytics && m.analytics.mostActive) html += `<div style="font-size:9px;color:var(--c-text-quaternary);">${tr('mostActive')}: ${esc(m.analytics.mostActive.name)} (${m.analytics.mostActive.turns} ${tr('turns')})</div>`;
+        html += `<div style="font-size:9px;color:var(--c-text-quaternary);margin-top:4px;">${tr('created')}: ${new Date(m.createdAt).toLocaleDateString(meetingLocale)}</div>`;
         html += '</div>';
       }
       html += '</div>';
       return html;
     }
-    return '<div class="empty-state"><div class="empty-state-text">Select meetings to compare</div></div>';
+    return `<div class="empty-state"><div class="empty-state-text">${tr('selectCompareMeetings')}</div></div>`;
   }
 
   async _doCompare() {
-    if (this._compareIds.size < 2) { notify('Select 2+ meetings'); return; }
+    if (this._compareIds.size < 2) { notify(tr('selectTwo')); return; }
     try {
       const r = await fetch('/api/v1/meetings/compare', {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ids: Array.from(this._compareIds)})
       });
-      if (!r.ok) { notify('Compare failed'); return; }
+      if (!r.ok) { notify(tr('compareFailed')); return; }
       this._compareData = await r.json();
       this._showCompare = true;
       this._render();
-    } catch { notify('Error'); }
+    } catch { notify(tr('genericError')); }
   }
 
   async _diagnose() {
-    notify('Testing LLM connection...');
+    notify(tr('testingLlm'));
     try {
       const r = await fetch('/api/v1/plugins/meeting/diagnose/llm');
       const d = await r.json();
-      if (d.ok) notify('LLM OK (' + d.contentLength + ' chars, finish: ' + d.finishReason + ')');
-      else notify('LLM ERROR: ' + (d.error || 'unknown'));
-    } catch (err) { notify('Diagnose failed: ' + err.message); }
+      if (d.ok) notify(tr('llmOk', {length:d.contentLength, reason:d.finishReason}));
+      else notify(tr('llmError', {error:d.error || tr('unknown')}));
+    } catch (err) { notify(tr('diagnoseFailed', {error:err.message})); }
   }
 
   async _showCreateForm() {
@@ -1177,14 +1352,14 @@ class MeetingApp {
 
     let html = '<div class="modal-card">';
     html += '<button class="modal-close" id="modalClose">✕</button>';
-    html += '<div class="section-legend" style="margin-bottom:16px;font-size:11px;">New Meeting</div>';
+    html += `<div class="section-legend" style="margin-bottom:16px;font-size:11px;" data-i18n="newMeeting">${tr('newMeeting')}</div>`;
 
     // Template selector with icons
     if (this._templates.length > 0) {
-      html += '<div class="form-row"><label class="label">Template (optional)</label><div class="template-grid">';
+      html += `<div class="form-row"><label class="label" data-i18n="templateOptional">${tr('templateOptional')}</label><div class="template-grid">`;
       html += `<button class="template-option selected" data-tpl="">
         <div class="template-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
-        <div><div class="template-name">Custom</div><div class="template-desc">Start from scratch</div></div>
+        <div><div class="template-name" data-i18n="custom">${tr('custom')}</div><div class="template-desc" data-i18n="fromScratch">${tr('fromScratch')}</div></div>
       </button>`;
       for (const t of this._templates) {
         const icon = TPL_ICONS[t.id] || TPL_ICONS.default;
@@ -1199,10 +1374,10 @@ class MeetingApp {
       html += '</div>';
     }
 
-    html += '<div class="form-row"><label class="label">Topic</label><input class="input" id="fTopic" placeholder="What to discuss"></div>';
-    html += '<div class="form-row"><label class="label">Goal</label><textarea class="textarea" id="fGoal" rows="2" placeholder="What should be achieved"></textarea></div>';
-    html += '<div class="form-row"><label class="label">Participants</label><div class="agent-grid">';
-    if (agents.length === 0) html += '<div style="font-size:10px;color:var(--c-text-quaternary);padding:8px 0;">No agents available</div>';
+    html += `<div class="form-row"><label class="label" data-i18n="topic">${tr('topic')}</label><input class="input" id="fTopic" placeholder="${tr('topicPlaceholder')}" data-i18n-placeholder="topicPlaceholder"></div>`;
+    html += `<div class="form-row"><label class="label" data-i18n="goal">${tr('goal')}</label><textarea class="textarea" id="fGoal" rows="2" placeholder="${tr('goalPlaceholder')}" data-i18n-placeholder="goalPlaceholder"></textarea></div>`;
+    html += `<div class="form-row"><label class="label" data-i18n="participantsLabel">${tr('participantsLabel')}</label><div class="agent-grid">`;
+    if (agents.length === 0) html += `<div style="font-size:10px;color:var(--c-text-quaternary);padding:8px 0;" data-i18n="noAgents">${tr('noAgents')}</div>`;
     else { for (const a of agents) {
       const n = a.name||a.displayName||a.id;
       const color = avatarColor(n);
@@ -1213,29 +1388,29 @@ class MeetingApp {
       </button>`;
     } }
     html += '</div></div>';
-    html += '<div class="form-row-double"><div><label class="label">Mode</label><select class="select" id="fMode"><option value="round-robin">Round Robin</option><option value="moderator">Moderator</option><option value="auto">Auto</option></select></div><div><label class="label">Rounds</label><input class="input" id="fRounds" type="number" value="2" min="1" max="10"></div></div>';
-    html += '<div class="form-row-double"><div><label class="label">Meeting Style</label><select class="select" id="fMeetingStyle"><option value="dialectic">Dialectic debate</option><option value="workshop">Production workshop</option></select></div><div><label class="label">Tool Evidence</label><div class="recurring-toggle" style="height:32px;align-items:center;"><input type="checkbox" id="fToolUseEnabled" checked><label for="fToolUseEnabled" style="font-size:10px;color:var(--c-text-tertiary);">Read-only probes per turn</label></div></div></div>';
-    html += '<div class="form-row-double"><div><label class="label">Allowed Tools</label><input class="input" id="fAllowedTools" value="memory.search,Grep" placeholder="memory.search,Grep,MeetingWebSearch"></div><div><label class="label">Probe Budget</label><input class="input" id="fToolProbeBudget" type="number" value="2" min="0" max="6"></div></div>';
-    html += '<div class="form-row-double"><div><label class="label">Quality Threshold</label><input class="input" id="fMinimumQualityScore" type="number" value="70" min="0" max="100"></div><div><label class="label">Quality Gate</label><div class="recurring-toggle" style="height:32px;align-items:center;"><input type="checkbox" id="fEnforceQualityGate" checked><label for="fEnforceQualityGate" style="font-size:10px;color:var(--c-text-tertiary);">Append remediation if weak</label></div></div></div>';
-    html += '<div class="form-row"><label class="label">Probe Templates JSON</label><textarea class="textarea" id="fToolProbeTemplates" rows="2" placeholder=\'[{"toolName":"MeetingWebSearch","purpose":"Fresh market signal","params":{"query":"{{topic}} {{term}}"}}]\'></textarea></div>';
+    html += `<div class="form-row-double"><div><label class="label" data-i18n="mode">${tr('mode')}</label><select class="select" id="fMode"><option value="round-robin" data-i18n="roundRobin">${tr('roundRobin')}</option><option value="moderator" data-i18n="moderator">${tr('moderator')}</option><option value="auto" data-i18n="auto">${tr('auto')}</option></select></div><div><label class="label" data-i18n="rounds">${tr('rounds')}</label><input class="input" id="fRounds" type="number" value="2" min="1" max="10"></div></div>`;
+    html += `<div class="form-row-double"><div><label class="label" data-i18n="meetingStyle">${tr('meetingStyle')}</label><select class="select" id="fMeetingStyle"><option value="dialectic" data-i18n="dialectic">${tr('dialectic')}</option><option value="workshop" data-i18n="workshop">${tr('workshop')}</option></select></div><div><label class="label" data-i18n="toolEvidenceLabel">${tr('toolEvidenceLabel')}</label><div class="recurring-toggle" style="height:32px;align-items:center;"><input type="checkbox" id="fToolUseEnabled" checked><label for="fToolUseEnabled" style="font-size:10px;color:var(--c-text-tertiary);" data-i18n="readOnlyProbes">${tr('readOnlyProbes')}</label></div></div></div>`;
+    html += `<div class="form-row-double"><div><label class="label" data-i18n="allowedTools">${tr('allowedTools')}</label><input class="input" id="fAllowedTools" value="memory.search,Grep" placeholder="memory.search,Grep,MeetingWebSearch"></div><div><label class="label" data-i18n="probeBudget">${tr('probeBudget')}</label><input class="input" id="fToolProbeBudget" type="number" value="2" min="0" max="6"></div></div>`;
+    html += `<div class="form-row-double"><div><label class="label" data-i18n="qualityThreshold">${tr('qualityThreshold')}</label><input class="input" id="fMinimumQualityScore" type="number" value="70" min="0" max="100"></div><div><label class="label" data-i18n="qualityGate">${tr('qualityGate')}</label><div class="recurring-toggle" style="height:32px;align-items:center;"><input type="checkbox" id="fEnforceQualityGate" checked><label for="fEnforceQualityGate" style="font-size:10px;color:var(--c-text-tertiary);" data-i18n="appendRemediation">${tr('appendRemediation')}</label></div></div></div>`;
+    html += `<div class="form-row"><label class="label" data-i18n="probeTemplates">${tr('probeTemplates')}</label><textarea class="textarea" id="fToolProbeTemplates" rows="2" placeholder='[{"toolName":"MeetingWebSearch","purpose":"Fresh market signal","params":{"query":"{{topic}} {{term}}"}}]'></textarea></div>`;
 
-    html += '<div class="form-row"><label class="label">Project Evidence</label>';
-    html += '<div class="recurring-toggle"><input type="checkbox" id="fContextEnabled" checked><label for="fContextEnabled" style="font-size:10px;color:var(--c-text-tertiary);">Collect read-only project context before discussion</label></div>';
-    html += '<input class="input" id="fContextQuery" style="margin-top:6px;" placeholder="Optional context query, defaults to topic + goal">';
-    html += '<textarea class="textarea" id="fContextFiles" rows="2" style="margin-top:6px;" placeholder="Optional extra files, one per line"></textarea>';
+    html += `<div class="form-row"><label class="label" data-i18n="projectEvidenceLabel">${tr('projectEvidenceLabel')}</label>`;
+    html += `<div class="recurring-toggle"><input type="checkbox" id="fContextEnabled" checked><label for="fContextEnabled" style="font-size:10px;color:var(--c-text-tertiary);" data-i18n="collectContext">${tr('collectContext')}</label></div>`;
+    html += `<input class="input" id="fContextQuery" style="margin-top:6px;" placeholder="${tr('contextQueryPlaceholder')}" data-i18n-placeholder="contextQueryPlaceholder">`;
+    html += `<textarea class="textarea" id="fContextFiles" rows="2" style="margin-top:6px;" placeholder="${tr('contextFilesPlaceholder')}" data-i18n-placeholder="contextFilesPlaceholder"></textarea>`;
     html += '</div>';
 
     // Recurring meeting toggle
-    html += '<div class="form-row"><label class="label">Recurring</label>';
-    html += '<div class="recurring-toggle"><input type="checkbox" id="fRecurring"><label for="fRecurring" style="font-size:10px;color:var(--c-text-tertiary);">Repeat this meeting</label></div>';
+    html += `<div class="form-row"><label class="label" data-i18n="recurring">${tr('recurring')}</label>`;
+    html += `<div class="recurring-toggle"><input type="checkbox" id="fRecurring"><label for="fRecurring" style="font-size:10px;color:var(--c-text-tertiary);" data-i18n="repeatMeeting">${tr('repeatMeeting')}</label></div>`;
     html += '<div id="recurringOptions" style="display:none;margin-top:6px;">';
-    html += '<select class="select" id="fRecurringPattern"><option value="daily">Daily (weekdays)</option><option value="weekly">Weekly</option><option value="biweekly">Bi-weekly</option><option value="monthly">Monthly</option></select>';
+    html += `<select class="select" id="fRecurringPattern"><option value="daily" data-i18n="daily">${tr('daily')}</option><option value="weekly" data-i18n="weekly">${tr('weekly')}</option><option value="biweekly" data-i18n="biweekly">${tr('biweekly')}</option><option value="monthly" data-i18n="monthly">${tr('monthly')}</option></select>`;
     html += '</div></div>';
 
     // Compare checkbox for list
-    html += '<div style="font-size:9px;color:var(--c-text-quaternary);margin:8px 0 0;letter-spacing:0.5px;">Tip: Use compare checkboxes in the meeting list to compare meetings side-by-side.</div>';
+    html += `<div style="font-size:9px;color:var(--c-text-quaternary);margin:8px 0 0;letter-spacing:0.5px;" data-i18n="compareTip">${tr('compareTip')}</div>`;
 
-    html += '<div style="display:flex;gap:8px;margin-top:16px;"><button class="btn btn-primary" id="fCreate">Create</button><button class="btn" id="fCancel">Cancel</button></div>';
+    html += `<div style="display:flex;gap:8px;margin-top:16px;"><button class="btn btn-primary" id="fCreate" data-i18n="create">${tr('create')}</button><button class="btn" id="fCancel" data-i18n="cancel">${tr('cancel')}</button></div>`;
     html += '</div>';
 
     overlay.innerHTML = html;
@@ -1267,12 +1442,12 @@ class MeetingApp {
           if (tplPreview) {
             tplPreview.style.display = 'block';
             tplPreview.innerHTML = `<div class="template-preview">
-              <div class="template-preview-title">${esc(tpl.name)} Preview</div>
-              <div class="template-preview-row"><span class="template-preview-label">Goal:</span><span>${esc(tpl.goal)}</span></div>
-              <div class="template-preview-row"><span class="template-preview-label">Mode:</span><span>${esc(tpl.speakerMode)}</span></div>
-              <div class="template-preview-row"><span class="template-preview-label">Rounds:</span><span>${tpl.maxRounds}</span></div>
-              <div class="template-preview-row"><span class="template-preview-label">Category:</span><span>${esc(tpl.category||'—')}</span></div>
-              <div class="template-preview-row"><span class="template-preview-label">Est. Duration:</span><span>${esc(tpl.estimatedDuration||'—')}</span></div>
+              <div class="template-preview-title">${esc(tpl.name)} <span data-i18n="preview">${tr('preview')}</span></div>
+              <div class="template-preview-row"><span class="template-preview-label"><span data-i18n="goal">${tr('goal')}</span>:</span><span>${esc(tpl.goal)}</span></div>
+              <div class="template-preview-row"><span class="template-preview-label"><span data-i18n="mode">${tr('mode')}</span>:</span><span>${esc(meetingMode(tpl.speakerMode))}</span></div>
+              <div class="template-preview-row"><span class="template-preview-label"><span data-i18n="rounds">${tr('rounds')}</span>:</span><span>${tpl.maxRounds}</span></div>
+              <div class="template-preview-row"><span class="template-preview-label"><span data-i18n="category">${tr('category')}</span>:</span><span>${esc(tpl.category||'—')}</span></div>
+              <div class="template-preview-row"><span class="template-preview-label"><span data-i18n="estimatedDuration">${tr('estimatedDuration')}</span>:</span><span>${esc(tpl.estimatedDuration||'—')}</span></div>
             </div>`;
           }
         } else {
@@ -1306,9 +1481,9 @@ class MeetingApp {
     overlay.querySelector('#fCreate')?.addEventListener('click', async() => {
       const topic = (overlay.querySelector('#fTopic')?.value||'').trim();
       const goal = (overlay.querySelector('#fGoal')?.value||'').trim();
-      if (!topic) { notify('Topic required'); return; }
-      if (!goal) { notify('Goal required'); return; }
-      if (selectedAgents.size < 2) { notify('Select 2+ participants'); return; }
+      if (!topic) { notify(tr('topicRequired')); return; }
+      if (!goal) { notify(tr('goalRequired')); return; }
+      if (selectedAgents.size < 2) { notify(tr('selectParticipants')); return; }
       try {
         const contextFiles = (overlay.querySelector('#fContextFiles')?.value||'').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
         const allowedToolNames = (overlay.querySelector('#fAllowedTools')?.value||'').split(',').map(s=>s.trim()).filter(Boolean);
@@ -1316,8 +1491,8 @@ class MeetingApp {
         const templateRaw = (overlay.querySelector('#fToolProbeTemplates')?.value||'').trim();
         if (templateRaw) {
           try { toolProbeTemplates = JSON.parse(templateRaw); }
-          catch { notify('Probe Templates must be valid JSON'); return; }
-          if (!Array.isArray(toolProbeTemplates)) { notify('Probe Templates JSON must be an array'); return; }
+          catch { notify(tr('probeJsonInvalid')); return; }
+          if (!Array.isArray(toolProbeTemplates)) { notify(tr('probeArrayRequired')); return; }
         }
         const body = {
           topic, goal,
@@ -1337,20 +1512,22 @@ class MeetingApp {
         };
         if (selectedTemplate.current) body.template = selectedTemplate.current;
         const r = await fetch('/api/v1/meetings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-        if (!r.ok) { notify('Failed'); return; }
-        notify('Meeting created'); close(); this._load();
-      } catch { notify('Error'); }
+        if (!r.ok) { notify(tr('failed')); return; }
+        notify(tr('meetingCreated')); close(); this._load();
+      } catch { notify(tr('genericError')); }
     });
 
     const onKey = e => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); } };
     document.addEventListener('keydown', onKey);
   }
 
-  _showMemory(name) { notify('Saved in memory: ' + name); }
+  _showMemory(name) { notify(tr('savedMemory', {name})); }
 }
 
 const app = new MeetingApp();
 window.app = app;
+applyMeetingChrome();
+$('app').querySelector('.empty-state-text').textContent = tr('loading');
 app._load();
 </script>
 </body>

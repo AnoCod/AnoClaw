@@ -8,6 +8,7 @@ import { WorkspaceTabGroup } from './WorkspaceTabGroup.js';
 import { WorkspaceSplitContainer } from './WorkspaceSplitContainer.js';
 import { WorkspaceBindingDialog } from '../../WorkspaceBindingDialog.js';
 import { ToastManager } from '../../../ToastManager.js';
+import { onLocaleChange, t } from '../../../i18n/index.js';
 
 interface AgentBrowserEvent {
   sessionId: string;
@@ -90,7 +91,9 @@ export class WorkspacePage implements Page {
   private _loadGeneration = 0;
   private _loadAbortController: AbortController | null = null;
   private _workspacePath = '';
+  private _toolbarKicker!: HTMLElement;
   private _toolbarPath!: HTMLElement;
+  private _switchButton!: HTMLButtonElement;
   private _fileTree!: WorkspaceFileTree;
   private _treeGrip!: HTMLElement;
   private _tabMount!: HTMLElement;
@@ -110,6 +113,7 @@ export class WorkspacePage implements Page {
     this.container.style.display = 'none';
     this.container.setAttribute('data-page', 'workspace');
     this._buildDOM();
+    onLocaleChange(() => this._refreshLocale());
   }
 
   private _buildDOM(): void {
@@ -120,19 +124,21 @@ export class WorkspacePage implements Page {
     toolbarTitle.className = 'ws-toolbar-title';
     const toolbarKicker = document.createElement('span');
     toolbarKicker.className = 'ws-toolbar-kicker';
-    toolbarKicker.textContent = 'Workspace';
+    toolbarKicker.textContent = t('workspace.title');
+    this._toolbarKicker = toolbarKicker;
     toolbarTitle.appendChild(toolbarKicker);
 
     this._toolbarPath = document.createElement('span');
     this._toolbarPath.className = 'ws-toolbar-path';
-    this._toolbarPath.textContent = 'No workspace';
+    this._toolbarPath.textContent = t('workspace.noWorkspace');
     toolbarTitle.appendChild(this._toolbarPath);
     toolbar.appendChild(toolbarTitle);
 
-    const switchBtn = document.createElement('button');
-    switchBtn.className = 'ws-toolbar-btn'; switchBtn.textContent = 'Switch';
-    switchBtn.addEventListener('click', () => void this._switchWorkspace());
-    toolbar.appendChild(switchBtn);
+    this._switchButton = document.createElement('button');
+    this._switchButton.className = 'ws-toolbar-btn';
+    this._switchButton.textContent = t('workspace.switchAction');
+    this._switchButton.addEventListener('click', () => void this._switchWorkspace());
+    toolbar.appendChild(this._switchButton);
     this.container.appendChild(toolbar);
 
     const content = document.createElement('div');
@@ -228,7 +234,7 @@ export class WorkspacePage implements Page {
     this._currentGroup = null;
     this._sessionId = '';
     this._workspacePath = '';
-    this._toolbarPath.textContent = 'No workspace';
+    this._toolbarPath.textContent = t('workspace.noWorkspace');
     void this._fileTree.loadRoot('');
     this._showWorkspaceIdle();
   }
@@ -272,7 +278,7 @@ export class WorkspacePage implements Page {
       if (this._sessionId && this._currentGroup?.hasTabs) { this._tabCache.set(this._sessionId, this._currentGroup); }
       this._sessionId = sid; this._workspacePath = newPath;
       App.getInstance().sessionVM?.updateSessionWorkspace(sid, newPath);
-      this._toolbarPath.textContent = newPath || 'Default workspace';
+      this._toolbarPath.textContent = newPath || t('workspace.defaultWorkspace');
       await this._fileTree.loadRoot(sid);
       if (generation !== this._loadGeneration || App.getInstance().sessionVM?.activeSessionId !== sid) return;
       if (this._currentGroup) { this._currentGroup.element.remove(); }
@@ -325,15 +331,15 @@ export class WorkspacePage implements Page {
     const dlg = new WorkspaceBindingDialog();
     const result = await dlg.show(this._workspacePath);
     if (!result || !this._sessionId) return;
-    if (this._currentGroup && !await this._currentGroup.prepareToDiscardAll('switching workspaces')) return;
+    if (this._currentGroup && !await this._currentGroup.prepareToDiscardAll(t('workspace.action.switching'))) return;
     try {
       const resp = await fetch(`/api/v1/sessions/${encodeURIComponent(this._sessionId)}/bind-workspace`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: result.path }) });
-      if (!resp.ok) throw new Error(`Workspace binding failed (HTTP ${resp.status})`);
+      if (!resp.ok) throw new Error(t('workspace.bindingFailed', { status: resp.status }));
       const payload = await resp.json() as { workspace?: string };
       const boundPath = payload.workspace || result.path;
       this._workspacePath = boundPath;
       App.getInstance().sessionVM?.updateSessionWorkspace(this._sessionId, boundPath);
-      this._toolbarPath.textContent = boundPath || 'Default workspace';
+      this._toolbarPath.textContent = boundPath || t('workspace.defaultWorkspace');
       this._tabCache.get(this._sessionId)?.dispose(); this._tabCache.delete(this._sessionId); this._currentGroup = null;
       this._tabMount.innerHTML = '';
       const fresh = new WorkspaceSplitContainer(); fresh.setSessionId(this._sessionId);
@@ -345,7 +351,7 @@ export class WorkspacePage implements Page {
       await this._fileTree.loadRoot(this._sessionId);
       this._startExternalChangePolling();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Workspace switch failed';
+      const message = err instanceof Error ? err.message : t('workspace.switchFailed');
       ToastManager.getInstance().error(message);
       console.debug('WorkspacePage: session switch cleanup failed');
     }
@@ -388,9 +394,20 @@ export class WorkspacePage implements Page {
       <div class="ws-editor-empty ws-editor-empty--workspace">
         <div class="ws-editor-empty-panel">
           <div class="ws-editor-empty-mark"></div>
-          <div class="ws-editor-empty-title">No file open</div>
-          <div class="ws-editor-empty-meta">Workspace editor idle</div>
+          <div class="ws-editor-empty-title">${t('workspace.noFileOpen')}</div>
+          <div class="ws-editor-empty-meta">${t('workspace.editorIdle')}</div>
         </div>
       </div>`;
+  }
+
+  private _refreshLocale(): void {
+    this._toolbarKicker.textContent = t('workspace.title');
+    this._switchButton.textContent = t('workspace.switchAction');
+    this._toolbarPath.textContent = this._workspacePath
+      ? this._workspacePath
+      : this._sessionId
+        ? t('workspace.defaultWorkspace')
+        : t('workspace.noWorkspace');
+    if (!this._currentGroup) this._showWorkspaceIdle();
   }
 }

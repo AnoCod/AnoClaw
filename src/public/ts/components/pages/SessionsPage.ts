@@ -115,14 +115,14 @@ export class SessionsPage implements Page {
     this.container = document.createElement('div');
     this.container.className = 'cinema-page';
 
-    // Left 48px bar — session dots, new/delete buttons
+    // Persistent session tree — collapsible to a compact root-session rail.
     this._leftBar = new SessionEdgeBar({
       onSelectSession: (id) => this._onSelectSession(id),
       onNewSession: () => this._onNewSession(),
       onDeleteSession: (id) => this._onDeleteSession(id),
     });
 
-    // Right 48px bar — overview, plan, tasks, and context icons
+    // Right utility bar — lightweight overview, plan, and context controls.
     this._rightBar = new RightEdgeBar({
       onCompactRequest: () => this._onCompactRequest(),
     });
@@ -438,7 +438,7 @@ export class SessionsPage implements Page {
     agentVM.on('agentDeleted', () => this._updateWelcome());
     agentVM.on('agentStatusChanged', () => this._updateWelcome());
 
-    // Session tree mutations — re-render left bar dots
+    // Session tree mutations — refresh the persistent navigation tree.
     sessionVM.on('sessionAdded', () => {
       this._activeSessionId = sessionVM.activeSessionId;
       this._leftBar.renderTree(sessionVM.sessions.tree, this._activeSessionId);
@@ -1156,7 +1156,7 @@ export class SessionsPage implements Page {
 
   private _showInlineCard(panel: string): void {
     if (!this._activeSessionId) return;
-    if (!['overview', 'plan', 'tasks'].includes(panel)) return;
+    if (!['overview', 'plan'].includes(panel)) return;
     this._overfly.show(panel, this._activeSessionId, this._workspacePath);
     this._rightBar.setActivePanel(panel);
   }

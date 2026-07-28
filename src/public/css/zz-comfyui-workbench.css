@@ -165,8 +165,7 @@ html[data-theme="dark"] .topbar-cinema .topbar-status {
   margin-left: 0;
 }
 
-html[data-theme="dark"] .connection-status-dot.connected,
-html[data-theme="dark"] .session-dot.active {
+html[data-theme="dark"] .connection-status-dot.connected {
   background: var(--comfy-blue) !important;
   box-shadow: 0 0 0 3px rgba(11, 140, 233, 0.18) !important;
 }
@@ -250,7 +249,6 @@ html[data-theme="dark"] .ws-browser-placeholder {
 
 html[data-theme="dark"] .page-col-left,
 html[data-theme="dark"] .page-col-right,
-html[data-theme="dark"] .cinema-edge-left,
 html[data-theme="dark"] .cinema-edge-right {
   width: 48px;
   min-width: 48px;
@@ -266,7 +264,6 @@ html[data-theme="dark"] .page-col-right:not(.collapsed) {
   padding: 10px;
 }
 
-html[data-theme="dark"] .cinema-edge-left,
 html[data-theme="dark"] .cinema-edge-right {
   width: 56px;
   min-width: 56px;
@@ -275,8 +272,22 @@ html[data-theme="dark"] .cinema-edge-right {
   box-shadow: none;
 }
 
-html[data-theme="dark"] .cinema-edge-left .edge-search,
-html[data-theme="dark"] .cinema-edge-left .edge-new-btn,
+html[data-theme="dark"] .cinema-edge-left {
+  width: 256px;
+  min-width: 256px;
+  padding: 12px 10px 8px;
+  gap: 8px;
+  background: var(--comfy-panel-bg) !important;
+  border-color: var(--comfy-border) !important;
+  box-shadow: none;
+}
+
+html[data-theme="dark"] .cinema-edge-left.is-collapsed {
+  width: 56px;
+  min-width: 56px;
+  padding: 10px 6px 8px;
+}
+
 html[data-theme="dark"] .cinema-edge-icon {
   width: 44px;
   height: 44px;
@@ -287,15 +298,12 @@ html[data-theme="dark"] .cinema-edge-icon {
   color: #b9bcc3;
 }
 
-html[data-theme="dark"] .cinema-edge-left .edge-search:hover,
-html[data-theme="dark"] .cinema-edge-left .edge-new-btn:hover,
 html[data-theme="dark"] .cinema-edge-icon:hover {
   border-color: var(--comfy-border-strong) !important;
   background: var(--comfy-control-hover) !important;
   color: #ffffff !important;
 }
 
-html[data-theme="dark"] .cinema-edge-left .edge-search.active,
 html[data-theme="dark"] .cinema-edge-icon.active {
   border-color: var(--comfy-border-strong) !important;
   background: var(--comfy-control-active) !important;
@@ -307,12 +315,44 @@ html[data-theme="dark"] .cinema-edge-right .cinema-edge-icon.active {
   box-shadow: inset -3px 0 0 var(--comfy-blue);
 }
 
-html[data-theme="dark"] .cinema-edge-left .edge-search svg,
-html[data-theme="dark"] .cinema-edge-left .edge-new-btn svg,
 html[data-theme="dark"] .cinema-edge-icon svg {
   width: 20px !important;
   height: 20px !important;
   stroke-width: 2;
+}
+
+html[data-theme="dark"] .cinema-edge-left .edge-sidebar-action,
+html[data-theme="dark"] .cinema-edge-left .edge-sidebar-collapse {
+  border: 1px solid transparent;
+  color: var(--comfy-text-muted);
+}
+
+html[data-theme="dark"] .cinema-edge-left .edge-sidebar-action:hover,
+html[data-theme="dark"] .cinema-edge-left .edge-sidebar-action.active,
+html[data-theme="dark"] .cinema-edge-left .edge-sidebar-collapse:hover {
+  border-color: var(--comfy-border-strong);
+  background: var(--comfy-control-hover);
+  color: var(--comfy-text-primary);
+}
+
+html[data-theme="dark"] .cinema-edge-left .edge-session-search {
+  border-color: var(--comfy-border);
+  background: var(--comfy-input-bg);
+}
+
+html[data-theme="dark"] .session-tree-row.active,
+html[data-theme="dark"] .session-search-result.active,
+html[data-theme="dark"] .session-rail-item.active {
+  border-color: var(--comfy-charcoal-300);
+  background: var(--comfy-charcoal-500);
+  color: var(--comfy-text-primary);
+}
+
+html[data-theme="dark"] .session-tree-row:hover,
+html[data-theme="dark"] .session-search-result:hover,
+html[data-theme="dark"] .session-rail-item:hover {
+  background: var(--comfy-control-hover);
+  color: var(--comfy-text-primary);
 }
 
 html[data-theme="dark"] .cinema-edge-ctx-text {
@@ -328,12 +368,6 @@ html[data-theme="dark"] .cinema-edge-icon:hover .cinema-edge-ctx-text,
 html[data-theme="dark"] .cinema-edge-icon.active .cinema-edge-ctx-text {
   border-color: #ffffff !important;
   color: #ffffff !important;
-}
-
-html[data-theme="dark"] .cinema-edge-left .edge-label {
-  color: var(--comfy-text-muted);
-  font-size: 9px;
-  letter-spacing: 0.05em;
 }
 
 html[data-theme="dark"] .cinema-center {
@@ -531,7 +565,6 @@ html[data-theme="dark"] .dialog,
 html[data-theme="dark"] .mode-dropdown,
 html[data-theme="dark"] .slash-popup,
 html[data-theme="dark"] .page-switcher-menu,
-html[data-theme="dark"] .cinema-tree-overlay,
 html[data-theme="dark"] .cinema-overfly,
 html[data-theme="dark"] .ag-edit-panel,
 html[data-theme="dark"] .ag-ctx-menu,
@@ -585,7 +618,6 @@ html[data-theme="dark"] .mode-dropdown-item.active,
 html[data-theme="dark"] .page-switcher-item.active,
 html[data-theme="dark"] .session-node-row.active,
 html[data-theme="dark"] .agent-node-row.active,
-html[data-theme="dark"] .cinema-tree-row.active,
 html[data-theme="dark"] .cinema-list-item.active,
 html[data-theme="dark"] .ws-tab.active,
 html[data-theme="dark"] .ws-tree-node.selected,
@@ -736,7 +768,6 @@ html[data-theme="dark"] .sub-session-card,
 html[data-theme="dark"] .tool-call-card,
 html[data-theme="dark"] .tool-result-card,
 html[data-theme="dark"] .think-card,
-html[data-theme="dark"] .task-panel-card,
 html[data-theme="dark"] .workspace-binding-card,
 html[data-theme="dark"] .detail-card,
 html[data-theme="dark"] .cinema-section,

@@ -4,7 +4,6 @@
 
 import { App } from '../../app.js';
 import { handlePathClick } from '../../utils/ClickablePathHandler.js';
-import { BackgroundTasksTab } from '../tabs/BackgroundTasksTab.js';
 import { ToastManager } from '../../ToastManager.js';
 import { slotRegistry } from '../../SlotRegistry.js';
 
@@ -16,7 +15,6 @@ export class SessionsPageOverfly {
   private _clickHandler: ((e: MouseEvent) => void) | null = null;
   private _outsideClickHandler: ((e: MouseEvent) => void) | null = null;
   private _outsideClickTimer: ReturnType<typeof setTimeout> | null = null;
-  private _tasksPanel: BackgroundTasksTab | null = null;
   private _onClose: (() => void) | null;
 
   constructor(onClose?: () => void) {
@@ -57,7 +55,6 @@ export class SessionsPageOverfly {
     switch (panel) {
       case 'overview': this._renderOverviewPanel(overfly, activeSessionId); break;
       case 'plan': this._renderPlanPanel(overfly); break;
-      case 'tasks': this._renderTasksPanel(overfly, activeSessionId); break;
       default:
         this.close();
         return;
@@ -89,7 +86,6 @@ export class SessionsPageOverfly {
     console.log('[Overfly] close');
     const wasOpen = this._panel !== null;
     this._removeOutsideClickHandler();
-    if (this._tasksPanel) { this._tasksPanel.destroy(); this._tasksPanel = null; }
     if (this._panel) {
       if (this._clickHandler) this._panel.removeEventListener('click', this._clickHandler);
       this._panel.remove();
@@ -192,20 +188,6 @@ export class SessionsPageOverfly {
       `;
       overfly.appendChild(row);
     }
-  }
-
-
-
-  private _renderTasksPanel(overfly: HTMLElement, activeSessionId: string | null): void {
-    const title = document.createElement('div');
-    title.className = 'cinema-overfly-title';
-    title.textContent = 'Team Cockpit';
-    overfly.appendChild(title);
-
-    const container = document.createElement('div');
-    overfly.appendChild(container);
-
-    this._tasksPanel = new BackgroundTasksTab(container, activeSessionId || '');
   }
 }
 

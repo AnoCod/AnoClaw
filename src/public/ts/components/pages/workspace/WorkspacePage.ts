@@ -384,9 +384,9 @@ export class WorkspacePage implements Page {
   private _wireTreeGrip(): void {
     const grip = this._treeGrip; const tree = this._fileTree.element;
     let dragging = false, startX = 0, startW = 0;
-    grip.addEventListener('mousedown', (e) => { dragging = true; startX = e.clientX; startW = tree.getBoundingClientRect().width; grip.style.background = 'var(--color-hairline-strong)'; document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'; e.preventDefault(); });
+    grip.addEventListener('mousedown', (e) => { dragging = true; startX = e.clientX; startW = tree.getBoundingClientRect().width; grip.classList.add('active'); document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'; e.preventDefault(); });
     window.addEventListener('mousemove', (e) => { if (!dragging) return; tree.style.width = Math.max(150, startW + e.clientX - startX) + 'px'; tree.style.flexShrink = '0'; });
-    window.addEventListener('mouseup', () => { dragging = false; grip.style.background = ''; document.body.style.cursor = ''; document.body.style.userSelect = ''; });
+    window.addEventListener('mouseup', () => { dragging = false; grip.classList.remove('active'); document.body.style.cursor = ''; document.body.style.userSelect = ''; });
   }
 
   private _showWorkspaceIdle(): void {

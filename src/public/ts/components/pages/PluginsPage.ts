@@ -64,6 +64,9 @@ export class PluginsPage implements Page {
             ${errorCount > 0 ? `<span class="plugins-status-pill plugins-status-pill-error">${t('plugins.errorCount', { count: errorCount })}</span>` : ''}
           </div>
         </div>
+        <div role="note" style="margin:0 0 14px;padding:10px 12px;border:1px solid rgba(255,197,51,.28);border-radius:6px;color:var(--color-text-secondary,#cdcdcd);font-size:11px;line-height:1.5;background:rgba(255,197,51,.05);">
+          ${t('plugins.securityNotice')}
+        </div>
         ${plugins.length === 0 ? `
           <div class="plugins-empty-state">
             <span class="plugins-empty-icon">${SVG_PLUGIN}</span>

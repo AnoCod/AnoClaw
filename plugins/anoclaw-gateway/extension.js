@@ -7,6 +7,7 @@
 // Features: message dedup, health monitoring, image/file support, WebSocket real-time.
 
 import * as https from 'https';
+import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const path = require('path');
@@ -25,19 +26,148 @@ const CONFIG_FILE = path.join(DATA_DIR, 'gateway_connections.json');
 const INBOX_FILE = path.join(DATA_DIR, 'inbox.json');
 const TEMPLATES_FILE = path.join(DATA_DIR, 'gateway_templates.json');
 const RETRY_FILE = path.join(DATA_DIR, 'gateway_retry_queue.json');
+const CREDENTIAL_KEY_FILE = path.join(DATA_DIR, '.gateway-credentials.key');
+const ENCRYPTED_VALUE_MARKER = 'anoclaw:aes-256-gcm:v1';
+let _credentialKey = null;
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
+function logStorageError(message) {
+  try { _anoclaw?.log?.error(message); } catch {}
+}
+
+function atomicWriteJson(filePath, value) {
+  ensureDataDir();
+  const tempPath = path.join(DATA_DIR, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${randomBytes(4).toString('hex')}.tmp`);
+  try {
+    const fd = fs.openSync(tempPath, 'wx', 0o600);
+    try {
+      fs.writeFileSync(fd, JSON.stringify(value, null, 2), 'utf8');
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(tempPath, filePath);
+  } finally {
+    try { fs.rmSync(tempPath, { force: true }); } catch {}
+  }
+}
+
+function readJsonArray(filePath) {
+  if (!fs.existsSync(filePath)) return [];
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    if (!Array.isArray(parsed)) throw new Error('expected a JSON array');
+    return parsed;
+  } catch (err) {
+    const quarantinePath = `${filePath}.corrupt-${Date.now()}`;
+    try {
+      fs.renameSync(filePath, quarantinePath);
+    } catch (quarantineError) {
+      const message = `Gateway state is corrupt and could not be quarantined (${path.basename(filePath)}): ${quarantineError.message}`;
+      logStorageError(message);
+      throw new Error(message, { cause: err });
+    }
+    logStorageError(`Gateway state quarantined after parse failure (${path.basename(filePath)}): ${err.message}`);
+    return [];
+  }
+}
+
+function credentialKey() {
+  if (_credentialKey) return _credentialKey;
+  ensureDataDir();
+  if (fs.existsSync(CREDENTIAL_KEY_FILE)) {
+    const stored = Buffer.from(fs.readFileSync(CREDENTIAL_KEY_FILE, 'utf8').trim(), 'base64');
+    if (stored.length !== 32) throw new Error('Gateway credential key is invalid');
+    _credentialKey = stored;
+    return _credentialKey;
+  }
+  const generated = randomBytes(32);
+  const tempPath = `${CREDENTIAL_KEY_FILE}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    fs.writeFileSync(tempPath, generated.toString('base64'), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    fs.renameSync(tempPath, CREDENTIAL_KEY_FILE);
+    try { fs.chmodSync(CREDENTIAL_KEY_FILE, 0o600); } catch {}
+  } finally {
+    try { fs.rmSync(tempPath, { force: true }); } catch {}
+  }
+  _credentialKey = generated;
+  return _credentialKey;
+}
+
+function isSecretConfigKey(key) {
+  return /(token|secret|password|api.?key|private.?key)/i.test(key);
+}
+
+function encryptConfigValue(field, value) {
+  if (!isSecretConfigKey(field) || typeof value !== 'string' || !value) return value;
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', credentialKey(), iv);
+  cipher.setAAD(Buffer.from(`gateway:${field}`, 'utf8'));
+  const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
+  return {
+    marker: ENCRYPTED_VALUE_MARKER,
+    iv: iv.toString('base64'),
+    tag: cipher.getAuthTag().toString('base64'),
+    ciphertext: ciphertext.toString('base64'),
+  };
+}
+
+function decryptConfigValue(field, value) {
+  if (!value || typeof value !== 'object' || value.marker !== ENCRYPTED_VALUE_MARKER) return value;
+  const decipher = createDecipheriv('aes-256-gcm', credentialKey(), Buffer.from(value.iv, 'base64'));
+  decipher.setAAD(Buffer.from(`gateway:${field}`, 'utf8'));
+  decipher.setAuthTag(Buffer.from(value.tag, 'base64'));
+  return Buffer.concat([
+    decipher.update(Buffer.from(value.ciphertext, 'base64')),
+    decipher.final(),
+  ]).toString('utf8');
+}
+
+function decryptConnections(connections) {
+  return connections.map(connection => ({
+    ...connection,
+    config: Object.fromEntries(Object.entries(connection.config || {}).map(([field, value]) => [
+      field,
+      decryptConfigValue(field, value),
+    ])),
+  }));
+}
+
+function encryptConnections(connections) {
+  return connections.map(connection => ({
+    ...connection,
+    config: Object.fromEntries(Object.entries(connection.config || {}).map(([field, value]) => [
+      field,
+      encryptConfigValue(field, value),
+    ])),
+  }));
+}
+
+function publicConnection(connection) {
+  return {
+    ...connection,
+    config: Object.fromEntries(Object.entries(connection.config || {}).map(([field, value]) => [
+      field,
+      isSecretConfigKey(field) ? (value ? '[configured]' : '') : value,
+    ])),
+  };
+}
+
 function loadConfig() {
-  try { return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')); }
-  catch { return []; }
+  try {
+    return decryptConnections(readJsonArray(CONFIG_FILE));
+  }
+  catch (err) {
+    logStorageError(`Gateway credentials could not be decrypted: ${err.message}`);
+    throw err;
+  }
 }
 
 function saveConfig(config) {
-  ensureDataDir();
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  atomicWriteJson(CONFIG_FILE, encryptConnections(config));
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -48,19 +178,14 @@ const _inbox = [];
 const INBOX_MAX = 500;
 
 function loadInbox() {
-  try {
-    const data = JSON.parse(fs.readFileSync(INBOX_FILE, 'utf-8'));
-    if (Array.isArray(data)) {
-      _inbox.length = 0;
-      _inbox.push(...data.slice(-INBOX_MAX));
-    }
-  } catch { /* no inbox yet */ }
+  const data = readJsonArray(INBOX_FILE);
+  _inbox.length = 0;
+  _inbox.push(...data.slice(-INBOX_MAX));
 }
 
 function persistInbox() {
   try {
-    ensureDataDir();
-    fs.writeFileSync(INBOX_FILE, JSON.stringify(_inbox, null, 2));
+    atomicWriteJson(INBOX_FILE, _inbox);
   } catch (err) {
     if (_anoclaw) _anoclaw.log.error(`Failed to persist inbox: ${err.message}`);
   }
@@ -94,14 +219,13 @@ function addInboxMessage(platform, chatId, senderId, text, connectionId, extra) 
 const _templates = [];
 
 function loadTemplates() {
-  try {
-    const data = JSON.parse(fs.readFileSync(TEMPLATES_FILE, 'utf-8'));
-    if (Array.isArray(data)) { _templates.length = 0; _templates.push(...data); }
-  } catch { /* no templates yet */ }
+  const data = readJsonArray(TEMPLATES_FILE);
+  _templates.length = 0;
+  _templates.push(...data);
 }
 
 function persistTemplates() {
-  try { ensureDataDir(); fs.writeFileSync(TEMPLATES_FILE, JSON.stringify(_templates, null, 2)); }
+  try { atomicWriteJson(TEMPLATES_FILE, _templates); }
   catch {}
 }
 
@@ -155,14 +279,13 @@ const RETRY_MAX = 100;
 const RETRY_INTERVALS = [1000, 2000, 5000, 10000, 30000, 60000, 120000, 300000]; // 1s to 5m
 
 function loadRetryQueue() {
-  try {
-    const data = JSON.parse(fs.readFileSync(RETRY_FILE, 'utf-8'));
-    if (Array.isArray(data)) { _retryQueue.length = 0; _retryQueue.push(...data); }
-  } catch {}
+  const data = readJsonArray(RETRY_FILE);
+  _retryQueue.length = 0;
+  _retryQueue.push(...data);
 }
 
 function persistRetryQueue() {
-  try { ensureDataDir(); fs.writeFileSync(RETRY_FILE, JSON.stringify(_retryQueue, null, 2)); }
+  try { atomicWriteJson(RETRY_FILE, _retryQueue); }
   catch {}
 }
 
@@ -306,8 +429,7 @@ function stopAdapter(adapter) {
   if (typeof adapter.stopPolling === 'function') adapter.stopPolling();
 }
 
-function initAdapters() {
-  const config = loadConfig();
+function initAdapters(config = loadConfig()) {
   for (const conn of config) {
     if (!conn.connected) continue;
     try {
@@ -322,6 +444,16 @@ function getAdapter(platform) {
     if (adapter.platform() === platform) return adapter;
   }
   return null;
+}
+
+function persistTelegramWebhookHash(adapter) {
+  const adapterEntry = Object.entries(_adapters).find(([, candidate]) => candidate === adapter);
+  if (!adapterEntry) return;
+  const config = loadConfig();
+  const connection = config.find(item => item.id === adapterEntry[0]);
+  if (!connection) return;
+  connection.config = { ...connection.config, webhookSecretHash: adapter.webhookSecretHash() };
+  saveConfig(config);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -360,10 +492,13 @@ export async function activate(anoclaw) {
   anoclaw.log.info('Gateway plugin activating');
 
   ensureDataDir();
+  const initialConfig = loadConfig();
+  // Migrate any legacy plaintext credential fields to encrypted values.
+  saveConfig(initialConfig);
   loadInbox();
   loadTemplates();
   loadRetryQueue();
-  initAdapters();
+  initAdapters(initialConfig);
   startRetryProcessor();
 
   // Load API key from environment or settings
@@ -377,7 +512,8 @@ export async function activate(anoclaw) {
     } catch {}
   }
 
-  // Register HTTP routes (all wrapped with auth)
+  // Register HTTP routes. The Telegram receiver is public at the host layer,
+  // but validates Telegram's dedicated secret-token header in its handler.
   await anoclaw.routes.register([
     { method: 'GET',    path: '/api/gateway/connections',         handler: 'handleListConnections' },
     { method: 'POST',   path: '/api/gateway/connections',         handler: 'handleCreateConnection' },
@@ -395,7 +531,7 @@ export async function activate(anoclaw) {
     { method: 'GET',    path: '/api/gateway/retry-queue',         handler: 'handleRetryQueue' },
     { method: 'DELETE', path: '/api/gateway/retry-queue',         handler: 'handleClearRetryQueue' },
     { method: 'DELETE', path: '/api/gateway/retry-queue/:id',     handler: 'handleRemoveRetryItem' },
-    { method: 'POST',   path: '/api/gateway/telegram/webhook',    handler: 'handleTelegramWebhook' },
+    { method: 'POST',   path: '/api/gateway/telegram/webhook',    handler: 'handleTelegramWebhook', auth: 'public' },
     { method: 'POST',   path: '/api/gateway/telegram/webhook/setup', handler: 'handleTelegramWebhookSetup' },
   ]);
 
@@ -527,11 +663,11 @@ function escapeSlot(value) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// HTTP route handlers (all with auth)
+// HTTP route handlers (administrator auth except the secret-verified Telegram receiver)
 // ═══════════════════════════════════════════════════════════════
 
 export const handleListConnections = authMiddleware(async (_req) => {
-  return { status: 200, body: { connections: loadConfig() } };
+  return { status: 200, body: { connections: loadConfig().map(publicConnection) } };
 });
 
 export const handleCreateConnection = authMiddleware(async (req) => {
@@ -548,7 +684,7 @@ export const handleCreateConnection = authMiddleware(async (req) => {
   };
   config.push(entry);
   saveConfig(config);
-  return { status: 201, body: entry };
+  return { status: 201, body: publicConnection(entry) };
 });
 
 export const handleDeleteConnection = authMiddleware(async (req) => {
@@ -739,17 +875,21 @@ export const handleRemoveRetryItem = authMiddleware(async (req) => {
   return { status: 404, body: { error: 'Retry item not found' } };
 });
 
-export const handleTelegramWebhook = authMiddleware(async (req) => {
+export const handleTelegramWebhook = async (req) => {
   const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
   const adapter = getAdapter('telegram');
   if (!adapter) return { status: 503, body: { error: 'No Telegram adapter connected' } };
+  const secret = req.headers?.['x-telegram-bot-api-secret-token'];
+  if (typeof adapter.verifyWebhookSecret !== 'function' || !adapter.verifyWebhookSecret(secret)) {
+    return { status: 401, body: { error: 'Invalid Telegram webhook secret' } };
+  }
   try {
     adapter.processWebhookUpdate(body);
     return { status: 200, body: { ok: true } };
   } catch (err) {
     return { status: 500, body: { error: err.message } };
   }
-});
+};
 
 export const handleTelegramWebhookSetup = authMiddleware(async (req) => {
   const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
@@ -758,9 +898,17 @@ export const handleTelegramWebhookSetup = authMiddleware(async (req) => {
   try {
     if (body.remove) {
       await adapter.removeWebhook();
+      persistTelegramWebhookHash(adapter);
       return { status: 200, body: { removed: true } };
     }
+    if (typeof body.url !== 'string' || !body.url.startsWith('https://')) {
+      return { status: 400, body: { error: 'A valid HTTPS webhook URL is required' } };
+    }
+    if (typeof body.secretToken !== 'string' || !/^[A-Za-z0-9_-]{16,256}$/.test(body.secretToken)) {
+      return { status: 400, body: { error: 'secretToken must be 16-256 characters using A-Z, a-z, 0-9, _ or -' } };
+    }
     await adapter.setWebhook(body.url, body.secretToken);
+    persistTelegramWebhookHash(adapter);
     const info = await adapter.getWebhookInfo();
     return { status: 200, body: { set: true, webhookInfo: info } };
   } catch (err) {

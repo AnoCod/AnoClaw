@@ -225,19 +225,6 @@ export abstract class Tool {
     // Set a default toolCallId if not provided
     const effectiveToolCallId = toolCallId ?? `${this.name()}-${startedAt}`;
 
-    // Track file state before destructive edits (for withdrawal/rewind)
-    if (this.isDestructive()) {
-      const pathParams = this.workspacePathParams();
-      for (const key of pathParams) {
-        const fp = params[key] as string | undefined;
-        if (fp) {
-          // Lazy-import to avoid circular dependency
-          const { getFileHistoryTracker } = await import('../session/FileHistoryTracker.js');
-          getFileHistoryTracker(ctx.sessionId).trackEdit(ctx.sessionId, fp).catch(() => {});
-        }
-      }
-    }
-
     TypedEventBus.emit('tool:executed', {
       toolName: this.name(),
       sessionId: ctx.sessionId,

@@ -25,17 +25,22 @@ export async function readBody(req: IncomingMessage): Promise<Record<string, unk
   const MAX_BODY = 5 * 1024 * 1024;
   return new Promise((resolve, reject) => {
     let bodySize = 0;
+    let tooLarge = false;
     const chunks: Buffer[] = [];
     req.on('data', (chunk: Buffer) => {
       bodySize += chunk.length;
       if (bodySize > MAX_BODY) {
-        req.destroy();
+        tooLarge = true;
+        chunks.length = 0;
+        return;
+      }
+      if (!tooLarge) chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (tooLarge) {
         reject(Object.assign(new Error('Request body too large'), { statusCode: 413 }));
         return;
       }
-      chunks.push(chunk);
-    });
-    req.on('end', () => {
       const raw = Buffer.concat(chunks).toString('utf-8');
       if (!raw.trim()) { resolve({}); return; }
       try { resolve(JSON.parse(raw)); }

@@ -106,8 +106,8 @@ class FakePageElement {
     gridColumn: '',
     color: '',
     backgroundColor: '',
-    setProperty: vi.fn(),
-    removeProperty: vi.fn(),
+    setProperty: (..._args: unknown[]) => undefined,
+    removeProperty: (..._args: unknown[]) => undefined,
   };
   parentElement: FakePageElement | null = null;
   className = '';

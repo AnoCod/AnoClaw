@@ -95,19 +95,42 @@ parentPort?.on('message', async (msg: unknown) => {
       }
 
       case 'plugin.execute': {
-        const p = request.params as { pluginName: string; handler: string; body: unknown; params: Record<string, string>; query: string };
+        const p = request.params as {
+          pluginName: string;
+          handler: string;
+          body: unknown;
+          params: Record<string, string>;
+          query: string;
+          headers: Record<string, string>;
+          method: string;
+          path: string;
+        };
         const mod = _activeMod;
         if (!mod) {
           parentPort?.postMessage({ id: request.id, error: { code: 'NOT_ACTIVE', message: 'Plugin not active' } });
           break;
         }
-        const handlerFn = mod[p.handler] as ((args: { body: unknown; params: Record<string, string>; query: string }) => Promise<unknown>) | undefined;
+        const handlerFn = mod[p.handler] as ((args: {
+          body: unknown;
+          params: Record<string, string>;
+          query: string;
+          headers: Record<string, string>;
+          method: string;
+          path: string;
+        }) => Promise<unknown>) | undefined;
         if (typeof handlerFn !== 'function') {
           parentPort?.postMessage({ id: request.id, error: { code: 'NO_HANDLER', message: `Plugin does not export "${p.handler}"` } });
           break;
         }
         try {
-          const result = await handlerFn({ body: p.body, params: p.params, query: p.query });
+          const result = await handlerFn({
+            body: p.body,
+            params: p.params,
+            query: p.query,
+            headers: p.headers,
+            method: p.method,
+            path: p.path,
+          });
           parentPort?.postMessage({ id: request.id, result });
         } catch (err) {
           parentPort?.postMessage({ id: request.id, error: { code: 'HANDLER_ERROR', message: (err as Error).message } });
@@ -241,7 +264,16 @@ async function activateCurrentPlugin(): Promise<void> {
     return;
   }
 
-  const loader = new PluginLoader();
+  const requestedPluginPath = path.resolve(_pluginPath);
+  if (path.basename(requestedPluginPath) !== _pluginName) {
+    parentPort?.postMessage({
+      id: 'auto-activate-error',
+      error: { code: 'PATH_MISMATCH', message: `${_pluginName}: worker plugin path does not match plugin name` },
+    });
+    return;
+  }
+
+  const loader = new PluginLoader(path.dirname(requestedPluginPath));
   const state = loader.loadOne(_pluginName);
   if (!state) {
     parentPort?.postMessage({
@@ -254,6 +286,21 @@ async function activateCurrentPlugin(): Promise<void> {
     parentPort?.postMessage({
       id: 'auto-activate-error',
       error: { code: 'LOAD_ERROR', message: `${_pluginName}: ${state.errorMessage}` },
+    });
+    return;
+  }
+  try {
+    if (fs.realpathSync(state.pluginPath) !== fs.realpathSync(requestedPluginPath)) {
+      parentPort?.postMessage({
+        id: 'auto-activate-error',
+        error: { code: 'PATH_MISMATCH', message: `${_pluginName}: resolved plugin path differs from worker plugin path` },
+      });
+      return;
+    }
+  } catch (err) {
+    parentPort?.postMessage({
+      id: 'auto-activate-error',
+      error: { code: 'PATH_ERROR', message: `${_pluginName}: ${(err as Error).message}` },
     });
     return;
   }

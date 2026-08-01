@@ -42,6 +42,7 @@ export const enUS = {
   'taskResolution.missingTools': 'Missing tools: {tools}',
   'taskResolution.activate': 'Activate',
   'taskResolution.install': 'Install',
+  'taskResolution.installSecurityConfirm': 'Installing "{name}" runs its local code with your user privileges. Continue only if you trust the source. Install it?',
   'taskResolution.reload': 'Reload',
   'taskResolution.inspect': 'Inspect',
   'taskResolution.openPlugins': 'Open plugins',

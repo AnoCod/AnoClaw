@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs';
@@ -11,6 +11,8 @@ import type { RouteHandler, RouteMatch } from '../RouteHandler.js';
 import { handleBrowseWorkspace, handleReadWorkspaceFile, resolveWorkspacePath } from '../handlers/WorkspaceHandlers.js';
 import { ApiPermission } from '../../../shared/types/gateway.js';
 import { getTrustedUiToken, TRUSTED_UI_HEADER } from '../TrustedUiAuth.js';
+import { PluginHostManager } from '../../core/plugin-host/PluginHostManager.js';
+import { SettingsManager } from '../../infra/storage/SettingsManager.js';
 
 interface Capture {
   status: number;
@@ -76,6 +78,10 @@ describe('ApiServer security boundaries', () => {
     api = ApiServer.getInstance();
     (api as unknown as { _routeTable: RouteHandler[] })._routeTable = [];
     (api as unknown as { _pluginRoutes: unknown[] })._pluginRoutes = [];
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('rejects permissioned routes when no token is present', async () => {
@@ -193,6 +199,46 @@ describe('ApiServer security boundaries', () => {
     expect(capture.body.message).toBe('Missing permission: admin');
   });
 
+  it('allows an explicitly public webhook and forwards only approved request headers', async () => {
+    api.registerPluginRoutes('webhook-plugin', [{
+      method: 'POST',
+      path: '/api/plugin/webhook',
+      handler: 'handleWebhook',
+      auth: 'public',
+    }]);
+    const execute = vi.spyOn(PluginHostManager.getInstance(), 'executeHandler').mockResolvedValue({
+      status: 200,
+      body: { ok: true },
+    });
+    const req = mockReqWithHeaders('/api/plugin/webhook', {
+      'x-telegram-bot-api-secret-token': 'telegram-secret',
+      cookie: 'must-not-cross-worker-boundary',
+    });
+    req.method = 'POST';
+    const capture: Capture = { status: 0, headers: {}, body: {} };
+
+    await api.handleApiRequest(req, mockRes(capture));
+    req.emit('end');
+    await vi.waitFor(() => expect(capture.status).toBe(200));
+
+    expect(execute).toHaveBeenCalledWith('webhook-plugin', 'handleWebhook', expect.objectContaining({
+      method: 'POST',
+      path: '/api/plugin/webhook',
+      headers: { 'x-telegram-bot-api-secret-token': 'telegram-secret' },
+    }));
+  });
+
+  it('drains an oversized JSON request and reports 413 without destroying the socket', async () => {
+    const destroy = vi.fn();
+    const req = Object.assign(new EventEmitter(), { destroy }) as unknown as IncomingMessage;
+    const bodyPromise = api.readBody(req);
+    req.emit('data', Buffer.alloc(5 * 1024 * 1024 + 1));
+    req.emit('end');
+
+    await expect(bodyPromise).rejects.toMatchObject({ statusCode: 413 });
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
   it('keeps the health route public when it has no explicit permission', async () => {
     api.registerRoute({
       method: 'GET',
@@ -247,6 +293,35 @@ describe('ApiServer security boundaries', () => {
 
     expect(capture.status).toBe(403);
     expect(capture.body.error).toBe('Forbidden');
+  });
+
+  it('returns CORS permission for the configured UI port', async () => {
+    const settings = SettingsManager.getInstance();
+    const previousPort = settings.get<number>('port', 3456);
+    await settings.set('port', 4567);
+    api.registerRoute({
+      method: 'GET',
+      path: '/api/v1/custom-port',
+      handle: (_match, _req, res) => {
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true }));
+        return true;
+      },
+    });
+    const capture: Capture = { status: 0, headers: {}, body: {} };
+    try {
+      await api.handleTrustedUiRequest(
+        mockReqWithHeaders('/api/v1/custom-port', {
+          [TRUSTED_UI_HEADER]: getTrustedUiToken(),
+          origin: 'http://127.0.0.1:4567',
+        }),
+        mockRes(capture),
+      );
+      expect(capture.status).toBe(200);
+      expect(capture.headers['Access-Control-Allow-Origin']).toBe('http://127.0.0.1:4567');
+    } finally {
+      await settings.set('port', previousPort);
+    }
   });
 
   it('does not treat sibling paths as inside the workspace', () => {

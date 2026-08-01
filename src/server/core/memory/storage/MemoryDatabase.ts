@@ -150,6 +150,9 @@ export class MemoryDatabase {
   private _dbPath: string;
   private _config: MemoryStoreConfig;
   private _initPromise: Promise<void> | null = null;
+  private _persistQueue: Promise<void> = Promise.resolve();
+  private _persistGeneration = 0;
+  private _closing = false;
 
   // -----------------------------------------------------------------------
   // Singleton
@@ -169,6 +172,13 @@ export class MemoryDatabase {
     }
   }
 
+  static async closeInstance(): Promise<void> {
+    const instance = this._instance;
+    if (!instance) return;
+    await instance.close();
+    if (this._instance === instance) this._instance = null;
+  }
+
   private constructor(config?: MemoryStoreConfig) {
     this._config = config ?? DEFAULT_CONFIG;
     this._dbPath = path.resolve(this._config.dbPath);
@@ -185,6 +195,7 @@ export class MemoryDatabase {
   get isReady(): boolean { return this._db !== null; }
 
   private async _init(): Promise<void> {
+    if (this._closing) throw new Error('MemoryDatabase is closing');
     if (this._db) return;
     if (this._initPromise) return this._initPromise;
 
@@ -228,7 +239,7 @@ export class MemoryDatabase {
 
     // Persist if newly created
     if (!fileBuffer) {
-      this._persist();
+      await this._persist();
     }
 
     log.info('MemoryDatabase initialized', { dbPath: this._dbPath });
@@ -238,13 +249,22 @@ export class MemoryDatabase {
   // Persistence
   // -----------------------------------------------------------------------
 
-  /** Write the in-memory database to disk. Fire-and-forget after mutations. */
-  private _persist(): void {
+  /** Serialize full-database snapshots and resolve only after the write lands. */
+  private async _persist(): Promise<void> {
     if (!this._db) return;
     const data = Buffer.from(this._db.export());
-    writeFile(this._dbPath, data).catch((err) => {
-      log.error('MemoryDatabase persist failed', { error: (err as Error).message });
+    const generation = this._persistGeneration;
+    const task = this._persistQueue.catch(() => undefined).then(async () => {
+      if (generation !== this._persistGeneration) return;
+      await writeFile(this._dbPath, data);
     });
+    this._persistQueue = task;
+    try {
+      await task;
+    } catch (err) {
+      log.error('MemoryDatabase persist failed', { error: (err as Error).message });
+      throw err;
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -286,7 +306,7 @@ export class MemoryDatabase {
       await this.upsertBm25Term(term, doc.id, tf);
     }
 
-    this._persist();
+    await this._persist();
   }
 
   async getDocument(id: string): Promise<MemoryDocument | null> {
@@ -299,7 +319,7 @@ export class MemoryDatabase {
       `UPDATE documents SET access_count = access_count + 1, last_accessed_at = ? WHERE id = ?`,
       [new Date().toISOString(), id],
     );
-    this._persist();
+    await this._persist();
 
     return this._rowToDocument(result[0].columns, result[0].values[0]);
   }
@@ -347,7 +367,7 @@ export class MemoryDatabase {
         id,
       ],
     );
-    this._persist();
+    await this._persist();
   }
 
   async deleteDocument(id: string): Promise<boolean> {
@@ -357,7 +377,7 @@ export class MemoryDatabase {
     if (!count) return false;
 
     this._db!.run('DELETE FROM documents WHERE id = ?', [id]);
-    this._persist();
+    await this._persist();
     return true;
   }
 
@@ -415,7 +435,7 @@ export class MemoryDatabase {
        VALUES (?, ?, ?, ?)`,
       [docId, buf, model, new Date().toISOString()],
     );
-    this._persist();
+    await this._persist();
   }
 
   async getEmbedding(docId: string): Promise<MemoryEmbedding | null> {
@@ -463,7 +483,7 @@ export class MemoryDatabase {
        VALUES (?, ?, ?)`,
       [term, docId, tf],
     );
-    this._persist();
+    await this._persist();
   }
 
   async getBm25Stats(): Promise<MemoryBm25Stats> {
@@ -542,19 +562,25 @@ export class MemoryDatabase {
 
   async close(): Promise<void> {
     if (this._db) {
-      this._persist();
-      // Wait a tick for the fire-and-forget persist to flush
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      this._db.close();
-      this._db = null;
-      this._SQL = null;
-      log.info('MemoryDatabase closed');
+      this._closing = true;
+      try {
+        await this._persist();
+        await this._persistQueue;
+        this._persistGeneration += 1;
+        this._db.close();
+        this._db = null;
+        this._SQL = null;
+        log.info('MemoryDatabase closed');
+      } finally {
+        this._closing = false;
+      }
     }
   }
 
   /** Synchronous close for resetInstance — no await available. */
   private _closeSync(): void {
     if (this._db) {
+      this._persistGeneration += 1;
       try {
         const data = Buffer.from(this._db.export());
         writeFileSync(this._dbPath, data);

@@ -6,6 +6,9 @@ import type { ExecutionContext } from '../../../../shared/types/session.js';
 import { makeResult, makeError } from '../ToolResult.js';
 import { PlanTool } from '../builtin/PlanTool.js';
 import { WorkspaceLeaseService } from '../../coordination/WorkspaceLeaseService.js';
+import * as fsp from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 // ── Helpers ──
 
@@ -667,6 +670,34 @@ describe('ToolPipeline.securityCheck', () => {
   it('handles multiple path params', () => {
     const tool = mockTool({ workspacePathParams: ['notebook_path'] });
     expect(ToolPipeline.securityCheck(tool, { notebook_path: '/home/user/project/notebook.ipynb', new_source: 'print("hi")' }, ctx({ workspace: '/home/user/project' }))).toBeNull();
+  });
+
+  it('blocks paths and lease scopes that escape through a symlink or junction', async () => {
+    const workspace = await fsp.mkdtemp(path.join(os.tmpdir(), 'anoclaw-workspace-'));
+    const external = await fsp.mkdtemp(path.join(os.tmpdir(), 'anoclaw-external-'));
+    const link = path.join(workspace, 'escape');
+    await fsp.symlink(external, link, process.platform === 'win32' ? 'junction' : 'dir');
+    try {
+      const tool = mockTool({ workspacePathParams: ['file_path'] });
+      const result = ToolPipeline.securityCheck(
+        tool,
+        { file_path: path.join(link, 'secret.txt') },
+        ctx({ workspace }),
+      );
+      expect(result?.errorMessage).toContain('Path boundary violation');
+      expect(() => WorkspaceLeaseService.getInstance().acquire({
+        rootSessionId: 'root-link',
+        taskId: 'task-link',
+        agentId: 'agent-link',
+        workspace,
+        scopes: ['escape'],
+        ttlMs: 30_000,
+      })).toThrow(/outside workspace/);
+    } finally {
+      WorkspaceLeaseService.resetInstance();
+      await fsp.rm(workspace, { recursive: true, force: true });
+      await fsp.rm(external, { recursive: true, force: true });
+    }
   });
 
   it('blocks non-read-only tools in readOnly mode', () => {

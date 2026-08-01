@@ -62,4 +62,20 @@ describe('Meeting frontend i18n', () => {
     expect(html).toContain('${meetingRole(role)}');
     expect(html).toContain("tr('round',{round:r})");
   });
+
+  it('does not place stored meeting values into inline scripts or raw HTML', async () => {
+    const html = await source();
+    const tableSource = await readFile(new URL('../frontend/src/MeetingTable.ts', import.meta.url), 'utf8');
+
+    expect(html).not.toContain('onclick="app._showMemory');
+    expect(html).toContain('data-memory-name="${esc(r.memoryName)}"');
+    expect(html).toContain('speakerNames.map(esc).join');
+    expect(html.match(/\$\{avatarInitial\(/g)).toBeNull();
+    expect(html).toContain("const statusClass = ['idle', 'running', 'completed'].includes(m.status)");
+    expect(html).not.toContain('<span class="transcript-round">R${entry.round}</span>');
+    expect(html).toContain('<span class="transcript-round">R${esc(entry.round)}</span>');
+    expect(html).toContain('data-tpl-rounds="${esc(t.maxRounds)}"');
+    expect(tableSource).not.toContain('tooltip.innerHTML');
+    expect(tableSource).toContain('nameLabel.textContent = p.name || p.id');
+  });
 });

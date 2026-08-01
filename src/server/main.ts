@@ -4,6 +4,7 @@
 import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as YAML from 'yaml';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PORT, DEFAULT_HOST, APP_NAME, APP_VERSION, DEFAULT_MAIN_AGENT_ID } from '../shared/constants.js';
 import { WsServer } from './infra/network/WsServer.js';
@@ -26,6 +27,8 @@ import { ApiPermission } from '../shared/types/gateway.js';
 import { SettingsManager } from './infra/storage/SettingsManager.js';
 import { serveStatic } from './infra/StaticFiles.js';
 import { writablePath, ensureWritableDir, appPath } from './infra/WritablePath.js';
+import { atomicWriteFile } from './core/tools/builtin/FileUtils.js';
+import { installPluginFromUrl, PluginInstallError } from './core/plugin-host/PluginInstaller.js';
 
 // Set cwd to the unpacked root when packaged (asar is read-only).
 // In dev mode, REPO_ROOT is the real project directory.
@@ -44,9 +47,12 @@ function isAllowedLocalOrigin(origin: string | undefined): boolean {
     const parsed = new URL(origin);
     const hostname = parsed.hostname.toLowerCase();
     const port = parsed.port ? Number(parsed.port) : (parsed.protocol === 'https:' ? 443 : 80);
+    const settings = SettingsManager.getInstance();
+    const configuredUiPort = settings.get<number>('port', DEFAULT_PORT);
+    const configuredApiPort = settings.get<number>('apiPort', 15730);
     return (parsed.protocol === 'http:' || parsed.protocol === 'https:')
       && ['localhost', '127.0.0.1', '::1'].includes(hostname)
-      && [DEFAULT_PORT, 15730].includes(port);
+      && [configuredUiPort, configuredApiPort].includes(port);
   } catch {
     return false;
   }
@@ -80,25 +86,46 @@ function authorizeLegacyAdminApi(req: http.IncomingMessage, res: http.ServerResp
   return true;
 }
 
-function safePathSegment(value: string, label: string): string {
-  if (!value || value === '.' || value === '..' || /[/\\]/.test(value) || /[<>:"|?*]/.test(value)) {
-    throw new Error(`Invalid ${label}`);
+const LEGACY_API_BODY_LIMIT = 1024 * 1024;
+
+class RequestBodyError extends Error {
+  constructor(message: string, readonly statusCode: number) {
+    super(message);
   }
-  return value;
 }
 
-function safeRelativeFilePath(value: string): string {
-  const normalized = path.normalize(value);
-  if (
-    !value ||
-    path.isAbsolute(value) ||
-    normalized.startsWith('..') ||
-    normalized.includes(`..${path.sep}`) ||
-    /(^|[\\/])\.\.([\\/]|$)/.test(value)
-  ) {
-    throw new Error('Invalid file path');
-  }
-  return normalized;
+function readJsonRequest(req: http.IncomingMessage, limit = LEGACY_API_BODY_LIMIT): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let tooLarge = false;
+    req.on('data', (chunk: Buffer | string) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      size += buffer.length;
+      if (size > limit) {
+        tooLarge = true;
+        chunks.length = 0;
+        return;
+      }
+      if (!tooLarge) chunks.push(buffer);
+    });
+    req.once('error', reject);
+    req.once('end', () => {
+      if (tooLarge) {
+        reject(new RequestBodyError(`Request body exceeds ${limit} bytes`, 413));
+        return;
+      }
+      try {
+        const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error('JSON body must be an object');
+        }
+        resolve(parsed as Record<string, unknown>);
+      } catch (error) {
+        reject(new RequestBodyError(`Invalid JSON: ${(error as Error).message}`, 400));
+      }
+    });
+  });
 }
 
 
@@ -205,146 +232,93 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     return;
   }
   if (url === '/api/v1/plugins/reload' && req.method === 'POST') {
-    const chunks: Buffer[] = [];
-    req.on('data', (c: Buffer) => chunks.push(c));
-    req.on('end', async () => {
-      try {
-        const body = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
-        const name = body.name as string;
-        if (!name) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Missing "name" field' }));
-          return;
-        }
-        const { PluginHostManager: PM } = await import('./core/plugin-host/PluginHostManager.js');
-        const pm = PM.getInstance();
-        const action = (body.action as string) || 'reload';
-        let state;
-        switch (action) {
-          case 'activate':
-            state = await pm.activatePlugin(name);
-            break;
-          case 'deactivate':
-            state = await pm.deactivatePlugin(name);
-            break;
-          default:
-            state = await pm.reloadPlugin(name);
-            break;
-        }
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(state));
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Reload failed', message: msg }));
+    try {
+      const body = await readJsonRequest(req);
+      const name = typeof body.name === 'string' ? body.name : '';
+      if (!name) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Missing "name" field' }));
+        return;
       }
-    });
+      const { PluginHostManager: PM } = await import('./core/plugin-host/PluginHostManager.js');
+      const pm = PM.getInstance();
+      const action = typeof body.action === 'string' ? body.action : 'reload';
+      let state;
+      switch (action) {
+        case 'activate':
+          state = await pm.activatePlugin(name);
+          break;
+        case 'deactivate':
+          state = await pm.deactivatePlugin(name);
+          break;
+        default:
+          state = await pm.reloadPlugin(name);
+          break;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(state));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const status = err instanceof RequestBodyError ? err.statusCode : 500;
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Reload failed', message: msg }));
+    }
     return;
   }
 
-  // Plugin install from URL (supports raw JSON or GitHub repos)
+  // Plugin install from URL. Sources are fully fetched and validated in a hidden
+  // staging directory, then renamed into place as one filesystem transaction.
   if (url === '/api/v1/plugins/install' && req.method === 'POST') {
-    const chunks: Buffer[] = [];
-    req.on('data', (c: Buffer) => chunks.push(c));
-    req.on('end', async () => {
-      try {
-        const body = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
-        const installUrl = body.url as string;
-        if (!installUrl) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Missing "url" field' }));
-          return;
-        }
-        const destName = body.name ? safePathSegment(String(body.name), 'plugin name') : `plugin-${Date.now().toString(36)}`;
-        const destDir = writablePath('plugins', destName);
-        if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-
-        // GitHub repo install: convert github.com/owner/repo to raw URLs
-        const githubMatch = installUrl.match(/github\.com\/([^\/]+)\/([^\/\s#]+)/);
-        if (githubMatch) {
-          const [, owner, repoSlug] = githubMatch;
-          const repo = repoSlug.replace(/\.git$/, '');
-          const branch = encodeURIComponent(body.branch as string || 'main');
-          const files = ['plugin.json', 'extension.js', 'frontend/index.html'];
-          let fetched = 0;
-          for (const f of files) {
-            const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${f}`;
-            try {
-              const r = await fetch(rawUrl);
-              if (r.ok) {
-                const content = await r.text();
-                const fullPath = path.join(destDir, f);
-                const dir = path.dirname(fullPath);
-                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-                fs.writeFileSync(fullPath, content);
-                fetched++;
-              }
-            } catch {}
-          }
-          if (fetched === 0) {
-            res.writeHead(502, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'No plugin files found in GitHub repo' }));
-            return;
-          }
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ name: destName, path: destDir, installed: true, files: fetched, source: 'github' }));
-          return;
-        }
-
-        // Raw JSON install: { files: { "extension.js": "...", "plugin.json": "..." } }
-        const resp = await fetch(installUrl);
-        if (!resp.ok) {
-          res.writeHead(502, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: `Fetch failed: HTTP ${resp.status}` }));
-          return;
-        }
-        const data = await resp.json() as { files: Record<string, string> };
-        for (const [filePath, fileContent] of Object.entries(data.files)) {
-          const fullPath = path.join(destDir, safeRelativeFilePath(filePath));
-          const dir = path.dirname(fullPath);
-          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-          fs.writeFileSync(fullPath, fileContent);
-        }
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ name: destName, path: destDir, installed: true }));
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Install failed', message: msg }));
+    try {
+      const body = await readJsonRequest(req);
+      const installUrl = typeof body.url === 'string' ? body.url : '';
+      if (!installUrl) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Missing "url" field' }));
+        return;
       }
-    });
+      const result = await installPluginFromUrl({
+        url: installUrl,
+        requestedName: typeof body.name === 'string' ? body.name : undefined,
+        branch: typeof body.branch === 'string' ? body.branch : undefined,
+        subdir: typeof body.subdir === 'string' ? body.subdir : undefined,
+        pluginsDir: writablePath('plugins'),
+      });
+      res.writeHead(201, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const status = err instanceof RequestBodyError || err instanceof PluginInstallError
+        ? err.statusCode
+        : 500;
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Install failed', message: msg }));
+    }
     return;
   }
 
 
   if (url === '/api/skills') {
     if (req.method === 'POST') {
-      const chunks: Buffer[] = [];
-      req.on('data', (c: Buffer) => chunks.push(c));
-      req.on('end', () => {
-        try {
-          const body = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
-          const name = (body.name as string || 'untitled').replace(/[^a-z0-9_-]/gi, '_');
-          const frontmatter = [
-            '---',
-            `name: "${body.name || 'Untitled'}"`,
-            `description: "${body.description || ''}"`,
-            'type: custom',
-            '---',
-            '',
-          ].join('\n');
-          const content = frontmatter + (body.content as string || '');
-          const skillDir = writablePath('skills', name);
-          if (!fs.existsSync(skillDir)) fs.mkdirSync(skillDir, { recursive: true });
-          const filePath = path.join(skillDir, 'SKILL.md');
-          fs.writeFileSync(filePath, content);
-          res.writeHead(201, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ id: name, name: body.name, status: 'imported' }));
-        } catch (err) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Invalid JSON', message: (err as Error).message }));
-        }
-      });
+      try {
+        const body = await readJsonRequest(req);
+        const displayName = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : 'Untitled';
+        const description = typeof body.description === 'string' ? body.description : '';
+        const skillBody = typeof body.content === 'string' ? body.content : '';
+        const normalizedName = displayName.replace(/[^a-z0-9_-]/gi, '_').replace(/^_+|_+$/g, '') || 'untitled';
+        const frontmatter = YAML.stringify({ name: displayName, description, type: 'custom' }).trim();
+        const content = `---\n${frontmatter}\n---\n\n${skillBody}`;
+        const skillDir = writablePath('skills', normalizedName);
+        fs.mkdirSync(skillDir, { recursive: true });
+        const filePath = path.join(skillDir, 'SKILL.md');
+        await atomicWriteFile(filePath, content, 'utf8');
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ id: normalizedName, name: displayName, status: 'imported' }));
+      } catch (err) {
+        const status = err instanceof RequestBodyError ? err.statusCode : 400;
+        res.writeHead(status, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Skill import failed', message: (err as Error).message }));
+      }
       return;
     }
 
@@ -396,36 +370,32 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
   const skillsPatchMatch = url.match(/^\/api\/skills\/([a-zA-Z0-9_-]+)$/);
   if (skillsPatchMatch && req.method === 'PATCH') {
     const skillId = skillsPatchMatch[1];
-    const chunks: Buffer[] = [];
-    req.on('data', (c: Buffer) => chunks.push(c));
-    req.on('end', () => {
-      try {
-        const body = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
-        const skillsDir = path.resolve(process.cwd(), 'skills');
-        // Try nested standard format first, then deprecated flat
-        let filePath = path.join(skillsDir, skillId, 'SKILL.md');
-        if (!fs.existsSync(filePath)) {
-          filePath = path.join(skillsDir, `${skillId}.md`);
-        }
-        if (!fs.existsSync(filePath)) {
-          res.writeHead(404, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Not Found' }));
-          return;
-        }
-        let raw = fs.readFileSync(filePath, 'utf-8');
-        const match = raw.match(/^---\n([\s\S]*?)\n---/);
-        if (match && body.enabled !== undefined) {
-          const newFrontmatter = match[1].replace(/^enabled:.*$/m, `enabled: ${body.enabled}`);
-          raw = raw.replace(match[1], newFrontmatter);
-          fs.writeFileSync(filePath, raw);
-        }
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ id: skillId, enabled: body.enabled }));
-      } catch (err) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: (err as Error).message }));
+    try {
+      const body = await readJsonRequest(req);
+      if (typeof body.enabled !== 'boolean') throw new RequestBodyError('enabled must be a boolean', 400);
+      const skillsDir = writablePath('skills');
+      // Try nested standard format first, then deprecated flat
+      let filePath = path.join(skillsDir, skillId, 'SKILL.md');
+      if (!fs.existsSync(filePath)) filePath = path.join(skillsDir, `${skillId}.md`);
+      if (!fs.existsSync(filePath)) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Not Found' }));
+        return;
       }
-    });
+      const raw = fs.readFileSync(filePath, 'utf8');
+      const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+      if (!match) throw new RequestBodyError('Skill file has no YAML frontmatter', 400);
+      const frontmatter = (YAML.parse(match[1]) || {}) as Record<string, unknown>;
+      frontmatter.enabled = body.enabled;
+      const updated = `---\n${YAML.stringify(frontmatter).trim()}\n---\n\n${raw.slice(match[0].length)}`;
+      await atomicWriteFile(filePath, updated, 'utf8');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ id: skillId, enabled: body.enabled }));
+    } catch (err) {
+      const status = err instanceof RequestBodyError ? err.statusCode : 400;
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: (err as Error).message }));
+    }
     return;
   }
 
@@ -499,7 +469,7 @@ async function initialize(): Promise<void> {
   // Auto-create a main agent on first run only if setup is done (apiKey exists).
 
   if (registry.allAgents().length === 0) {
-    const hasApiKey = !!settings.get('apiKey');
+    const hasApiKey = !!settings.get('llm.apiKey');
     if (!hasApiKey) {
       logManager.logger('anochat.core').info('No agents and no apiKey - skipping auto-create, waiting for setup wizard');
     } else {
@@ -511,11 +481,11 @@ async function initialize(): Promise<void> {
       if (!existingCfg) {
         const configs = buildDefaultAgentConfigs({
           agentName: 'MainAgent',
-          provider: settings.get('provider') || 'openai-compatible',
-          apiUrl: settings.get('apiUrl') || '',
-          apiKey: settings.get('apiKey') || '',
-          model: settings.get('model') || '',
-          contextWindow: Number(settings.get('contextWindow')) || 131072,
+          provider: settings.get('llm.provider') || 'openai-compatible',
+          apiUrl: settings.get('llm.apiUrl') || '',
+          apiKey: settings.get('llm.apiKey') || '',
+          model: settings.get('llm.model') || '',
+          contextWindow: Number(settings.get('llm.contextWindow')) || 131072,
         });
         for (const cfg of configs) {
           await saveAgentConfig(cfg);
@@ -571,7 +541,7 @@ async function initialize(): Promise<void> {
   }
 
   // 4.5 Initialize API auth tokens
-  await initAuthStore('config');
+  await initAuthStore(ensureWritableDir('config'));
 
 
   // Restore a restart checkpoint as an idempotent system message. The restartId
@@ -713,25 +683,40 @@ export async function startServer(): Promise<http.Server> {
   await initialize();
   const settings = SettingsManager.getInstance();
   const port = settings.get<number>('port', DEFAULT_PORT);
+  const apiPort = settings.get<number>('apiPort', 15730);
   const host = settings.get<string>('host', DEFAULT_HOST);
 
-  return new Promise((resolve, reject) => {
-    server.on('error', (err: NodeJS.ErrnoException) => {
+  await new Promise<void>((resolve, reject) => {
+    const onError = (err: NodeJS.ErrnoException) => {
+      server.off('listening', onListening);
       if (err.code === 'EADDRINUSE') {
         LogManager.getInstance().logger('anochat.core').error('Port already in use', { port });
         reject(new Error(`Port ${port} already in use`));
         return;
       }
       reject(err);
-    });
-
-    server.listen(port, host, () => {
+    };
+    const onListening = () => {
+      server.off('error', onError);
       LogManager.getInstance().logger('anochat.core').info('Server started', {
         port, version: APP_VERSION, platform: process.platform, node: process.version,
       });
-      resolve(server);
-    });
+      resolve();
+    };
+    server.once('error', onError);
+    server.once('listening', onListening);
+    server.listen(port, host);
   });
+  wsServer.resume();
+
+  try {
+    const { ApiServer } = await import('./gateway/ApiServer.js');
+    await ApiServer.getInstance().start(apiPort, DEFAULT_HOST);
+  } catch (error) {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    throw error;
+  }
+  return server;
 }
 
 let shutdownPromise: Promise<void> | null = null;
@@ -762,6 +747,8 @@ export async function shutdown(): Promise<void> {
     await SessionTurnRecorder.drainAll();
     const { SessionStore } = await import('./core/session/SessionStore.js');
     await SessionStore.getInstance().drain();
+    const { MemoryDatabase } = await import('./core/memory/storage/MemoryDatabase.js');
+    await MemoryDatabase.closeInstance();
     const { SessionLeaseManager } = await import('./core/session/SessionLeaseManager.js');
     SessionLeaseManager.getInstance().stop();
     const { CoordinationScheduler } = await import('./core/coordination/CoordinationScheduler.js');

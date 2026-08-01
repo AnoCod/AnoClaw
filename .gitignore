@@ -18,6 +18,7 @@ out/
 /memory/
 config/settings.yaml
 config/mcp_servers.yaml
+config/api.json
 config/auth.json
 config/window-state.json
 config/.encryption-key

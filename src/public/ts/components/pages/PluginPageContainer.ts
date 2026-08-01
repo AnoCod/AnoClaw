@@ -12,6 +12,7 @@ export class PluginPageContainer implements Page {
   private _iframe: HTMLIFrameElement | null = null;
   private _loaded = false;
   private _tokensInjected = false;
+  private _disposed = false;
 
   constructor(contribution: PluginPageContribution) {
     this.name = contribution.id;
@@ -27,59 +28,66 @@ export class PluginPageContainer implements Page {
   }
 
   private _installDialogBridge(): void {
-    window.addEventListener('message', async (e: MessageEvent) => {
-      if (!e.data || e.data.type !== 'anoclaw:dialog:confirm') return;
-      const iframe = this._iframe;
-      if (!iframe?.contentWindow || e.source !== iframe.contentWindow) return;
-      const result = await ConfirmDialog.show(e.data.message, e.data.title);
-      iframe.contentWindow.postMessage({
-        type: 'anoclaw:dialog:result',
-        id: e.data.id,
-        result,
-      }, '*');
-    });
+    window.addEventListener('message', this._onDialogMessage);
   }
 
   private _installSessionBridge(): void {
-    window.addEventListener('message', async (e: MessageEvent) => {
-      if (!e.data || e.data.type !== 'anoclaw:session:handoff') return;
-      const iframe = this._iframe;
-      if (!iframe?.contentWindow || e.source !== iframe.contentWindow) return;
-
-      const sessionId = String(e.data.sessionId || '');
-      const prompt = String(e.data.prompt || '');
-      if (!sessionId || !prompt) {
-        iframe.contentWindow.postMessage({
-          type: 'anoclaw:session:handoff-result',
-          id: e.data.id,
-          ok: false,
-          error: 'sessionId and prompt are required',
-        }, '*');
-        return;
-      }
-
-      try {
-        const { App } = await import('../../app.js');
-        const app = App.getInstance();
-        if (!app.handoffToSession(sessionId, prompt)) {
-          throw new Error('The requested session is not available.');
-        }
-        iframe.contentWindow.postMessage({
-          type: 'anoclaw:session:handoff-result',
-          id: e.data.id,
-          ok: true,
-          sessionId,
-        }, '*');
-      } catch (err) {
-        iframe.contentWindow.postMessage({
-          type: 'anoclaw:session:handoff-result',
-          id: e.data.id,
-          ok: false,
-          error: (err as Error).message,
-        }, '*');
-      }
-    });
+    window.addEventListener('message', this._onSessionMessage);
   }
+
+  private _onDialogMessage = async (e: MessageEvent): Promise<void> => {
+    if (!e.data || e.data.type !== 'anoclaw:dialog:confirm') return;
+    const iframe = this._iframe;
+    if (!iframe?.contentWindow || e.source !== iframe.contentWindow) return;
+    const result = await ConfirmDialog.show(e.data.message, e.data.title);
+    if (this._disposed || !iframe.contentWindow) return;
+    iframe.contentWindow.postMessage({
+      type: 'anoclaw:dialog:result',
+      id: e.data.id,
+      result,
+    }, '*');
+  };
+
+  private _onSessionMessage = async (e: MessageEvent): Promise<void> => {
+    if (!e.data || e.data.type !== 'anoclaw:session:handoff') return;
+    const iframe = this._iframe;
+    if (!iframe?.contentWindow || e.source !== iframe.contentWindow) return;
+
+    const sessionId = String(e.data.sessionId || '');
+    const prompt = String(e.data.prompt || '');
+    if (!sessionId || !prompt) {
+      iframe.contentWindow.postMessage({
+        type: 'anoclaw:session:handoff-result',
+        id: e.data.id,
+        ok: false,
+        error: 'sessionId and prompt are required',
+      }, '*');
+      return;
+    }
+
+    try {
+      const { App } = await import('../../app.js');
+      const app = App.getInstance();
+      if (!app.handoffToSession(sessionId, prompt)) {
+        throw new Error('The requested session is not available.');
+      }
+      if (this._disposed || !iframe.contentWindow) return;
+      iframe.contentWindow.postMessage({
+        type: 'anoclaw:session:handoff-result',
+        id: e.data.id,
+        ok: true,
+        sessionId,
+      }, '*');
+    } catch (err) {
+      if (this._disposed || !iframe.contentWindow) return;
+      iframe.contentWindow.postMessage({
+        type: 'anoclaw:session:handoff-result',
+        id: e.data.id,
+        ok: false,
+        error: (err as Error).message,
+      }, '*');
+    }
+  };
 
   private _onThemeChanged = (): void => {
     this._syncTheme();
@@ -130,8 +138,26 @@ export class PluginPageContainer implements Page {
     if (this._iframe) this._iframe.style.display = 'none';
   }
 
+  dispose(): void {
+    if (this._disposed) return;
+    this._disposed = true;
+    window.removeEventListener('theme-changed', this._onThemeChanged);
+    window.removeEventListener('locale-changed', this._onLocaleChanged);
+    window.removeEventListener('message', this._onDialogMessage);
+    window.removeEventListener('message', this._onSessionMessage);
+    if (this._iframe) {
+      this._iframe.srcdoc = '';
+      this._iframe.src = 'about:blank';
+      this._iframe.remove();
+      this._iframe = null;
+    }
+    this.container.remove();
+    this._loaded = false;
+    this._tokensInjected = false;
+  }
+
   private _createIframe(): void {
-    if (!this._htmlPath) return;
+    if (!this._htmlPath || this._disposed) return;
     this._iframe = document.createElement('iframe');
     this._iframe.className = 'plugin-iframe';
     this._iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-same-origin');

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   hasExternalContentChange,
+  isSaveSnapshotCurrent,
   workspaceModelUri,
   workspaceReadOnlyReason,
 } from '../WorkspaceIdeUtils.js';
@@ -22,5 +23,10 @@ describe('Workspace IDE safety helpers', () => {
   it('detects an external change that clears a file', () => {
     expect(hasExternalContentChange('', 'previous content')).toBe(true);
     expect(hasExternalContentChange('', '')).toBe(false);
+  });
+
+  it('keeps a tab dirty when the editor changes while an older save is in flight', () => {
+    expect(isSaveSnapshotCurrent(4, 5, 'sent', 'newer')).toBe(false);
+    expect(isSaveSnapshotCurrent(4, 4, 'sent', 'sent')).toBe(true);
   });
 });

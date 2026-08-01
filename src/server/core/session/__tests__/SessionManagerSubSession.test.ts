@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { SessionManager } from '../SessionManager.js';
 import { SessionStore } from '../SessionStore.js';
+import { MessageRole, type Message } from '../../../../shared/types/session.js';
 
 describe('SessionManager.createSubSession', () => {
   let tmpDir = '';
@@ -38,6 +39,32 @@ describe('SessionManager.createSubSession', () => {
       manager.createSubSession(parent.id, 'agent-child', 'Child'),
     ).rejects.toThrow(`Cannot create sub-session under archived parent '${parent.id}'`);
     expect(parent.subSessionIds).toEqual([]);
+  });
+
+  it('creates a fresh directory after an archived sub-session instead of reusing its transcript', async () => {
+    const parent = await manager.createMainSession('agent-main', 'Parent', path.join(tmpDir, 'workspace'));
+    const archived = await manager.createSubSession(parent.id, 'agent-child', 'First assignment');
+    const secret: Message = {
+      id: 'secret-message',
+      sessionId: archived.id,
+      role: MessageRole.User,
+      content: 'archived secret context',
+      tokenCount: 0,
+      compressed: false,
+      timestamp: new Date().toISOString(),
+    };
+    await manager.appendMessage(archived.id, secret);
+    await manager.archiveSession(archived.id);
+
+    const replacement = await manager.createSubSession(parent.id, 'agent-child', 'Second assignment');
+
+    expect(replacement.id).not.toBe(archived.id);
+    expect(replacement.id).toMatch(new RegExp(`^${archived.id}-[a-f0-9]{8}$`));
+    expect((await manager.getHistory(replacement.id)).map((message) => message.content))
+      .not.toContain('archived secret context');
+
+    const reused = await manager.createSubSession(parent.id, 'agent-child', 'Same active assignment');
+    expect(reused).toBe(replacement);
   });
 
   it('serializes creation with a concurrent parent workspace change', async () => {

@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { WorkspaceLease } from '../../../shared/types/coordination.js';
+import { canonicalizePath, resolveWorkspacePath } from '../workspace/WorkspacePathBoundary.js';
 
 export interface LeaseRequest {
   rootSessionId: string;
@@ -39,15 +40,22 @@ export class WorkspaceLeaseService {
   restore(leases: WorkspaceLease[]): void {
     for (const lease of leases) {
       if (Date.parse(lease.expiresAt) > Date.now()) {
-        this.leases.set(lease.id, { ...lease, scopes: [...lease.scopes] });
+        try {
+          const workspace = canonicalizePath(lease.workspace);
+          const scopes = normalizeScopesForWorkspace(workspace, lease.scopes);
+          this.leases.set(lease.id, { ...lease, workspace, scopes });
+        } catch {
+          // Invalid persisted leases are not restored across a trust boundary.
+        }
       }
     }
   }
 
   acquire(request: LeaseRequest): { lease?: WorkspaceLease; conflict?: LeaseConflict } {
     this.reapExpired();
-    const scopes = normalizeScopes(request.scopes);
-    const conflict = this.findConflict(request.rootSessionId, request.taskId, request.workspace, scopes);
+    const workspace = canonicalizePath(request.workspace);
+    const scopes = normalizeScopesForWorkspace(workspace, request.scopes);
+    const conflict = this.findConflict(request.rootSessionId, request.taskId, workspace, scopes);
     if (conflict) return { conflict: { requestedScopes: scopes, holder: conflict } };
 
     const now = new Date();
@@ -56,7 +64,7 @@ export class WorkspaceLeaseService {
       rootSessionId: request.rootSessionId,
       taskId: request.taskId,
       agentId: request.agentId,
-      workspace: path.resolve(request.workspace),
+      workspace,
       scopes,
       acquiredAt: now.toISOString(),
       expiresAt: new Date(now.getTime() + request.ttlMs).toISOString(),
@@ -104,14 +112,12 @@ export class WorkspaceLeaseService {
   }
 
   isPathCovered(lease: WorkspaceLease, candidate: string): boolean {
-    const rawRelative = path.relative(lease.workspace, path.resolve(candidate));
-    if (
-      rawRelative === '..'
-      || rawRelative.startsWith(`..${path.sep}`)
-      || path.isAbsolute(rawRelative)
-    ) return false;
-    const relative = normalizeScope(rawRelative || '.');
-    return lease.scopes.some((scope) => pathWithinScope(scope, relative));
+    try {
+      const relative = normalizeScope(resolveWorkspacePath(lease.workspace, candidate).relativePath);
+      return lease.scopes.some((scope) => pathWithinScope(scope, relative));
+    } catch {
+      return false;
+    }
   }
 
   findConflict(
@@ -122,10 +128,10 @@ export class WorkspaceLeaseService {
   ): WorkspaceLease | undefined {
     this.reapExpired();
     void rootSessionId;
-    const workspaceKey = normalizeCase(path.resolve(workspace));
+    const workspaceKey = normalizeCase(canonicalizePath(workspace));
     for (const lease of this.leases.values()) {
       if (lease.taskId === taskId) continue;
-      if (normalizeCase(path.resolve(lease.workspace)) !== workspaceKey) continue;
+      if (normalizeCase(canonicalizePath(lease.workspace)) !== workspaceKey) continue;
       if (lease.scopes.some((held) => scopes.some((wanted) => pathPrefixesOverlap(held, wanted)))) {
         return { ...lease, scopes: [...lease.scopes] };
       }
@@ -145,6 +151,14 @@ export function normalizeScopes(scopes: string[]): string[] {
   const normalized = [...new Set((scopes.length ? scopes : ['.']).map(normalizeScope))];
   if (normalized.includes('.')) return ['.'];
   return normalized.sort();
+}
+
+export function normalizeScopesForWorkspace(workspace: string, scopes: string[]): string[] {
+  const normalized = normalizeScopes(scopes);
+  if (normalized.includes('.')) return ['.'];
+  return normalizeScopes(normalized.map((scope) =>
+    normalizeScope(resolveWorkspacePath(workspace, scope).relativePath)
+  ));
 }
 
 export function normalizeScope(scope: string): string {

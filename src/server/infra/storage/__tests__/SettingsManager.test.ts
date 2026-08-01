@@ -13,6 +13,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { mkdirSync } from 'fs';
+import * as YAML from 'yaml';
 import { SettingsManager } from '../SettingsManager.js';
 
 const TMP_ROOT = path.resolve(process.cwd(), '.test-settings');
@@ -86,6 +87,44 @@ describe('SettingsManager', () => {
     await manager2.load();
 
     expect(manager2.get('port')).toBe(9999);
+  });
+
+  it('migrates legacy top-level LLM settings and removes exposed apiKey', async () => {
+    await fs.writeFile(path.join(configDir, 'settings.yaml'), [
+      'provider: openai-compatible',
+      'apiUrl: https://example.test/v1',
+      'apiKey: legacy-secret',
+      'model: legacy-model',
+      'contextWindow: 64000',
+      '',
+    ].join('\n'), 'utf-8');
+
+    await manager.load();
+
+    expect(manager.get('llm.apiKey')).toBe('legacy-secret');
+    expect(manager.get('apiKey')).toBe('legacy-secret');
+    expect(manager.get('llm.model')).toBe('legacy-model');
+    const persisted = YAML.parse(await fs.readFile(path.join(configDir, 'settings.yaml'), 'utf-8'));
+    expect(persisted).not.toHaveProperty('apiKey');
+    expect(persisted.llm).toMatchObject({
+      apiKey: 'legacy-secret',
+      apiUrl: 'https://example.test/v1',
+      model: 'legacy-model',
+      contextWindow: 64000,
+    });
+  });
+
+  it('serializes atomic saves and leaves no temporary files behind', async () => {
+    await manager.load();
+    await manager.set('ui.theme', 'light');
+    const first = manager.save();
+    await manager.set('ui.theme', 'dark');
+    const second = manager.save();
+    await Promise.all([first, second]);
+
+    const persisted = YAML.parse(await fs.readFile(path.join(configDir, 'settings.yaml'), 'utf-8'));
+    expect(persisted.ui.theme).toBe('dark');
+    expect((await fs.readdir(configDir)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
   });
 
   // -----------------------------------------------------------------------

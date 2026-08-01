@@ -77,7 +77,10 @@ export class RpcDispatcher {
       }
 
       case 'routes.register': {
-        const p = params as { pluginName: string; routes: Array<{ method: string; path: string; handler: string }> };
+        const p = params as {
+          pluginName: string;
+          routes: Array<{ method: string; path: string; handler: string; auth?: 'admin' | 'public' }>;
+        };
         ApiServer.getInstance().registerPluginRoutes(p.pluginName, p.routes);
         return { registered: p.routes.length };
       }
@@ -122,10 +125,10 @@ export class RpcDispatcher {
       case 'llm.chat': {
         const p = params as { pluginName: string; messages: PluginLLMMessage[]; options: PluginLLMOptions };
         const settings = SettingsManager.getInstance();
-        const model = p.options.model || settings.get<string>('model', 'deepseek-chat');
-        const apiUrl = settings.get<string>('apiUrl', 'https://api.deepseek.com');
-        const apiKey = settings.get<string>('apiKey', '');
-        const provider = settings.get<string>('provider', 'openai-compatible');
+        const model = p.options.model || settings.get<string>('llm.model', 'deepseek-chat');
+        const apiUrl = settings.get<string>('llm.apiUrl', 'https://api.deepseek.com');
+        const apiKey = settings.get<string>('llm.apiKey', '');
+        const provider = settings.get<string>('llm.provider', 'openai-compatible');
         const temperature = p.options.temperature ?? settings.get<number>('llm.temperature', 0.7);
         const maxTokens = p.options.maxTokens || settings.get<number>('llm.maxTokens', 4096);
 

@@ -10,7 +10,7 @@
       "rating": 4.5,
       "downloads": 0,
       "tags": ["mcp", "official"],
-      "installUrl": "https://github.com/AnoCod/AnoClaw-Solo",
+      "installUrl": "https://github.com/AnoCod/AnoClaw/tree/main/plugins/anoclaw-mcp",
       "category": "Integration"
     },
     {
@@ -23,7 +23,7 @@
       "rating": 4.3,
       "downloads": 0,
       "tags": ["meeting", "official"],
-      "installUrl": "https://github.com/AnoCod/AnoClaw-Solo",
+      "installUrl": "https://github.com/AnoCod/AnoClaw/tree/main/plugins/anoclaw-meeting",
       "category": "Collaboration"
     },
     {
@@ -36,7 +36,7 @@
       "rating": 4.0,
       "downloads": 0,
       "tags": ["gateway", "official"],
-      "installUrl": "https://github.com/AnoCod/AnoClaw-Solo",
+      "installUrl": "https://github.com/AnoCod/AnoClaw/tree/main/plugins/anoclaw-gateway",
       "category": "Integration"
     }
   ],

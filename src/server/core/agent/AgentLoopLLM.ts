@@ -19,7 +19,6 @@ import { extensionPoints } from '../plugin-host/ExtensionPoints.js';
 import { compactAndRebuildMessages } from '../context/index.js';
 import { TypedEventBus } from '../events/index.js';
 import type { SummarizerFn } from '../context/ContextCompressor.js';
-import { isCompactionSummaryMessage } from '../context/CompactionConstants.js';
 
 export interface LLMCallResult {
   assistantMessage: ApiMessage | null;
@@ -91,20 +90,29 @@ function sanitizeOrphanedMessages(messages: SanitizableMsg[]): SanitizableMsg[] 
  * Build the provider-visible conversation.
  *
  * The primary system prompt is supplied separately to provider.chat(). Other
- * system messages keep the historical filtering behavior, except compaction
- * summaries: those are mapped to a guarded user message so the model actually
- * receives the handoff.
+ * The primary system prompt is removed because it is supplied separately.
+ * Later internal notices (compaction, recovery, stall hints, AgentChannel)
+ * are mapped to user messages so providers actually receive them.
  */
-export function prepareMessagesForLLM(messages: readonly ApiMessage[]): ApiMessage[] {
+export function prepareMessagesForLLM(
+  messages: readonly ApiMessage[],
+  primarySystemPrompt?: string,
+): ApiMessage[] {
   const visible: ApiMessage[] = [];
+  let skippedPrimary = false;
   for (const message of messages) {
     if (message.role !== 'system') {
       visible.push(message);
       continue;
     }
-    if (isCompactionSummaryMessage(message)) {
-      visible.push({ ...message, role: 'user' });
+    if (
+      !skippedPrimary
+      && (primarySystemPrompt === undefined || message.content === primarySystemPrompt)
+    ) {
+      skippedPrimary = true;
+      continue;
     }
+    visible.push({ ...message, role: 'user' });
   }
   return sanitizeOrphanedMessages(visible) as ApiMessage[];
 }
@@ -191,7 +199,7 @@ export async function* callLLMWithRetry(
       const estimatedTotalTokens = estimatedInputTokens + tools.length * 50 + llmOptions.maxTokens;
       await APIScheduler.getInstance().acquireSlot(config.apiKey || '', estimatedTotalTokens);
 
-      const chatMessages = prepareMessagesForLLM(messages) as Array<{
+      const chatMessages = prepareMessagesForLLM(messages, systemPrompt) as Array<{
         role: string;
         content: string;
         tool_calls?: unknown[];

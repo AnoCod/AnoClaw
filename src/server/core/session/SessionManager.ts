@@ -435,17 +435,33 @@ export class SessionManager extends EventEmitter {
     const scopeSegment = options?.scopeId
       ? `-${options.scopeId.replace(/[^a-zA-Z0-9_.-]/g, '-').slice(0, 120)}`
       : '';
-    const sessionId = `${parentSessionId}${scopeSegment}-${agentId}`;
+    const baseSessionId = `${parentSessionId}${scopeSegment}-${agentId}`;
+    let sessionId = baseSessionId;
 
-    // Check for duplicates — only one active sub-session per agent per parent
-    const existing = this.sessions.get(sessionId);
-    if (existing && !existing.isArchived()) {
+    // Check for duplicates — only one active sub-session per agent, parent,
+    // and scope. A replacement created after an archived deterministic ID has
+    // a random suffix, so it must be discovered rather than recreated.
+    const existing = [...this.sessions.values()].find((candidate) =>
+      !candidate.isArchived()
+      && candidate.parentSessionId === parentSessionId
+      && candidate.agentId === agentId
+      && (candidate.id === baseSessionId || candidate.id.startsWith(`${baseSessionId}-`))
+    );
+    if (existing) {
       // Sync workspace in case parent was rebound after sub-session creation
       if (existing.workspace !== parent.workspace) {
-        await this._setWorkspaceUnlocked(sessionId, parent.workspace);
-        this.log.debug('Sub-session workspace synced from parent', { sid: sessionId, workspace: parent.workspace });
+        await this._setWorkspaceUnlocked(existing.id, parent.workspace);
+        this.log.debug('Sub-session workspace synced from parent', { sid: existing.id, workspace: parent.workspace });
       }
       return existing;
+    }
+
+    // Archived session directories are immutable history. Never reuse one for
+    // a new assignment, otherwise its transcript becomes the new task context.
+    if (this.sessions.has(baseSessionId)) {
+      do {
+        sessionId = `${baseSessionId}-${randomUUID().slice(0, 8)}`;
+      } while (this.sessions.has(sessionId));
     }
 
     const now = new Date().toISOString();
@@ -1441,8 +1457,12 @@ export class SessionManager extends EventEmitter {
 
   /** Generate a unique main session ID */
   private generateMainId(): string {
-    // Use a short readable ID: 4-char hex from UUID
-    return randomUUID().replace(/-/g, '').slice(0, 8);
+    // Keep the full 128-bit UUID entropy and explicitly avoid recovered in-memory IDs.
+    let candidate: string;
+    do {
+      candidate = randomUUID().replace(/-/g, '');
+    } while (this.sessions.has(candidate));
+    return candidate;
   }
 
   /**

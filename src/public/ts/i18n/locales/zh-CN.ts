@@ -42,6 +42,7 @@ export const zhCN = {
   'taskResolution.missingTools': '缺少工具：{tools}',
   'taskResolution.activate': '启用',
   'taskResolution.install': '安装',
+  'taskResolution.installSecurityConfirm': '安装“{name}”将以当前用户权限运行其本机代码。仅在你信任来源时继续。是否安装？',
   'taskResolution.reload': '重载',
   'taskResolution.inspect': '检查',
   'taskResolution.openPlugins': '打开插件',

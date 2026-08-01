@@ -4,7 +4,7 @@ import { prepareMessagesForLLM } from '../AgentLoopLLM.js';
 import type { ApiMessage } from '../AgentLoopHelpers.js';
 
 describe('prepareMessagesForLLM compaction handoff', () => {
-  it('maps only compaction summaries to user messages and preserves tool pairs', () => {
+  it('maps recovery notices and compaction summaries to user messages while preserving tool pairs', () => {
     const messages: ApiMessage[] = [
       { id: 'system', role: 'system', content: 'primary system prompt' },
       { id: 'internal-note', role: 'system', content: 'internal recovery note' },
@@ -41,12 +41,15 @@ describe('prepareMessagesForLLM compaction handoff', () => {
     const prepared = prepareMessagesForLLM(messages);
 
     expect(prepared.some(message => message.content === 'primary system prompt')).toBe(false);
-    expect(prepared.some(message => message.content === 'internal recovery note')).toBe(false);
     expect(prepared[0]).toMatchObject({
-      id: 'compact-summary-1',
+      id: 'internal-note',
       role: 'user',
     });
     expect(prepared[1]).toMatchObject({
+      id: 'compact-summary-1',
+      role: 'user',
+    });
+    expect(prepared[2]).toMatchObject({
       id: 'legacy-summary',
       role: 'user',
     });

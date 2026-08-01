@@ -14,11 +14,33 @@ class PageRegistry {
   register(page: Page): void {
     if (this._pages.has(page.name)) {
       ClientLogger.app.warn('Page already registered, overwriting', { page: page.name });
+      this.unregister(page.name);
     }
     this._pages.set(page.name, page);
     // Start hidden — removed from flow entirely so no layout interference
     page.container.style.display = 'none';
     page.container.setAttribute('data-page', page.name);
+  }
+
+  unregister(name: string): Page | undefined {
+    const page = this._pages.get(name);
+    if (!page) return undefined;
+
+    if (this._currentPage === name) {
+      try { page.onExit(); } catch (e) {
+        ClientLogger.app.error('Page onExit error', { page: name, error: (e as Error).message });
+      }
+      this._currentPage = null;
+    }
+
+    this._pages.delete(name);
+    try {
+      if (page.dispose) page.dispose();
+      else page.container.remove();
+    } catch (e) {
+      ClientLogger.app.error('Page dispose error', { page: name, error: (e as Error).message });
+    }
+    return page;
   }
 
   navigateTo(name: string): void {

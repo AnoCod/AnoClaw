@@ -27,6 +27,7 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
     temperature: 1.0,
     apiKey: '',
     apiUrl: 'https://api.deepseek.com',
+    contextWindow: 131072,
   },
 
   // Agent
@@ -103,6 +104,15 @@ export class SettingsManager extends EventEmitter {
   private _watcher: fs.FSWatcher | null = null;
   private _configPath: string;
   private _extPoints: { get(point: string): ((...args: unknown[]) => unknown) | null } | null = null;
+  private _saveQueue: Promise<void> = Promise.resolve();
+
+  private static readonly LEGACY_LLM_KEYS: Record<string, string> = {
+    provider: 'llm.provider',
+    model: 'llm.model',
+    apiUrl: 'llm.apiUrl',
+    apiKey: 'llm.apiKey',
+    contextWindow: 'llm.contextWindow',
+  };
 
   setExtensionPoints(extPoints: { get(point: string): ((...args: unknown[]) => unknown) | null }): void {
     this._extPoints = extPoints;
@@ -156,7 +166,9 @@ export class SettingsManager extends EventEmitter {
     if (raw && loadedPath) {
       this._configPath = loadedPath;
       const parsed = this.parseConfig(raw, loadedPath);
-      this._settings = this.deepMerge(DEFAULT_SETTINGS, parsed) as Record<string, unknown>;
+      const { settings: migrated, changed } = this.migrateLegacySettings(parsed);
+      this._settings = this.deepMerge(this.deepClone(DEFAULT_SETTINGS), migrated) as Record<string, unknown>;
+      if (changed) await this.save();
       LogManager.getInstance().logger('anochat.system').info('Settings loaded', { file: path.basename(loadedPath) });
     }
 
@@ -172,6 +184,7 @@ export class SettingsManager extends EventEmitter {
    * Example: get('llm.model'), get('agent.maxTurns', 0)
    */
   get<T>(key: string, defaultValue?: T): T {
+    key = this.canonicalKey(key);
     if (this._extPoints) {
       const override = this._extPoints.get('settingsStore');
       if (override) {
@@ -210,6 +223,7 @@ export class SettingsManager extends EventEmitter {
    * Set a setting value by dot-notation key (in memory only; call save() to persist).
    */
   async set(key: string, value: unknown): Promise<void> {
+    key = this.canonicalKey(key);
     const keys = key.split('.');
     const lastKey = keys.pop()!;
 
@@ -231,18 +245,32 @@ export class SettingsManager extends EventEmitter {
   // -----------------------------------------------------------------------
 
   async save(): Promise<void> {
-    const ext = path.extname(this._configPath).toLowerCase();
-    let content: string;
+    this._saveQueue = this._saveQueue.catch(() => undefined).then(async () => {
+      const ext = path.extname(this._configPath).toLowerCase();
+      const content = ext === '.json'
+        ? JSON.stringify(this._settings, null, 2)
+        : YAML.stringify(this._settings, { indent: 2, lineWidth: 0 });
+      const directory = path.dirname(this._configPath);
+      const tempPath = path.join(
+        directory,
+        `.${path.basename(this._configPath)}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`,
+      );
 
-    if (ext === '.json') {
-      content = JSON.stringify(this._settings, null, 2);
-    } else {
-      // YAML by default
-      content = YAML.stringify(this._settings, { indent: 2, lineWidth: 0 });
-    }
-
-    await fsp.mkdir(path.dirname(this._configPath), { recursive: true });
-    await fsp.writeFile(this._configPath, content, 'utf-8');
+      await fsp.mkdir(directory, { recursive: true });
+      try {
+        const handle = await fsp.open(tempPath, 'wx', 0o600);
+        try {
+          await handle.writeFile(content, 'utf-8');
+          await handle.sync();
+        } finally {
+          await handle.close();
+        }
+        await fsp.rename(tempPath, this._configPath);
+      } finally {
+        await fsp.rm(tempPath, { force: true }).catch(() => undefined);
+      }
+    });
+    return this._saveQueue;
   }
 
   // -----------------------------------------------------------------------
@@ -311,6 +339,32 @@ export class SettingsManager extends EventEmitter {
     return parsed as Record<string, unknown>;
   }
 
+  private canonicalKey(key: string): string {
+    return SettingsManager.LEGACY_LLM_KEYS[key] || key;
+  }
+
+  private migrateLegacySettings(source: Record<string, unknown>): {
+    settings: Record<string, unknown>;
+    changed: boolean;
+  } {
+    const settings = this.deepClone(source);
+    const llm = settings.llm && typeof settings.llm === 'object' && !Array.isArray(settings.llm)
+      ? { ...(settings.llm as Record<string, unknown>) }
+      : {};
+    let changed = false;
+
+    for (const [legacyKey, canonicalPath] of Object.entries(SettingsManager.LEGACY_LLM_KEYS)) {
+      if (!(legacyKey in settings)) continue;
+      const canonicalKey = canonicalPath.slice('llm.'.length);
+      if (llm[canonicalKey] === undefined) llm[canonicalKey] = settings[legacyKey];
+      delete settings[legacyKey];
+      changed = true;
+    }
+
+    if (Object.keys(llm).length > 0 || settings.llm !== undefined) settings.llm = llm;
+    return { settings, changed };
+  }
+
   // -----------------------------------------------------------------------
   // Utility
   // -----------------------------------------------------------------------
@@ -347,8 +401,8 @@ export class SettingsManager extends EventEmitter {
   // Accessors
   // -----------------------------------------------------------------------
 
-  /** Return a shallow copy of all settings (safe to read, mutating has no effect) */
+  /** Return a deep copy of all settings (safe to read, mutating has no effect) */
   get all(): Record<string, unknown> {
-    return { ...this._settings };
+    return this.deepClone(this._settings);
   }
 }

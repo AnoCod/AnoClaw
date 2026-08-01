@@ -6,11 +6,40 @@ import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import * as path from 'path';
 import * as zlib from 'zlib';
+import { createHash } from 'node:crypto';
 import micromatch from 'micromatch';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { SessionManager } from '../../core/session/SessionManager.js';
 import { requireWs, requireWsAny } from '../WsRequired.js';
 import type { SendJson, ReadBody } from '../RouteHelpers.js';
+import { atomicWriteFile } from '../../core/tools/builtin/FileUtils.js';
+
+async function fileSha256(filePath: string): Promise<string> {
+  const hash = createHash('sha256');
+  await new Promise<void>((resolve, reject) => {
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.once('error', reject);
+    stream.once('end', resolve);
+  });
+  return hash.digest('hex');
+}
+
+const workspaceWriteQueues = new Map<string, Promise<void>>();
+
+async function serializeWorkspaceWrite<T>(filePath: string, action: () => Promise<T>): Promise<T> {
+  const resolved = path.resolve(filePath);
+  const key = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  const previous = workspaceWriteQueues.get(key) || Promise.resolve();
+  const operation = previous.catch(() => undefined).then(action);
+  const tail = operation.then(() => undefined, () => undefined);
+  workspaceWriteQueues.set(key, tail);
+  try {
+    return await operation;
+  } finally {
+    if (workspaceWriteQueues.get(key) === tail) workspaceWriteQueues.delete(key);
+  }
+}
 
 async function mapWithConcurrency<T, R>(
   items: readonly T[],
@@ -283,22 +312,24 @@ function loadGitignore(workspaceRoot: string): string[] {
     const content = fs.readFileSync(gitignorePath, 'utf-8');
     return content.split('\n')
       .map(line => line.trim())
-      .filter(line => line && !line.startsWith('#') && !line.startsWith('!'));
+      .filter(line => line && !line.startsWith('#'));
   } catch {
     return [];
   }
 }
 
 /** Check if relative path matches root .gitignore patterns used by the file tree. */
-function isGitignored(relPath: string, isDir: boolean, patterns: string[]): boolean {
+export function isGitignored(relPath: string, isDir: boolean, patterns: string[]): boolean {
   const rel = relPath.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '');
   if (!rel) return false;
 
   const segments = rel.split('/').filter(Boolean);
   const matchOptions = { dot: true, nocase: process.platform === 'win32' };
 
+  let ignored = false;
   for (const rawPattern of patterns) {
-    const pattern = rawPattern.replace(/\\/g, '/').replace(/^\/+/, '');
+    const negated = rawPattern.startsWith('!');
+    const pattern = (negated ? rawPattern.slice(1) : rawPattern).replace(/\\/g, '/').replace(/^\/+/, '');
     const directoryOnly = pattern.endsWith('/');
     const pat = pattern.replace(/\/+$/, '');
     if (!pat) continue;
@@ -306,21 +337,21 @@ function isGitignored(relPath: string, isDir: boolean, patterns: string[]): bool
     if (!pat.includes('/')) {
       for (let i = 0; i < segments.length; i++) {
         if (!micromatch.isMatch(segments[i], pat, matchOptions)) continue;
-        if (!directoryOnly || i < segments.length - 1 || isDir) return true;
+        if (!directoryOnly || i < segments.length - 1 || isDir) ignored = !negated;
       }
       continue;
     }
 
     if (micromatch.isMatch(rel, pat, matchOptions)) {
-      if (!directoryOnly || isDir) return true;
+      if (!directoryOnly || isDir) ignored = !negated;
     }
 
     if (directoryOnly && micromatch.isMatch(rel, `${pat}/**`, matchOptions)) {
-      return true;
+      ignored = !negated;
     }
 
   }
-  return false;
+  return ignored;
 }
 
 // ---------------------------------------------------------------------------
@@ -481,6 +512,7 @@ export async function handleReadWorkspaceFile(
       truncated,
       language: langMap[ext] || 'text',
       modifiedAt: stat.mtime.toISOString(),
+      sha256: await fileSha256(absPath),
     });
   } catch (err) {
     sendWorkspaceError(err, res, sendJson, 'Read failed');
@@ -834,28 +866,54 @@ export async function handleWriteWorkspaceFile(
     const sessionId = String(body.sessionId || '');
     const filePath = String(body.path || '');
     const content = String(body.content || '');
+    const expectedSha256 = typeof body.expectedSha256 === 'string'
+      ? body.expectedSha256.trim().toLowerCase()
+      : undefined;
 
     if (!filePath) {
       sendJson(res, 400, { error: 'Bad Request', message: 'Missing "path"' });
       return;
     }
-
-    const absPath = resolveToAbs(filePath, sessionId);
-    const parentDir = path.dirname(absPath);
-
-    if (!fs.existsSync(parentDir)) {
-      fs.mkdirSync(parentDir, { recursive: true });
+    if (expectedSha256 !== undefined && !/^[a-f0-9]{64}$/.test(expectedSha256)) {
+      sendJson(res, 400, { error: 'Bad Request', message: 'expectedSha256 must be a SHA-256 hex digest' });
+      return;
     }
 
-    fs.writeFileSync(absPath, content, 'utf-8');
+    const absPath = resolveToAbs(filePath, sessionId);
+    const outcome = await serializeWorkspaceWrite(absPath, async () => {
+      if (expectedSha256 !== undefined) {
+        if (!fs.existsSync(absPath)) {
+          return { status: 409, body: { error: 'Conflict', message: 'File no longer exists on disk' } };
+        }
+        const currentSha256 = await fileSha256(absPath);
+        if (currentSha256 !== expectedSha256) {
+          const currentStat = fs.statSync(absPath);
+          return {
+            status: 409,
+            body: {
+              error: 'Conflict',
+              message: 'File changed on disk since it was opened',
+              currentSha256,
+              modifiedAt: currentStat.mtime.toISOString(),
+            },
+          };
+        }
+      }
 
-    const stat = fs.statSync(absPath);
-    sendJson(res, 200, {
-      path: filePath,
-      written: true,
-      size: stat.size,
-      modifiedAt: stat.mtime.toISOString(),
+      await atomicWriteFile(absPath, content, 'utf-8');
+      const stat = fs.statSync(absPath);
+      return {
+        status: 200,
+        body: {
+          path: filePath,
+          written: true,
+          size: stat.size,
+          modifiedAt: stat.mtime.toISOString(),
+          sha256: await fileSha256(absPath),
+        },
+      };
     });
+    sendJson(res, outcome.status, outcome.body);
   } catch (err) {
     sendWorkspaceError(err, res, sendJson, 'Write failed');
   }
@@ -866,7 +924,7 @@ export async function handleWriteWorkspaceFile(
 // ═══════════════════════════════════════════════════════════════════════
 
 /** Minimal ZIP entry info we extract from central directory. */
-interface ZipEntry {
+export interface ZipEntry {
   name: string;
   /** Byte offset of the local file header (where raw data begins). */
   offset: number;
@@ -877,6 +935,14 @@ interface ZipEntry {
   /** Compression method: 0 = stored (no compression), 8 = deflate. */
   method: number;
 }
+
+const MAX_OFFICE_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_OFFICE_ENTRY_BYTES = 20 * 1024 * 1024;
+const MAX_OFFICE_TOTAL_UNCOMPRESSED_BYTES = 100 * 1024 * 1024;
+const MAX_OFFICE_ZIP_ENTRIES = 3000;
+const MAX_OFFICE_COMPRESSION_RATIO = 1000;
+
+class OfficePreviewLimitError extends Error {}
 
 /**
  * Parse the central directory of a ZIP buffer.
@@ -903,12 +969,17 @@ function parseZipCD(buf: Buffer): Map<string, ZipEntry> {
   }
   if (eocdOff < 0) return entries;
 
+  const declaredEntryCount = buf.readUint16LE(eocdOff + 10);
+  if (declaredEntryCount > MAX_OFFICE_ZIP_ENTRIES) {
+    throw new OfficePreviewLimitError(`Office archive exceeds ${MAX_OFFICE_ZIP_ENTRIES} entries`);
+  }
   const stCdSize = buf.readUint32LE(eocdOff + 12);
   const stCdOff = buf.readUint32LE(eocdOff + 16);
-  if (stCdOff < 0 || stCdOff >= buf.length || stCdSize <= 0) return entries;
+  if (stCdOff < 0 || stCdOff >= buf.length || stCdSize <= 0 || stCdOff + stCdSize > buf.length) return entries;
 
   let pos = stCdOff;
-  const end = Math.min(stCdOff + stCdSize, buf.length);
+  const end = stCdOff + stCdSize;
+  let totalUncompressed = 0;
   while (pos + 46 <= end) {
     const sig = buf.readUint32LE(pos);
     if (sig !== 0x02014b50) break;
@@ -919,7 +990,21 @@ function parseZipCD(buf: Buffer): Map<string, ZipEntry> {
     const extraLen = buf.readUint16LE(pos + 30);
     const commentLen = buf.readUint16LE(pos + 32);
     const localOff = buf.readUint32LE(pos + 42);
+    if (pos + 46 + nameLen + extraLen + commentLen > end) return new Map();
     const name = buf.toString('utf-8', pos + 46, pos + 46 + nameLen).replace(/\\/g, '/');
+    if (entries.size >= MAX_OFFICE_ZIP_ENTRIES) {
+      throw new OfficePreviewLimitError(`Office archive exceeds ${MAX_OFFICE_ZIP_ENTRIES} entries`);
+    }
+    if (uncompSize > MAX_OFFICE_ENTRY_BYTES) {
+      throw new OfficePreviewLimitError(`Office archive entry is too large: ${name}`);
+    }
+    totalUncompressed += uncompSize;
+    if (totalUncompressed > MAX_OFFICE_TOTAL_UNCOMPRESSED_BYTES) {
+      throw new OfficePreviewLimitError('Office archive expands beyond the preview limit');
+    }
+    if (compSize > 0 && uncompSize / compSize > MAX_OFFICE_COMPRESSION_RATIO) {
+      throw new OfficePreviewLimitError(`Office archive compression ratio is unsafe: ${name}`);
+    }
     entries.set(name.toLowerCase(), { name, offset: localOff, compSize, uncompSize, method });
     pos += 46 + nameLen + extraLen + commentLen;
   }
@@ -949,9 +1034,48 @@ function readZipEntry(buf: Buffer, entry: ZipEntry): Buffer | null {
   const dataOff = pos + 30 + nameLen + extraLen;
   if (dataOff + entry.compSize > buf.length) return null;
   const raw = buf.subarray(dataOff, dataOff + entry.compSize);
-  if (entry.method === 0) return raw;
-  if (entry.method === 8) return zlib.inflateRawSync(raw);
+  if (entry.method === 0) {
+    return raw.length <= MAX_OFFICE_ENTRY_BYTES && raw.length === entry.uncompSize ? raw : null;
+  }
+  if (entry.method === 8) {
+    let output: Buffer;
+    try {
+      output = zlib.inflateRawSync(raw, { maxOutputLength: MAX_OFFICE_ENTRY_BYTES });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ERR_BUFFER_TOO_LARGE') {
+        throw new OfficePreviewLimitError(`Office archive entry expands beyond the preview limit: ${entry.name}`);
+      }
+      return null;
+    }
+    if (output.length > MAX_OFFICE_ENTRY_BYTES) return null;
+    if (output.length !== entry.uncompSize) return null;
+    return output;
+  }
   return null;
+}
+
+/** Validate ZIP metadata before any Office converter is allowed to decompress it. */
+export function validateOfficeArchiveBuffer(buf: Buffer): Map<string, ZipEntry> {
+  if (buf.length > MAX_OFFICE_FILE_BYTES) {
+    throw new OfficePreviewLimitError(`Office file exceeds ${MAX_OFFICE_FILE_BYTES} bytes`);
+  }
+  const entries = parseZipCD(buf);
+  if (entries.size === 0) throw new Error('Invalid or empty Office archive');
+  let actualUncompressedBytes = 0;
+  for (const entry of entries.values()) {
+    const content = readZipEntry(buf, entry);
+    if (content === null) {
+      throw new Error(`Office archive entry cannot be safely decompressed: ${entry.name}`);
+    }
+    actualUncompressedBytes += content.length;
+    if (actualUncompressedBytes > MAX_OFFICE_TOTAL_UNCOMPRESSED_BYTES) {
+      throw new OfficePreviewLimitError('Office archive expands beyond the preview limit');
+    }
+    if (entry.compSize > 0 && content.length / entry.compSize > MAX_OFFICE_COMPRESSION_RATIO) {
+      throw new OfficePreviewLimitError(`Office archive compression ratio is unsafe: ${entry.name}`);
+    }
+  }
+  return entries;
 }
 
 /**
@@ -1083,7 +1207,21 @@ export async function handleConvertOffice(
     }
 
     const ext = path.extname(absPath).toLowerCase();
-    const buf = fs.readFileSync(absPath);
+    if (ext === '.doc' || ext === '.xls' || ext === '.ppt') {
+      sendJson(res, 200, { type: 'text', content: 'Legacy Office format (.doc/.xls/.ppt). Save as .docx/.xlsx/.pptx for preview.' });
+      return;
+    }
+    const supportedArchiveExtensions = new Set(['.docx', '.xlsx', '.xlsm', '.pptx', '.pptm', '.odt', '.ods', '.odp']);
+    if (!supportedArchiveExtensions.has(ext)) {
+      sendJson(res, 400, { error: 'Bad Request', message: `Unsupported format: ${ext}` });
+      return;
+    }
+    const stat = await fsp.stat(absPath);
+    if (stat.size > MAX_OFFICE_FILE_BYTES) {
+      throw new OfficePreviewLimitError(`Office file exceeds ${MAX_OFFICE_FILE_BYTES} bytes`);
+    }
+    const buf = await fsp.readFile(absPath);
+    const entries = validateOfficeArchiveBuffer(buf);
 
     // ── .docx → mammoth ──
     if (ext === '.docx') {
@@ -1095,7 +1233,6 @@ export async function handleConvertOffice(
 
     // ── .xlsx / .xlsm → extract shared strings + sheet data ──
     if (ext === '.xlsx' || ext === '.xlsm') {
-      const entries = parseZipCD(buf);
       // Try shared strings first
       const ssEntry = entries.get('xl/sharedstrings.xml');
       let sharedStrings: string[] = [];
@@ -1139,7 +1276,6 @@ export async function handleConvertOffice(
 
     // ── .pptx / .ppt → extract slide text ──
     if (ext === '.pptx' || ext === '.pptm') {
-      const entries = parseZipCD(buf);
       const slideEntries = [...entries.values()]
         .filter(e => e.name.match(/^ppt\/slides\/slide\d+\.xml$/))
         .sort((a, b) => a.name.localeCompare(b.name));
@@ -1165,7 +1301,6 @@ export async function handleConvertOffice(
 
     // ── .odt / .ods / .odp (OpenDocument) — extract content.xml ──
     if (ext === '.odt' || ext === '.ods' || ext === '.odp') {
-      const entries = parseZipCD(buf);
       const contentEntry = entries.get('content.xml');
       if (contentEntry) {
         const raw = readZipEntry(buf, contentEntry);
@@ -1179,15 +1314,9 @@ export async function handleConvertOffice(
       return;
     }
 
-    // ── .doc (old format) → can't parse, suggest conversion ──
-    if (ext === '.doc' || ext === '.xls' || ext === '.ppt') {
-      sendJson(res, 200, { type: 'text', content: 'Legacy Office format (.doc/.xls/.ppt). Save as .docx/.xlsx/.pptx for preview.' });
-      return;
-    }
-
-    sendJson(res, 400, { error: 'Bad Request', message: `Unsupported format: ${ext}` });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    sendJson(res, 500, { error: 'Convert failed', message });
+    const status = err instanceof OfficePreviewLimitError ? 413 : 500;
+    sendJson(res, status, { error: 'Convert failed', message });
   }
 }

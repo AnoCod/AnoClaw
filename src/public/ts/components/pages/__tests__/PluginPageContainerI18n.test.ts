@@ -26,6 +26,7 @@ class FakePluginElement extends EventTarget {
   href = '';
   lang = '';
   parentElement: FakePluginElement | null = null;
+  removed = false;
   private readonly attributes = new Map<string, string>();
 
   constructor(readonly tagName: string) {
@@ -53,6 +54,10 @@ class FakePluginElement extends EventTarget {
 
   getAttribute(name: string): string | null {
     return this.attributes.get(name) ?? null;
+  }
+
+  remove(): void {
+    this.removed = true;
   }
 }
 
@@ -113,5 +118,27 @@ describe('PluginPageContainer locale propagation', () => {
       locale: 'en-US',
     }, '*');
     expect(iframe.contentDocument?.documentElement.lang).toBe('en-US');
+  });
+
+  it('removes global bridges and tears down its iframe when disposed', async () => {
+    const removeListener = vi.spyOn(window, 'removeEventListener');
+    const { PluginPageContainer } = await import('../PluginPageContainer.js');
+    const page = new PluginPageContainer({
+      id: 'temporary-plugin',
+      pluginName: 'temporary-plugin',
+      title: 'Temporary',
+      htmlPath: '/plugins/temporary-plugin/frontend/index.html',
+    });
+    page.onEnter();
+    const iframe = (page.container as unknown as FakePluginElement).children[0];
+
+    page.dispose();
+    page.dispose();
+
+    expect(removeListener).toHaveBeenCalledWith('theme-changed', expect.any(Function));
+    expect(removeListener).toHaveBeenCalledWith('locale-changed', expect.any(Function));
+    expect(removeListener.mock.calls.filter(([name]) => name === 'message')).toHaveLength(2);
+    expect(iframe.src).toBe('about:blank');
+    expect(iframe.removed).toBe(true);
   });
 });

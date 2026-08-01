@@ -13,6 +13,8 @@ import { WsServer } from './WsServer.js';
 import { SessionManager } from '../../core/session/SessionManager.js';
 import { WsMessageType } from '../../../shared/types/ws-protocol.js';
 
+const forwardingInstalled = new WeakSet<WsServer>();
+
 function resolveRootSessionId(sessionId: string): string {
   try {
     const sm = SessionManager.getInstance();
@@ -25,6 +27,7 @@ function resolveRootSessionId(sessionId: string): string {
 
 export function installWsForwarding(): void {
   const ws = WsServer.getInstance();
+  if (forwardingInstalled.has(ws)) return;
 
   // ═══════════════════════════════════════════════════════════════
   // Session lifecycle events
@@ -483,4 +486,5 @@ export function installWsForwarding(): void {
     }
   });
 
+  forwardingInstalled.add(ws);
 }

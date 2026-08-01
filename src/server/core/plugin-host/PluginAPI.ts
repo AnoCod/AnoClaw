@@ -89,6 +89,8 @@ export interface PluginRouteDef {
   method: string;
   path: string;
   handler: string;
+  /** Routes are administrator-only unless a plugin explicitly opts into a public webhook. */
+  auth?: 'admin' | 'public';
 }
 
 export interface PluginToolDefinition {

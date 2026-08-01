@@ -9,11 +9,15 @@ function internals(server: WsServer): {
   _connections: Map<unknown, unknown>;
   _seqCounter: number;
   _eventBuffers: Map<string, BufferedEntry[]>;
+  _heartbeatTimer: ReturnType<typeof setInterval> | null;
+  _bufferCleanupTimer: ReturnType<typeof setInterval> | null;
 } {
   return server as unknown as {
     _connections: Map<unknown, unknown>;
     _seqCounter: number;
     _eventBuffers: Map<string, BufferedEntry[]>;
+    _heartbeatTimer: ReturnType<typeof setInterval> | null;
+    _bufferCleanupTimer: ReturnType<typeof setInterval> | null;
   };
 }
 
@@ -66,6 +70,20 @@ describe('WsServer disconnected buffering', () => {
     expect(server.send('session-1', { type: 'status', content: 'ready' })).toBe(true);
     expect(first.send).toHaveBeenCalledOnce();
     expect(second.send).toHaveBeenCalledOnce();
+  });
+
+  it('restores maintenance timers after an in-process shutdown', async () => {
+    server.resume();
+    expect(internals(server)._heartbeatTimer).not.toBeNull();
+    expect(internals(server)._bufferCleanupTimer).not.toBeNull();
+    await server.shutdown();
+    expect(internals(server)._heartbeatTimer).toBeNull();
+    expect(internals(server)._bufferCleanupTimer).toBeNull();
+
+    server.resume();
+    expect(internals(server)._heartbeatTimer).not.toBeNull();
+    expect(internals(server)._bufferCleanupTimer).not.toBeNull();
+    await server.shutdown();
   });
 });
 

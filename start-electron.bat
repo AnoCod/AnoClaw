@@ -1,4 +1,6 @@
 @echo off
-cd /d F:\QoderSoft\AnoClaw
+setlocal
+cd /d "%~dp0"
 set ELECTRON_RUN_AS_NODE=
-start /MIN node_modules\.bin\electron.cmd .
+start "" /MIN "%~dp0node_modules\.bin\electron.cmd" .
+endlocal

@@ -290,11 +290,13 @@ describe('TokenCounter.breakdown — logical closure', () => {
   });
 
   it('freeSpace never goes below 0 when content overflows window', () => {
-    // 1.6M chars of repeated text (~8 chars/token) guarantees overflow of the 200K window
-    const hugeMessages = [msg('user', 'x'.repeat(2_000_000))];
-    const bd = TokenCounter.breakdown('prompt', [{ name: 't' }], 'skills', hugeMessages);
+    // A deliberately small window exercises the same overflow boundary without
+    // spending seconds tokenizing a multi-megabyte synthetic message.
+    const overflowingMessages = [msg('user', 'x'.repeat(2_000))];
+    const contextWindow = 32;
+    const bd = TokenCounter.breakdown('prompt', [{ name: 't' }], 'skills', overflowingMessages, contextWindow);
     expect(bd.freeSpace).toBeGreaterThanOrEqual(0);
-    expect(bd.total).toBeGreaterThan(DEFAULT_CONTEXT_WINDOW);
+    expect(bd.total).toBeGreaterThan(contextWindow);
     expect(bd.freeSpace).toBe(0);
   });
 

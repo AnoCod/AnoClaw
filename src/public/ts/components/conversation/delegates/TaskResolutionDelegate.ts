@@ -151,7 +151,8 @@ export class TaskResolutionDelegate {
       button.disabled = true;
       button.textContent = '...';
       try {
-        await runPluginAction(plugin);
+        const changed = await runPluginAction(plugin);
+        if (!changed) return;
         ToastManager.getInstance().success(t('taskResolution.actionDone'));
         window.dispatchEvent(new CustomEvent('anoclaw:plugins-changed', { detail: { pluginName: plugin.pluginName } }));
       } catch (err) {
@@ -167,23 +168,27 @@ export class TaskResolutionDelegate {
   }
 }
 
-async function runPluginAction(plugin: CapabilityPluginRecommendation): Promise<void> {
+async function runPluginAction(plugin: CapabilityPluginRecommendation): Promise<boolean> {
   if (plugin.action === 'activate' || plugin.action === 'reload') {
     const action = plugin.action === 'activate' ? 'activate' : 'reload';
     await postJson(plugin.activateRoute || '/api/v1/plugins/reload', { name: plugin.pluginName, action });
-    return;
+    return true;
   }
 
   if (plugin.action === 'install' && plugin.installUrl) {
+    if (!window.confirm(t('taskResolution.installSecurityConfirm', {
+      name: plugin.displayName || plugin.pluginName,
+    }))) return false;
     await postJson(plugin.installRoute || '/api/v1/plugins/install', {
       name: plugin.pluginName,
       url: plugin.installUrl,
     });
     await postJson('/api/v1/plugins/reload', { name: plugin.pluginName, action: 'activate' }).catch(() => {});
-    return;
+    return true;
   }
 
   window.location.hash = '#plugins';
+  return true;
 }
 
 async function postJson(url: string, body: Record<string, unknown>): Promise<void> {

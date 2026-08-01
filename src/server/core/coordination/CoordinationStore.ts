@@ -92,27 +92,36 @@ export class CoordinationStore {
 
   async readEvents(rootSessionId: string, afterRevision = 0): Promise<CoordinationEvent[]> {
     this.assertRootId(rootSessionId);
-    const dir = this.scopeDir(rootSessionId);
-    const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
-    const shards = entries
-      .filter((entry) => entry.isFile() && /^shard_\d{6}\.jsonl$/.test(entry.name))
-      .map((entry) => entry.name)
-      .sort();
-    const result: CoordinationEvent[] = [];
-    for (const shard of shards) {
-      const raw = await fsp.readFile(path.join(dir, shard), 'utf-8');
-      for (const line of raw.split(/\r?\n/)) {
-        if (!line.trim()) continue;
-        try {
-          const event = JSON.parse(line) as CoordinationEvent;
-          if (event.revision > afterRevision) result.push(event);
-        } catch {
-          // A crash may leave a partial trailing line. The last durable event
-          // and projection remain recoverable; diagnostics retain the shard.
+    return this.withLock(rootSessionId, async () => {
+      const dir = this.scopeDir(rootSessionId);
+      const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
+      const shards = entries
+        .filter((entry) => entry.isFile() && /^shard_\d{6}\.jsonl$/.test(entry.name))
+        .map((entry) => entry.name)
+        .sort();
+      if (shards.length > 0) {
+        const latestState = await this.inspectLatestShard(dir);
+        this.shardState.set(rootSessionId, latestState);
+      }
+      const result: CoordinationEvent[] = [];
+      for (const shard of shards) {
+        const raw = await fsp.readFile(path.join(dir, shard), 'utf-8');
+        const lines = raw.split(/\r?\n/);
+        for (let index = 0; index < lines.length; index += 1) {
+          const line = lines[index];
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line) as CoordinationEvent;
+            if (event.revision > afterRevision) result.push(event);
+          } catch (error) {
+            throw new Error(`Corrupt coordination event in ${shard} at line ${index + 1}`, {
+              cause: error,
+            });
+          }
         }
       }
-    }
-    return result.sort((a, b) => a.revision - b.revision);
+      return result.sort((a, b) => a.revision - b.revision);
+    });
   }
 
   async readSnapshot(rootSessionId: string): Promise<CoordinationSnapshot | null> {
@@ -166,7 +175,8 @@ export class CoordinationStore {
     const index = indexes.at(-1) ?? 0;
     const file = path.join(dir, shardName(index));
     try {
-      const raw = await fsp.readFile(file, 'utf-8');
+      const repaired = await this.repairTrailingRecord(file);
+      const raw = repaired.toString('utf-8');
       return {
         index,
         lines: raw.split(/\r?\n/).filter(Boolean).length,
@@ -174,6 +184,37 @@ export class CoordinationStore {
       };
     } catch {
       return { index, lines: 0, bytes: 0 };
+    }
+  }
+
+  private async repairTrailingRecord(file: string): Promise<Buffer> {
+    const raw = await fsp.readFile(file);
+    if (raw.length === 0 || raw[raw.length - 1] === 0x0a) return raw;
+
+    const lastNewline = raw.lastIndexOf(0x0a);
+    const tailOffset = lastNewline + 1;
+    const tail = raw.subarray(tailOffset);
+    try {
+      JSON.parse(tail.toString('utf-8'));
+      const handle = await fsp.open(file, 'a');
+      try {
+        await handle.writeFile('\n', 'utf-8');
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      return Buffer.concat([raw, Buffer.from('\n')]);
+    } catch {
+      const diagnostic = `${file}.corrupt-tail-${Date.now()}-${randomUUID()}.bin`;
+      await fsp.writeFile(diagnostic, tail);
+      const handle = await fsp.open(file, 'r+');
+      try {
+        await handle.truncate(tailOffset);
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      return raw.subarray(0, tailOffset);
     }
   }
 

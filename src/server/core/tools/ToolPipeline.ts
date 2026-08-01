@@ -28,6 +28,7 @@ import {
   normalizeScope,
   pathWithinScope,
 } from '../coordination/WorkspaceLeaseService.js';
+import { resolveWorkspacePath } from '../workspace/WorkspacePathBoundary.js';
 
 // ══════════════════════════════════════════════════════════════
 // Configuration constants
@@ -218,13 +219,13 @@ export class ToolPipeline {
           }
         }
       } else {
-        const workspace = path.resolve(ctx.workspace);
         for (const paramName of pathParams) {
           const raw = params[paramName];
           if (typeof raw !== 'string' || !raw) continue;
-          const absolute = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(workspace, raw);
-          const rawRelative = path.relative(workspace, absolute);
-          if (rawRelative === '..' || rawRelative.startsWith(`..${path.sep}`) || path.isAbsolute(rawRelative)) {
+          let rawRelative: string;
+          try {
+            rawRelative = resolveWorkspacePath(ctx.workspace, raw).relativePath;
+          } catch {
             return makeError(
               `Path "${raw}" resolves outside the coordination workspace.`,
               { toolCallId: '' },
@@ -297,29 +298,13 @@ export class ToolPipeline {
     if (ws) {
       const pathParams = tool.workspacePathParams();
       if (pathParams.length > 0) {
-        // Resolve workspace to a fully-qualified absolute path (adds drive
-        // letter on Windows so we compare apples-to-apples).
-        const workspaceAbs = path.resolve(ws);
-
         for (const paramName of pathParams) {
           const raw = params[paramName];
           if (typeof raw !== 'string' || raw.length === 0) continue;
 
-          // Resolve the same way tools do: absolute paths kept as-is,
-          // relative paths resolved against the workspace.
-          const resolved = path.isAbsolute(raw)
-            ? path.resolve(raw)
-            : path.resolve(workspaceAbs, raw);
-
-          const resolvedNorm = path.normalize(resolved);
-          const wsNorm = path.normalize(workspaceAbs);
-          const inside = process.platform === 'win32'
-            ? resolvedNorm.toLowerCase() === wsNorm.toLowerCase() ||
-              resolvedNorm.toLowerCase().startsWith(wsNorm.toLowerCase() + '\\')
-            : resolvedNorm === wsNorm ||
-              resolvedNorm.startsWith(wsNorm + path.sep);
-
-          if (!inside) {
+          try {
+            resolveWorkspacePath(ws, raw);
+          } catch {
             return makeError(
               `Path boundary violation: "${raw}" resolves outside the workspace.`,
               { toolCallId: '' },

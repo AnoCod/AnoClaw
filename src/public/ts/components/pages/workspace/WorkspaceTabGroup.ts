@@ -5,6 +5,7 @@ import { ToastManager } from '../../../ToastManager.js';
 import { onLocaleChange, t, type TranslationKey } from '../../../i18n/index.js';
 import {
   hasExternalContentChange,
+  isSaveSnapshotCurrent,
   workspaceModelUri,
   workspaceReadOnlyReason,
 } from './WorkspaceIdeUtils.js';
@@ -354,6 +355,10 @@ interface OpenTab {
   agentTrace?: AgentBrowserEvent[];
   tableRows?:string[][];
   originalContent?:string; // snapshot at open — for diff detection
+  diskSha256?:string;
+  pendingExternalSha256?:string;
+  editRevision?:number;
+  savePromise?:Promise<boolean>;
 }
 
 export class WorkspaceTabGroup {
@@ -867,6 +872,8 @@ export class WorkspaceTabGroup {
         viewState:null,
         originalContent: content,
         readOnlyReason: workspaceReadOnlyReason(data),
+        diskSha256: typeof data.sha256 === 'string' ? data.sha256 : undefined,
+        editRevision: 0,
       };
       this._tabs.push(tab); this._renderTabBtn(tab); this._activate(tab);
       if (fileType === 'code') this._revealEditorLocation(line, column);
@@ -1045,7 +1052,10 @@ export class WorkspaceTabGroup {
       });
       this._editor.onDidChangeModelContent(() => {
         const active = this._tabs.find(t => t.path===this._activePath);
-        if (active && !active.readOnlyReason && !active.isDirty) { active.isDirty = true; this._updateDirty(active); }
+        if (active && !active.readOnlyReason) {
+          active.editRevision = (active.editRevision || 0) + 1;
+          if (!active.isDirty) { active.isDirty = true; this._updateDirty(active); }
+        }
         this._scheduleDiagnostics(this._editor.getModel());
       });
       // Update status bar on cursor change
@@ -2378,14 +2388,46 @@ export class WorkspaceTabGroup {
       ToastManager.getInstance().error(tab.readOnlyReason);
       return false;
     }
+    if (tab.savePromise) {
+      const previousSucceeded = await tab.savePromise;
+      if (!previousSucceeded || !tab.isDirty) return previousSucceeded;
+    }
+    const operation = this._saveFileSnapshot(tab);
+    tab.savePromise = operation;
+    try {
+      return await operation;
+    } finally {
+      if (tab.savePromise === operation) tab.savePromise = undefined;
+    }
+  }
+
+  private async _saveFileSnapshot(tab: OpenTab): Promise<boolean> {
     try {
       const content = tab.model.getValue();
-      const resp = await fetch('/api/v1/workspace/write', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({sessionId:this._sessionId, path:tab.path, content}) });
+      const sentRevision = tab.editRevision || 0;
+      const resp = await fetch('/api/v1/workspace/write', {
+        method:'PUT',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          sessionId:this._sessionId,
+          path:tab.path,
+          content,
+          ...(tab.diskSha256 ? { expectedSha256: tab.diskSha256 } : {}),
+        }),
+      });
       if (!resp.ok) {
         throw new Error(await _responseError(resp, t('workspace.saveFailedStatus', { status: resp.status })));
       }
+      const result = await resp.json() as { sha256?: string };
+      if (result.sha256) tab.diskSha256 = result.sha256;
       tab.originalContent = content;
-      tab.isDirty = false; this._updateDirty(tab);
+      tab.isDirty = !isSaveSnapshotCurrent(
+        sentRevision,
+        tab.editRevision || 0,
+        content,
+        tab.model.getValue(),
+      );
+      this._updateDirty(tab);
       return true;
     } catch (err) {
       ToastManager.getInstance().error(
@@ -3028,6 +3070,7 @@ export class WorkspaceTabGroup {
         const diskContent = data.content || '';
         const editorContent = tab.model?.getValue() || '';
         if (hasExternalContentChange(diskContent, editorContent)) {
+          tab.pendingExternalSha256 = typeof data.sha256 === 'string' ? data.sha256 : undefined;
           this._showDiffBanner(tab, editorContent, diskContent);
           return; // Only show one banner at a time
         }
@@ -3118,6 +3161,8 @@ export class WorkspaceTabGroup {
     this._hideDiffBanner();
     tab.model.setValue(newContent);
     tab.originalContent = newContent;
+    tab.diskSha256 = tab.pendingExternalSha256 || tab.diskSha256;
+    tab.pendingExternalSha256 = undefined;
     tab.isDirty = false;
     this._updateDirty(tab);
     // Re-render active tab to restore normal editor view
@@ -3126,13 +3171,32 @@ export class WorkspaceTabGroup {
 
   private async _revertExternalChange(tab: OpenTab, originalContent: string): Promise<void> {
     this._hideDiffBanner();
-    // Write original content back to disk
+    // Revert only the exact external revision that was reviewed. If another
+    // writer changed the file again, preserve the editor buffer as dirty.
     try {
-      await fetch('/api/v1/workspace/write', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId:this._sessionId, path: tab.path, content: originalContent }) });
-    } catch { console.debug('WorkspaceTabGroup: undo write failed for', tab.path); }
-    tab.model.setValue(originalContent);
-    tab.originalContent = originalContent;
-    tab.isDirty = false;
+      const resp = await fetch('/api/v1/workspace/write', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId:this._sessionId,
+          path: tab.path,
+          content: originalContent,
+          ...(tab.pendingExternalSha256 ? { expectedSha256: tab.pendingExternalSha256 } : {}),
+        }),
+      });
+      if (!resp.ok) {
+        throw new Error(await _responseError(resp, t('workspace.saveFailedStatus', { status: resp.status })));
+      }
+      const result = await resp.json() as { sha256?: string };
+      tab.model.setValue(originalContent);
+      tab.originalContent = originalContent;
+      tab.diskSha256 = result.sha256 || tab.pendingExternalSha256 || tab.diskSha256;
+      tab.pendingExternalSha256 = undefined;
+      tab.isDirty = false;
+    } catch (err) {
+      tab.isDirty = true;
+      ToastManager.getInstance().error(err instanceof Error ? err.message : String(err));
+    }
     this._updateDirty(tab);
     if (tab.path === this._activePath) this._activate(tab);
   }

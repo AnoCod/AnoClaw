@@ -37,6 +37,8 @@ Infrastructure
 
 `main.ts` 会处理插件管理、静态资源和 `/ws`。其他 `/api/*` 通常委托给 `ApiServer`。
 
+两个端口都可在 `config/settings.yaml` 中通过 `port` 与 `apiPort` 修改。首次启动外部 API 时，如果尚无令牌，AnoClaw 会生成完整管理员令牌并以仅当前用户可读的方式写入可写配置目录下的 `config/api.json`；请求使用 `Authorization: Bearer <token>`。该文件属于本机密钥材料，不应提交、复制到 Issue/PR 或写入日志。
+
 ## Agent 执行流
 
 ```text

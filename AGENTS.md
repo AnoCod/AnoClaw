@@ -292,7 +292,7 @@ All hierarchy, swarm, and temporary SubAgent work uses the same durable task sta
 
 ### Plugin Architecture
 
-Plugins run in a Worker Thread, isolated from the main process. Communication via bidirectional MessageChannel RPC.
+Plugins run in a Worker Thread for fault and object isolation from the main thread. This is not a permission sandbox: plugin code retains the current OS user's Node.js filesystem, process, and network privileges. Communication with kernel objects uses bidirectional MessageChannel RPC.
 
 ```mermaid
 graph TB
@@ -408,7 +408,7 @@ When working with DeepSeek-based LLM providers:
 VSCode-style extension architecture. Plugins live in `plugins/<name>/` with `plugin.json` + `extension.js`.
 
 ```
-Plugins run in a Worker Thread, isolated from the main process.
+Plugins run in a Worker Thread for fault isolation, not as a security sandbox. Treat third-party plugin installation as local code execution with the current user's privileges.
 Main ↔ Worker communication: bidirectional MessageChannel RPC.
 
 Plugin Host lifecycle:

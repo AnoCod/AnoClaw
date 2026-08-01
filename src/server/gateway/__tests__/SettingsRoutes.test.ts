@@ -5,6 +5,10 @@ import * as path from 'node:path';
 import { ApiServer } from '../ApiServer.js';
 import type { RouteHandler } from '../RouteHandler.js';
 import { GetSettingsRoute } from '../routes/SettingsRoutes.js';
+import {
+  GetSettingsRoute as GetFullSettingsRoute,
+  PutSettingRoute,
+} from '../routes/SettingsFullRoute.js';
 import { SettingsManager } from '../../infra/storage/SettingsManager.js';
 
 describe('UI settings API routes', () => {
@@ -52,5 +56,40 @@ describe('UI settings API routes', () => {
       compactionThreshold: 70,
     });
     expect(settings.get<Record<string, unknown>>('ui')).toEqual(result.body);
+  });
+
+  it('recursively removes credentials from the full settings response', async () => {
+    (settings as unknown as { _settings: Record<string, unknown> })._settings = {
+      apiKey: 'legacy-secret',
+      llm: { apiKey: 'nested-secret', model: 'safe-model' },
+      gateway: {
+        botToken: 'gateway-secret',
+        clientSecret: 'client-secret',
+        webhookSecretHash: 'secret-hash',
+        enabled: true,
+      },
+    };
+    api.registerRoute(new GetFullSettingsRoute());
+
+    const result = await api.callInternal('GET', '/api/v1/settings');
+
+    expect(result.statusCode).toBe(200);
+    expect(JSON.stringify(result.body)).not.toContain('secret');
+    expect(result.body).toEqual({
+      llm: { model: 'safe-model' },
+      gateway: { enabled: true },
+    });
+  });
+
+  it('stores a legacy apiKey update canonically without echoing the secret', async () => {
+    (settings as unknown as { _settings: Record<string, unknown> })._settings = { llm: {} };
+    api.registerRoute(new PutSettingRoute());
+
+    const result = await api.callInternal('PUT', '/api/v1/settings/apiKey', { value: 'new-secret' });
+
+    expect(result.statusCode).toBe(200);
+    expect(result.body).toEqual({ key: 'apiKey', configured: true });
+    expect(settings.get('llm.apiKey')).toBe('new-secret');
+    expect(JSON.stringify(result.body)).not.toContain('new-secret');
   });
 });

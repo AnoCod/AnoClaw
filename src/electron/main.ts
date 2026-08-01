@@ -267,19 +267,31 @@ export async function createApp(electron: typeof import('electron')) {
   app.whenReady().then(async () => {
     try {
       const trustedUiToken = getTrustedUiToken();
+      let activeUiPort = DEFAULT_PORT;
       session.defaultSession.webRequest.onBeforeSendHeaders(
         {
           urls: [
-            `http://localhost:${DEFAULT_PORT}/api/*`,
-            `http://127.0.0.1:${DEFAULT_PORT}/api/*`,
+            'http://localhost/*',
+            'http://127.0.0.1/*',
           ],
         },
         (details, callback) => {
-          details.requestHeaders[TRUSTED_UI_HEADER] = trustedUiToken;
+          try {
+            const requestUrl = new URL(details.url);
+            const requestPort = Number(requestUrl.port || '80');
+            if (requestPort === activeUiPort && requestUrl.pathname.startsWith('/api/')) {
+              details.requestHeaders[TRUSTED_UI_HEADER] = trustedUiToken;
+            }
+          } catch { /* leave unrelated requests untouched */ }
           callback({ requestHeaders: details.requestHeaders });
         },
       );
-      await startServer();
+      const useServerPort = (runningServer: import('node:http').Server): void => {
+        const address = runningServer.address();
+        if (address && typeof address !== 'string') activeUiPort = address.port;
+        WindowManager.getInstance().setServerPort(activeUiPort);
+      };
+      useServerPort(await startServer());
 
       // Check if first-run setup is needed
       initSetup(BW, ipcMain);
@@ -290,7 +302,7 @@ export async function createApp(electron: typeof import('electron')) {
         await runSetupWizard();
         // Setup wizard saved agent config + settings — reload server to pick them up
         await shutdown();
-        await startServer();
+        useServerPort(await startServer());
       }
 
       WindowManager.getInstance().createWindow();

@@ -193,6 +193,7 @@ export interface Page {
   container: HTMLElement;
   onEnter(): void;
   onExit(): void;
+  dispose?(): void;
 }
 
 export interface AppSettings {

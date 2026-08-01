@@ -5,9 +5,11 @@
 
 import { randomBytes } from 'crypto';
 import * as fs from 'fs';
+import * as fsp from 'fs/promises';
 import * as path from 'path';
 import type { ApiToken, ApiPermission } from '../../shared/types/gateway.js';
 import { LogManager } from '../infra/logging/LogManager.js';
+import { writablePath } from '../infra/WritablePath.js';
 // Re-export for convenience (used by ApiServer)
 export type { ApiToken, ApiPermission } from '../../shared/types/gateway.js';
 
@@ -112,9 +114,10 @@ export function tokenCount(): number {
  *
  * If a config/api.json file exists, tokens are loaded from it.
  * Otherwise, a single default admin token is auto-generated for localhost use
- * (printed to stdout so the user can find it).
+ * (persisted to config/api.json so the local user can retrieve it).
  */
 export async function initAuthStore(configDir?: string): Promise<void> {
+  tokens.clear();
   // Try loading from config file
   const loaded = await loadTokensFromConfig(configDir);
   if (loaded && tokens.size > 0) {
@@ -137,8 +140,36 @@ export async function initAuthStore(configDir?: string): Promise<void> {
     'admin' as ApiPermission,
   ]);
 
+  const tokenPath = path.join(path.resolve(configDir || writablePath('config')), 'api.json');
+  await persistTokens(tokenPath);
   const masked = defaultToken.token.slice(0, 8) + '...';
-  LogManager.getInstance().logger('anochat.api').info('Default admin token generated', { token: masked });
+  LogManager.getInstance().logger('anochat.api').info('Default admin token generated and persisted', {
+    token: masked,
+    file: tokenPath,
+  });
+}
+
+async function persistTokens(filePath: string): Promise<void> {
+  const directory = path.dirname(filePath);
+  const tempPath = path.join(
+    directory,
+    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${randomBytes(4).toString('hex')}.tmp`,
+  );
+  const payload = JSON.stringify({ tokens: listTokens(false) }, null, 2) + '\n';
+  await fsp.mkdir(directory, { recursive: true });
+  try {
+    const handle = await fsp.open(tempPath, 'wx', 0o600);
+    try {
+      await handle.writeFile(payload, 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await fsp.rename(tempPath, filePath);
+    await fsp.chmod(filePath, 0o600).catch(() => undefined);
+  } finally {
+    await fsp.rm(tempPath, { force: true }).catch(() => undefined);
+  }
 }
 
 // ---------------------------------------------------------------------------

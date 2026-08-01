@@ -1,10 +1,9 @@
-// MessageWithdrawalManager — preview and execute message withdrawal with file rewinding.
+// MessageWithdrawalManager — preview and execute transcript-only message withdrawal.
 //
-// When a user withdraws a message containing destructive tool calls (Edit, Write, etc.),
-// this manager coordinates with FileHistoryTracker to rewind file changes and marks
-// the message as withdrawn in the session transcript.
+// Tool side effects are deliberately never guessed or rewound. A correct rollback
+// requires durable message-to-operation provenance, which the current transcript
+// does not record. Withdrawal therefore only marks the message as withdrawn.
 
-import { getFileHistoryTracker, clearFileHistoryTracker } from './FileHistoryTracker.js';
 import { SessionManager } from './SessionManager.js';
 import { SessionStore } from './SessionStore.js';
 import { createLogger } from '../logger.js';
@@ -19,9 +18,9 @@ export interface WithdrawalPreview {
   message: Message;
   /** Tool calls embedded in this message (if assistant message) */
   toolCalls: Array<{ name: string; id: string; irreversible: boolean }>;
-  /** Files that would be rewound to prior state */
+  /** Always empty: transcript withdrawal never rewinds files. */
   affectedFiles: string[];
-  /** Whether the withdrawal is safe (no irreversible tool calls) */
+  /** Whether the message has no tool side effects that require a warning. */
   safe: boolean;
   /** Warning message if unsafe */
   warning?: string;
@@ -76,27 +75,24 @@ export class MessageWithdrawalManager {
 
     const message = messages[idx];
     const toolCalls = this._extractToolCalls(message);
-    const affectedFiles = getFileHistoryTracker(sessionId).getTrackedFiles();
+    const affectedFiles: string[] = [];
 
-    const hasIrreversible = toolCalls.some((tc) => tc.irreversible);
-    const safe = !hasIrreversible;
+    const safe = toolCalls.length === 0;
 
     let warning: string | undefined;
-    if (hasIrreversible) {
+    if (toolCalls.length > 0) {
       const names = toolCalls
-        .filter((tc) => tc.irreversible)
         .map((tc) => tc.name)
         .join(', ');
-      warning = `This message contains irreversible tool calls: ${names}. ` +
-        'Withdrawing the message cannot undo their effects.';
+      warning = `This message contains tool calls: ${names}. ` +
+        'Withdrawing the transcript message does not undo tool, file, process, network, or memory effects.';
     }
 
     return { message, toolCalls, affectedFiles, safe, warning };
   }
 
   /**
-   * Withdraw a message and rewind file changes synchronously.
-   * Also marks the message as withdrawn in the session transcript.
+   * Withdraw a message from the transcript. Tool and file effects are untouched.
    */
   async withdrawMessage(
     sessionId: string,
@@ -105,24 +101,16 @@ export class MessageWithdrawalManager {
     const preview = await this.previewWithdrawal(sessionId, messageId);
     if (!preview) return { success: false, rewoundFiles: [], error: 'Message not found' };
 
-    const tracker = getFileHistoryTracker(sessionId);
-
-    // Rewind file changes
-    let rewoundFiles: string[] = [];
-    if (tracker.hasAnyChanges()) {
-      rewoundFiles = await tracker.rewindTo(sessionId, 0);
-    }
-
     // Mark message as withdrawn in transcript
     await this._markWithdrawn(sessionId, messageId);
 
     createLogger('anochat.system').info('Message withdrawn', {
       sid: sessionId,
       mid: messageId,
-      rewoundFiles: rewoundFiles.length,
+      rewoundFiles: 0,
     });
 
-    return { success: true, rewoundFiles };
+    return { success: true, rewoundFiles: [] };
   }
 
   /**
@@ -183,6 +171,6 @@ export class MessageWithdrawalManager {
       messageId,
       timestamp: new Date().toISOString(),
     } as JsonlEvent;
-    await store.persistEvent(sessionId, event).catch(() => {});
+    await store.persistEvent(sessionId, event);
   }
 }

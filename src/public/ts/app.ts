@@ -143,10 +143,8 @@ class App {
     this._agentVM.loadAgents().catch((e) => ClientLogger.app.error('Failed to load agents', { error: (e as Error).message }));
 
     // Load plugins + sync contributed pages into TitleBar PAGES dropdown
-    this._pluginVM.load().then(() => {
-      this._syncPluginPages();
-      this._pluginVM.on('pluginsChanged', () => this._syncPluginPages());
-    }).catch(() => {});
+    this._pluginVM.on('pluginsChanged', () => this._syncPluginPages(true));
+    this._pluginVM.load().catch(() => {});
 
     // Server restart detection: WS sends serverEpoch on connect. If changed, reload all state.
     const ws = this._sessionVM.getWSClient();
@@ -542,7 +540,7 @@ class App {
   }
 
   /** Sync plugin-contributed pages to TitleBar PAGES dropdown and PageRegistry. */
-  private _syncPluginPages(): void {
+  private _syncPluginPages(forceReload = false): void {
     const entries: Array<{ page: string; label: string }> = [];
     entries.push({ page: 'plugins', label: t('nav.section.plugins') });
 
@@ -556,14 +554,10 @@ class App {
     let removedCurrent = false;
     const kept = new Set<string>();
     for (const name of this._registeredPluginPages) {
-      if (!currentNames.has(name)) {
-        const old = pageRegistry.getPage(name);
-        if (old) {
-          const wasCurrent = pageRegistry.currentPage === name;
-          old.container.remove();
-          old.onExit();
-          if (wasCurrent) removedCurrent = true;
-        }
+      if (forceReload || !currentNames.has(name)) {
+        const wasCurrent = pageRegistry.currentPage === name;
+        pageRegistry.unregister(name);
+        if (wasCurrent) removedCurrent = true;
       } else {
         kept.add(name);
       }
@@ -581,6 +575,10 @@ class App {
 
     this._registeredPluginPages = this._pluginVM.pageContributions.map(c => c.id);
     this._titleBar.setPluginPages(entries);
+
+    if (removedCurrent && !pageRegistry.getPage(window.location.hash.slice(1))) {
+      this.navigateTo('workspace');
+    }
 
     // Re-check hash — may need to navigate to a newly available plugin page
     const hash = window.location.hash.slice(1);

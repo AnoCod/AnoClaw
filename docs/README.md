@@ -29,6 +29,7 @@
 | 插件开发 | [plugin-dev.md](plugin-dev.md) | 创建插件、热重载、工具、页面、路由、调试 |
 | 插件 API | [plugin-api.md](plugin-api.md) | `api.tools`、`api.llm`、`api.fs`、events、UI、扩展点 |
 | 插件 UI / 品牌设计 | [plugin-ui-guide.md](plugin-ui-guide.md) | iframe 页面、tokens、组件、设计预设、布局约束 |
+| GitHub 协作开发 | [github-development-workflow.md](github-development-workflow.md) | Issue、分支、提交、PR、审查、合并、发布与仓库保护 |
 | 排障 | [troubleshooting.md](troubleshooting.md) | 启动无响应、插件不加载、工具失效、页面空白、构建问题 |
 | docs 维护规则 | [agent-docs.md](agent-docs.md) | agent 何时读取、何时维护、如何不污染知识库 |
 | 品牌设计预设 | `design-md/<brand>/DESIGN.md` | 按品牌风格设计 UI，例如 Apple、Stripe、Linear、Notion |

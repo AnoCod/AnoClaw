@@ -1,0 +1,67 @@
+name: 工程任务
+description: 跟踪重构、测试、构建、文档、依赖或技术债
+title: "chore: "
+body:
+  - type: input
+    id: objective
+    attributes:
+      label: 目标
+      description: 用一句话描述任务完成后产生的工程结果。
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 背景与证据
+      description: 提供源码、测试、运行证据或相关 Issue/PR；不要只写主观判断。
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 范围
+      placeholder: |
+        范围内：
+        - ...
+
+        范围外：
+        - ...
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: 验证计划
+      description: 写出计划运行的聚焦测试、构建、打包或人工检查。
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 依赖与阻塞
+      description: 列出前置 Issue、外部决策、负责人或写“无”。
+  - type: textarea
+    id: risk
+    attributes:
+      label: 风险与回滚
+      description: 说明数据、兼容性、权限、性能、发布影响和恢复路径。
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交确认
+      options:
+        - label: 任务具有可验证的完成条件。
+          required: true
+        - label: 我已检查是否能合并到现有 Issue，避免重复工作项。
+          required: true
+        - label: 内容不包含密钥、用户数据或其他私人信息。
+          required: true

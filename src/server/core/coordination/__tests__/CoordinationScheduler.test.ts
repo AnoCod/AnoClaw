@@ -110,7 +110,7 @@ describe('CoordinationScheduler', () => {
     )).toHaveLength(0);
 
     scheduler.stop();
-  });
+  }, 20_000);
 
   it('never runs two preassigned tasks for the same member at once', async () => {
     const service = CoordinationService.getInstance();

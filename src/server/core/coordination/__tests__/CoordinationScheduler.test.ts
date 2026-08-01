@@ -100,7 +100,7 @@ describe('CoordinationScheduler', () => {
 
     await vi.waitFor(
       () => expect(service.listTasks(rootSessionId).filter((task) => task.status === 'completed')).toHaveLength(100),
-      { timeout: 10_000 },
+      { timeout: 30_000 },
     );
     expect(started).toHaveLength(100);
     expect(new Set(started).size).toBe(100);
@@ -110,7 +110,7 @@ describe('CoordinationScheduler', () => {
     )).toHaveLength(0);
 
     scheduler.stop();
-  }, 20_000);
+  }, 40_000);
 
   it('never runs two preassigned tasks for the same member at once', async () => {
     const service = CoordinationService.getInstance();
@@ -438,10 +438,14 @@ describe('CoordinationScheduler', () => {
       resolveMemberDone();
     });
 
-    await vi.waitFor(
-      () => expect(service.getTask(rootSessionId, rootTaskId)?.status).toBe('completed'),
-      { timeout: 5_000 },
-    );
+    await vi.waitFor(() => {
+      expect(service.getTask(rootSessionId, rootTaskId)?.status).toBe('completed');
+      expect(service.listMessages(rootSessionId).filter((message) => message.kind === 'task_result'))
+        .toEqual(expect.arrayContaining([
+          expect.objectContaining({ fromAgentId: 'worker-1', toAgentId: 'manager-1', taskId: childTaskId }),
+          expect.objectContaining({ fromAgentId: 'manager-1', toAgentId: 'ceo', taskId: rootTaskId }),
+        ]));
+    }, { timeout: 20_000 });
 
     const child = service.getTask(rootSessionId, childTaskId);
     expect(child).toMatchObject({

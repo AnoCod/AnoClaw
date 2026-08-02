@@ -56,6 +56,10 @@ describe('BrowserAgentTool', () => {
     expect(script).toContain('interactive');
     expect(script).toContain('forms');
     expect(script).toContain('scroll');
+    expect(script).toContain("type === 'password'");
+    expect(script).toContain("text: sensitive ? '' : clean(safeText");
+    expect(script).toContain('textPreview: safeText(scope, 1500)');
+    expect(script).toContain('if (isSensitiveControl(control)) control.remove()');
   });
 
   it('builds a text finder script with escaped query and bounded output', () => {
@@ -65,6 +69,9 @@ describe('BrowserAgentTool', () => {
     expect(script).toContain('const maxItems = 100');
     expect(script).toContain('matches');
     expect(script).toContain('selectorFor');
+    expect(script).toContain('isSensitiveControl(el)');
+    expect(script).toContain("const value = sensitive ? '' : el.value");
+    expect(script).toContain("sensitive ? '' : safeText(el, 300)");
   });
 
   it('normalizes browser wait durations to the declared bounded range', () => {

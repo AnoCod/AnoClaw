@@ -513,74 +513,95 @@ export class WorkspaceFileTree {
   }
 
   private async _createFile(parentPath:string): Promise<void> {
+    const sessionId = this._sessionId;
     const name = await this._prompt(t('workspace.fileNamePrompt'), 'new-file.txt'); if (!name) return;
+    if (!sessionId || this._sessionId !== sessionId) return;
     try {
-      const resp = await fetch('/api/v1/workspace/create-file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,path:parentPath,name})});
+      const resp = await fetch('/api/v1/workspace/create-file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,path:parentPath,name})});
       if (!resp.ok) throw new Error(await this._responseError(resp, t('workspace.createFileFailed')));
-      await this.refreshDirectory(parentPath);
-    } catch (err) { this._showMutationError(err, t('workspace.createFileFailed')); }
+      if (this._sessionId === sessionId) await this.refreshDirectory(parentPath);
+    } catch (err) { if (this._sessionId === sessionId) this._showMutationError(err, t('workspace.createFileFailed')); }
   }
   private async _createFolder(parentPath:string): Promise<void> {
+    const sessionId = this._sessionId;
     const name = await this._prompt(t('workspace.folderNamePrompt'), 'new-folder'); if (!name) return;
+    if (!sessionId || this._sessionId !== sessionId) return;
     try {
-      const resp = await fetch('/api/v1/workspace/create-dir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,path:parentPath,name})});
+      const resp = await fetch('/api/v1/workspace/create-dir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,path:parentPath,name})});
       if (!resp.ok) throw new Error(await this._responseError(resp, t('workspace.createFolderFailed')));
-      await this.refreshDirectory(parentPath);
-    } catch (err) { this._showMutationError(err, t('workspace.createFolderFailed')); }
+      if (this._sessionId === sessionId) await this.refreshDirectory(parentPath);
+    } catch (err) { if (this._sessionId === sessionId) this._showMutationError(err, t('workspace.createFolderFailed')); }
   }
   private async _rename(node:FileNode): Promise<void> {
+    const sessionId = this._sessionId;
     const newName = await this._prompt(t('workspace.newNamePrompt'), node.name); if (!newName||newName===node.name) return;
+    if (!sessionId || this._sessionId !== sessionId) return;
     try {
-      const resp = await fetch('/api/v1/workspace/rename',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,path:node.path,newName})});
+      const resp = await fetch('/api/v1/workspace/rename',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,path:node.path,newName})});
       if (!resp.ok) throw new Error(await this._responseError(resp, t('workspace.renameFailed')));
       const payload = await resp.json() as { newPath?: string };
       const newPath = payload.newPath || _joinTreePath(node.path.substring(0,node.path.lastIndexOf('/'))||'/', newName);
-      this.onPathRenamed?.(node.path, newPath);
       const parentPath = node.path.substring(0,node.path.lastIndexOf('/'))||'/';
-      await this.refreshDirectory(parentPath);
-    } catch (err) { this._showMutationError(err, t('workspace.renameFailed')); }
+      if (this._sessionId === sessionId) {
+        this.onPathRenamed?.(node.path, newPath);
+        await this.refreshDirectory(parentPath);
+      }
+    } catch (err) { if (this._sessionId === sessionId) this._showMutationError(err, t('workspace.renameFailed')); }
   }
   private async _delete(node:FileNode): Promise<void> {
     await this._deleteByName(node.path, node.name);
   }
 
   private async _deleteByName(filePath: string, name: string): Promise<void> {
+    const sessionId = this._sessionId;
     const confirmed = await this._confirm(t('workspace.deleteConfirm', { name })); if (!confirmed) return;
+    if (!sessionId || this._sessionId !== sessionId) return;
     if (this.beforePathDelete && !await this.beforePathDelete(filePath)) return;
+    if (this._sessionId !== sessionId) return;
     try {
-      const resp = await fetch(`/api/v1/workspace/file?path=${encodeURIComponent(filePath)}&sessionId=${encodeURIComponent(this._sessionId)}`,{method:'DELETE'});
+      const resp = await fetch(`/api/v1/workspace/file?path=${encodeURIComponent(filePath)}&sessionId=${encodeURIComponent(sessionId)}`,{method:'DELETE'});
       if (!resp.ok) throw new Error(await this._responseError(resp, t('workspace.deleteFailed')));
-      this.onPathDeleted?.(filePath);
       const parentPath = filePath.substring(0,filePath.lastIndexOf('/'))||'/';
-      await this.refreshDirectory(parentPath);
-      if (this._selectedPath === filePath) this._selectedPath = '';
-    } catch (err) { this._showMutationError(err, t('workspace.deleteFailed')); }
+      if (this._sessionId === sessionId) {
+        this.onPathDeleted?.(filePath);
+        await this.refreshDirectory(parentPath);
+        if (this._selectedPath === filePath) this._selectedPath = '';
+      }
+    } catch (err) { if (this._sessionId === sessionId) this._showMutationError(err, t('workspace.deleteFailed')); }
   }
 
   private async _renameByPath(filePath: string): Promise<void> {
+    const sessionId = this._sessionId;
     const name = filePath.split('/').pop() || '';
     const newName = await this._prompt(t('workspace.newNamePrompt'), name); if (!newName||newName===name) return;
+    if (!sessionId || this._sessionId !== sessionId) return;
     try {
-      const resp = await fetch('/api/v1/workspace/rename',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,path:filePath,newName})});
+      const resp = await fetch('/api/v1/workspace/rename',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,path:filePath,newName})});
       if (!resp.ok) throw new Error(await this._responseError(resp, t('workspace.renameFailed')));
       const payload = await resp.json() as { newPath?: string };
       const parentPath = filePath.substring(0,filePath.lastIndexOf('/'))||'/';
       const nextPath = payload.newPath || _joinTreePath(parentPath, newName);
-      this.onPathRenamed?.(filePath, nextPath);
-      if (this._selectedPath === filePath) this._selectedPath = nextPath;
-      await this.refreshDirectory(parentPath);
-    } catch (err) { this._showMutationError(err, t('workspace.renameFailed')); }
+      if (this._sessionId === sessionId) {
+        this.onPathRenamed?.(filePath, nextPath);
+        if (this._selectedPath === filePath) this._selectedPath = nextPath;
+        await this.refreshDirectory(parentPath);
+      }
+    } catch (err) { if (this._sessionId === sessionId) this._showMutationError(err, t('workspace.renameFailed')); }
   }
 
   private async _moveFile(srcPath: string, destDir: string): Promise<void> {
+    const sessionId = this._sessionId;
+    if (!sessionId) return;
     try {
-      const resp = await fetch('/api/v1/workspace/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,source:srcPath,destDir})});
+      const resp = await fetch('/api/v1/workspace/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,source:srcPath,destDir})});
       if (!resp.ok) throw new Error(await this._responseError(resp, t('workspace.moveFailed')));
       const payload = await resp.json() as { destPath?: string };
       const nextPath = payload.destPath || _joinTreePath(destDir, srcPath.split('/').pop() || '');
-      this.onPathRenamed?.(srcPath, nextPath);
-      this.refreshAll();
-    } catch (err) { this._showMutationError(err, t('workspace.moveFailed')); }
+      if (this._sessionId === sessionId) {
+        this.onPathRenamed?.(srcPath, nextPath);
+        this.refreshAll();
+      }
+    } catch (err) { if (this._sessionId === sessionId) this._showMutationError(err, t('workspace.moveFailed')); }
   }
 
   private async _responseError(resp: Response, fallback: string): Promise<string> {

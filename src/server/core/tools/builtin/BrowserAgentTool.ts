@@ -56,7 +56,7 @@ async function getOrCreateViewId(sessionId: string, url?: string): Promise<strin
   const existing = _viewBySession.get(sessionId);
   if (existing && bvm.get(existing)) return existing;
 
-  const viewId = bvm.create(url || 'about:blank');
+  const viewId = bvm.create(url || 'about:blank', { sessionId, ownerKind: 'agent' });
   _viewBySession.set(sessionId, viewId);
   return viewId;
 }
@@ -165,17 +165,42 @@ export function buildDomSnapshotScript(selector?: string, maxItems = 80): string
       if (/^h[1-6]$/.test(tag)) return 'heading';
       return tag;
     }
+    function isSensitiveControl(el) {
+      if (!el || !el.tagName) return false;
+      const type = String(el.getAttribute('type') || '').toLowerCase();
+      if (type === 'password' || type === 'hidden') return true;
+      const identity = [el.id, el.getAttribute('name'), el.getAttribute('autocomplete'), el.getAttribute('aria-label'), el.getAttribute('placeholder')]
+        .filter(Boolean).join(' ').toLowerCase();
+      return /(pass(word|code)?|secret|token|api[ _-]?key|access[ _-]?key|auth|credential|private[ _-]?key)/i.test(identity);
+    }
+    function safeText(root, max) {
+      if (!root || !root.cloneNode) return '';
+      if (isSensitiveControl(root)) return '';
+      const clone = root.cloneNode(true);
+      const controls = [];
+      if (clone.matches && clone.matches('input,textarea,select')) controls.push(clone);
+      if (clone.querySelectorAll) controls.push(...clone.querySelectorAll('input,textarea,select'));
+      for (const control of controls) {
+        if (isSensitiveControl(control)) control.remove();
+        else {
+          control.removeAttribute('value');
+          if (String(control.tagName || '').toLowerCase() === 'textarea') control.textContent = '';
+        }
+      }
+      return clean(clone.innerText || clone.textContent || '', max);
+    }
     function summary(el) {
       const rect = el.getBoundingClientRect();
+      const sensitive = isSensitiveControl(el);
       return {
         selector: selectorFor(el),
         tag: el.tagName.toLowerCase(),
         role: roleFor(el),
-        text: clean(el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || '', 180),
+        text: sensitive ? '' : clean(safeText(el, 180) || el.value || el.getAttribute('aria-label') || '', 180),
         href: el.href || undefined,
         name: el.getAttribute('name') || undefined,
         placeholder: el.getAttribute('placeholder') || undefined,
-        value: (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') ? String(el.value || '').slice(0, 120) : undefined,
+        value: !sensitive && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') ? String(el.value || '').slice(0, 120) : undefined,
         visible: visible(el),
         rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
       };
@@ -188,7 +213,7 @@ export function buildDomSnapshotScript(selector?: string, maxItems = 80): string
       .filter(visible).slice(0, maxItems).map(summary);
     const forms = Array.from(scope.querySelectorAll('form')).slice(0, Math.min(20, maxItems)).map(form => ({
       selector: selectorFor(form),
-      text: clean(form.innerText || '', 220),
+      text: safeText(form, 220),
       controls: Array.from(form.querySelectorAll('input,textarea,select,button')).filter(visible).slice(0, 30).map(summary),
     }));
 
@@ -209,7 +234,7 @@ export function buildDomSnapshotScript(selector?: string, maxItems = 80): string
         inputs: scope.querySelectorAll('input,textarea,select').length,
         forms: scope.querySelectorAll('form').length,
       },
-      textPreview: clean(scope.innerText || scope.textContent || '', 1500),
+      textPreview: safeText(scope, 1500),
       headings,
       links,
       interactive,
@@ -250,13 +275,38 @@ export function buildFindElementsScript(query: string, maxItems = 30): string {
       }
       return parts.join(' > ');
     }
+    function isSensitiveControl(el) {
+      if (!el || !el.tagName) return false;
+      const type = String(el.getAttribute('type') || '').toLowerCase();
+      if (type === 'password' || type === 'hidden') return true;
+      const identity = [el.id, el.getAttribute('name'), el.getAttribute('autocomplete'), el.getAttribute('aria-label'), el.getAttribute('placeholder')]
+        .filter(Boolean).join(' ').toLowerCase();
+      return /(pass(word|code)?|secret|token|api[ _-]?key|access[ _-]?key|auth|credential|private[ _-]?key)/i.test(identity);
+    }
+    function safeText(root, max) {
+      if (!root || !root.cloneNode) return '';
+      if (isSensitiveControl(root)) return '';
+      const clone = root.cloneNode(true);
+      const controls = [];
+      if (clone.matches && clone.matches('input,textarea,select')) controls.push(clone);
+      if (clone.querySelectorAll) controls.push(...clone.querySelectorAll('input,textarea,select'));
+      for (const control of controls) {
+        if (isSensitiveControl(control)) control.remove();
+        else {
+          control.removeAttribute('value');
+          if (String(control.tagName || '').toLowerCase() === 'textarea') control.textContent = '';
+        }
+      }
+      return clean(clone.innerText || clone.textContent || '', max);
+    }
     const candidates = Array.from(document.querySelectorAll('a,button,input,textarea,select,[role],[aria-label],[placeholder],[title],h1,h2,h3,p,span,div'))
       .filter(visible)
       .map(el => {
+        const sensitive = isSensitiveControl(el);
+        const value = sensitive ? '' : el.value;
         const haystack = clean([
-          el.innerText,
-          el.textContent,
-          el.value,
+          sensitive ? '' : safeText(el, 300),
+          value,
           el.getAttribute('aria-label'),
           el.getAttribute('placeholder'),
           el.getAttribute('title'),
@@ -298,7 +348,7 @@ async function emitBrowserEvent(
       phase,
       url: (params.url as string) || bvm.getUrl?.(viewId) || undefined,
       selector: params.selector as string | undefined,
-      valuePreview: previewValue(params.value),
+      valuePreview: action === 'fill' ? undefined : previewValue(params.value),
       timestamp: Date.now(),
       ...extra,
     });
@@ -319,7 +369,7 @@ export class BrowserAgentTool extends Tool {
 - The browser tab is visible in the Workspace page, and the user can see what you do.
 - Browser actions automatically open the Workspace page and show an action trace above the page.
 - **navigate**: On the FIRST call for this session, a browser tab is created automatically. Subsequent calls reuse the same session tab.
-- **list_tabs**: Shows all open browser tabs with IDs.
+- **list_tabs**: Shows the Agent-controlled browser tabs for this session.
 - **close_tabs**: Close tabs by index from list_tabs.
 
 ## Actions
@@ -391,7 +441,7 @@ export class BrowserAgentTool extends Tool {
     const bvm = await getBVM();
 
     if (action === 'list_tabs') {
-      const entries = bvm.allEntries();
+      const entries = bvm.allEntries(sessionId, 'agent');
       if (!entries.length) return 'No open browser pages.';
       return entries.map((e: any, i: number) => `[${i}] ${e.title || '(no title)'} - ${e.url}`).join('\n');
     }
@@ -400,11 +450,11 @@ export class BrowserAgentTool extends Tool {
       const raw = (p.value as string) || '';
       const indices = raw.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
       if (!indices.length) throw new Error('value required: comma-separated tab indices from list_tabs (e.g. "0,2,4")');
-      const entries = bvm.allEntries();
+      const entries = bvm.allEntries(sessionId, 'agent');
       let closed = 0;
       for (const idx of indices) {
         if (idx >= 0 && idx < entries.length) {
-          if (bvm.destroy(entries[idx].id)) {
+          if (bvm.isOwnedBySession(entries[idx].id, sessionId, 'agent') && bvm.destroy(entries[idx].id)) {
             for (const [sid, viewId] of _viewBySession.entries()) {
               if (viewId === entries[idx].id) _viewBySession.delete(sid);
             }

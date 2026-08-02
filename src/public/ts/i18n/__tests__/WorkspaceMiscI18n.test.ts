@@ -53,15 +53,15 @@ describe('workspace and conversation runtime i18n', () => {
       monaco: {
         KeyCode: { Backslash: 1, F12: 2, KeyO: 3 },
         KeyMod: { Alt: 4, Shift: 8 },
-        editor: {
-          addEditorAction: (descriptor: { id: string; label: string }) => {
-            descriptors.push(descriptor);
-            return { dispose: () => disposed.push(descriptor.id) };
-          },
-        },
       },
     });
     const group = Object.create(WorkspaceTabGroup.prototype) as any;
+    group._editor = {
+      addAction: (descriptor: { id: string; label: string }) => {
+        descriptors.push(descriptor);
+        return { dispose: () => disposed.push(descriptor.id) };
+      },
+    };
     group._agentActionsRegistered = false;
     group._agentActionDisposables = [];
 

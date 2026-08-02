@@ -30,6 +30,7 @@
 | 插件 API | [plugin-api.md](plugin-api.md) | `api.tools`、`api.llm`、`api.fs`、events、UI、扩展点 |
 | 插件 UI / 品牌设计 | [plugin-ui-guide.md](plugin-ui-guide.md) | iframe 页面、tokens、组件、设计预设、布局约束 |
 | GitHub 协作开发 | [github-development-workflow.md](github-development-workflow.md) | Issue、分支、提交、PR、审查、合并、发布与仓库保护 |
+| Windows 发布验收 | [release-qualification.md](release-qualification.md) | 安装包、便携包、产物审计、桌面 E2E、CI 与发布门槛 |
 | 排障 | [troubleshooting.md](troubleshooting.md) | 启动无响应、插件不加载、工具失效、页面空白、构建问题 |
 | docs 维护规则 | [agent-docs.md](agent-docs.md) | agent 何时读取、何时维护、如何不污染知识库 |
 | 品牌设计预设 | `design-md/<brand>/DESIGN.md` | 按品牌风格设计 UI，例如 Apple、Stripe、Linear、Notion |
@@ -47,6 +48,7 @@ api.fs 怎么限制路径      -> Grep "api.fs|workspace" docs/plugin-api.md
 agent 什么时候用 memory  -> Read docs/agent-docs.md
 品牌风格怎么选          -> Glob docs/design-md/*/DESIGN.md
 启动后双击没反应        -> Read docs/troubleshooting.md
+准备 Windows 发布       -> Read docs/release-qualification.md
 ```
 
 ## 写作标准

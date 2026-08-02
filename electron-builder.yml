@@ -2,6 +2,7 @@ appId: com.anoclaw.app
 productName: AnoClaw
 directories:
   output: release9
+artifactName: "${productName}-${version}-win-unpacked.${ext}"
 files:
   - dist/**/*
   - "!dist/**/*.map"
@@ -58,8 +59,11 @@ win:
   target:
     - target: nsis
       arch: [x64]
+    - target: zip
+      arch: [x64]
   icon: build/icon.ico
 nsis:
+  artifactName: "${productName}.Setup.${version}.${ext}"
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true

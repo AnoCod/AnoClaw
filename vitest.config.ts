@@ -14,6 +14,7 @@ export default defineConfig({
     include: [
       'src/**/__tests__/**/*.test.ts',
       'plugins/**/__tests__/**/*.test.ts',
+      'scripts/packaging-qa/__tests__/**/*.test.mjs',
     ],
   },
   resolve: {

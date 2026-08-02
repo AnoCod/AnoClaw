@@ -18,6 +18,11 @@
     "sessions:audit": "node scripts/audit-session-recovery.cjs",
     "check:boundaries": "node scripts/check-module-boundaries.cjs",
     "check:boundaries:update": "node scripts/check-module-boundaries.cjs --update-baseline",
+    "package:win": "electron-builder --win --publish never",
+    "release:verify": "node scripts/packaging-qa/verify-release-artifacts.mjs",
+    "test:release": "vitest run scripts/packaging-qa/__tests__/qualification-lib.test.mjs",
+    "test:e2e:packaged": "node scripts/packaging-qa/installed-app-smoke.mjs --app release9/win-unpacked/AnoClaw.exe",
+    "test:e2e:installed": "node scripts/packaging-qa/installed-app-smoke.mjs --installer auto",
     "test": "vitest run",
     "test:watch": "vitest"
   },

@@ -27,7 +27,8 @@ npx electron-builder --win
 
 Build output:
 
-- Installer: `release9/AnoClaw Setup 2.0.1.exe`
+- Installer: `release9/AnoClaw.Setup.2.0.1.exe`
+- Portable build: `release9/AnoClaw-2.0.1-win-unpacked.zip`
 - Unpacked app: `release9/win-unpacked/AnoClaw.exe`
 
 Do not use `npm run dev` unless you are on Windows `cmd.exe`; the project build path is `npm run build:all` followed by `npx electron-builder --win`.
@@ -56,7 +57,7 @@ AnoClaw is an LLM-native desktop platform. AI agents use tools (Read, Write, Bas
 | `data/agents/` | Per-agent configs (model, tools, prompt) |
 | `data/sessions/` | JSONL append-only conversation history |
 
-First run: setup wizard auto-creates `config/settings.yaml` and `data/agents/ceo.json`.
+First run: setup wizard auto-creates `config/settings.yaml` and `data/agents/main-agent.json`.
 
 ## Tech Stack
 
@@ -66,9 +67,13 @@ TypeScript + Node.js `http` + `ws`. Frontend: vanilla DOM, no framework. Electro
 
 ```bash
 npm run build:all      # Full build (server + frontend + CSS + plugins)
-npm test               # Vitest (~500 tests)
-npx electron-builder --win
+npm test               # Vitest (1,300+ tests)
+npm run package:win    # NSIS installer + portable ZIP + unpacked app
+npm run release:verify # Inspect artifacts and write SHA-256 manifests
+npm run test:e2e:packaged # Exercise the packaged Electron app with isolated data
 ```
+
+Maintainers should follow [`docs/release-qualification.md`](docs/release-qualification.md) before publishing a release.
 
 ## License
 

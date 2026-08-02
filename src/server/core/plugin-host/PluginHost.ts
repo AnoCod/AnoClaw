@@ -16,6 +16,7 @@ import { PluginLoader } from './PluginLoader.js';
 import { createAnoClawAPI } from './PluginAPI.js';
 import type { AnoClawAPI } from './PluginAPI.js';
 import { PluginBase } from './PluginBase.js';
+import { resolvePluginHttpHandler } from './PluginHandlerResolver.js';
 
 const ACTIVATE_TIMEOUT_MS = 15_000;
 
@@ -110,16 +111,9 @@ parentPort?.on('message', async (msg: unknown) => {
           parentPort?.postMessage({ id: request.id, error: { code: 'NOT_ACTIVE', message: 'Plugin not active' } });
           break;
         }
-        const handlerFn = mod[p.handler] as ((args: {
-          body: unknown;
-          params: Record<string, string>;
-          query: string;
-          headers: Record<string, string>;
-          method: string;
-          path: string;
-        }) => Promise<unknown>) | undefined;
-        if (typeof handlerFn !== 'function') {
-          parentPort?.postMessage({ id: request.id, error: { code: 'NO_HANDLER', message: `Plugin does not export "${p.handler}"` } });
+        const handlerFn = resolvePluginHttpHandler(mod, _activeInstance, p.handler);
+        if (!handlerFn) {
+          parentPort?.postMessage({ id: request.id, error: { code: 'NO_HANDLER', message: `Plugin does not provide "${p.handler}"` } });
           break;
         }
         try {

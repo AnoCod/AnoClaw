@@ -171,77 +171,9 @@ interface ExecJsResult {
   error?: string;
 }
 
-type FloatingBallSessionOpenPayload = number | { sessionId?: string; index?: number | null };
-type FloatingBallConnection = 'connected' | 'connecting' | 'disconnected';
-type FloatingBallPhase = 'thinking' | 'tool' | 'waiting' | 'done' | 'failed' | 'idle' | 'goal' | 'paused';
-
-interface FloatingBallSession {
-  id: string;
-  title: string;
-  status?: string;
-}
-
-interface FloatingBallActivityItem {
-  id: string;
-  sessionId: string | null;
-  title: string;
-  detail?: string;
-  status: 'completed' | 'failed';
-  timestamp: number;
-}
-
-interface FloatingBallHelperNotice {
-  kind: 'info' | 'success' | 'error';
-  text: string;
-  timestamp: number;
-}
-
-interface FloatingBallGoalPulse {
-  sessionId: string | null;
-  status: 'active' | 'paused' | 'blocked' | 'completed' | 'deleted';
-  objective: string;
-  runCount?: number;
-  updatedAt?: string;
-  lastRunAt?: string;
-}
-
-interface FloatingBallState {
-  activeSessionId: string | null;
-  activeTitle: string | null;
-  connection: FloatingBallConnection;
-  runningCount: number;
-  waitingCount: number;
-  recentSessions: FloatingBallSession[];
-  activityItems?: FloatingBallActivityItem[];
-  helperNotice?: FloatingBallHelperNotice | null;
-  waitingInbox?: {
-    count: number;
-    sessionId: string | null;
-    title: string;
-    detail?: string;
-    riskLevel?: string;
-    toolCallId?: string;
-    canInlineResolve?: boolean;
-  };
-  goalPulse?: FloatingBallGoalPulse | null;
-  currentTask?: {
-    sessionId: string;
-    title: string;
-    phase: FloatingBallPhase;
-    detail?: string;
-  };
-  clipboardText?: string;
-}
-
-interface FloatingBallCommand {
-  action: string;
-  data?: unknown;
-}
-
 interface ElectronAPI {
   // ── Window controls ──
   windowMinimize: () => void;
-  windowMinimizeAnimate: () => void;
   windowMaximize: () => void;
   windowClose: () => void;
   isMaximized: () => Promise<boolean>;
@@ -255,16 +187,6 @@ interface ElectronAPI {
   getAppVersion: () => Promise<string>;
   getAutoStart: () => Promise<boolean>;
   setAutoStart: (enabled: boolean) => void;
-
-  // ── Floating ball events (main -> renderer listeners) ──
-  onFloatingBallNewSession: (cb: () => void) => void;
-  onFloatingBallOpenSession: (cb: (payload: FloatingBallSessionOpenPayload) => void) => void;
-  onFloatingBallCommand: (cb: (payload: FloatingBallCommand) => void) => () => void;
-  onFloatingBallStateChanged: (cb: (state: FloatingBallState) => void) => () => void;
-  floatingBallAction: (action: string, data?: unknown) => void;
-  floatingBallGetSessions: () => Promise<FloatingBallSession[]>;
-  floatingBallGetState: () => Promise<FloatingBallState>;
-  floatingBallUpdateState: (state: Partial<FloatingBallState>) => void;
 
   // ── File/link opening ──
   openExternal: (url: string) => Promise<ApiResult>;

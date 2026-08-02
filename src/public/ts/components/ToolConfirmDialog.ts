@@ -2,6 +2,8 @@
 // Shows when the agent wants to execute a tool that requires user approval.
 // Reuses existing dialog CSS classes from layout-panels.css.
 
+import { onLocaleChange, t } from '../i18n/index.js';
+
 export interface ToolConfirmRequest {
   toolCallId: string;
   toolName: string;
@@ -19,11 +21,13 @@ export class ToolConfirmDialog {
       let settled = false;
       let overlay: HTMLDivElement;
       let onKey: (e: KeyboardEvent) => void;
+      let stopLocaleListener = () => {};
 
       const done = (value: boolean) => {
         if (settled) return;
         settled = true;
         ToolConfirmDialog._active.delete(request.toolCallId);
+        stopLocaleListener();
         document.removeEventListener('keydown', onKey);
         overlay.remove();
         resolve(value);
@@ -32,21 +36,21 @@ export class ToolConfirmDialog {
       overlay = document.createElement('div');
       overlay.className = 'dialog-overlay';
       overlay.setAttribute('role', 'dialog');
-      overlay.setAttribute('aria-label', 'Tool Confirmation');
+      overlay.setAttribute('aria-label', t('toolConfirm.ariaLabel'));
 
       const card = document.createElement('div');
       card.className = 'dialog';
 
       const titleEl = document.createElement('h2');
       titleEl.className = 'dialog-title';
-      titleEl.textContent = 'Approve Tool Execution';
+      titleEl.textContent = t('toolConfirm.title');
 
       const msgEl = document.createElement('div');
       msgEl.className = 'dialog-message';
 
       const toolLine = document.createElement('p');
       toolLine.style.cssText = 'margin:0 0 8px 0;';
-      toolLine.innerHTML = `<strong>Tool:</strong> ${escapeHtml(request.displayName)}`;
+      toolLine.innerHTML = `<strong>${escapeHtml(t('toolConfirm.tool'))}</strong> ${escapeHtml(request.displayName)}`;
 
       const riskBadge = document.createElement('span');
       riskBadge.className = `tool-confirm-risk tool-confirm-risk-${request.riskLevel}`;
@@ -58,12 +62,13 @@ export class ToolConfirmDialog {
 
       const metaLine = document.createElement('p');
       metaLine.style.cssText = 'margin:0 0 8px 0;display:flex;align-items:center;gap:8px;';
-      metaLine.innerHTML = '<strong>Risk:</strong> ';
+      metaLine.innerHTML = `<strong>${escapeHtml(t('toolConfirm.risk'))}</strong> `;
       metaLine.appendChild(riskBadge);
       msgEl.appendChild(metaLine);
 
+      let paramLine: HTMLParagraphElement | null = null;
       if (paramSummary) {
-        const paramLine = document.createElement('p');
+        paramLine = document.createElement('p');
         paramLine.style.cssText = 'margin:0;color:var(--color-text-tertiary);font-size:12px;';
         paramLine.textContent = paramSummary;
         msgEl.appendChild(paramLine);
@@ -74,13 +79,13 @@ export class ToolConfirmDialog {
 
       const rejectBtn = document.createElement('button');
       rejectBtn.className = 'btn-dialog-cancel';
-      rejectBtn.textContent = 'Reject';
+      rejectBtn.textContent = t('common.reject');
       rejectBtn.type = 'button';
       rejectBtn.addEventListener('click', () => done(false));
 
       const approveBtn = document.createElement('button');
       approveBtn.className = 'btn-dialog-confirm';
-      approveBtn.textContent = 'Approve';
+      approveBtn.textContent = t('common.approve');
       approveBtn.type = 'button';
       approveBtn.addEventListener('click', () => done(true));
 
@@ -103,6 +108,15 @@ export class ToolConfirmDialog {
 
       document.body.appendChild(overlay);
       ToolConfirmDialog._active.set(request.toolCallId, done);
+      stopLocaleListener = onLocaleChange(() => {
+        overlay.setAttribute('aria-label', t('toolConfirm.ariaLabel'));
+        titleEl.textContent = t('toolConfirm.title');
+        toolLine.innerHTML = `<strong>${escapeHtml(t('toolConfirm.tool'))}</strong> ${escapeHtml(request.displayName)}`;
+        metaLine.firstElementChild!.textContent = t('toolConfirm.risk');
+        rejectBtn.textContent = t('common.reject');
+        approveBtn.textContent = t('common.approve');
+        if (paramLine) paramLine.textContent = summarizeParams(request.params);
+      });
     });
   }
 
@@ -132,6 +146,6 @@ function summarizeParams(params: Record<string, unknown>): string {
       parts.push(`${key}: ${val}`);
     }
   }
-  if (keys.length > 4) parts.push(`... +${keys.length - 4} more`);
+  if (keys.length > 4) parts.push(t('toolConfirm.moreParams', { count: keys.length - 4 }));
   return parts.join('; ');
 }

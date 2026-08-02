@@ -42,157 +42,415 @@
 }
 
 /* ========================================
-   Left edge bar (48px) — session dots
+   Persistent session navigation
    ======================================== */
 
 .cinema-edge-left {
-  width: 48px;
-  min-width: 48px;
+  width: 256px;
+  min-width: 256px;
+  box-sizing: border-box;
   background: var(--cinema-bg-subtle);
   border-right: 1px solid var(--hairline-cinema);
   display: flex;
   flex-direction: column;
-  align-items: center;
-  padding-top: 28px;
-  gap: 10px;
+  gap: 8px;
+  padding: 12px 10px 8px;
   flex-shrink: 0;
+  overflow: hidden;
   user-select: none;
+  transition: width 0.16s ease, min-width 0.16s ease, padding 0.16s ease;
 }
 
-.cinema-edge-left .edge-search {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: var(--cinema-bg-search);
+.cinema-edge-left.is-collapsed {
+  width: 56px;
+  min-width: 56px;
+  padding: 10px 6px 8px;
+}
+
+.edge-sidebar-header {
+  min-height: 30px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  color: var(--cinema-text-edge);
-  transition: background 0.15s;
-}
-.cinema-edge-left .edge-search:hover {
-  background: rgba(255,255,255,0.14);
-}
-.cinema-edge-left .edge-search.active {
-  color: var(--color-text-primary);
-  background: var(--color-surface-elevated);
+  justify-content: space-between;
+  gap: 8px;
 }
 
-.cinema-edge-left .edge-label {
-  font-size: 7px;
-  color: var(--cinema-text-welcome-desc);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  transform: rotate(-90deg);
-  margin: 8px 0;
-  white-space: nowrap;
-}
-
-.session-dot {
-  border-radius: 50%;
-  cursor: pointer;
-  transition: transform 0.15s, background 0.15s;
-  flex-shrink: 0;
-}
-.session-dot:hover {
-  transform: scale(1.3);
-}
-.session-dot.active {
-  background: var(--color-primary, #0b8ce9);
-  box-shadow: none;
-}
-.session-dot.child {
-  margin-left: 4px;
-}
-
-.cinema-edge-left .edge-new-btn {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  border: 1px solid var(--cinema-text-dim);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.edge-sidebar-title {
+  min-width: 0;
+  color: var(--cinema-text-btn);
   font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.edge-sidebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.edge-sidebar-action,
+.edge-search-close,
+.session-tree-toggle,
+.session-tree-archive,
+.edge-sidebar-collapse {
+  appearance: none;
+  box-sizing: border-box;
+  border: 0;
+  background: transparent;
   color: var(--cinema-text-muted);
   cursor: pointer;
-  background: transparent;
-  transition: border-color 0.15s, color 0.15s;
-  margin-top: auto;
-  margin-bottom: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
-.cinema-edge-left .edge-new-btn:hover {
-  border-color: var(--cinema-text-welcome);
+
+.edge-sidebar-action {
+  width: 28px;
+  height: 28px;
+  border-radius: 5px;
+}
+
+.edge-sidebar-action:hover,
+.edge-sidebar-action.active,
+.edge-search-close:hover,
+.edge-sidebar-collapse:hover {
+  background: var(--cinema-bg-hover);
   color: var(--cinema-text-btn);
 }
 
-/* Session tree overlay (hover popup from left bar dots)
-   Positioned dynamically via JS — no hardcoded left/top here. */
-.cinema-tree-overlay {
-  position: fixed;
-  width: 220px;
-  max-height: calc(100vh - 80px);
-  background: var(--cinema-overfly-bg);
-  border: 1px solid var(--hairline-cinema-bar);
-  border-radius: 6px;
-  padding: 8px;
-  overflow-y: auto;
-  z-index: var(--z-tooltip, 1000);
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  animation: compaction-fade-in 0.1s ease;
-}
-.cinema-tree-row {
+.edge-session-search {
+  height: 32px;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--cinema-text-overlay);
-  transition: background 0.1s, color 0.1s;
+  gap: 4px;
+  padding: 0 5px 0 9px;
+  border: 1px solid var(--hairline-cinema-bar);
+  border-radius: 6px;
+  background: var(--cinema-bg-search);
 }
-.cinema-tree-row:hover {
+
+.edge-session-search[hidden] {
+  display: none;
+}
+
+.edge-session-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--cinema-text-btn);
+  font: 11px/1.4 var(--font-sans);
+}
+
+.edge-session-search input::placeholder {
+  color: var(--cinema-text-muted);
+}
+
+.edge-session-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.edge-search-close {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  flex: 0 0 auto;
+}
+
+.edge-session-tree {
+  min-height: 0;
+  flex: 1;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--hairline-cinema-bar) transparent;
+}
+
+.edge-session-empty {
+  padding: 28px 10px;
+  color: var(--cinema-text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.session-tree-node {
+  min-width: 0;
+}
+
+.session-tree-row,
+.session-search-result {
+  position: relative;
+  min-width: 0;
+  min-height: 38px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 5px 4px calc(2px + var(--session-depth, 0) * 13px);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--cinema-text-overlay);
+  cursor: pointer;
+  outline: none;
+  transition: background 0.1s ease, border-color 0.1s ease, color 0.1s ease;
+}
+
+.session-search-result {
+  --session-depth: 0;
+  padding-left: 8px;
+}
+
+.session-tree-row:hover,
+.session-search-result:hover {
   background: var(--cinema-bg-hover);
   color: var(--cinema-text-btn-hover);
 }
-.cinema-tree-row.active {
-  color: var(--cinema-text-btn-strong);
-  background: var(--cinema-bg-active);
-}
-.cinema-tree-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
+
+.session-tree-row:focus-visible,
+.session-search-result:focus-visible {
+  border-color: var(--color-primary, #0b8ce9);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary, #0b8ce9) 34%, transparent);
 }
 
-.cinema-tree-del-btn {
+.session-tree-row.active,
+.session-search-result.active {
+  background: var(--cinema-bg-active);
+  color: var(--cinema-text-btn-strong);
+}
+
+.session-tree-row.active-path:not(.active) {
+  color: var(--cinema-text-btn);
+}
+
+.session-tree-toggle {
+  width: 18px;
+  height: 24px;
+  border-radius: 4px;
+  flex: 0 0 auto;
+  transition: color 0.1s ease;
+}
+
+.session-tree-toggle svg {
+  transition: transform 0.14s ease;
+}
+
+.session-tree-toggle.expanded svg {
+  transform: rotate(90deg);
+}
+
+.session-tree-toggle:disabled {
+  visibility: hidden;
+  cursor: default;
+}
+
+.session-tree-status {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--cinema-text-dim);
+}
+
+.session-tree-status.status-active {
+  background: var(--color-primary, #0b8ce9);
+}
+
+.session-tree-status.status-working {
+  background: var(--color-primary, #0b8ce9);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary, #0b8ce9) 14%, transparent);
+}
+
+.session-tree-status.status-error {
+  background: var(--color-error, #f44747);
+}
+
+.session-tree-status.status-paused {
+  background: var(--color-warning, #d9a441);
+}
+
+.session-tree-status.status-idle {
+  background: var(--cinema-text-dim);
+}
+
+.session-tree-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.session-tree-title,
+.session-tree-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-tree-title {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.session-tree-meta {
+  color: var(--cinema-text-muted);
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.session-tree-count,
+.session-rail-count {
+  min-width: 18px;
+  height: 16px;
+  box-sizing: border-box;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--cinema-text-dim) 28%, transparent);
+  color: var(--cinema-text-muted);
+  font-size: 8px;
+  line-height: 16px;
+  text-align: center;
+  flex: 0 0 auto;
+}
+
+.session-tree-archive {
+  position: absolute;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
   opacity: 0;
+}
+
+.session-tree-row:hover .session-tree-archive,
+.session-tree-row:focus-within .session-tree-archive {
+  opacity: 1;
+}
+
+.session-tree-row:hover .session-tree-count,
+.session-tree-row:focus-within .session-tree-count {
+  opacity: 0;
+}
+
+.session-tree-archive:hover {
+  background: var(--cinema-bg-hover);
+  background: color-mix(in srgb, var(--color-error, #f44747) 12%, transparent);
+  color: var(--color-error, #f44747);
+}
+
+.session-tree-group-row {
+  min-height: 34px;
+}
+
+.session-tree-group-icon {
+  width: 13px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cinema-text-muted);
+  flex: 0 0 auto;
+}
+
+.session-tree-group-row .session-tree-title {
+  color: var(--cinema-text-welcome-desc);
+}
+
+.edge-sidebar-footer {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--hairline-cinema);
+  padding-top: 7px;
+}
+
+.edge-sidebar-collapse {
+  width: 100%;
+  height: 28px;
+  justify-content: flex-start;
+  gap: 7px;
+  padding: 0 8px;
+  border-radius: 5px;
+  color: var(--cinema-text-muted);
+  font: 10px/1 var(--font-sans);
+}
+
+.session-rail-item {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 4px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--cinema-text-muted);
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  background: none;
-  border: none;
-  border-radius: 3px;
-  cursor: pointer;
-  color: var(--cinema-text-muted);
-  padding: 2px;
-  margin-left: auto;
-  transition: opacity 0.12s, color 0.12s, background 0.12s;
 }
-.cinema-tree-row:hover .cinema-tree-del-btn {
-  opacity: 1;
+
+.session-rail-item:hover {
+  border-color: var(--hairline-cinema-bar);
+  background: var(--cinema-bg-hover);
 }
-.cinema-tree-del-btn:hover {
-  color: var(--color-error, #f44747);
-  background: rgba(255,70,70,0.12);
+
+.session-rail-item.active {
+  border-color: color-mix(in srgb, var(--color-primary, #0b8ce9) 42%, transparent);
+  background: var(--cinema-bg-active);
+}
+
+.session-rail-item .session-tree-status {
+  width: 9px;
+  height: 9px;
+}
+
+.session-rail-count {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  min-width: 14px;
+  height: 13px;
+  padding: 0 3px;
+  border: 1px solid var(--cinema-bg-subtle);
+  background: var(--cinema-bg-active);
+  font-size: 7px;
+  line-height: 11px;
+}
+
+.cinema-edge-left.is-collapsed .edge-sidebar-header {
+  flex-direction: column;
+}
+
+.cinema-edge-left.is-collapsed .edge-sidebar-title {
+  display: none;
+}
+
+.cinema-edge-left.is-collapsed .edge-sidebar-actions {
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cinema-edge-left.is-collapsed .edge-sidebar-action {
+  width: 40px;
+  height: 40px;
+}
+
+.cinema-edge-left.is-collapsed .edge-sidebar-collapse {
+  width: 40px;
+  height: 36px;
+  margin: 0 auto;
+  padding: 0;
+  justify-content: center;
+}
+
+.cinema-edge-left.is-collapsed .edge-sidebar-collapse span {
+  display: none;
 }
 
 /* ========================================
@@ -638,6 +896,9 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  -webkit-app-region: no-drag;
+}
+.topbar-cinema [data-slot="titlebar-left"] > * {
   -webkit-app-region: no-drag;
 }
 .topbar-cinema .topbar-page-switcher {
@@ -1089,146 +1350,4 @@
 
 .context-tooltip-popover .context-compact-btn:hover {
   background: var(--cinema-bg-hover) !important;
-}
-
-/* ========================================
-   Evolution Dashboard — Settings page
-   ======================================== */
-
-.evo-stats-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.evo-stat-card {
-  background: var(--cinema-bg-active);
-  border: 1px solid var(--hairline-cinema);
-  border-radius: 6px;
-  padding: 10px;
-  text-align: center;
-}
-
-.evo-stat-value {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--color-cinema-text-primary);
-  line-height: 1.2;
-}
-
-.evo-stat-label {
-  font-size: 9px;
-  color: var(--color-cinema-text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-top: 2px;
-}
-
-.evo-tool-table {
-  width: 100%;
-  font-size: 11px;
-  border-collapse: collapse;
-  margin-top: 6px;
-}
-
-.evo-tool-table th {
-  text-align: left;
-  color: var(--color-cinema-text-tertiary);
-  font-weight: 500;
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 4px 6px;
-  border-bottom: 1px solid var(--hairline-cinema);
-}
-
-.evo-tool-table td {
-  padding: 4px 6px;
-  border-bottom: 1px solid var(--hairline-cinema-bar);
-  color: var(--color-cinema-text-secondary);
-}
-
-.evo-tool-table tr:hover td {
-  background: var(--cinema-bg-hover);
-}
-
-.evo-section-title {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--color-cinema-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin: 12px 0 6px;
-}
-
-.evo-empty {
-  font-size: 11px;
-  color: var(--color-cinema-text-tertiary);
-  font-style: italic;
-  padding: 4px 0;
-}
-
-.evo-spinner {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--hairline-cinema);
-  border-top-color: var(--color-primary, #ffffff);
-  border-radius: 50%;
-  animation: evo-spin 0.6s linear infinite;
-  vertical-align: middle;
-  margin-right: 6px;
-}
-
-@keyframes evo-spin {
-  to { transform: rotate(360deg); }
-}
-
-.evo-success-bar {
-  height: 3px;
-  border-radius: 2px;
-  background: var(--cinema-bg-active);
-  overflow: hidden;
-  margin-top: 2px;
-}
-
-.evo-success-fill {
-  height: 100%;
-  border-radius: 2px;
-  background: var(--color-primary, #ffffff);
-  transition: width 0.3s ease;
-}
-
-/* ========================================
-   Session Tree Tags
-   ======================================== */
-
-.stn-tags {
-  display: inline-flex;
-  gap: 3px;
-  margin-left: 6px;
-  overflow: hidden;
-}
-
-.stn-tag {
-  font-size: 9px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  white-space: nowrap;
-}
-
-.stn-tag--auto {
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.stn-tag--user {
-  background: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.7);
-}
-
-.stn-tag-more {
-  font-size: 9px;
-  color: rgba(255, 255, 255, 0.3);
 }

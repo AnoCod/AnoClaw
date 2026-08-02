@@ -1,3 +1,5 @@
+import { onLocaleChange, t } from '../i18n/index.js';
+
 export interface FilePathReference {
   raw: string;
   path: string;
@@ -126,13 +128,28 @@ export function clickablePathHtml(displayHtml: string, rawPath: string): string 
   const lineAttr = ref.line ? ` data-file-line="${ref.line}"` : '';
   const columnAttr = ref.column ? ` data-file-column="${ref.column}"` : '';
   const title = ref.line ? `${ref.path}:${ref.line}` : ref.path;
-  return `<span class="clickable-path" data-file-path="${escAttr(ref.path)}"${lineAttr}${columnAttr} title="Open ${escAttr(title)}">${displayHtml}</span>`;
+  return `<span class="clickable-path" data-file-path="${escAttr(ref.path)}"${lineAttr}${columnAttr} data-file-open-title="${escAttr(title)}" title="${escAttr(t('path.open', { path: title }))}">${displayHtml}</span>`;
 }
+
+export function refreshClickablePathTitles(root: ParentNode): void {
+  root.querySelectorAll<HTMLElement>('[data-file-open-title]').forEach((element) => {
+    element.title = t('path.open', { path: element.dataset.fileOpenTitle || '' });
+  });
+}
+
+onLocaleChange(() => {
+  if (typeof document !== 'undefined') refreshClickablePathTitles(document);
+});
 
 export function markdownLinkHtml(labelHtml: string, target: string): string {
   const ref = parseFilePathReference(target);
   if (ref && !isHttpUrl(target)) {
     return clickablePathHtml(labelHtml, target);
+  }
+  const compactTarget = target.replace(/[\u0000-\u0020\u007f]/g, '');
+  const scheme = compactTarget.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase();
+  if (scheme && !['http', 'https', 'mailto'].includes(scheme)) {
+    return labelHtml;
   }
   return `<a href="${escAttr(target)}" data-external-url="true" rel="noopener noreferrer" class="md-link">${labelHtml}</a>`;
 }

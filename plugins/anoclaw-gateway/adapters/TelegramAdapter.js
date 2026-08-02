@@ -5,6 +5,7 @@
 // Features: message deduplication, health monitoring, allowed-user filtering, webhook mode
 
 import * as https from 'https';
+import { createHash, timingSafeEqual } from 'crypto';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const path = require('path');
@@ -23,6 +24,7 @@ export class TelegramAdapter {
     this._running = false;
     this._offset = 0;
     this._onMessage = null;
+    this._webhookSecretHash = config.webhookSecretHash || '';
 
     // Deduplication
     this._seenUpdateIds = new Set();
@@ -178,13 +180,28 @@ export class TelegramAdapter {
     if (secretToken) params.secret_token = secretToken;
     const result = await this._api('setWebhook', params);
     if (!result.ok) throw new Error(`Telegram setWebhook error: ${result.description}`);
+    this._webhookSecretHash = secretToken
+      ? createHash('sha256').update(secretToken, 'utf8').digest('hex')
+      : '';
     return result;
+  }
+
+  webhookSecretHash() {
+    return this._webhookSecretHash;
+  }
+
+  verifyWebhookSecret(secretToken) {
+    if (!this._webhookSecretHash || typeof secretToken !== 'string') return false;
+    const actual = createHash('sha256').update(secretToken, 'utf8').digest();
+    const expected = Buffer.from(this._webhookSecretHash, 'hex');
+    return expected.length === actual.length && timingSafeEqual(actual, expected);
   }
 
   /** Remove the webhook (switch back to long-polling) */
   async removeWebhook() {
     const result = await this._api('setWebhook', { url: '' });
     if (!result.ok) throw new Error(`Telegram removeWebhook error: ${result.description}`);
+    this._webhookSecretHash = '';
     return result;
   }
 

@@ -5,6 +5,7 @@ import {
   buildDefaultAgentConfigs,
   DEFAULT_ENGINEERING_MANAGER_ID,
   DEFAULT_IMPLEMENTATION_MEMBER_ID,
+  migrateCoordinationToolAllowlist,
 } from '../DefaultAgentTemplate.js';
 
 describe('buildDefaultAgentConfigs', () => {
@@ -44,25 +45,27 @@ describe('buildDefaultAgentConfigs', () => {
     });
 
     expect(ceo.allowedTools).toEqual(expect.arrayContaining([
-      'TaskAssign',
-      'ListEmployees',
+      'RunProgram',
+      'Team',
+      'Task',
+      'JobList',
+      'Organization',
       'memory_save',
       'memory_search',
       'Skill',
       'skill_matching',
       'Browser',
       'ApiCall',
-      'office.create_pptx',
-      'office.create_docx',
-      'office.analyze_spreadsheet',
-      'pdf.summarize',
-      'web.research',
-      'files.organize',
     ]));
-    expect(manager.allowedTools).toContain('TaskAssign');
-    expect(manager.allowedTools).toContain('HireEmployee');
-    expect(member.allowedTools).toContain('SubAgentSpawn');
-    expect(member.allowedTools).not.toContain('HireEmployee');
+    expect(manager.allowedTools).toContain('Task');
+    expect(manager.allowedTools).toContain('RunProgram');
+    expect(manager.allowedTools).toContain('Organization');
+    expect(ceo.allowedTools).toContain('Organization');
+    expect(member.allowedTools).toContain('Task');
+    expect(member.allowedTools).toContain('Team');
+    expect(member.allowedTools).toContain('RunProgram');
+    expect(member.allowedTools).not.toContain('SubAgentDelete');
+    expect(member.allowedTools).not.toContain('Organization');
   });
 
   it('enables focused default skills instead of leaving skills blank', () => {
@@ -84,5 +87,48 @@ describe('buildDefaultAgentConfigs', () => {
       'test-driven-development',
       'code-review',
     ]));
+  });
+
+  it('migrates legacy delegation allowlists without widening unrelated restricted agents', () => {
+    const [config] = buildDefaultAgentConfigs({
+      provider: 'openai-compatible',
+      apiUrl: 'https://api.example.test/v1',
+      apiKey: 'sk-test',
+      model: 'test-model',
+    });
+    const legacy = {
+      ...config,
+      allowedTools: ['Read', 'TaskAssign', 'SubAgentDelete'],
+      agentPrompt: 'Use ListEmployees, TaskAssign, and SubAgentSpawn.',
+    };
+    const migrated = migrateCoordinationToolAllowlist(legacy);
+    expect(migrated.changed).toBe(true);
+    expect(migrated.config.allowedTools).toEqual(expect.arrayContaining([
+      'Read',
+      'Team',
+      'Task',
+      'JobList',
+    ]));
+    expect(migrated.config.allowedTools).not.toContain('TaskAssign');
+    expect(migrated.config.allowedTools).not.toContain('SubAgentDelete');
+    expect(migrated.config.agentPrompt).toBe(
+      'Use Organization action="list", Task action="assign", and Task action="spawn".',
+    );
+
+    const restricted = { ...config, allowedTools: ['Read'] };
+    expect(migrateCoordinationToolAllowlist(restricted)).toEqual({
+      config: restricted,
+      changed: false,
+    });
+
+    const legacyManager = {
+      ...config,
+      role: AgentRole.Manager,
+      allowedTools: ['Read', 'UpdateOrg'],
+    };
+    expect(migrateCoordinationToolAllowlist(legacyManager)).toEqual({
+      config: { ...legacyManager, allowedTools: ['Read'] },
+      changed: true,
+    });
   });
 });

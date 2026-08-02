@@ -16,7 +16,7 @@ import { createLogger } from '../../logger.js';
 
 const log = createLogger('anochat.system');
 
-export type BackgroundTaskType = 'subagent' | 'bash' | 'command';
+export type BackgroundTaskType = 'subagent' | 'bash' | 'program' | 'command';
 export type BackgroundTaskStatus = 'running' | 'completed' | 'failed' | 'killed';
 
 const RECENT_TASK_RESULT_TTL_MS = 10 * 60 * 1000;
@@ -37,6 +37,8 @@ export interface BackgroundTaskEntry {
   durationMs?: number;
   pid?: number;
   command?: string;
+  /** False for detached work that should remain trackable without holding the parent AgentLoop open. */
+  awaitCompletion?: boolean;
 }
 
 export interface BackgroundTaskResultSnapshot {

@@ -4,23 +4,31 @@
 import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as YAML from 'yaml';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PORT, DEFAULT_HOST, APP_NAME, APP_VERSION, DEFAULT_MAIN_AGENT_ID } from '../shared/constants.js';
 import { WsServer } from './infra/network/WsServer.js';
 import { WsMessageRouter } from './infra/network/WsMessageRouter.js';
 import { registerAllWsHandlers } from './infra/network/handlers/registerAllHandlers.js';
 import { AgentRegistry } from './core/agent/AgentRegistry.js';
-import { loadAgentConfig } from './core/agent/AgentConfig.js';
+import { AgentRuntime } from './core/agent/AgentRuntime.js';
+import { loadAgentConfig, saveAgentConfig } from './core/agent/AgentConfig.js';
+import { migrateCoordinationToolAllowlist } from './core/agent/DefaultAgentTemplate.js';
 import { SessionManager } from './core/session/SessionManager.js';
+import { recoverRestartCheckpoint } from './core/session/RestartCheckpointRecovery.js';
 import { ToolRegistry } from './core/tools/ToolRegistry.js';
 import { ToolProfiler } from './infra/supervision/ToolProfiler.js';
 import { PromptAssembler } from './core/prompt/PromptAssembler.js';
 import { CommandRegistry } from './core/commands/CommandRegistry.js';
 import { LogManager } from './infra/logging/LogManager.js';
-import { initAuthStore } from './gateway/ApiAuth.js';
+import { hasPermission, initAuthStore, validateToken } from './gateway/ApiAuth.js';
+import { isTrustedUiRequest, TRUSTED_UI_HEADER } from './gateway/TrustedUiAuth.js';
+import { ApiPermission } from '../shared/types/gateway.js';
 import { SettingsManager } from './infra/storage/SettingsManager.js';
 import { serveStatic } from './infra/StaticFiles.js';
 import { writablePath, ensureWritableDir, appPath } from './infra/WritablePath.js';
+import { atomicWriteFile } from './core/tools/builtin/FileUtils.js';
+import { installPluginFromUrl, PluginInstallError } from './core/plugin-host/PluginInstaller.js';
 
 // Set cwd to the unpacked root when packaged (asar is read-only).
 // In dev mode, REPO_ROOT is the real project directory.
@@ -39,9 +47,12 @@ function isAllowedLocalOrigin(origin: string | undefined): boolean {
     const parsed = new URL(origin);
     const hostname = parsed.hostname.toLowerCase();
     const port = parsed.port ? Number(parsed.port) : (parsed.protocol === 'https:' ? 443 : 80);
+    const settings = SettingsManager.getInstance();
+    const configuredUiPort = settings.get<number>('port', DEFAULT_PORT);
+    const configuredApiPort = settings.get<number>('apiPort', 15730);
     return (parsed.protocol === 'http:' || parsed.protocol === 'https:')
       && ['localhost', '127.0.0.1', '::1'].includes(hostname)
-      && [DEFAULT_PORT, 15730].includes(port);
+      && [configuredUiPort, configuredApiPort].includes(port);
   } catch {
     return false;
   }
@@ -54,28 +65,67 @@ function setCors(req: http.IncomingMessage, res: http.ServerResponse): void {
     res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', `Content-Type, Authorization, ${TRUSTED_UI_HEADER}`);
 }
 
-function safePathSegment(value: string, label: string): string {
-  if (!value || value === '.' || value === '..' || /[/\\]/.test(value) || /[<>:"|?*]/.test(value)) {
-    throw new Error(`Invalid ${label}`);
+function authorizeLegacyAdminApi(req: http.IncomingMessage, res: http.ServerResponse): boolean {
+  if (isTrustedUiRequest(req)) return true;
+  const authorization = req.headers.authorization || '';
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  const token = match ? validateToken(match[1]) : null;
+  if (!token) {
+    res.writeHead(401, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Unauthorized', message: 'Invalid or missing Bearer token' }));
+    return false;
   }
-  return value;
+  if (!hasPermission(token, ApiPermission.Admin)) {
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Forbidden', message: 'Missing permission: admin' }));
+    return false;
+  }
+  return true;
 }
 
-function safeRelativeFilePath(value: string): string {
-  const normalized = path.normalize(value);
-  if (
-    !value ||
-    path.isAbsolute(value) ||
-    normalized.startsWith('..') ||
-    normalized.includes(`..${path.sep}`) ||
-    /(^|[\\/])\.\.([\\/]|$)/.test(value)
-  ) {
-    throw new Error('Invalid file path');
+const LEGACY_API_BODY_LIMIT = 1024 * 1024;
+
+class RequestBodyError extends Error {
+  constructor(message: string, readonly statusCode: number) {
+    super(message);
   }
-  return normalized;
+}
+
+function readJsonRequest(req: http.IncomingMessage, limit = LEGACY_API_BODY_LIMIT): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let tooLarge = false;
+    req.on('data', (chunk: Buffer | string) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      size += buffer.length;
+      if (size > limit) {
+        tooLarge = true;
+        chunks.length = 0;
+        return;
+      }
+      if (!tooLarge) chunks.push(buffer);
+    });
+    req.once('error', reject);
+    req.once('end', () => {
+      if (tooLarge) {
+        reject(new RequestBodyError(`Request body exceeds ${limit} bytes`, 413));
+        return;
+      }
+      try {
+        const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error('JSON body must be an object');
+        }
+        resolve(parsed as Record<string, unknown>);
+      } catch (error) {
+        reject(new RequestBodyError(`Invalid JSON: ${(error as Error).message}`, 400));
+      }
+    });
+  });
 }
 
 
@@ -105,6 +155,13 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       agents: AgentRegistry.getInstance().allAgents().length,
       tools: ToolRegistry.getInstance().allTools().length,
     }));
+    return;
+  }
+
+  if (
+    (url.startsWith('/api/v1/plugins') || url.startsWith('/api/skills'))
+    && !authorizeLegacyAdminApi(req, res)
+  ) {
     return;
   }
 
@@ -175,146 +232,93 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     return;
   }
   if (url === '/api/v1/plugins/reload' && req.method === 'POST') {
-    const chunks: Buffer[] = [];
-    req.on('data', (c: Buffer) => chunks.push(c));
-    req.on('end', async () => {
-      try {
-        const body = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
-        const name = body.name as string;
-        if (!name) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Missing "name" field' }));
-          return;
-        }
-        const { PluginHostManager: PM } = await import('./core/plugin-host/PluginHostManager.js');
-        const pm = PM.getInstance();
-        const action = (body.action as string) || 'reload';
-        let state;
-        switch (action) {
-          case 'activate':
-            state = await pm.activatePlugin(name);
-            break;
-          case 'deactivate':
-            state = await pm.deactivatePlugin(name);
-            break;
-          default:
-            state = await pm.reloadPlugin(name);
-            break;
-        }
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(state));
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Reload failed', message: msg }));
+    try {
+      const body = await readJsonRequest(req);
+      const name = typeof body.name === 'string' ? body.name : '';
+      if (!name) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Missing "name" field' }));
+        return;
       }
-    });
+      const { PluginHostManager: PM } = await import('./core/plugin-host/PluginHostManager.js');
+      const pm = PM.getInstance();
+      const action = typeof body.action === 'string' ? body.action : 'reload';
+      let state;
+      switch (action) {
+        case 'activate':
+          state = await pm.activatePlugin(name);
+          break;
+        case 'deactivate':
+          state = await pm.deactivatePlugin(name);
+          break;
+        default:
+          state = await pm.reloadPlugin(name);
+          break;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(state));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const status = err instanceof RequestBodyError ? err.statusCode : 500;
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Reload failed', message: msg }));
+    }
     return;
   }
 
-  // Plugin install from URL (supports raw JSON or GitHub repos)
+  // Plugin install from URL. Sources are fully fetched and validated in a hidden
+  // staging directory, then renamed into place as one filesystem transaction.
   if (url === '/api/v1/plugins/install' && req.method === 'POST') {
-    const chunks: Buffer[] = [];
-    req.on('data', (c: Buffer) => chunks.push(c));
-    req.on('end', async () => {
-      try {
-        const body = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
-        const installUrl = body.url as string;
-        if (!installUrl) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Missing "url" field' }));
-          return;
-        }
-        const destName = body.name ? safePathSegment(String(body.name), 'plugin name') : `plugin-${Date.now().toString(36)}`;
-        const destDir = writablePath('plugins', destName);
-        if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-
-        // GitHub repo install: convert github.com/owner/repo to raw URLs
-        const githubMatch = installUrl.match(/github\.com\/([^\/]+)\/([^\/\s#]+)/);
-        if (githubMatch) {
-          const [, owner, repoSlug] = githubMatch;
-          const repo = repoSlug.replace(/\.git$/, '');
-          const branch = encodeURIComponent(body.branch as string || 'main');
-          const files = ['plugin.json', 'extension.js', 'frontend/index.html'];
-          let fetched = 0;
-          for (const f of files) {
-            const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${f}`;
-            try {
-              const r = await fetch(rawUrl);
-              if (r.ok) {
-                const content = await r.text();
-                const fullPath = path.join(destDir, f);
-                const dir = path.dirname(fullPath);
-                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-                fs.writeFileSync(fullPath, content);
-                fetched++;
-              }
-            } catch {}
-          }
-          if (fetched === 0) {
-            res.writeHead(502, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'No plugin files found in GitHub repo' }));
-            return;
-          }
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ name: destName, path: destDir, installed: true, files: fetched, source: 'github' }));
-          return;
-        }
-
-        // Raw JSON install: { files: { "extension.js": "...", "plugin.json": "..." } }
-        const resp = await fetch(installUrl);
-        if (!resp.ok) {
-          res.writeHead(502, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: `Fetch failed: HTTP ${resp.status}` }));
-          return;
-        }
-        const data = await resp.json() as { files: Record<string, string> };
-        for (const [filePath, fileContent] of Object.entries(data.files)) {
-          const fullPath = path.join(destDir, safeRelativeFilePath(filePath));
-          const dir = path.dirname(fullPath);
-          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-          fs.writeFileSync(fullPath, fileContent);
-        }
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ name: destName, path: destDir, installed: true }));
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Install failed', message: msg }));
+    try {
+      const body = await readJsonRequest(req);
+      const installUrl = typeof body.url === 'string' ? body.url : '';
+      if (!installUrl) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Missing "url" field' }));
+        return;
       }
-    });
+      const result = await installPluginFromUrl({
+        url: installUrl,
+        requestedName: typeof body.name === 'string' ? body.name : undefined,
+        branch: typeof body.branch === 'string' ? body.branch : undefined,
+        subdir: typeof body.subdir === 'string' ? body.subdir : undefined,
+        pluginsDir: writablePath('plugins'),
+      });
+      res.writeHead(201, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const status = err instanceof RequestBodyError || err instanceof PluginInstallError
+        ? err.statusCode
+        : 500;
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Install failed', message: msg }));
+    }
     return;
   }
 
 
   if (url === '/api/skills') {
     if (req.method === 'POST') {
-      const chunks: Buffer[] = [];
-      req.on('data', (c: Buffer) => chunks.push(c));
-      req.on('end', () => {
-        try {
-          const body = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
-          const name = (body.name as string || 'untitled').replace(/[^a-z0-9_-]/gi, '_');
-          const frontmatter = [
-            '---',
-            `name: "${body.name || 'Untitled'}"`,
-            `description: "${body.description || ''}"`,
-            'type: custom',
-            '---',
-            '',
-          ].join('\n');
-          const content = frontmatter + (body.content as string || '');
-          const skillDir = writablePath('skills', name);
-          if (!fs.existsSync(skillDir)) fs.mkdirSync(skillDir, { recursive: true });
-          const filePath = path.join(skillDir, 'SKILL.md');
-          fs.writeFileSync(filePath, content);
-          res.writeHead(201, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ id: name, name: body.name, status: 'imported' }));
-        } catch (err) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Invalid JSON', message: (err as Error).message }));
-        }
-      });
+      try {
+        const body = await readJsonRequest(req);
+        const displayName = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : 'Untitled';
+        const description = typeof body.description === 'string' ? body.description : '';
+        const skillBody = typeof body.content === 'string' ? body.content : '';
+        const normalizedName = displayName.replace(/[^a-z0-9_-]/gi, '_').replace(/^_+|_+$/g, '') || 'untitled';
+        const frontmatter = YAML.stringify({ name: displayName, description, type: 'custom' }).trim();
+        const content = `---\n${frontmatter}\n---\n\n${skillBody}`;
+        const skillDir = writablePath('skills', normalizedName);
+        fs.mkdirSync(skillDir, { recursive: true });
+        const filePath = path.join(skillDir, 'SKILL.md');
+        await atomicWriteFile(filePath, content, 'utf8');
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ id: normalizedName, name: displayName, status: 'imported' }));
+      } catch (err) {
+        const status = err instanceof RequestBodyError ? err.statusCode : 400;
+        res.writeHead(status, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Skill import failed', message: (err as Error).message }));
+      }
       return;
     }
 
@@ -366,43 +370,39 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
   const skillsPatchMatch = url.match(/^\/api\/skills\/([a-zA-Z0-9_-]+)$/);
   if (skillsPatchMatch && req.method === 'PATCH') {
     const skillId = skillsPatchMatch[1];
-    const chunks: Buffer[] = [];
-    req.on('data', (c: Buffer) => chunks.push(c));
-    req.on('end', () => {
-      try {
-        const body = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
-        const skillsDir = path.resolve(process.cwd(), 'skills');
-        // Try nested standard format first, then deprecated flat
-        let filePath = path.join(skillsDir, skillId, 'SKILL.md');
-        if (!fs.existsSync(filePath)) {
-          filePath = path.join(skillsDir, `${skillId}.md`);
-        }
-        if (!fs.existsSync(filePath)) {
-          res.writeHead(404, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Not Found' }));
-          return;
-        }
-        let raw = fs.readFileSync(filePath, 'utf-8');
-        const match = raw.match(/^---\n([\s\S]*?)\n---/);
-        if (match && body.enabled !== undefined) {
-          const newFrontmatter = match[1].replace(/^enabled:.*$/m, `enabled: ${body.enabled}`);
-          raw = raw.replace(match[1], newFrontmatter);
-          fs.writeFileSync(filePath, raw);
-        }
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ id: skillId, enabled: body.enabled }));
-      } catch (err) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: (err as Error).message }));
+    try {
+      const body = await readJsonRequest(req);
+      if (typeof body.enabled !== 'boolean') throw new RequestBodyError('enabled must be a boolean', 400);
+      const skillsDir = writablePath('skills');
+      // Try nested standard format first, then deprecated flat
+      let filePath = path.join(skillsDir, skillId, 'SKILL.md');
+      if (!fs.existsSync(filePath)) filePath = path.join(skillsDir, `${skillId}.md`);
+      if (!fs.existsSync(filePath)) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Not Found' }));
+        return;
       }
-    });
+      const raw = fs.readFileSync(filePath, 'utf8');
+      const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+      if (!match) throw new RequestBodyError('Skill file has no YAML frontmatter', 400);
+      const frontmatter = (YAML.parse(match[1]) || {}) as Record<string, unknown>;
+      frontmatter.enabled = body.enabled;
+      const updated = `---\n${YAML.stringify(frontmatter).trim()}\n---\n\n${raw.slice(match[0].length)}`;
+      await atomicWriteFile(filePath, updated, 'utf8');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ id: skillId, enabled: body.enabled }));
+    } catch (err) {
+      const status = err instanceof RequestBodyError ? err.statusCode : 400;
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: (err as Error).message }));
+    }
     return;
   }
 
 
   if (url.startsWith('/api/')) {
     const { ApiServer } = await import('./gateway/ApiServer.js');
-    await ApiServer.getInstance().handleApiRequest(req, res);
+    await ApiServer.getInstance().handleTrustedUiRequest(req, res);
     return;
   }
 
@@ -451,9 +451,14 @@ async function initialize(): Promise<void> {
   for (const file of files) {
     const agentId = file.replace('.json', '');
     try {
-      const config = await loadAgentConfig(agentId);
+      const loaded = await loadAgentConfig(agentId);
+      const migration = migrateCoordinationToolAllowlist(loaded);
+      if (migration.changed) {
+        await saveAgentConfig(migration.config);
+        logManager.logger('anochat.core').info('Agent coordination tools migrated', { aid: agentId });
+      }
       const { Agent } = await import('./core/agent/Agent.js');
-      const agent = new Agent(config);
+      const agent = new Agent(migration.config);
       registry.registerAgent(agent);
       logManager.logger('anochat.core').info('Agent loaded', { aid: agent.id, name: agent.name });
     } catch (err) {
@@ -464,24 +469,23 @@ async function initialize(): Promise<void> {
   // Auto-create a main agent on first run only if setup is done (apiKey exists).
 
   if (registry.allAgents().length === 0) {
-    const hasApiKey = !!settings.get('apiKey');
+    const hasApiKey = !!settings.get('llm.apiKey');
     if (!hasApiKey) {
       logManager.logger('anochat.core').info('No agents and no apiKey - skipping auto-create, waiting for setup wizard');
     } else {
       logManager.logger('anochat.core').info('First run - creating default agent organization');
       const { Agent } = await import('./core/agent/Agent.js');
-      const { saveAgentConfig } = await import('./core/agent/AgentConfig.js');
       const { buildDefaultAgentConfigs } = await import('./core/agent/DefaultAgentTemplate.js');
       const defaultId = DEFAULT_MAIN_AGENT_ID;
       const existingCfg = await loadAgentConfig(defaultId).catch(() => null);
       if (!existingCfg) {
         const configs = buildDefaultAgentConfigs({
           agentName: 'MainAgent',
-          provider: settings.get('provider') || 'openai-compatible',
-          apiUrl: settings.get('apiUrl') || '',
-          apiKey: settings.get('apiKey') || '',
-          model: settings.get('model') || '',
-          contextWindow: Number(settings.get('contextWindow')) || 131072,
+          provider: settings.get('llm.provider') || 'openai-compatible',
+          apiUrl: settings.get('llm.apiUrl') || '',
+          apiKey: settings.get('llm.apiKey') || '',
+          model: settings.get('llm.model') || '',
+          contextWindow: Number(settings.get('llm.contextWindow')) || 131072,
         });
         for (const cfg of configs) {
           await saveAgentConfig(cfg);
@@ -512,61 +516,49 @@ async function initialize(): Promise<void> {
   const sessionManager = SessionManager.getInstance();
   try {
     await sessionManager.initialize(ensureWritableDir('data', 'sessions'));
-    logManager.logger('anochat.core').info('SessionManager initialized');
+    const reconciledStatuses = await sessionManager.reconcileRuntimeStatuses();
+    logManager.logger('anochat.core').info('SessionManager initialized', { reconciledStatuses });
   } catch (err) {
-    logManager.logger('anochat.core').warn('SessionManager init skipped', { error: (err as Error).message });
+    logManager.logger('anochat.core').error('SessionManager initialization failed', { error: (err as Error).message });
+    throw err;
+  }
+
+  // 4.2 Initialize the durable multi-agent coordination event log and scheduler.
+  try {
+    const { CoordinationService } = await import('./core/coordination/CoordinationService.js');
+    const { CoordinationScheduler } = await import('./core/coordination/CoordinationScheduler.js');
+    await CoordinationService.getInstance().initialize(ensureWritableDir('data', 'coordination'));
+    const coordinationRuntime = AgentRuntime.getInstance();
+    CoordinationScheduler.getInstance().start(
+      (task) => coordinationRuntime.runCoordinationTask(task),
+    );
+    logManager.logger('anochat.core').info('CoordinationService and scheduler initialized');
+  } catch (err) {
+    logManager.logger('anochat.core').error('Coordination initialization failed', {
+      error: (err as Error).message,
+    });
+    throw err;
   }
 
   // 4.5 Initialize API auth tokens
-  await initAuthStore('config');
+  await initAuthStore(ensureWritableDir('config'));
 
 
-  // Don't try to wake the agent directly (AgentLoop needs agent registry, session cache,
-  // and WS connection all ready). Instead, inject a system message into the session's
-  // JSONL. When the user sends their first message after restart, the agent naturally
-  // sees it in history and resumes where it left off.
+  // Restore a restart checkpoint as an idempotent system message. The restartId
+  // survives a crash between transcript commit and checkpoint deletion.
   try {
     const checkpointPath = writablePath('data', 'restart-checkpoint.json');
-    if (fs.existsSync(checkpointPath)) {
-      const raw = fs.readFileSync(checkpointPath, 'utf-8');
-      const checkpoint = JSON.parse(raw);
-      const age = Date.now() - (checkpoint.timestamp || 0);
-      const MAX_AGE = 5 * 60 * 1000; // 5 minutes
-      if (age < MAX_AGE && checkpoint.sessionId && checkpoint.resumeMessage) {
-        const { SessionStore } = await import('./core/session/SessionStore.js');
-        const store = SessionStore.getInstance();
-
-        const sessDir = path.join(store.getSessionsDir(), checkpoint.sessionId);
-        if (fs.existsSync(sessDir)) {
-
-          const now = new Date().toISOString();
-          const evId = () => `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-          await store.persistEvent(checkpoint.sessionId, {
-            type: 'user',
-            uuid: evId(),
-            sessionId: checkpoint.sessionId,
-            message: {
-              role: 'user',
-              content: [{ type: 'text', text: `[Server restarted]\n\nBefore restart I was working on:\n${checkpoint.resumeMessage}\n\nNow continuing.` }],
-            },
-            timestamp: now,
-            agentId: 'system',
-          });
-          logManager.logger('anochat.core').info('Restart checkpoint injected into session JSONL', {
-            sid: checkpoint.sessionId, ageMs: age,
-          });
-          // Only delete checkpoint after successful injection
-          fs.unlinkSync(checkpointPath);
-        } else {
-          logManager.logger('anochat.core').warn('Restart checkpoint skipped - session not found on disk', {
-            sid: checkpoint.sessionId, ageMs: age,
-          });
-          fs.unlinkSync(checkpointPath);
-        }
-      } else {
-
-        fs.unlinkSync(checkpointPath);
-      }
+    const result = await recoverRestartCheckpoint(checkpointPath, { sessionManager });
+    if (result.status === 'recovered' || result.status === 'deduplicated') {
+      logManager.logger('anochat.core').info(
+        'Restart checkpoint recovered',
+        result as unknown as Record<string, unknown>,
+      );
+    } else if (result.status === 'retained_failed') {
+      logManager.logger('anochat.core').warn(
+        'Restart checkpoint retained for diagnostics',
+        result as unknown as Record<string, unknown>,
+      );
     }
   } catch (err) {
     logManager.logger('anochat.core').warn('Restart checkpoint recovery failed', { error: (err as Error).message });
@@ -615,10 +607,8 @@ async function initialize(): Promise<void> {
 
     const { SkillsExtension } = await import('./core/skills/SkillsExtension.js');
     const { MemoryExtension } = await import('./core/memory/MemoryExtension.js');
-    const { EvolutionExtension } = await import('./core/evolution/EvolutionExtension.js');
     extMgr.register(new SkillsExtension());
     extMgr.register(new MemoryExtension());
-    extMgr.register(new EvolutionExtension());
 
     await extMgr.startAll();
 
@@ -693,29 +683,91 @@ export async function startServer(): Promise<http.Server> {
   await initialize();
   const settings = SettingsManager.getInstance();
   const port = settings.get<number>('port', DEFAULT_PORT);
+  const apiPort = settings.get<number>('apiPort', 15730);
   const host = settings.get<string>('host', DEFAULT_HOST);
 
-  return new Promise((resolve, reject) => {
-    server.on('error', (err: NodeJS.ErrnoException) => {
+  await new Promise<void>((resolve, reject) => {
+    const onError = (err: NodeJS.ErrnoException) => {
+      server.off('listening', onListening);
       if (err.code === 'EADDRINUSE') {
         LogManager.getInstance().logger('anochat.core').error('Port already in use', { port });
         reject(new Error(`Port ${port} already in use`));
         return;
       }
       reject(err);
-    });
-
-    server.listen(port, host, () => {
+    };
+    const onListening = () => {
+      server.off('error', onError);
       LogManager.getInstance().logger('anochat.core').info('Server started', {
         port, version: APP_VERSION, platform: process.platform, node: process.version,
       });
-      resolve(server);
-    });
+      resolve();
+    };
+    server.once('error', onError);
+    server.once('listening', onListening);
+    server.listen(port, host);
   });
+  wsServer.resume();
+
+  try {
+    const { ApiServer } = await import('./gateway/ApiServer.js');
+    await ApiServer.getInstance().start(apiPort, DEFAULT_HOST);
+  } catch (error) {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    throw error;
+  }
+  return server;
 }
 
+let shutdownPromise: Promise<void> | null = null;
+
 export async function shutdown(): Promise<void> {
-  LogManager.getInstance().logger('anochat.core').info('Server shutting down');
-  await wsServer.shutdown();
-  server.close();
+  if (shutdownPromise) return shutdownPromise;
+  shutdownPromise = (async () => {
+    const logger = LogManager.getInstance().logger('anochat.core');
+    logger.info('Server shutting down');
+    const httpClosePromise = server.listening
+      ? new Promise<void>((resolve, reject) => {
+        server.close((error?: Error) => error ? reject(error) : resolve());
+      })
+      : Promise.resolve();
+    await wsServer.shutdown();
+
+    const { InterruptController, InterruptReason } = await import(
+      './core/agent/supervision/InterruptController.js'
+    );
+    InterruptController.getInstance().interruptAll(InterruptReason.UserStop);
+    const runtime = AgentRuntime.getInstance();
+    const deadline = Date.now() + 5_000;
+    while (runtime.activeSessionCount > 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+
+    const { SessionTurnRecorder } = await import('./infra/SessionTurnRecorder.js');
+    await SessionTurnRecorder.drainAll();
+    const { SessionStore } = await import('./core/session/SessionStore.js');
+    await SessionStore.getInstance().drain();
+    const { MemoryDatabase } = await import('./core/memory/storage/MemoryDatabase.js');
+    await MemoryDatabase.closeInstance();
+    const { SessionLeaseManager } = await import('./core/session/SessionLeaseManager.js');
+    SessionLeaseManager.getInstance().stop();
+    const { CoordinationScheduler } = await import('./core/coordination/CoordinationScheduler.js');
+    CoordinationScheduler.getInstance().stop();
+    SettingsManager.getInstance().stopWatching();
+    const { ExtensionManager } = await import('./core/extensible/ExtensionManager.js');
+    await ExtensionManager.getInstance().stopAll();
+    const { PluginHostManager } = await import('./core/plugin-host/PluginHostManager.js');
+    await PluginHostManager.getInstance().stop();
+    const { ApiServer } = await import('./gateway/ApiServer.js');
+    await ApiServer.getInstance().stop();
+    await httpClosePromise;
+    logger.info('Server shutdown complete', {
+      remainingActiveSessions: runtime.activeSessionCount,
+    });
+  })();
+  try {
+    await shutdownPromise;
+  } finally {
+    shutdownPromise = null;
+  }
 }

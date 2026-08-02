@@ -1,0 +1,287 @@
+/*
+ * Global ultra-minimal interaction language.
+ *
+ * This file intentionally sorts after every other application stylesheet.
+ * Buttons are visually quiet at rest, gain a neutral rounded surface on
+ * hover/focus, and use a slightly stronger neutral surface when selected.
+ */
+
+:root {
+  --button-minimal-hover: var(--color-overlay-hover, rgba(255, 255, 255, 0.06));
+  --button-minimal-active: var(--color-overlay-pressed, rgba(255, 255, 255, 0.1));
+  --button-minimal-radius: 6px;
+}
+
+html[data-theme="dark"] {
+  --button-minimal-hover: var(--comfy-control-hover, #25272b);
+  --button-minimal-active: var(--comfy-control-active, #2a2c30);
+}
+
+/* Native buttons and custom controls share one borderless container language. */
+html[data-theme][data-theme] body :is(
+  button,
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="menuitemradio"],
+  [role="treeitem"],
+  .btn,
+  .ui-btn,
+  .cinema-btn
+) {
+  appearance: none;
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+  border-radius: var(--button-minimal-radius) !important;
+}
+
+/* Ordinary actions stay transparent until the user points at or focuses them. */
+html[data-theme][data-theme] body :is(
+  button,
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="menuitemradio"],
+  [role="treeitem"],
+  .btn,
+  .ui-btn,
+  .cinema-btn
+):not(.appearance-swatch) {
+  background: transparent !important;
+}
+
+html[data-theme][data-theme] body :is(
+  button,
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="menuitemradio"],
+  [role="treeitem"],
+  .btn,
+  .ui-btn,
+  .cinema-btn
+):not(.appearance-swatch):not(:disabled):not([aria-disabled="true"]):hover,
+html[data-theme][data-theme] body :is(
+  button,
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="menuitemradio"],
+  [role="treeitem"],
+  .btn,
+  .ui-btn,
+  .cinema-btn
+):not(.appearance-swatch):not(:disabled):not([aria-disabled="true"]):focus-visible {
+  border: 0 !important;
+  outline: 0 !important;
+  background: var(--button-minimal-hover) !important;
+  color: var(--color-text-primary) !important;
+  box-shadow: none !important;
+}
+
+html[data-theme][data-theme] body :is(
+  button,
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="menuitemradio"],
+  [role="treeitem"],
+  .btn,
+  .ui-btn,
+  .cinema-btn
+):not(.appearance-swatch):not(:disabled):not([aria-disabled="true"]):active {
+  border: 0 !important;
+  background: var(--button-minimal-active) !important;
+  box-shadow: none !important;
+}
+
+/* Persistent state is communicated by a neutral fill, never a colored edge. */
+html[data-theme][data-theme] body :is(
+  button,
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="menuitemradio"],
+  [role="treeitem"],
+  .btn,
+  .ui-btn,
+  .cinema-btn
+):not(.appearance-swatch):is(
+  .active,
+  .selected,
+  [aria-pressed="true"],
+  [aria-selected="true"],
+  [aria-checked="true"],
+  [data-selected="1"],
+  [data-state="active"]
+) {
+  border: 0 !important;
+  outline: 0 !important;
+  background: var(--button-minimal-active) !important;
+  color: var(--color-text-primary) !important;
+  box-shadow: none !important;
+}
+
+html[data-theme][data-theme] body :is(
+  button,
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="menuitemradio"],
+  [role="treeitem"],
+  .btn,
+  .ui-btn,
+  .cinema-btn
+):is(:disabled, [aria-disabled="true"]) {
+  background: transparent !important;
+  opacity: 0.38;
+  cursor: not-allowed;
+  box-shadow: none !important;
+}
+
+/* Primary actions rely on weight and copy instead of a permanent filled box. */
+html[data-theme][data-theme] body :is(
+  button,
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  [role="button"],
+  .btn,
+  .ui-btn,
+  .cinema-btn
+):is(
+  .primary,
+  .btn-primary,
+  .ui-btn-primary,
+  .cinema-btn-primary,
+  .cinema-welcome-primary,
+  .is-primary,
+  .send-btn,
+  .ag-empty-btn,
+  .ag-edit-btn-save,
+  .skill-form-btn-save,
+  .tp-preview-hire-btn,
+  .btn-dialog-confirm,
+  .aq-confirm-btn,
+  .aq-submit-btn,
+  [data-variant="primary"]
+) {
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--color-text-primary) !important;
+  font-weight: 600;
+  box-shadow: none !important;
+}
+
+/* Destructive meaning remains in the label color; its surface appears on hover. */
+html[data-theme][data-theme] body :is(
+  button,
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  [role="button"],
+  .btn,
+  .ui-btn,
+  .cinema-btn
+):is(
+  .danger,
+  .btn-danger,
+  .ui-btn-danger,
+  .is-stop,
+  .supervision-stop-btn,
+  .win-close,
+  [class*="-delete"],
+  [class*="-remove"],
+  [class*="-reject"],
+  [class*="-uninstall"],
+  [data-variant="danger"],
+  [data-action="delete"],
+  [data-action="reject"]
+) {
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--color-error, #e04e48) !important;
+  box-shadow: none !important;
+}
+
+html[data-theme][data-theme] body :is(
+  button,
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  [role="button"],
+  .btn,
+  .ui-btn,
+  .cinema-btn
+):is(
+  .danger,
+  .btn-danger,
+  .ui-btn-danger,
+  .is-stop,
+  .supervision-stop-btn,
+  .win-close,
+  [class*="-delete"],
+  [class*="-remove"],
+  [class*="-reject"],
+  [class*="-uninstall"],
+  [data-variant="danger"],
+  [data-action="delete"],
+  [data-action="reject"]
+):not(:disabled):not([aria-disabled="true"]):is(:hover, :focus-visible) {
+  background: color-mix(in srgb, var(--color-error, #e04e48) 12%, transparent) !important;
+  color: var(--color-error, #e04e48) !important;
+}
+
+/* Color swatches are information, not button chrome. Selection uses scale only. */
+html[data-theme][data-theme] body button.appearance-swatch.appearance-swatch {
+  border: 0 !important;
+  outline: 0 !important;
+  border-radius: 999px !important;
+  background: var(--appearance-swatch-color, transparent) !important;
+  opacity: 0.72;
+  box-shadow: none !important;
+}
+
+html[data-theme][data-theme] body button.appearance-swatch.appearance-swatch:is(:hover, :focus-visible) {
+  background: var(--appearance-swatch-color, transparent) !important;
+  opacity: 0.92;
+  transform: scale(1.08);
+}
+
+html[data-theme][data-theme] body button.appearance-swatch.appearance-swatch.active {
+  background: var(--appearance-swatch-color, transparent) !important;
+  opacity: 1;
+  transform: scale(1.14);
+}
+
+/* Retire colored edge markers that duplicate the selected surface. */
+html[data-theme][data-theme] body .page-switcher-item.active::before,
+html[data-theme][data-theme] body .ws-tab.active::after,
+html[data-theme][data-theme] body .appearance-swatch.active::after {
+  content: none !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}

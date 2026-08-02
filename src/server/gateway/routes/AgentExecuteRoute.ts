@@ -16,6 +16,7 @@ import { MessageRole } from '../../../shared/types/session.js';
 import { WsServer } from '../../infra/network/WsServer.js';
 import { selectRunnableAgent } from '../../core/agent/AgentSelection.js';
 import { resolveSessionEffort, resolveSessionPermissionMode } from '../../core/agent/PermissionModePolicy.js';
+import { SessionTurnRecorder } from '../../infra/SessionTurnRecorder.js';
 
 /** Resolve root session ID for WebSocket routing */
 function resolveRootSessionId(sessionId: string): string {
@@ -43,6 +44,7 @@ export class AgentExecuteRoute implements RouteHandler {
   ): Promise<boolean> {
     let sessionCreated = false;
     let sessionId = '';
+    let recorder: SessionTurnRecorder | null = null;
 
     try {
       // 1. Parse request body
@@ -83,20 +85,22 @@ export class AgentExecuteRoute implements RouteHandler {
         compressed: false,
         timestamp: new Date().toISOString(),
       };
+      const history = await sm.getHistory(sessionId);
       await sm.appendMessage(sessionId, msg);
 
       // 4. Run the full ReAct loop, streaming to WebSocket
-      const history = await sm.getHistory(sessionId);
       const runtime = AgentRuntime.getInstance();
       const ws = WsServer.getInstance();
       const rootId = resolveRootSessionId(sessionId);
 
       let fullContent = '';
+      recorder = new SessionTurnRecorder(sessionId, agentId);
       const loopOptions = {
         permissionMode: resolveSessionPermissionMode(sm, sessionId, body.mode),
         effort: resolveSessionEffort(sm, sessionId, body.effort),
       };
       for await (const event of runtime.processMessage(sessionId, agentId, msg, history, loopOptions)) {
+        await recorder.record(event);
         if (ws.isConnected(rootId)) {
           ws.send(rootId, event as Record<string, unknown>);
         }
@@ -104,6 +108,9 @@ export class AgentExecuteRoute implements RouteHandler {
           fullContent += (event.content as string) || '';
         }
       }
+      await recorder.finalize();
+      const completedSession = sm.session(sessionId);
+      if (completedSession) completedSession.lastEventUuid = recorder.headEventUuid;
 
       // 5. Ephemeral cleanup: delete session if we created it and caller requested it
       if (deleteOnComplete && sessionCreated) {
@@ -114,6 +121,8 @@ export class AgentExecuteRoute implements RouteHandler {
       return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      await recorder?.recordError(msg, 'agent_execute').catch(() => {});
+      await recorder?.finalize().catch(() => {});
       // 6. On error, still clean up ephemeral session to avoid leaking
       if (sessionCreated && sessionId) {
         try { await SessionManager.getInstance().archiveSession(sessionId); } catch {}

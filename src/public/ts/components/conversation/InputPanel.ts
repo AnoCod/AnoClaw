@@ -13,6 +13,7 @@ import { App } from '../../app.js';
 import { ClientLogger } from '../../ClientLogger.js';
 import { ToastManager } from '../../ToastManager.js';
 import { handlePathClick } from '../../utils/ClickablePathHandler.js';
+import { getLocale, onLocaleChange, t } from '../../i18n/index.js';
 
 const SVG_ATTACH = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M9.5 4v7a3 3 0 1 1-6 0V4.5a2 2 0 0 1 4 0v6a1 1 0 0 1-2 0V4"/></svg>`;
 const SVG_ATTACHMENT_FILE = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`;
@@ -114,6 +115,7 @@ export class InputPanel {
     this._slashPanel.on('commandSelected', (name: string) => {
       this._insertCommand(name);
     });
+    onLocaleChange(() => this._refreshLocale());
   }
 
 
@@ -145,7 +147,7 @@ export class InputPanel {
   private _makeTextarea(): HTMLTextAreaElement {
     const ta = document.createElement('textarea');
     ta.className = 'cinema-textarea';
-    ta.placeholder = 'Message AnoClaw...';
+    ta.placeholder = t('composer.placeholder');
     ta.rows = 1;
     let heightRaf = 0;
     ta.addEventListener('input', () => {
@@ -238,7 +240,7 @@ export class InputPanel {
     const btn = document.createElement('button');
     btn.className = 'cinema-tool-btn';
     btn.innerHTML = SVG_ATTACH;
-    btn.title = 'Attach files';
+    btn.title = t('composer.attach');
     btn.addEventListener('click', () => this._openFilePicker());
     return btn;
   }
@@ -250,9 +252,11 @@ export class InputPanel {
     input.multiple = true;
     input.style.display = 'none';
 
+    let cleanedUp = false;
     const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
       input.remove();
-      window.removeEventListener('focus', cleanup);
     };
 
     input.addEventListener('change', () => {
@@ -282,8 +286,7 @@ export class InputPanel {
       cleanup();
     });
 
-    // Also cleanup when user cancels (window regains focus without change event)
-    window.addEventListener('focus', cleanup, { once: true });
+    input.addEventListener('cancel', cleanup, { once: true });
     document.body.appendChild(input);
     input.click();
   }
@@ -323,8 +326,8 @@ export class InputPanel {
       remove.type = 'button';
       remove.className = 'attachment-tag-remove';
       remove.innerHTML = SVG_REMOVE;
-      remove.title = 'Remove attachment';
-      remove.setAttribute('aria-label', `Remove ${att.name}`);
+      remove.title = t('composer.removeAttachment');
+      remove.setAttribute('aria-label', t('composer.removeNamedAttachment', { name: att.name }));
       remove.dataset.index = String(i);
       remove.addEventListener('click', (e) => {
         const target = (e.currentTarget as HTMLElement);
@@ -370,7 +373,7 @@ export class InputPanel {
     dot.className = 'input-goal-dot';
     dot.setAttribute('aria-hidden', 'true');
     const statusText = document.createElement('span');
-    statusText.textContent = `${this._goalStatusLabel(this._goal.status)}${this._goalPending ? ' · Updating…' : ''}`;
+    statusText.textContent = `${this._goalStatusLabel(this._goal.status)}${this._goalPending ? ` · ${t('goal.card.updating')}` : ''}`;
     status.appendChild(dot);
     status.appendChild(statusText);
 
@@ -382,16 +385,16 @@ export class InputPanel {
     const actions = document.createElement('div');
     actions.className = 'input-goal-actions';
     if (isActive || this._goal.status === 'waiting_confirmation' || this._goal.status === 'waiting_user') {
-      actions.appendChild(this._makeGoalActionBtn('Pause', 'pause'));
+      actions.appendChild(this._makeGoalActionBtn(t('goal.action.pause'), 'pause'));
     } else if (this._goal.status === 'waiting_review') {
-      actions.appendChild(this._makeGoalActionBtn('Accept', 'complete', true));
-      actions.appendChild(this._makeGoalActionBtn('Continue', 'resume'));
+      actions.appendChild(this._makeGoalActionBtn(t('goal.action.accept'), 'complete', true));
+      actions.appendChild(this._makeGoalActionBtn(t('goal.action.continue'), 'resume'));
     } else if (this._goal.status === 'budget_exhausted') {
-      actions.appendChild(this._makeGoalActionBtn('Edit limits', 'edit', true));
+      actions.appendChild(this._makeGoalActionBtn(t('goal.action.editLimits'), 'edit', true));
     } else if (this._goal.status !== 'completed') {
-      actions.appendChild(this._makeGoalActionBtn('Resume', 'resume'));
+      actions.appendChild(this._makeGoalActionBtn(t('goal.action.resume'), 'resume'));
     } else {
-      actions.appendChild(this._makeGoalActionBtn('Reopen', 'resume'));
+      actions.appendChild(this._makeGoalActionBtn(t('goal.action.reopen'), 'resume'));
     }
     main.appendChild(status);
     main.appendChild(summary);
@@ -420,20 +423,23 @@ export class InputPanel {
     {
       const detail = document.createElement('div');
       detail.className = 'input-goal-detail-grid';
-      this._appendGoalDetail(detail, 'Outcome', this._goal.objective);
-      this._appendGoalDetail(detail, 'Done when', this._goal.acceptanceCriteria || 'Not specified');
-      if (this._goal.lastSummary) this._appendGoalDetail(detail, 'Latest result', this._goal.lastSummary);
-      if (this._goal.nextStep) this._appendGoalDetail(detail, 'Next step', this._goal.nextStep);
-      if (this._goal.statusReason) this._appendGoalDetail(detail, 'Status reason', this._goal.statusReason);
-      if (this._goal.lastError) this._appendGoalDetail(detail, 'Last error', this._goal.lastError, true);
+      this._appendGoalDetail(detail, t('goal.detail.outcome'), this._goal.objective);
+      this._appendGoalDetail(detail, t('goal.detail.doneWhen'), this._goal.acceptanceCriteria || t('goal.detail.notSpecified'));
+      if (this._goal.lastSummary) this._appendGoalDetail(detail, t('goal.detail.latestResult'), this._goal.lastSummary);
+      if (this._goal.nextStep) this._appendGoalDetail(detail, t('goal.detail.nextStep'), this._goal.nextStep);
+      if (this._goal.statusReason) this._appendGoalDetail(detail, t('goal.detail.statusReason'), this._goal.statusReason);
+      if (this._goal.lastError) this._appendGoalDetail(detail, t('goal.detail.lastError'), this._goal.lastError, true);
       this._goalCard.appendChild(detail);
 
+      const workspaceContext = t('goal.context.workspace', {
+        value: this._shortPath(this._goal.workspace || this._goal.lastWorkspace || ''),
+      });
       const contextItems = [
-        `Mode ${this._modeLabel(this._goal.permissionMode || this._goal.lastPermissionMode || 'Auto')}`,
-        this._goal.lastEffort ? `Effort ${this._goal.lastEffort}` : '',
-        `Workspace ${this._shortPath(this._goal.workspace || this._goal.lastWorkspace || '')}`,
-        `Runs ${this._goal.runCount || 0}/${this._goal.maxRuns || 20}`,
-        this._goal.consecutiveFailures ? `Failures ${this._goal.consecutiveFailures}/${this._goal.maxConsecutiveFailures}` : '',
+        t('goal.context.mode', { value: this._modeLabel(this._goal.permissionMode || this._goal.lastPermissionMode || 'Auto') }),
+        this._goal.lastEffort ? t('goal.context.effort', { value: this._goal.lastEffort }) : '',
+        workspaceContext,
+        t('goal.context.runs', { current: this._goal.runCount || 0, max: this._goal.maxRuns || 20 }),
+        this._goal.consecutiveFailures ? t('goal.context.failures', { current: this._goal.consecutiveFailures, max: this._goal.maxConsecutiveFailures }) : '',
       ].filter(Boolean);
       if (contextItems.length > 0) {
         const context = document.createElement('div');
@@ -442,7 +448,7 @@ export class InputPanel {
           const chip = document.createElement('span');
           chip.className = 'input-goal-context-chip';
           chip.textContent = item;
-          if (item.startsWith('Workspace ')) chip.title = this._goal.workspace || this._goal.lastWorkspace || '';
+          if (item === workspaceContext) chip.title = this._goal.workspace || this._goal.lastWorkspace || '';
           context.appendChild(chip);
         }
         this._goalCard.appendChild(context);
@@ -453,7 +459,7 @@ export class InputPanel {
         evidence.className = 'input-goal-evidence';
         const heading = document.createElement('div');
         heading.className = 'input-goal-evidence-title';
-        heading.textContent = 'Evidence';
+        heading.textContent = t('goal.evidence');
         evidence.appendChild(heading);
         for (const item of this._goal.evidence) {
           if (item.type === 'image' && item.path) {
@@ -462,7 +468,7 @@ export class InputPanel {
             preview.alt = item.label;
             preview.loading = 'lazy';
             preview.src = `/api/v1/workspace/read?path=${encodeURIComponent(item.path)}&sessionId=${encodeURIComponent(App.getInstance().conversationVM.getActiveSessionId() || '')}&raw=1`;
-            preview.title = 'Click to preview';
+            preview.title = t('goal.preview');
             preview.setAttribute('data-file-path', item.path);
             preview.addEventListener('error', () => { preview.style.display = 'none'; });
             evidence.appendChild(preview);
@@ -488,17 +494,17 @@ export class InputPanel {
 
       const footerActions = document.createElement('div');
       footerActions.className = 'input-goal-footer-actions';
-      footerActions.appendChild(this._makeGoalActionBtn('Edit contract', 'edit'));
-      footerActions.appendChild(this._makeGoalActionBtn('Delete', 'delete'));
+      footerActions.appendChild(this._makeGoalActionBtn(t('goal.action.editContract'), 'edit'));
+      footerActions.appendChild(this._makeGoalActionBtn(t('goal.action.delete'), 'delete'));
       this._goalCard.appendChild(footerActions);
 
       const meta = document.createElement('div');
       meta.className = 'input-goal-meta';
-      const updated = this._goal.updatedAt ? new Date(this._goal.updatedAt).toLocaleString() : '';
-      const lastRun = this._goal.lastRunAt ? new Date(this._goal.lastRunAt).toLocaleString() : '';
+      const updated = this._goal.updatedAt ? new Date(this._goal.updatedAt).toLocaleString(getLocale()) : '';
+      const lastRun = this._goal.lastRunAt ? new Date(this._goal.lastRunAt).toLocaleString(getLocale()) : '';
       meta.textContent = [
-        updated ? `Updated ${updated}` : '',
-        lastRun ? `Last run ${lastRun}` : '',
+        updated ? t('goal.updated', { time: updated }) : '',
+        lastRun ? t('goal.lastRun', { time: lastRun }) : '',
       ].filter(Boolean).join(' / ');
       if (meta.textContent) this._goalCard.appendChild(meta);
     }
@@ -506,16 +512,16 @@ export class InputPanel {
 
   private _goalStatusLabel(status: GoalState['status']): string {
     switch (status) {
-      case 'active': return 'Goal running';
-      case 'paused': return 'Goal paused';
-      case 'waiting_user': return 'Needs your input';
-      case 'waiting_confirmation': return 'Approval required';
-      case 'waiting_review': return 'Ready for review';
-      case 'blocked': return 'Goal blocked';
-      case 'failed': return 'Goal stopped after failures';
-      case 'budget_exhausted': return 'Run limit reached';
-      case 'completed': return 'Goal completed';
-      default: return 'Goal';
+      case 'active': return t('goal.card.running');
+      case 'paused': return t('goal.card.paused');
+      case 'waiting_user': return t('goal.card.needsInput');
+      case 'waiting_confirmation': return t('goal.card.needsApproval');
+      case 'waiting_review': return t('goal.card.readyReview');
+      case 'blocked': return t('goal.card.blocked');
+      case 'failed': return t('goal.card.stopped');
+      case 'budget_exhausted': return t('goal.card.limitReached');
+      case 'completed': return t('goal.card.completed');
+      default: return t('goal.title');
     }
   }
 
@@ -533,10 +539,10 @@ export class InputPanel {
 
   private _modeLabel(value: string): string {
     switch (value) {
-      case 'Ask': return 'Ask';
-      case 'AutoEdit': return 'Auto Edit';
-      case 'Plan': return 'Plan';
-      case 'Auto': return 'Safe Auto';
+      case 'Ask': return t('mode.ask');
+      case 'AutoEdit': return t('mode.autoEdit');
+      case 'Plan': return t('mode.plan');
+      case 'Auto': return t('mode.safeAuto');
       default: return value;
     }
   }
@@ -561,7 +567,7 @@ export class InputPanel {
 
     let detailsDialog: Dialog;
     detailsDialog = new Dialog({
-      title: 'Goal',
+      title: t('goal.title'),
       body,
       width: 'min(720px, calc(100vw - 32px))',
       onClose: () => {
@@ -608,11 +614,11 @@ export class InputPanel {
       return;
     }
     if (action === 'complete') {
-      const ok = await ConfirmDialog.show('Accept the evidence and mark this Goal complete?', 'Complete Goal');
+      const ok = await ConfirmDialog.show(t('goal.confirmComplete'), t('goal.completeTitle'));
       if (!ok) return;
     }
     if (action === 'delete') {
-      const ok = await ConfirmDialog.show('Delete this goal?', 'Delete Goal');
+      const ok = await ConfirmDialog.show(t('goal.confirmDelete'), t('goal.deleteTitle'));
       if (!ok) return;
       this._closeGoalDetails();
     }
@@ -652,17 +658,17 @@ export class InputPanel {
     objective.id = `${idPrefix}-objective`;
     objective.className = 'ui-textarea goal-dialog-textarea';
     objective.rows = 4;
-    objective.placeholder = 'What concrete result should AnoClaw deliver?';
+    objective.placeholder = t('goal.dialog.objectivePlaceholder');
     objective.value = this._goal?.objective || '';
-    body.appendChild(addField('Outcome', objective, 'Describe the result, not only the activity.'));
+    body.appendChild(addField(t('goal.detail.outcome'), objective, t('goal.dialog.objectiveHint')));
 
     const criteria = document.createElement('textarea');
     criteria.id = `${idPrefix}-criteria`;
     criteria.className = 'ui-textarea goal-dialog-criteria';
     criteria.rows = 3;
-    criteria.placeholder = 'How can AnoClaw and you verify that this is done?';
+    criteria.placeholder = t('goal.dialog.criteriaPlaceholder');
     criteria.value = this._goal?.acceptanceCriteria || '';
-    body.appendChild(addField('Done when', criteria, 'Use observable evidence such as files, tests, reports, or a reviewed result.'));
+    body.appendChild(addField(t('goal.detail.doneWhen'), criteria, t('goal.dialog.criteriaHint')));
 
     const workspace = document.createElement('input');
     workspace.id = `${idPrefix}-workspace`;
@@ -671,27 +677,10 @@ export class InputPanel {
     workspace.value = currentWorkspace;
     workspace.readOnly = true;
     workspace.title = currentWorkspace;
-    body.appendChild(addField('Workspace', workspace, 'This Goal stays bound to this Workspace until you edit its contract.'));
+    body.appendChild(addField(t('goal.dialog.workspace'), workspace, t('goal.dialog.workspaceHint')));
 
     const controls = document.createElement('div');
     controls.className = 'goal-dialog-grid';
-
-    const permission = document.createElement('select');
-    permission.id = `${idPrefix}-permission`;
-    permission.className = 'ui-select';
-    for (const [value, label] of [
-      ['Auto', 'Safe Auto'],
-      ['AutoEdit', 'Auto Edit'],
-      ['Ask', 'Ask before changes'],
-      ['Plan', 'Plan only'],
-    ]) {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = label;
-      permission.appendChild(option);
-    }
-    permission.value = this._goal?.permissionMode || 'Auto';
-    controls.appendChild(addField('Permission', permission));
 
     const maxRuns = document.createElement('input');
     maxRuns.id = `${idPrefix}-runs`;
@@ -700,7 +689,7 @@ export class InputPanel {
     maxRuns.min = '1';
     maxRuns.max = '1000';
     maxRuns.value = String(this._goal?.maxRuns || 20);
-    controls.appendChild(addField('Maximum runs', maxRuns));
+    controls.appendChild(addField(t('goal.dialog.maximumRuns'), maxRuns));
 
     const failures = document.createElement('input');
     failures.id = `${idPrefix}-failures`;
@@ -709,33 +698,38 @@ export class InputPanel {
     failures.min = '1';
     failures.max = '20';
     failures.value = String(this._goal?.maxConsecutiveFailures || 3);
-    controls.appendChild(addField('Failure limit', failures));
+    controls.appendChild(addField(t('goal.dialog.failureLimit'), failures));
 
     const cadence = document.createElement('select');
     cadence.id = `${idPrefix}-cadence`;
     cadence.className = 'ui-select';
-    for (const [value, label] of [['15000', '15 seconds'], ['60000', '1 minute'], ['300000', '5 minutes'], ['900000', '15 minutes']]) {
+    for (const [value, label] of [
+      ['15000', t('goal.dialog.seconds', { count: 15 })],
+      ['60000', t('goal.dialog.minute')],
+      ['300000', t('goal.dialog.minutes', { count: 5 })],
+      ['900000', t('goal.dialog.minutes', { count: 15 })],
+    ]) {
       const option = document.createElement('option');
       option.value = value;
       option.textContent = label;
       cadence.appendChild(option);
     }
     cadence.value = String(this._goal?.wakeIntervalMs || 15000);
-    controls.appendChild(addField('Between runs', cadence));
+    controls.appendChild(addField(t('goal.dialog.betweenRuns'), cadence));
 
     body.appendChild(controls);
 
     const safety = document.createElement('div');
     safety.className = 'goal-dialog-safety';
-    safety.textContent = 'High-risk and critical actions still require approval. The Goal stops on completion review, blockers, repeated failures, or the run limit.';
+    safety.textContent = t('goal.dialog.safety');
     body.appendChild(safety);
 
     const footer = document.createElement('div');
     footer.className = 'goal-dialog-actions';
     let dialog: Dialog | null = null;
-    const cancelBtn = new Button({ label: 'Cancel', onClick: () => dialog?.close() });
+    const cancelBtn = new Button({ label: t('goal.dialog.cancel'), onClick: () => dialog?.close() });
     const submitBtn = new Button({
-      label: action === 'edit' ? 'Change' : 'Start',
+      label: action === 'edit' ? t('goal.dialog.change') : t('goal.dialog.start'),
       variant: 'primary',
       onClick: () => {
         if (!objective.value.trim() || !criteria.value.trim()) return;
@@ -743,7 +737,6 @@ export class InputPanel {
           objective: objective.value.trim(),
           acceptanceCriteria: criteria.value.trim(),
           workspace: currentWorkspace,
-          permissionMode: permission.value,
           maxRuns: Number(maxRuns.value),
           maxConsecutiveFailures: Number(failures.value),
           wakeIntervalMs: Number(cadence.value),
@@ -769,7 +762,7 @@ export class InputPanel {
     footer.appendChild(submitBtn.element);
 
     dialog = new Dialog({
-      title: action === 'edit' ? 'Edit Goal' : 'Start Goal',
+      title: action === 'edit' ? t('goal.dialog.editTitle') : t('goal.dialog.startTitle'),
       body,
       footer,
       width: '660px',
@@ -789,7 +782,7 @@ export class InputPanel {
   private _makeSendBtn(): HTMLButtonElement {
     const btn = document.createElement('button');
     btn.className = 'cinema-tool-btn is-primary';
-    btn.textContent = 'SEND';
+    btn.textContent = t('composer.send');
     btn.addEventListener('click', () => this._fireSend());
     return btn;
   }
@@ -797,12 +790,21 @@ export class InputPanel {
   private _makeStopBtn(): HTMLButtonElement {
     const btn = document.createElement('button');
     btn.className = 'cinema-tool-btn is-stop';
-    btn.textContent = 'STOP';
+    btn.textContent = t('composer.stop');
     btn.style.display = 'none';
     btn.addEventListener('click', () => {
       if (this.onStop) this.onStop();
     });
     return btn;
+  }
+
+  private _refreshLocale(): void {
+    this._textarea.placeholder = t('composer.placeholder');
+    this._attachBtn.title = t('composer.attach');
+    this._sendBtn.textContent = t('composer.send');
+    this._stopBtn.textContent = t('composer.stop');
+    this._renderAttachments();
+    this._renderGoalCard();
   }
 
 
@@ -864,7 +866,10 @@ export class InputPanel {
 
     const args = rawArgs ? { raw: rawArgs } : undefined;
     ClientLogger.ui.debug('Slash command run', { command });
-    App.getInstance().conversationVM.runCommand(command, args);
+    const sent = App.getInstance().conversationVM.runCommand(command, args);
+    if (!sent) {
+      ToastManager.getInstance().error(t('composer.selectConnected'));
+    }
     return true;
   }
 

@@ -17,7 +17,7 @@ import { extensionPoints } from './ExtensionPoints.js';
 import { PluginToolProxy } from './PluginToolProxy.js';
 import type { PluginHostManager } from './PluginHostManager.js';
 import type { PluginLLMMessage, PluginLLMOptions, PluginMemorySearchOptions } from './PluginRPC.js';
-import type { ExecutionContext } from '../../../shared/types/session.js';
+import type { ExecutionContext, ToolExecutionMode } from '../../../shared/types/session.js';
 import type { LLMOptions } from '../../../shared/types/llm.js';
 
 const log = createLogger('anochat.plugins');
@@ -77,7 +77,10 @@ export class RpcDispatcher {
       }
 
       case 'routes.register': {
-        const p = params as { pluginName: string; routes: Array<{ method: string; path: string; handler: string }> };
+        const p = params as {
+          pluginName: string;
+          routes: Array<{ method: string; path: string; handler: string; auth?: 'admin' | 'public' }>;
+        };
         ApiServer.getInstance().registerPluginRoutes(p.pluginName, p.routes);
         return { registered: p.routes.length };
       }
@@ -122,10 +125,10 @@ export class RpcDispatcher {
       case 'llm.chat': {
         const p = params as { pluginName: string; messages: PluginLLMMessage[]; options: PluginLLMOptions };
         const settings = SettingsManager.getInstance();
-        const model = p.options.model || settings.get<string>('model', 'deepseek-chat');
-        const apiUrl = settings.get<string>('apiUrl', 'https://api.deepseek.com');
-        const apiKey = settings.get<string>('apiKey', '');
-        const provider = settings.get<string>('provider', 'openai-compatible');
+        const model = p.options.model || settings.get<string>('llm.model', 'deepseek-chat');
+        const apiUrl = settings.get<string>('llm.apiUrl', 'https://api.deepseek.com');
+        const apiKey = settings.get<string>('llm.apiKey', '');
+        const provider = settings.get<string>('llm.provider', 'openai-compatible');
         const temperature = p.options.temperature ?? settings.get<number>('llm.temperature', 0.7);
         const maxTokens = p.options.maxTokens || settings.get<number>('llm.maxTokens', 4096);
 
@@ -322,7 +325,7 @@ export class RpcDispatcher {
   }
 }
 
-function normalizeToolExecutionMode(value: unknown): string {
+function normalizeToolExecutionMode(value: unknown): ToolExecutionMode {
   if (typeof value !== 'string') return 'auto';
   switch (value) {
     case 'Ask':
@@ -341,6 +344,6 @@ function normalizeToolExecutionMode(value: unknown): string {
     case 'auto':
       return 'auto';
     default:
-      return value;
+      return 'auto';
   }
 }

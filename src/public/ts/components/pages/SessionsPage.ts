@@ -1,10 +1,9 @@
-// AnoClaw Cinema 閳?SessionsPage: full-bleed conversation with edge bars
+// AnoClaw Cinema — SessionsPage: full-bleed conversation with edge bars
 // Assembles SessionEdgeBar + ConversationFlow + RightEdgeBar + InputPanel.
 // Each session has its own independent SessionAgent with its own emitter.
 // Switching sessions = unsubscribing from old agent's emitter and subscribing to new one.
 
 import { App } from '../../app.js';
-import { pageRegistry } from '../../PageRegistry.js';
 import { slotRegistry } from '../../SlotRegistry.js';
 import type { Page, TokenBreakdown } from '../../types.js';
 import type { SessionNode } from '../../types.js';
@@ -34,6 +33,8 @@ import { toolCardRegistry } from '../../ToolCardRegistry.js';
 import { SessionsPageOverfly } from './SessionsPageOverfly.js';
 import type { SessionAgent } from '../../viewmodel/SessionAgent.js';
 import { handlePathClick } from '../../utils/ClickablePathHandler.js';
+import { ToastManager } from '../../ToastManager.js';
+import { onLocaleChange, refreshLocalizedElements, t } from '../../i18n/index.js';
 
 type ComposerAttachment = Attachment & { content?: string };
 
@@ -56,26 +57,28 @@ export class SessionsPage implements Page {
   private _delegateEls = new Map<string, HTMLElement>();
   /** Track live delegates so updates use component behavior instead of fragile DOM poking. */
   private _delegates = new Map<string, { element: HTMLElement; update?: (msg: any) => void; collapse?: () => void; expand?: () => void }>();
-  /** Status card element 閳?always kept at the very bottom above input. */
+  /** Status card element — always kept at the very bottom above input. */
   private _statusEl: HTMLElement | null = null;
   private _streamStatusEl: HTMLElement | null = null;
   private _loadingEl: HTMLElement | null = null;
-  /** Sentinel node 閳?all inserts go before this. Always the last child of _flowInner. */
+  /** Sentinel node — all inserts go before this. Always the last child of _flowInner. */
   private _sentinel: HTMLElement;
   /** Track which AskUserQuestion question indices have been answered per message. */
   private _answeredAskIds = new Map<string, Set<number>>();
   private _compactionOverlay: HTMLElement | null = null;
   private _compactionInProgress = false;
+  private _compactionSessionId: string | null = null;
   private _compactionSafetyTimer: ReturnType<typeof setTimeout> | null = null;
   private _scrollRaf = 0;
   private _timelineRaf = 0;
   private _timelineResizeObs: ResizeObserver | null = null;
-  private _overfly = new SessionsPageOverfly();
+  private _overfly: SessionsPageOverfly;
+  private _renderingHistory = false;
   private _workspaceChangedHandler: ((data: unknown) => void) | null = null;
   private _workspacePath: string = '';
   private _showThinkCards = App.getInstance().settings.showThinkCards;
   private _showToolCards = App.getInstance().settings.showToolCards;
-  // Scroll tracking 閳?prevent auto-scroll from yanking user back to bottom
+  // Scroll tracking — prevent auto-scroll from yanking user back to bottom
   // when they've scrolled up to read history during streaming.
   private _autoScroll: boolean = true;
   private _scrollThreshold: number = 50; // px from bottom to consider "at bottom"
@@ -101,6 +104,8 @@ export class SessionsPage implements Page {
     if (bd && bd.contextWindow > 0) {
       const usedPct = Math.min(100, Math.max(0, Math.round((bd.total / bd.contextWindow) * 100)));
       this._rightBar.setContextPct(usedPct);
+    } else {
+      this._rightBar.setContextPct(null);
     }
   };
   private _onRowsRemoved = (_start: number, _count: number, ids?: string[]) => {
@@ -111,16 +116,19 @@ export class SessionsPage implements Page {
     this.container = document.createElement('div');
     this.container.className = 'cinema-page';
 
-    // Left 48px bar 閳?session dots, new/delete buttons
+    // Persistent session tree — collapsible to a compact root-session rail.
     this._leftBar = new SessionEdgeBar({
       onSelectSession: (id) => this._onSelectSession(id),
       onNewSession: () => this._onNewSession(),
       onDeleteSession: (id) => this._onDeleteSession(id),
     });
 
-    // Right 48px bar 閳?files, overview, plan, context icons
+    // Right utility bar — lightweight overview, plan, and context controls.
     this._rightBar = new RightEdgeBar({
       onCompactRequest: () => this._onCompactRequest(),
+    });
+    this._overfly = new SessionsPageOverfly(() => {
+      this._rightBar.setActivePanel(null);
     });
 
     // Center column = scrollable flow + pinned input
@@ -137,7 +145,7 @@ export class SessionsPage implements Page {
       this._timelineResizeObs.observe(this._flowInner);
     }
 
-    // Welcome screen 閳?shown when no session is selected
+    // Welcome screen — shown when no session is selected
     this._welcomeEl = this._buildWelcome();
     this._flowInner.appendChild(this._welcomeEl);
 
@@ -151,18 +159,19 @@ export class SessionsPage implements Page {
     this._inputPanel = new InputPanel();
     this._inputPanel.onSend = (content, _mode, attachments) => {
       void this._handleComposerSend(content, attachments as ComposerAttachment[]);
-      this._resetAutoScroll(); // user sent a message 閳?re-anchor to bottom
     };
     this._inputPanel.onStop = () => {
       if (this._activeAgent) this._activeAgent.stopGeneration().catch(() => {});
     };
 
-    // Listen for workspace閳妺gent bridge events (Monaco right-click, file tree right-click)
+    // Listen for workspace-to-agent bridge events (Monaco right-click, file tree right-click)
     window.addEventListener('ws-ask-agent', ((e: CustomEvent) => {
       this._handleAskAgent(e.detail);
     }) as EventListener);
-    window.addEventListener('compaction-completed', (() => {
-      this._hideCompactionOverlay();
+    window.addEventListener('compaction-completed', ((event: CustomEvent) => {
+      const detail = event.detail as { sessionId?: string; success?: boolean } | undefined;
+      if (!detail?.sessionId || detail.sessionId !== this._compactionSessionId) return;
+      this._hideCompactionOverlay(detail.success === true);
     }) as EventListener);
     window.addEventListener('settings-changed', ((e: CustomEvent) => {
       const detail = e.detail || {};
@@ -202,11 +211,10 @@ export class SessionsPage implements Page {
       this._leftBar.element.appendChild(bottomSlot);
       slotRegistry._onSlotReady('sessions-sidebar-bottom');
     }
+    onLocaleChange(() => this._refreshLocale());
   }
 
-  // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡?
   // Welcome
-  // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡?
 
   private async _handleComposerSend(content: string, attachments: ComposerAttachment[]): Promise<void> {
     const readiness = await this._conversationReadiness();
@@ -222,46 +230,46 @@ export class SessionsPage implements Page {
     const app = App.getInstance();
     const convVM = app.conversationVM;
     convVM.inputValue = content;
-    if (attachments && attachments.length > 0) {
-      for (const a of attachments) convVM.addAttachment(a as any);
-    }
+    convVM.attachments = [...attachments];
 
-    this._hideWelcome();
-    this._resetAutoScroll();
-    this._inputPanel.setStreaming(true);
-    this._inputPanel.clear();
+    try {
+      if (!this._activeAgent) {
+        const session = await app.sessionVM.createSession(undefined, undefined);
+        if (!session) {
+          this._restoreComposerAfterSendFailure(content, attachments);
+          return;
+        }
+      }
 
-    const send = () => {
       const agent = this._activeAgent;
-      if (!agent) return;
-      agent.sendMessage(convVM.inputValue, convVM.permissionMode, convVM.effortMode, convVM.attachments).catch(() => {});
-      convVM.inputValue = '';
-      convVM.clearAttachments();
-    };
-
-    if (this._activeAgent) {
-      send();
-      return;
-    }
-
-    app.sessionVM.createSession(undefined, undefined).then((session) => {
-      if (session) {
-        app.conversationVM.setActiveSession(session.id);
-        send();
+      if (!agent) {
+        this._restoreComposerAfterSendFailure(content, attachments);
         return;
       }
+
+      const sent = await agent.sendMessage(content, convVM.permissionMode, convVM.effortMode, attachments);
+      if (!sent) {
+        this._restoreComposerAfterSendFailure(content, attachments);
+        return;
+      }
+      convVM.inputValue = '';
+      convVM.clearAttachments();
+      this._hideWelcome();
+      this._resetAutoScroll();
+    } catch (e) {
+      ClientLogger.ui.error('Failed to send composer message', { error: (e as Error).message });
       this._restoreComposerAfterSendFailure(content, attachments);
-    }).catch((e) => {
-      ClientLogger.ui.error('Failed to auto-create session', { error: (e as Error).message });
-      this._restoreComposerAfterSendFailure(content, attachments);
-    });
+    }
   }
 
   private _restoreComposerAfterSendFailure(content: string, attachments: ComposerAttachment[]): void {
     this._inputPanel.restoreDraft(content, attachments);
     this._inputPanel.setStreaming(false);
-    this._showWelcome();
-    this._updateWelcome();
+    if (!this._activeSessionId) {
+      this._showWelcome();
+      this._updateWelcome();
+    }
+    this._inputPanel.focus();
   }
 
   private async _conversationReadiness(): Promise<{ ready: boolean; message?: string }> {
@@ -269,7 +277,7 @@ export class SessionsPage implements Page {
     try {
       await app.agentVM.ensureLoaded();
     } catch (err) {
-      return { ready: false, message: (err as Error).message || 'Failed to load agents.' };
+      return { ready: false, message: (err as Error).message || t('session.readinessLoadFailed') };
     }
     const result = app.agentVM.selectRunnableAgent(app.sessionVM.activeSession?.agentId);
     return result.ok ? { ready: true } : { ready: false, message: result.message };
@@ -284,11 +292,11 @@ export class SessionsPage implements Page {
           <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
         </svg>
       </div>
-      <div class="cinema-welcome-title" data-welcome-title>Welcome to AnoClaw</div>
-      <div class="cinema-welcome-desc" data-welcome-desc>Start a new conversation or select a session from the left bar.</div>
+      <div class="cinema-welcome-title" data-welcome-title>${t('session.welcome.defaultTitle')}</div>
+      <div class="cinema-welcome-desc" data-welcome-desc>${t('session.welcome.defaultDescription')}</div>
       <div class="cinema-welcome-actions">
-        <button type="button" class="cinema-welcome-primary" data-welcome-primary>New Session</button>
-        <button type="button" class="cinema-welcome-secondary" data-welcome-secondary>Agents</button>
+        <button type="button" class="cinema-welcome-primary" data-welcome-primary>${t('session.welcome.newSession')}</button>
+        <button type="button" class="cinema-welcome-secondary" data-welcome-secondary>${t('session.welcome.agents')}</button>
       </div>
     `;
     el.querySelector<HTMLButtonElement>('[data-welcome-primary]')?.addEventListener('click', () => {
@@ -315,9 +323,9 @@ export class SessionsPage implements Page {
 
     const agents = app.agentVM.agents;
     if (agents.length === 0) {
-      title.textContent = 'No CEO configured';
-      desc.textContent = 'Create a CEO/MainAgent and configure its model connection before starting a conversation.';
-      primary.textContent = 'Open Agents';
+      title.textContent = t('session.welcome.noCeoTitle');
+      desc.textContent = t('session.welcome.noCeoDescription');
+      primary.textContent = t('session.welcome.openAgents');
       primary.dataset.action = 'agents';
       secondary.hidden = true;
       return;
@@ -325,19 +333,34 @@ export class SessionsPage implements Page {
 
     const result = app.agentVM.selectRunnableAgent(app.sessionVM.activeSession?.agentId);
     if (!result.ok) {
-      title.textContent = 'Agent needs configuration';
-      desc.textContent = result.message || 'Open Agents and configure a runnable model connection.';
-      primary.textContent = 'Open Agents';
+      title.textContent = t('session.welcome.agentConfigTitle');
+      desc.textContent = result.message || t('session.welcome.agentConfigDescription');
+      primary.textContent = t('session.welcome.openAgents');
       primary.dataset.action = 'agents';
       secondary.hidden = true;
       return;
     }
 
-    title.textContent = 'Ready to work';
-    desc.textContent = 'Create a new conversation or select a session from the left bar.';
-    primary.textContent = 'New Session';
+    title.textContent = t('session.welcome.defaultTitle');
+    desc.textContent = t('session.welcome.defaultDescription');
+    primary.textContent = t('session.welcome.newSession');
     primary.dataset.action = 'session';
     secondary.hidden = false;
+  }
+
+  private _refreshLocale(): void {
+    this._updateWelcome();
+    refreshLocalizedElements(this._flowInner);
+    AskUserQuestionCard.refreshLocale(this._flowInner);
+    if (this._compactionOverlay) {
+      const title = this._compactionOverlay.querySelector<HTMLElement>('.compaction-text');
+      const description = this._compactionOverlay.querySelector<HTMLElement>('.compaction-sub');
+      if (title) title.textContent = t('session.compact.title');
+      if (description) description.textContent = t('session.compact.description');
+    }
+    for (const expand of this._flowInner.querySelectorAll<HTMLButtonElement>('.tool-result-expand')) {
+      if (expand.textContent?.includes('+')) expand.textContent = t('session.showDetails');
+    }
   }
 
   private async _runWelcomePrimaryAction(): Promise<void> {
@@ -363,12 +386,10 @@ export class SessionsPage implements Page {
     this._flowInner.insertBefore(this._loadingEl, this._sentinel);
   }
 
-  // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡?
   // Agent emitter subscribe / unsubscribe
   // Each session gets its own SessionAgent with its own EventEmitter.
   // When switching sessions, we unbind from the old agent and bind to the new one.
   // This avoids stale references and double-firing handlers.
-  // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡?
 
   private _bindToAgent(agent: SessionAgent): void {
     this._unbindFromAgent();
@@ -406,12 +427,20 @@ export class SessionsPage implements Page {
     this._activeAgent = null;
   }
 
-  // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡?
+  private _syncContextFromAgent(agent: SessionAgent | null): void {
+    const breakdown = agent?.state.tokenBreakdown;
+    if (!breakdown || breakdown.contextWindow <= 0) {
+      this._rightBar.setContextPct(null);
+      return;
+    }
+    const usedPct = Math.min(100, Math.max(0, Math.round((breakdown.total / breakdown.contextWindow) * 100)));
+    this._rightBar.setContextPct(usedPct);
+  }
+
   // Global event bindings
-  // activeSessionChanged is the CENTRAL switch 閳?it fires whenever the
+  // activeSessionChanged is the CENTRAL switch — it fires whenever the
   // user picks a different session. All session-switch logic lives here:
-  // clear old cards 閳?fetch workspace 閳?bind new agent 閳?load history.
-  // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡?
+  // clear old cards — fetch workspace — bind new agent — load history.
 
   private _bindEvents(): void {
     const app = App.getInstance();
@@ -426,7 +455,7 @@ export class SessionsPage implements Page {
     agentVM.on('agentDeleted', () => this._updateWelcome());
     agentVM.on('agentStatusChanged', () => this._updateWelcome());
 
-    // Session tree mutations 閳?re-render left bar dots
+    // Session tree mutations — refresh the persistent navigation tree.
     sessionVM.on('sessionAdded', () => {
       this._activeSessionId = sessionVM.activeSessionId;
       this._leftBar.renderTree(sessionVM.sessions.tree, this._activeSessionId);
@@ -434,23 +463,15 @@ export class SessionsPage implements Page {
     sessionVM.on('sessionUpdated', () => {
       this._leftBar.renderTree(sessionVM.sessions.tree, this._activeSessionId);
     });
-    sessionVM.on('sessionRemoved', (removed: unknown) => {
-      const r = removed as { id: string };
-      const isActiveDeleted = r.id === this._activeSessionId;
-      this._activeSessionId = sessionVM.activeSessionId;
+    sessionVM.on('sessionRemoved', () => {
       this._leftBar.renderTree(sessionVM.sessions.tree, this._activeSessionId);
-      if (isActiveDeleted) {
-        this._clearFlow();
-        this._showWelcome();
-        this._closeOverfly();
-      }
+    });
+    sessionVM.on('sessionsCleared', () => {
+      this._leftBar.renderTree([], null);
     });
 
     sessionVM.on('sessionDeselected', () => {
-      this._activeSessionId = null;
-      this._clearFlow();
-      this._showWelcome();
-      this._closeOverfly();
+      this._leftBar.renderTree(sessionVM.sessions.tree, null);
     });
 
     sessionVM.on('sessionSelected', () => {
@@ -458,23 +479,36 @@ export class SessionsPage implements Page {
     });
 
     // activeSessionChanged: the SINGLE handler for all session switches.
-    // Switches agent emitter binding 閳?unsub from old, sub to new.
+    // Switches agent emitter binding — unsub from old, sub to new.
     convVM.on('activeSessionChanged', (data: unknown) => {
-      const newId = data as string;
-      if (this._activeSessionId === newId) return;
+      const newId = data as string | null;
+      if (this._activeSessionId === newId && (newId !== null || !this._activeAgent)) return;
 
       this._streamingDelegate = null;
       this._streamingEl = null;
       if (this._statusEl) { this._statusEl.remove(); this._statusEl = null; }
       if (this._streamStatusEl) { this._streamStatusEl.remove(); this._streamStatusEl = null; }
 
-      this._activeSessionId = newId;
-      this._leftBar.setActive(newId);
       this._answeredAskIds.clear();
       this._clearFlow();
-      this._hideWelcome();
       this._inputPanel.clear();
       this._inputPanel.clearAttachments?.();
+      this._closeOverfly();
+      this._activeSessionId = newId;
+
+      if (!newId) {
+        this._unbindFromAgent();
+        this._workspacePath = '';
+        this._leftBar.renderTree(sessionVM.sessions.tree, null);
+        this._inputPanel.setStreaming(false);
+        this._syncContextFromAgent(null);
+        this._showWelcome();
+        this._updateWelcome();
+        return;
+      }
+
+      this._leftBar.setActive(newId);
+      this._hideWelcome();
 
       // Fetch workspace path for relative file path resolution
       this._workspacePath = '';
@@ -484,6 +518,7 @@ export class SessionsPage implements Page {
       const agent = convVM.getAgent(newId);
       this._bindToAgent(agent);
       this._inputPanel.setStreaming(agent.state.isStreaming);
+      this._syncContextFromAgent(agent);
 
       if (agent.state.messages.length > 0) {
         this._renderHistory();
@@ -510,7 +545,7 @@ export class SessionsPage implements Page {
     });
   }
 
-  /** Inject text into the composer input (workspace閳妺gent bridge). */
+  /** Inject text into the composer input (workspace-to-agent bridge). */
   injectInput(text: string): void {
     if (this._inputPanel) {
       this._inputPanel.setValue(text);
@@ -519,11 +554,7 @@ export class SessionsPage implements Page {
   }
 
   private _handleAskAgent(detail: { action: string; activeFile?: string; fileName?: string; language?: string; selectedText?: string }): void {
-    // Navigate to sessions page if needed
     const app = App.getInstance();
-    if (pageRegistry.currentPage !== 'sessions') {
-      pageRegistry.navigateTo('sessions');
-    }
     // Ensure an active session exists
     const existingId = app.sessionVM?.activeSessionId;
     if (!existingId) {
@@ -553,9 +584,7 @@ export class SessionsPage implements Page {
     this._inputPanel?.focus();
   }
 
-  // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡?
   // Lifecycle
-  // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡?
 
   onEnter(): void {
     const panel = document.getElementById('sessions-panel');
@@ -587,6 +616,7 @@ export class SessionsPage implements Page {
       const agent = convVM.getAgent(activeId);
       this._bindToAgent(agent);
       this._inputPanel.setStreaming(agent.state.isStreaming);
+      this._syncContextFromAgent(agent);
 
       if (agent.state.messages.length > 0) {
         this._renderHistory();
@@ -595,6 +625,11 @@ export class SessionsPage implements Page {
       }
     } else if (activeId) {
       this._hideWelcome();
+      this._syncContextFromAgent(this._activeAgent);
+    } else {
+      this._syncContextFromAgent(null);
+      this._showWelcome();
+      this._updateWelcome();
     }
 
     const sseClient = App.getInstance().sseClient;
@@ -619,9 +654,7 @@ export class SessionsPage implements Page {
     if (panel) panel.classList.remove('cinema-active');
   }
 
-  // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡?
   // Session management
-  // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡?
 
   private _onSelectSession(id: string): void {
     console.log('[Sessions] selectSession id:', id);
@@ -644,8 +677,23 @@ export class SessionsPage implements Page {
   }
 
   private _onCompactRequest(): void {
+    if (this._compactionInProgress) return;
+    const app = App.getInstance();
+    const sessionId = app.sessionVM.activeSessionId;
+    if (!sessionId) {
+      ToastManager.getInstance().error(t('session.compact.selectFirst'));
+      return;
+    }
+    if (!app.sseClient.connected) {
+      ToastManager.getInstance().error(t('session.compact.disconnected'));
+      return;
+    }
+    if (!app.conversationVM.runCommand('compact')) {
+      ToastManager.getInstance().error(t('session.compact.sendFailed'));
+      return;
+    }
+    this._compactionSessionId = sessionId;
     this._showCompactionOverlay();
-    App.getInstance().conversationVM.runCommand('compact');
   }
 
   private _showCompactionOverlay(): void {
@@ -656,46 +704,48 @@ export class SessionsPage implements Page {
     overlay.className = 'compaction-overlay';
     overlay.innerHTML = `
       <div class="compaction-spinner"></div>
-      <div class="compaction-text">Compacting context...</div>
-      <div class="compaction-sub">Summarizing conversation history to free up space</div>
+      <div class="compaction-text">${t('session.compact.title')}</div>
+      <div class="compaction-sub">${t('session.compact.description')}</div>
     `;
     document.body.appendChild(overlay);
     this._compactionOverlay = overlay;
     this._compactionSafetyTimer = setTimeout(() => {
-      if (this._compactionInProgress) this._hideCompactionOverlay();
-    }, 10_000);
+      if (!this._compactionInProgress) return;
+      this._compactionSafetyTimer = null;
+      ToastManager.getInstance().info(t('session.compact.stillRunning'), 7000);
+      this._removeCompactionOverlay(false);
+    }, 45_000);
   }
 
-  private _hideCompactionOverlay(): void {
+  private _hideCompactionOverlay(confirmed: boolean): void {
     if (this._compactionSafetyTimer) {
       clearTimeout(this._compactionSafetyTimer);
       this._compactionSafetyTimer = null;
     }
     this._compactionInProgress = false;
-    if (this._compactionOverlay) {
-      this._compactionOverlay.classList.add('compaction-overlay--done');
-      setTimeout(() => {
-        if (this._compactionOverlay) {
-          this._compactionOverlay.remove();
-          this._compactionOverlay = null;
-        }
-      }, 400);
-    }
+    this._compactionSessionId = null;
+    this._removeCompactionOverlay(confirmed);
   }
 
-  // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡?
+  private _removeCompactionOverlay(confirmed: boolean): void {
+    const overlay = this._compactionOverlay;
+    if (!overlay) return;
+    this._compactionOverlay = null;
+    if (confirmed) overlay.classList.add('compaction-overlay--done');
+    setTimeout(() => overlay.remove(), confirmed ? 400 : 0);
+  }
+
   // Streaming
   // Token-by-token rendering flow:
-  //   1. _startStreamingCard() 閳?create a StreamingMessageDelegate and a "Thinking..." status
-  //   2. _appendToken() 閳?append each token to the streaming delegate, scroll to bottom
-  //   3. _finalizeStreaming() 閳?force final markdown render, remove streaming elements,
+  //   1. _startStreamingCard() — create a StreamingMessageDelegate and a "Thinking..." status
+  //   2. _appendToken() — append each token to the streaming delegate, scroll to bottom
+  //   3. _finalizeStreaming() — force final markdown render, remove streaming elements,
   //      then rebuild the ENTIRE message list from agent.state.messages.
   // We rebuild on finalize because the agent may have interleaved think/tool cards
   // during streaming that need to appear in correct chronological order.
-  // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡?
 
   private _startStreamingCard(): void {
-    // Always create a fresh streaming delegate 閳?never reuse from a prior turn
+    // Always create a fresh streaming delegate — never reuse from a prior turn
     if (this._streamingEl) { this._streamingEl.remove(); this._streamingEl = null; }
     this._streamingDelegate = null;
     const sd = new StreamingMessageDelegate({
@@ -732,7 +782,7 @@ export class SessionsPage implements Page {
     // textSegmentFinalized already rendered the last text segment as an
     // AgentMessageDelegate before we got here. think/tool cards were inserted
     // before the streaming delegate during streaming. Just tear down the
-    // streaming/status elements 閳?no full rebuild needed.
+    // streaming/status elements — no full rebuild needed.
     if (this._streamingDelegate) this._streamingDelegate.complete();
     if (this._streamingEl) { this._streamingEl.remove(); }
     this._streamingDelegate = null;
@@ -745,19 +795,17 @@ export class SessionsPage implements Page {
     this._scrollToBottom();
   }
 
-  // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡?
   // Message rendering
   //
   // _appendCard is the main rendering entry point. It dispatches by msg.type
   // to the correct Delegate class. Each delegate wraps a DOM element.
   //
   // _updateCard handles in-place updates for live cards:
-  //   - tool_call: toggle running 閳?done animation, append duration, show output
+  //   - tool_call: toggle running — done animation, append duration, show output
   //   - think: append text body, update elapsed time
   //   - delegation_activity / status: replace entire card
   //
   // _delegateEls tracks every card by message.id so we can find and update.
-  // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡?
 
   /** Dispatch msg.type to the correct delegate, insert into flow, track by id. */
   private _appendCard(msg: any): void {
@@ -804,7 +852,7 @@ export class SessionsPage implements Page {
           status: (status === 'failed' ? 'failed' : 'completed') as 'completed' | 'failed',
           summary: msg.taskSummary || data.summary || '',
           result: msg.taskResult || data.result || '',
-        });
+        }, { notify: !this._renderingHistory });
         break;
       }
       case 'task_resolution': {
@@ -835,16 +883,18 @@ export class SessionsPage implements Page {
     this._insertCardIntoFlow(delegate, msg);
   }
 
-  /** Build a tool_call card 閳?dispatches to AskUserQuestion, Edit diff, ToolCardRegistry, or generic delegates. */
+  /** Build a tool_call card — dispatches to AskUserQuestion, Edit diff, registered, or generic delegates. */
   private _renderToolCallCard(msg: any): { element: HTMLElement } | null {
     // AskUserQuestion gets a special interactive card
     if (msg.toolName === 'AskUserQuestion' && msg.toolInput) {
-      const onSendAnswer = (answer: string) => {
-        if (!this._activeAgent) return;
+      const onSendAnswer = async (answer: string): Promise<boolean> => {
+        const agent = this._activeAgent;
+        if (!agent) return false;
         const convVM = App.getInstance().conversationVM;
         convVM.inputValue = answer;
-        this._activeAgent.sendMessage(answer, convVM.permissionMode, convVM.effortMode, []).catch(() => {});
-        convVM.inputValue = '';
+        const sent = await agent.sendMessage(answer, convVM.permissionMode, convVM.effortMode, []);
+        if (sent) convVM.inputValue = '';
+        return sent;
       };
       const askCard = AskUserQuestionCard.build(msg, this._answeredAskIds, onSendAnswer);
       return { element: askCard };
@@ -867,7 +917,7 @@ export class SessionsPage implements Page {
         durationMs: msg.durationMs,
       });
     }
-    // Completed tool call from history 閳?rich ToolResultDelegate
+    // Completed tool call from history — rich ToolResultDelegate
     if (msg.content && msg.status !== 'pending') {
       return new ToolResultDelegate({
         type: 'tool_result',
@@ -958,7 +1008,8 @@ export class SessionsPage implements Page {
         // expand-while-running / collapse-when-complete contract.
         delegate = this._renderToolCallCard(msg);
         break;
-      }      case 'delegation_activity': {
+      }
+      case 'delegation_activity': {
         // Update content span in-place
         const indicator = oldEl.firstElementChild as HTMLElement | null;
         if (indicator && indicator.children.length >= 4) {
@@ -977,34 +1028,17 @@ export class SessionsPage implements Page {
           delegate = new ThinkDelegate(msg);
         }
         break;
-      }      case 'task_notification': {
+      }
+      case 'task_notification': {
         let tData: { status?: string; summary?: string; result?: string; taskId?: string; parentAgentId?: string } = {};
         try { tData = JSON.parse(msg.content || '{}'); } catch {}
-        const tStatus = ((msg.taskStatus || tData.status) === 'failed' ? 'failed' : 'completed') as string;
-        const tSummary = msg.taskSummary || tData.summary || '';
-        const tResult = msg.taskResult || tData.result || '';
-        if (oldEl.getAttribute('data-status') !== tStatus) {
-          oldEl.setAttribute('data-status', tStatus);
-          const borderColor = tStatus === 'completed'
-            ? 'var(--color-success, #4ade80)'
-            : 'var(--color-error, #f87171)';
-          oldEl.style.borderLeftColor = borderColor;
-        }
-        const tHeader = oldEl.firstElementChild as HTMLElement | null;
-        if (tHeader) {
-          const tAgentName = msg.parentAgentId || tData.parentAgentId || 'sub-agent';
-          const newHeaderText = `${tStatus === 'completed' ? 'Task completed' : 'Task failed'}: ${tAgentName} 閳?${tData.summary || ''}`;
-          if (tHeader.textContent !== newHeaderText) {
-            tHeader.textContent = newHeaderText;
-          }
-        }
-        const tBody = oldEl.children[1] as HTMLElement | null;
-        if (tBody && tResult) {
-          const newBody = tResult.slice(0, 500);
-          if (tBody.textContent !== newBody) {
-            tBody.textContent = newBody;
-          }
-        }
+        trackedDelegate?.update?.({
+          subSessionId: msg.taskId || tData.taskId || '',
+          subAgentId: msg.parentAgentId || tData.parentAgentId || '',
+          status: ((msg.taskStatus || tData.status) === 'failed' ? 'failed' : 'completed'),
+          summary: msg.taskSummary || tData.summary || '',
+          result: msg.taskResult || tData.result || '',
+        });
         break;
       }
       case 'status':
@@ -1034,7 +1068,7 @@ export class SessionsPage implements Page {
       const toggle = el.querySelector<HTMLElement>('.tool-result-toggle');
       if (toggle) toggle.textContent = '+';
       const expand = el.querySelector<HTMLButtonElement>('.tool-result-expand');
-      if (expand) expand.textContent = 'Show details +';
+      if (expand) expand.textContent = t('session.showDetails');
     }
     for (const body of Array.from(this._flowInner.querySelectorAll<HTMLElement>('.cinema-think-body, .tool-activity-output'))) {
       body.hidden = true;
@@ -1126,17 +1160,20 @@ export class SessionsPage implements Page {
     if (this._streamStatusEl) { this._streamStatusEl.remove(); this._streamStatusEl = null; }
     if (this._statusEl) { this._statusEl.remove(); this._statusEl = null; }
     const messages = this._activeAgent?.state.messages.messages || [];
-    for (const msg of messages) this._appendCard(msg);
+    this._renderingHistory = true;
+    try {
+      for (const msg of messages) this._appendCard(msg);
+    } finally {
+      this._renderingHistory = false;
+    }
     this._scheduleTimelineSync();
   }
 
-  // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡?
   // Overfly panels
-  // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡?
 
   private _showInlineCard(panel: string): void {
     if (!this._activeSessionId) return;
-    if (!['overview', 'artifacts', 'plan', 'tasks'].includes(panel)) return;
+    if (!['overview', 'plan'].includes(panel)) return;
     this._overfly.show(panel, this._activeSessionId, this._workspacePath);
     this._rightBar.setActivePanel(panel);
   }
@@ -1147,9 +1184,7 @@ export class SessionsPage implements Page {
     this._rightBar.setActivePanel(null);
   }
 
-  // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡?
   // Helpers
-  // 閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡鎰ㄦ櫜閳烘劏鏅查埡?
 
   private _appendToFlow(el: HTMLElement): void {
     this._flowInner.insertBefore(el, this._sentinel);
@@ -1234,7 +1269,7 @@ export class SessionsPage implements Page {
     }
     return false;
   }
-  /** Scroll to the latest message 閳?only if user hasn't scrolled up to read history.
+  /** Scroll to the latest message — only if user hasn't scrolled up to read history.
    *  Uses rAF to batch with DOM paint. Re-checks _autoScroll inside rAF
    *  because scroll state may have changed between call and frame. */
   private _scrollToBottom(): void {
@@ -1247,7 +1282,7 @@ export class SessionsPage implements Page {
     });
   }
 
-  /** Force auto-scroll back on 閳?called when user sends a new message. */
+  /** Force auto-scroll back on — called when user sends a new message. */
   private _resetAutoScroll(): void {
     this._autoScroll = true;
   }

@@ -15,47 +15,38 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { mkdirSync, existsSync } from 'fs';
+import * as os from 'os';
+import { mkdirSync } from 'fs';
 import { JsonlStore } from '../JsonlStore.js';
 import type { JsonlEvent } from '../../../../shared/types/session.js';
 
-const TMP_ROOT = path.resolve(process.cwd(), '.test-jsonlstore');
-
-function makeEvent(overrides: Partial<JsonlEvent> = {}): JsonlEvent {
+function makeEvent(sessionId: string, overrides: Partial<JsonlEvent> = {}): JsonlEvent {
   return {
     type: 'assistant',
     uuid: `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     parentUuid: '00000000-0000-0000-0000-000000000000',
-    sessionId: 'test-session',
+    sessionId,
     timestamp: new Date().toISOString(),
     message: { id: 'msg-1', role: 'assistant', content: [{ type: 'text', text: 'hello' }] },
     ...overrides,
   } as JsonlEvent;
 }
 
-// Override projectRoot for testing — JsonlStore uses process.cwd() + PATHS.sessions
-// We must point it at TMP_ROOT. The cleanest way: stub process.cwd for this module.
-// Since JsonlStore reads process.cwd() directly, we change cwd for the test.
-const origCwd = process.cwd;
-
 describe('JsonlStore', () => {
   let store: JsonlStore;
   let testDir: string;
 
   beforeEach(async () => {
-    testDir = path.join(TMP_ROOT, `test-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+    testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'anoclaw-jsonlstore-'));
     mkdirSync(testDir, { recursive: true });
-    // Override cwd so JsonlStore writes to our temp dir
-    process.cwd = () => testDir;
-    // Reset singleton
-    (JsonlStore as any)._instance = undefined;
+    JsonlStore.resetInstance();
     store = JsonlStore.getInstance();
+    await store.initialize(path.join(testDir, 'sessions'));
   });
 
   afterEach(async () => {
-    process.cwd = origCwd;
     try {
-      await fs.rm(TMP_ROOT, { recursive: true, force: true });
+      await fs.rm(testDir, { recursive: true, force: true });
     } catch { /* ok */ }
   });
 
@@ -64,7 +55,7 @@ describe('JsonlStore', () => {
   // -----------------------------------------------------------------------
 
   it('should append an event and read it back', async () => {
-    const ev = makeEvent();
+    const ev = makeEvent('s1');
     await store.appendEvent('s1', ev);
 
     const events = await store.readEvents('s1');
@@ -74,8 +65,8 @@ describe('JsonlStore', () => {
   });
 
   it('should increment messageCount in meta on append', async () => {
-    await store.appendEvent('s2', makeEvent());
-    await store.appendEvent('s2', makeEvent());
+    await store.appendEvent('s2', makeEvent('s2'));
+    await store.appendEvent('s2', makeEvent('s2'));
 
     const meta = await store.getMeta('s2');
     expect(meta.messageCount).toBe(2);
@@ -89,7 +80,7 @@ describe('JsonlStore', () => {
     const N = 20;
     const promises = [];
     for (let i = 0; i < N; i++) {
-      promises.push(store.appendEvent('s3', makeEvent({ uuid: `ev-${i}` })));
+      promises.push(store.appendEvent('s3', makeEvent('s3', { uuid: `ev-${i}` })));
     }
     await Promise.all(promises);
 
@@ -113,7 +104,7 @@ describe('JsonlStore', () => {
     // Default SHARD_MAX_LINES is typically 10000, so we write just 5 events
     // and verify they all go to shard_000000.jsonl
     for (let i = 0; i < 5; i++) {
-      await store.appendEvent(sessionId, makeEvent());
+      await store.appendEvent(sessionId, makeEvent(sessionId));
     }
 
     // Verify shard index
@@ -131,8 +122,8 @@ describe('JsonlStore', () => {
   it('should read events from multiple shards', async () => {
     // Simulate two shards by manually manipulating shard index
     const sessionId = 's5-multi';
-    await store.appendEvent(sessionId, makeEvent({ uuid: 'ev-a' }));
-    await store.appendEvent(sessionId, makeEvent({ uuid: 'ev-b' }));
+    await store.appendEvent(sessionId, makeEvent(sessionId, { uuid: 'ev-a' }));
+    await store.appendEvent(sessionId, makeEvent(sessionId, { uuid: 'ev-b' }));
 
     const events = await store.readEvents(sessionId);
     expect(events).toHaveLength(2);
@@ -151,7 +142,7 @@ describe('JsonlStore', () => {
   });
 
   it('should update meta fields', async () => {
-    await store.appendEvent('s7', makeEvent());
+    await store.appendEvent('s7', makeEvent('s7'));
     await store.updateMeta('s7', { title: 'Custom Title' } as any);
 
     const meta = await store.getMeta('s7');
@@ -161,7 +152,7 @@ describe('JsonlStore', () => {
   });
 
   it('preserves derived statistics when lifecycle metadata is merged', async () => {
-    await store.appendEvent('s7-merge', makeEvent());
+    await store.appendEvent('s7-merge', makeEvent('s7-merge'));
     await store.updateMeta('s7-merge', {
       tokenBreakdown: { systemPrompt: 1, systemTools: 2, skills: 3, messages: 4, freeSpace: 90, total: 10 },
     });
@@ -184,7 +175,7 @@ describe('JsonlStore', () => {
 
   it('should archive a session without error', async () => {
     const sessionId = 's8-archive';
-    await store.appendEvent(sessionId, makeEvent());
+    await store.appendEvent(sessionId, makeEvent(sessionId));
 
     await store.archiveSession(sessionId);
 
@@ -199,8 +190,8 @@ describe('JsonlStore', () => {
 
   it('should delete all shards on truncate', async () => {
     const sessionId = 's9-truncate';
-    await store.appendEvent(sessionId, makeEvent());
-    await store.appendEvent(sessionId, makeEvent());
+    await store.appendEvent(sessionId, makeEvent(sessionId));
+    await store.appendEvent(sessionId, makeEvent(sessionId));
 
     await store.truncateSession(sessionId);
 
@@ -216,7 +207,7 @@ describe('JsonlStore', () => {
     const sessionId = 's10-stats';
     const N = 5;
     for (let i = 0; i < N; i++) {
-      await store.appendEvent(sessionId, makeEvent());
+      await store.appendEvent(sessionId, makeEvent(sessionId));
     }
 
     // Read shard index and check stats

@@ -25,7 +25,7 @@ describe('SetSessionModeHandler', () => {
     }
   });
 
-  it('keeps the active Goal execution contract when another mode is requested', async () => {
+  it('keeps Goal on Auto Edit while preserving the requested session preference', async () => {
     const session = await manager.createMainSession('agent-main', 'Goal Session', tmpDir);
     await manager.setGoal(session.id, { objective: 'keep going', permissionMode: 'AutoEdit' });
     const sends: Array<{ sessionId: string; event: Record<string, unknown> }> = [];
@@ -48,11 +48,45 @@ describe('SetSessionModeHandler', () => {
       ws,
     });
 
-    expect(manager.getSessionPermissionMode(session.id)).toBe('AutoEdit');
+    expect(manager.getSessionPermissionMode(session.id)).toBe('Ask');
     expect(sends.at(-1)?.event).toMatchObject({
       type: 'session_mode_changed',
       mode: 'auto-edit',
+      storedMode: 'ask',
       effort: true,
+    });
+  });
+
+  it('locks sub-sessions to Auto Edit regardless of requested mode', async () => {
+    const root = await manager.createMainSession('agent-main', 'Root Session', tmpDir);
+    const child = await manager.createSubSession(root.id, 'agent-child', 'Delegated work');
+    const sends: Array<{ sessionId: string; event: Record<string, unknown> }> = [];
+    const ws = {
+      send: (sessionId: string, event: Record<string, unknown>) => {
+        sends.push({ sessionId, event });
+        return true;
+      },
+      broadcast: () => {},
+      isConnected: () => true,
+      activeSessions: () => [],
+      shutdown: async () => {},
+      on: () => {},
+    } satisfies Transport;
+
+    await setSessionModeHandler({
+      sessionId: child.id,
+      type: 'set_session_mode',
+      data: { mode: 'plan', effort: false },
+      ws,
+    });
+
+    expect(manager.getSessionPermissionMode(child.id)).toBe('AutoEdit');
+    expect(sends.at(-1)?.event).toMatchObject({
+      type: 'session_mode_changed',
+      mode: 'auto-edit',
+      storedMode: 'auto-edit',
+      effort: true,
+      locked: true,
     });
   });
 });

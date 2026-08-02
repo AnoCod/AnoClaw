@@ -47,20 +47,24 @@ export class JsonlSessionRepository implements ISessionRepository {
   /** Append a message to the session. */
   async appendMessage(sessionId: string, message: Message): Promise<void> {
     const events = messageToJsonlEvents(message, NULL_UUID);
-    for (const ev of events) {
-      await this._store.persistEvent(sessionId, ev);
-    }
+    await this._store.appendEvents(sessionId, events, {
+      messageDelta: 1,
+      sync: true,
+    });
   }
 
   /** Rewrite the entire message history (after compaction). */
   async rewriteMessages(sessionId: string, messages: Message[]): Promise<void> {
-    await this._store.truncateSession(sessionId);
+    const events = [];
+    let parentUuid = NULL_UUID;
     for (const message of messages) {
-      const events = messageToJsonlEvents(message, NULL_UUID);
-      for (const ev of events) {
-        await this._store.persistEvent(sessionId, ev);
+      const messageEvents = messageToJsonlEvents(message, parentUuid);
+      for (const event of messageEvents) {
+        events.push(event);
+        parentUuid = String(event.uuid);
       }
     }
+    await this._store.replaceHistory(sessionId, events, messages.length);
   }
 
   /** List all session metadata summaries (via recovery scan). */

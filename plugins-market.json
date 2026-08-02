@@ -10,7 +10,7 @@
       "rating": 4.5,
       "downloads": 0,
       "tags": ["mcp", "official"],
-      "installUrl": "https://github.com/AnoCod/AnoClaw-Solo",
+      "installUrl": "https://github.com/AnoCod/AnoClaw/tree/main/plugins/anoclaw-mcp",
       "category": "Integration"
     },
     {
@@ -23,21 +23,8 @@
       "rating": 4.3,
       "downloads": 0,
       "tags": ["meeting", "official"],
-      "installUrl": "https://github.com/AnoCod/AnoClaw-Solo",
+      "installUrl": "https://github.com/AnoCod/AnoClaw/tree/main/plugins/anoclaw-meeting",
       "category": "Collaboration"
-    },
-    {
-      "name": "anoclaw-workflow",
-      "displayName": "Workflow Editor",
-      "version": "2.0.0",
-      "description": "Visual workflow editor and execution engine with 14 node types",
-      "publisher": "anoclaw",
-      "author": "AnoClaw Team",
-      "rating": 4.7,
-      "downloads": 0,
-      "tags": ["workflow", "official"],
-      "installUrl": "https://github.com/AnoCod/AnoClaw-Solo",
-      "category": "Automation"
     },
     {
       "name": "anoclaw-gateway",
@@ -49,7 +36,7 @@
       "rating": 4.0,
       "downloads": 0,
       "tags": ["gateway", "official"],
-      "installUrl": "https://github.com/AnoCod/AnoClaw-Solo",
+      "installUrl": "https://github.com/AnoCod/AnoClaw/tree/main/plugins/anoclaw-gateway",
       "category": "Integration"
     }
   ],

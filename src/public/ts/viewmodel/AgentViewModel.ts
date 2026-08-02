@@ -4,6 +4,7 @@
 import { EventEmitter } from '../EventEmitter.js';
 import type { AgentConfig } from '../types.js';
 import { ClientLogger } from '../ClientLogger.js';
+import { t } from '../i18n/index.js';
 
 export interface AgentSelectionResult {
   ok: boolean;
@@ -27,16 +28,16 @@ export interface AgentConnectionTestResult {
 
 export function agentRunnableProblem(agent: AgentConfig): string | null {
   if (agent.state && agent.state !== 'Active') {
-    return `Agent '${agent.id}' is not active. Open Agents and reactivate or replace it before starting a session.`;
+    return t('runtime.agent.inactive', { agent: agent.id });
   }
   if (!agent.provider || !agent.provider.trim()) {
-    return `Agent '${agent.name}' is missing a provider. Open Agents and configure its model connection.`;
+    return t('runtime.agent.missingProvider', { agent: agent.name });
   }
   if (!agent.model || !agent.model.trim()) {
-    return `Agent '${agent.name}' is missing a model. Open Agents and configure its model connection.`;
+    return t('runtime.agent.missingModel', { agent: agent.name });
   }
   if (!agent.apiUrl || !agent.apiUrl.trim()) {
-    return `Agent '${agent.name}' is missing an API URL. Open Agents and configure its model connection.`;
+    return t('runtime.agent.missingApiUrl', { agent: agent.name });
   }
   return null;
 }
@@ -143,7 +144,7 @@ export class AgentViewModel extends EventEmitter {
       if (!agent) {
         return {
           ok: false,
-          message: `Agent '${requested}' is not configured. Open Agents and create or select a valid agent before starting a session.`,
+          message: t('runtime.agent.notConfigured', { agent: requested }),
         };
       }
       const problem = agentRunnableProblem(agent);
@@ -161,13 +162,13 @@ export class AgentViewModel extends EventEmitter {
     if (anyAgent) {
       return {
         ok: false,
-        message: agentRunnableProblem(anyAgent) || 'No runnable agent is configured. Open Agents and configure a model connection before starting a session.',
+        message: agentRunnableProblem(anyAgent) || t('runtime.agent.noneRunnableStart'),
       };
     }
 
     return {
       ok: false,
-      message: 'No agents are configured. Open Agents, create a CEO/MainAgent, and configure its model connection before starting a session.',
+      message: t('runtime.agent.noneConfigured'),
     };
   }
 
@@ -232,18 +233,18 @@ export class AgentViewModel extends EventEmitter {
       if (!resp.ok || body.ok === false) {
         return {
           ok: false,
-          message: body.message || `Connection test failed with HTTP ${resp.status}`,
+          message: body.message || t('runtime.connection.testHttpFailed', { status: resp.status }),
           durationMs: body.durationMs,
         };
       }
       return {
         ok: true,
-        message: body.message || 'Model connection verified',
+        message: body.message || t('runtime.connection.verified'),
         durationMs: body.durationMs,
       };
     } catch (e) {
       ClientLogger.vm.error('Failed to test agent connection', { error: (e as Error).message });
-      return { ok: false, message: (e as Error).message || 'Connection test failed' };
+      return { ok: false, message: (e as Error).message || t('runtime.connection.testFailed') };
     }
   }
 

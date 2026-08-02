@@ -5,6 +5,19 @@ import type { ApiToken } from '../ApiAuth.js';
 import { sendJson, readBody } from '../RouteHelpers.js';
 import { SettingsManager } from '../../infra/storage/SettingsManager.js';
 
+const SECRET_KEY_PATTERN = /(?:api[-_]?key|token|secret(?:[-_]?hash)?|password|private[-_]?key)$/i;
+
+function sanitizeSettings(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizeSettings);
+  if (!value || typeof value !== 'object') return value;
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (SECRET_KEY_PATTERN.test(key)) continue;
+    sanitized[key] = sanitizeSettings(child);
+  }
+  return sanitized;
+}
+
 export class GetSettingsRoute implements RouteHandler {
   method = 'GET' as const;
   path = '/api/v1/settings';
@@ -15,14 +28,7 @@ export class GetSettingsRoute implements RouteHandler {
   handle(_match: RouteMatch, _req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): boolean {
     try {
       const sm = SettingsManager.getInstance();
-      const all = sm.all;
-      // Sanitize: remove LLM apiKey from response
-      if (all.llm && typeof all.llm === 'object') {
-        const llm = { ...all.llm as Record<string, unknown> };
-        delete llm.apiKey;
-        all.llm = llm;
-      }
-      sendJson(res, 200, all);
+      sendJson(res, 200, sanitizeSettings(sm.all) as Record<string, unknown>);
     } catch (err) {
       sendJson(res, 500, { error: 'Failed to read settings', message: (err as Error).message });
     }
@@ -54,7 +60,11 @@ export class PutSettingRoute implements RouteHandler {
       const sm = SettingsManager.getInstance();
       await sm.set(key, body.value);
       await sm.save();
-      sendJson(res, 200, { key, value: sm.get(key) });
+      if (SECRET_KEY_PATTERN.test(key.split('.').at(-1) || '')) {
+        sendJson(res, 200, { key, configured: Boolean(body.value) });
+      } else {
+        sendJson(res, 200, { key, value: sm.get(key) });
+      }
     } catch (err) {
       sendJson(res, 500, { error: 'Failed to update setting', message: (err as Error).message });
     }

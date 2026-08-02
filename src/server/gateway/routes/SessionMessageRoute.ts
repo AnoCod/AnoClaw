@@ -22,6 +22,7 @@ import { WsServer } from '../../infra/network/WsServer.js';
 import { InterruptController, InterruptReason } from '../../core/agent/supervision/InterruptController.js';
 import { createLogger } from '../../core/logger.js';
 import { resolveSessionEffort, resolveSessionPermissionMode } from '../../core/agent/PermissionModePolicy.js';
+import { SessionTurnRecorder } from '../../infra/SessionTurnRecorder.js';
 
 const log = createLogger('anochat.route.session-msg');
 
@@ -57,6 +58,7 @@ export class SessionMessageRoute implements RouteHandler {
       const sm = SessionManager.getInstance();
       const session = sm.session(sessionId);
       if (!session) { sendJson(res, 404, { error: `Session "${sessionId}" not found` }); return true; }
+      const historyBeforeMessage = triggerAgent ? await sm.getHistory(sessionId) : [];
 
       // 3. Create and persist the injected message
       const msg: Message = {
@@ -109,20 +111,25 @@ export class SessionMessageRoute implements RouteHandler {
 
       // 6b. Idle session — spawn a background agent loop, forward streaming events to WS
       //     Response is returned immediately (202), streaming happens over WS
-      const history = await sm.getHistory(sessionId);
       (async () => {
+        const recorder = new SessionTurnRecorder(sessionId, agentId);
         try {
           const loopOptions = {
             permissionMode: resolveSessionPermissionMode(sm, sessionId, body.mode),
             effort: resolveSessionEffort(sm, sessionId, body.effort),
           };
-          for await (const event of runtime.processMessage(sessionId, agentId, msg, history, loopOptions)) {
+          for await (const event of runtime.processMessage(sessionId, agentId, msg, historyBeforeMessage, loopOptions)) {
+            await recorder.record(event);
             if (ws.isConnected(rootId)) {
               ws.send(rootId, event as Record<string, unknown>);
             }
           }
+          await recorder.finalize();
+          session.lastEventUuid = recorder.headEventUuid;
           sm.rebuildMessageCache(sessionId).catch(() => {});
         } catch (err) {
+          await recorder.recordError((err as Error).message, 'session_message').catch(() => {});
+          await recorder.finalize().catch(() => {});
           log.error('Background agent loop failed', { sessionId, error: (err as Error).message });
           if (ws.isConnected(rootId)) {
             ws.send(rootId, { type: WsMessageType.Error, errorMessage: `Agent error: ${(err as Error).message}`, code: 'BACKGROUND_AGENT_ERROR' });

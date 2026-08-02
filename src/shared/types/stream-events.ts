@@ -23,9 +23,7 @@ export type StreamEvent =
   | StreamEventDone
   | StreamEventError
   | StreamEventCommandResult
-  | StreamEventSubsessionCreated
-  | StreamEventQualityScoreAck
-  | StreamEventQualityScoreError;
+  | StreamEventSubsessionCreated;
 
 export interface StreamEventThink {
   type: 'think';
@@ -126,17 +124,6 @@ export interface StreamEventSubsessionCreated {
   agentId: string;
   title: string;
   level?: number;
-}
-
-/** Server confirms a quality score rating was saved */
-export interface StreamEventQualityScoreAck {
-  type: 'quality_score_ack';
-}
-
-/** Server rejected a quality score rating */
-export interface StreamEventQualityScoreError {
-  type: 'quality_score_error';
-  error: string;
 }
 
 /** Connection state machine — mirrors Hermes GatewayClient states */

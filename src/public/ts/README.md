@@ -171,7 +171,7 @@ Singleton bootstrap. Initializes all services on `DOMContentLoaded`.
 class App {
   static getInstance(): App;
   // Initializes WS, pages, sessions, agents, plugins, theme,
-  // hash routing, floating ball events
+  // and hash routing
   async init(): Promise<void>;
 }
 ```
@@ -357,8 +357,7 @@ One TS file per message type in `components/conversation/delegates/`:
 - `components/conversation/delegates/` — One file per message type
 - `components/pages/` — Full-page views (Sessions, Workspace, Agents, Settings, Skills, Memory, Plugins)
 - `components/pages/workspace/` — Workspace file tree, tabs, split view
-- `components/tabs/` — Shared/legacy tab helpers (FilePreview, Overview, Plan, Background Tasks)
-- `components/evolution/` — Star rating widget
+- `components/tabs/` — Shared tab helpers (FilePreview, Overview, Plan)
 - `components/ui/` — Reusable UI kit (Button, Card, Dialog, Toggle, Input, Select, Badge, Toast, etc.)
 - `handlers/` — WS event → SessionAgent dispatch
 - `utils/` — Color utilities, clickable path handler

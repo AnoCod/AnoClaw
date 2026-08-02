@@ -132,12 +132,6 @@
 | | `WsBroadcastRoute` | `POST /api/v1/ws/broadcast` |
 | | `WsDisconnectRoute` | `POST /api/v1/ws/connections/:sessionId` |
 
-### Evolution (2 routes)
-| File | Route(s) | Path |
-|------|----------|------|
-| `EvolutionRoute.ts` | `EvolutionAnalyzeRoute` | `POST /api/v1/evolution/analyze` |
-| | `EvolutionApplyRoute` | `POST /api/v1/evolution/apply` |
-
 ---
 
 ## Registration

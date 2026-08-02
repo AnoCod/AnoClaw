@@ -46,6 +46,12 @@ export type GoalReportOutcome =
   | 'blocked'
   | 'failed';
 
+/** Canonical permission modes persisted on root sessions. `Auto` is Safe Auto. */
+export type PermissionMode = 'Ask' | 'AutoEdit' | 'Plan' | 'Auto';
+
+/** Internal execution constraints passed through the tool pipeline. */
+export type ToolExecutionMode = 'ask' | 'auto_edit' | 'read_only' | 'readOnly' | 'auto';
+
 export interface GoalEvidence {
   type: 'file' | 'image' | 'test' | 'url' | 'note';
   label: string;
@@ -69,6 +75,7 @@ export interface GoalContractInput {
   objective: string;
   acceptanceCriteria?: string;
   workspace?: string;
+  /** @deprecated Goal runs always use AutoEdit. Accepted for client compatibility. */
   permissionMode?: string;
   maxRuns?: number;
   maxConsecutiveFailures?: number;
@@ -92,7 +99,7 @@ export interface SessionGoal {
   objective: string;
   acceptanceCriteria: string;
   workspace: string;
-  permissionMode: string;
+  permissionMode: PermissionMode;
   maxRuns: number;
   maxConsecutiveFailures: number;
   wakeIntervalMs: number;
@@ -115,9 +122,8 @@ export interface SessionGoal {
   recentRuns?: GoalRunRecord[];
   lastRunAt?: string;
   lastWorkspace?: string;
-  lastPermissionMode?: string;
+  lastPermissionMode?: PermissionMode;
   lastEffort?: 'HIGH' | 'NORMAL';
-  lastUserMode?: string;
   completedAt?: string;
   deletedAt?: string;
 }
@@ -127,7 +133,19 @@ export interface SessionMeta {
   createdAt: string;
   lastActiveAt: string;
   messageCount: number;
+  /** Number of physical JSONL events. Lifecycle events are not messages. */
+  eventCount?: number;
+  /** UUID of the last durably appended JSONL event. */
+  headEventUuid?: string | null;
   tokenBreakdown: TokenBreakdown;
+}
+
+/** Canonical on-disk meta.json document. Legacy documents omit schemaVersion
+ * and the derived counters, but must still contain the complete SessionNode. */
+export interface PersistedSessionMeta extends SessionNode, SessionMeta {
+  schemaVersion: 1;
+  eventCount: number;
+  headEventUuid: string | null;
 }
 
 export interface TokenBreakdown {
@@ -201,8 +219,8 @@ export type JsonlEvent =
   | (EventBase & { type: 'session_archived' })
 
   // Messages — user
-  | (EventBase & { type: 'user'; message: { role: 'user'; content: ContentBlock[] }; agentId?: string; agentName?: string })
-  | (EventBase & { type: 'system'; message: { role: 'system'; content: ContentBlock[] }; agentId?: string; agentName?: string })
+  | (EventBase & { type: 'user'; message: { id?: string; role: 'user'; content: ContentBlock[] }; agentId?: string; agentName?: string })
+  | (EventBase & { type: 'system'; message: { id?: string; role: 'system'; content: ContentBlock[] }; agentId?: string; agentName?: string })
 
   // Messages — assistant (one content block per event, shared message.id)
   | (EventBase & { type: 'assistant'; message: { id: string; role: 'assistant'; model?: string; content: [ContentBlock] }; agentId?: string; agentName?: string })
@@ -237,6 +255,14 @@ export interface ExecutionContext {
   callerRole?: import('./agent.js').AgentRole;
   /** AbortSignal from InterruptController — tools kill long ops when aborted */
   signal?: AbortSignal;
-  /** Execution mode constraint (e.g. 'read_only', 'readOnly'). Set by AgentLoop / QA mode. */
-  mode?: string;
+  /** Execution mode constraint selected by the session permission policy. */
+  mode?: ToolExecutionMode;
+  /** Durable coordination attribution for delegated/team task execution. */
+  coordination?: {
+    rootSessionId: string;
+    taskId: string;
+    teamId?: string;
+    readOnly: boolean;
+    writeScope: string[];
+  };
 }

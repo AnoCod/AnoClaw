@@ -67,8 +67,9 @@ export interface SubAgentConfig {
   subagent_type: 'Explore' | 'Plan' | 'general-purpose';
   model?: string;
   run_in_background?: boolean;
-  /** Keep the SubAgent alive for reuse (default: false). */
-  persist?: boolean;
-  /** Time-to-live in milliseconds after last use (default: 3600000 = 1 hour). */
-  ttl?: number;
+  contextMode?: 'isolated' | 'summary' | 'fork';
+  readOnly?: boolean;
+  writeScope?: string[];
+  /** Internal durable task created by Task action="spawn". */
+  coordinationTaskId?: string;
 }

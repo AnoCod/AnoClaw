@@ -9,6 +9,7 @@ import type { ExecutionContext } from '../../../../shared/types/session.js';
 import { SessionManager } from '../../session/index.js';
 import { ContextCompressor, TokenCounter } from '../../context/index.js';
 import { AgentRegistry } from '../../agent/AgentRegistry.js';
+import { createAgentLoopSummarizer } from '../../agent/AgentLoopSummarizer.js';
 import { makeCommandResult, makeCommandError } from '../CommandResult.js';
 
 export class CompactCommand extends Command {
@@ -42,9 +43,16 @@ export class CompactCommand extends Command {
     const beforeCount = history.length;
     const beforeTokens = TokenCounter.estimateMessages(history);
     const pctBefore = Math.round((beforeTokens / contextWindow) * 100);
+    const summarizer = agent ? createAgentLoopSummarizer({
+      provider: agent.provider,
+      modelName: agent.modelName,
+      contextWindow: agent.contextWindow,
+      apiUrl: agent.apiUrl,
+      apiKey: agent.apiKey,
+    }) : undefined;
 
     const compressor = ContextCompressor.getInstance();
-    const result = await compressor.compact(history, contextWindow);
+    const result = await compressor.compact(history, contextWindow, undefined, summarizer);
 
     const afterTokenEstimate = TokenCounter.estimateMessages(result.messages);
     const pctAfter = Math.round((afterTokenEstimate / contextWindow) * 100);
@@ -66,6 +74,6 @@ export class CompactCommand extends Command {
       `Tokens: **${beforeTokens.toLocaleString()}** / ${contextWindow.toLocaleString()} (${pctBefore}%)  \n` +
       `After compaction: **${afterTokenEstimate.toLocaleString()}** tokens (${pctAfter}%)  \n` +
       `Reduced: ~${Math.max(0, beforeTokens - afterTokenEstimate).toLocaleString()} tokens  \n` +
-      `_The compacted session history has been persisted._`);
+      `_Older detailed turns were replaced by this persisted summary and recent context._`);
   }
 }

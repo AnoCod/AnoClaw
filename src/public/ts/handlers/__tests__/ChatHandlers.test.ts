@@ -1,12 +1,19 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerChatHandlers } from '../ChatHandlers.js';
 import { WSMessageRouter } from '../../viewmodel/WSMessageRouter.js';
 import { ToastManager } from '../../ToastManager.js';
 import { slotRegistry } from '../../SlotRegistry.js';
 import { ToolConfirmationQueue } from '../../viewmodel/ToolConfirmationQueue.js';
+import { setLocale } from '../../i18n/index.js';
+
+beforeEach(() => {
+  setLocale('en-US');
+});
 
 afterEach(() => {
+  setLocale('zh-CN');
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   ToolConfirmationQueue.resetInstance();
 });
 
@@ -33,28 +40,29 @@ describe('registerChatHandlers', () => {
     );
   });
 
-  it('routes artifact events to the owning session agent', () => {
+  it('localizes fallback command and plugin failure toasts at dispatch time', () => {
     const router = new WSMessageRouter();
-    const onServerEvent = vi.fn();
-    const getAgent = vi.fn(() => ({ onServerEvent }));
+    const successSpy = vi.spyOn(ToastManager.getInstance(), 'success').mockReturnValue(1);
+    const showSpy = vi.spyOn(ToastManager.getInstance(), 'show').mockReturnValue(2);
 
-    registerChatHandlers(
-      router,
-      { getAgent } as any,
-      {} as any,
+    registerChatHandlers(router, { getAgent: vi.fn() } as any, {} as any);
+    setLocale('zh-CN');
+
+    router.dispatch('command_result', {
+      command: 'clear',
+      success: true,
+      output: '',
+    }, 'session-1');
+    router.dispatch('plugin_load_failed', {
+      pluginName: 'broken',
+    }, '*broadcast');
+
+    expect(successSpy).toHaveBeenCalledWith('clear 已完成');
+    expect(showSpy).toHaveBeenCalledWith(
+      'error',
+      '插件“broken”加载失败：未知错误',
+      8000,
     );
-
-    router.dispatch('artifact_done', {
-      sessionId: 'artifact-session',
-      artifactId: 'art-1',
-      artifact: { id: 'art-1', sessionId: 'artifact-session' },
-    }, 'root-session');
-
-    expect(getAgent).toHaveBeenCalledWith('artifact-session');
-    expect(onServerEvent).toHaveBeenCalledWith('artifact_done', expect.objectContaining({
-      sessionId: 'artifact-session',
-      artifactId: 'art-1',
-    }));
   });
 
   it('removes all slot content for a deactivated plugin', () => {
@@ -100,5 +108,49 @@ describe('registerChatHandlers', () => {
       toolCallId: 'tc-bash',
     }));
     expect(enqueueSpy).not.toHaveBeenCalledWith(expect.objectContaining({ autoApprove: true }));
+  });
+
+  it('correlates compact completion with its session and success state', () => {
+    const router = new WSMessageRouter();
+    const loadHistory = vi.fn(async () => true);
+    const dispatchEvent = vi.fn();
+    vi.stubGlobal('window', { dispatchEvent });
+    vi.stubGlobal('CustomEvent', class {
+      type: string;
+      detail: unknown;
+      constructor(type: string, options: { detail: unknown }) {
+        this.type = type;
+        this.detail = options.detail;
+      }
+    });
+    vi.spyOn(ToastManager.getInstance(), 'success').mockReturnValue(1);
+    vi.spyOn(ToastManager.getInstance(), 'error').mockReturnValue(2);
+
+    registerChatHandlers(
+      router,
+      { getAgent: vi.fn(() => ({ loadHistory })) } as any,
+      {} as any,
+    );
+
+    router.dispatch('command_result', {
+      command: 'compact',
+      success: true,
+      output: 'Compacted',
+    }, 'session-compact');
+    router.dispatch('command_result', {
+      command: 'compact',
+      success: false,
+      output: 'Failed',
+    }, 'session-compact');
+
+    expect(loadHistory).toHaveBeenCalledTimes(1);
+    expect(dispatchEvent).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      type: 'compaction-completed',
+      detail: expect.objectContaining({ sessionId: 'session-compact', success: true }),
+    }));
+    expect(dispatchEvent).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      type: 'compaction-completed',
+      detail: expect.objectContaining({ sessionId: 'session-compact', success: false }),
+    }));
   });
 });

@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Agent } from './Agent.js';
 import { loadAgentConfig, saveAgentConfig } from './AgentConfig.js';
+import { migrateCoordinationToolAllowlist } from './DefaultAgentTemplate.js';
 import type { OrgNode } from '../../../shared/types/agent.js';
 import { AgentRole, OrgRole } from '../../../shared/types/agent.js';
 import { AgentRegistryEvents } from '../../../shared/types/events.js';
@@ -231,8 +232,10 @@ export class AgentRegistry extends EventEmitter {
       .map(async (d) => {
         const agentId = d.name.replace(/\.json$/, '');
         try {
-          const config = await loadAgentConfig(agentId);
-          const agent = new Agent(config);
+          const loaded = await loadAgentConfig(agentId);
+          const migration = migrateCoordinationToolAllowlist(loaded);
+          if (migration.changed) await saveAgentConfig(migration.config);
+          const agent = new Agent(migration.config);
           this.registerAgent(agent);
         } catch (err) {
           this.log.warn('Failed to load agent config', { aid: agentId, error: (err as Error).message });

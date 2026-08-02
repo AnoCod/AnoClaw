@@ -14,41 +14,51 @@ import { SSEEventType, AgentRuntimeEvents } from '../../../shared/types/events.j
 import type { CapabilityRecord, TaskResolveResult } from '../../../shared/types/capability.js';
 import { InterruptController, InterruptReason } from './supervision/InterruptController.js';
 import { SessionManager } from '../session/index.js';
-import { SessionStore } from '../session/SessionStore.js';
 import { SessionLeaseManager } from '../session/SessionLeaseManager.js';
 import { createLogger } from '../logger.js';
-import { SupervisionManager, TaskStatus } from './supervision/SupervisionManager.js';
-import { BackgroundTaskManager } from './supervision/BackgroundTaskManager.js';
-import { buildContextSummary } from '../prompt/sections/DelegationContextSection.js';
+import { SupervisionManager } from './supervision/SupervisionManager.js';
 import { TypedEventBus } from '../events/index.js';
-import { SharedContextStore } from './SharedContextStore.js';
 import { TokenCounter } from '../context/index.js';
-import { TaskDAG } from './TaskDAG.js';
-import { ExecutionPlan } from './ExecutionPlan.js';
-import { EventSubscriptionManager } from '../events/index.js';
 import { WsServer } from '../../infra/network/WsServer.js';
 import { SettingsManager } from '../../infra/storage/SettingsManager.js';
 import { buildTaskNotificationXML } from './TaskNotification.js';
 import {
-  bubbleEventToParent,
-  emitDelegationStatus,
-  handleSubAgentOutput,
   spawnSubAgent,
-  subAgentAllowedTools,
-  type DelegationState,
 } from './AgentDelegation.js';
-import { normalizePermissionMode, resolveSessionEffort, resolveSessionPermissionMode } from './PermissionModePolicy.js';
+import {
+  activeGoalPermissionMode,
+  resolveSessionEffort,
+  resolveSessionPermissionMode,
+} from './PermissionModePolicy.js';
 import { TaskResolver } from '../capability/TaskResolver.js';
+import type { CoordinationTask } from '../../../shared/types/coordination.js';
+import {
+  CANCELLATION_REQUESTED_BLOCKER,
+  CHILD_TASKS_READY_BLOCKER,
+  CoordinationService,
+  WAITING_FOR_CHILD_TASKS_BLOCKER,
+} from '../coordination/CoordinationService.js';
+import { buildTaskPacket, renderTaskPacket } from '../coordination/TaskPacketBuilder.js';
+import { WorkspaceLeaseService } from '../coordination/WorkspaceLeaseService.js';
 
 export interface ProcessMessageOptions {
   permissionMode?: string;
   effort?: string;
   goalKick?: boolean;
+  systemPromptOverride?: string;
 }
 
 interface UserTaskResolution {
   result: TaskResolveResult;
   agentMissingTools: string[];
+}
+
+interface IdleSessionWakeRequest {
+  sessionId: string;
+  agentId: string;
+  notificationId: string;
+  content: string;
+  source: string;
 }
 
 export class AgentRuntime extends EventEmitter {
@@ -67,6 +77,7 @@ export class AgentRuntime extends EventEmitter {
     if (AgentRuntime._instance) {
       AgentRuntime._instance._unsubTaskCompleted?.();
       AgentRuntime._instance._unsubTaskFailed?.();
+      AgentRuntime._instance._unsubCoordinationTaskChanged?.();
     }
     AgentRuntime._instance = null;
   }
@@ -75,14 +86,22 @@ export class AgentRuntime extends EventEmitter {
   private _taskNotificationsWired = false;
   private _unsubTaskCompleted: (() => void) | null = null;
   private _unsubTaskFailed: (() => void) | null = null;
+  private _unsubCoordinationTaskChanged: (() => void) | null = null;
 
 
 
   private _activeLoops: Map<string, AgentLoop> = new Map();
+  /** Covers async preflight before an AgentLoop is visible in _activeLoops. */
+  private _sessionStartReservations = new Map<string, symbol>();
+  /** Per-session tail promises serialize automatic idle-session resumptions. */
+  private _idleSessionWakeQueues = new Map<string, Promise<void>>();
+  /** Suppresses duplicate scheduling while an idempotent notification is queued/running. */
+  private _idleSessionWakeIds = new Set<string>();
 
   private constructor() {
     super();
     this._subscribeToTaskNotifications();
+    this._subscribeToCoordinationTaskNotifications();
   }
 
 
@@ -133,7 +152,7 @@ export class AgentRuntime extends EventEmitter {
     if (this.isSessionActive(sessionId)) {
       logger.info('Session active - queuing as pending message (soft interrupt)', { sid: sessionId, aid: agentId });
       InterruptController.getInstance().setPendingUserMessage(sessionId, message.content as string);
-      InterruptController.getInstance().requestInterrupt(sessionId, InterruptReason.UserSteer);
+      InterruptController.getInstance().requestInterruptWhenAvailable(sessionId, InterruptReason.UserSteer);
       yield {
         type: SSEEventType.StatusInfo,
         content: '(Your message has been queued -- the agent will respond shortly)',
@@ -141,6 +160,9 @@ export class AgentRuntime extends EventEmitter {
       return;
     }
 
+    const startReservation = Symbol(sessionId);
+    this._sessionStartReservations.set(sessionId, startReservation);
+    try {
     const taskResolution = options.goalKick
       ? null
       : await this._resolveUserTask(sessionId, agent, message, logger);
@@ -196,6 +218,7 @@ export class AgentRuntime extends EventEmitter {
     SupervisionManager.getInstance().heartbeat(sessionId);
 
     const sessionManager = SessionManager.getInstance();
+    await sessionManager.setRuntimeStatus(sessionId, 'Active').catch(() => {});
     const resolvedPermissionMode = resolveSessionPermissionMode(sessionManager, sessionId, options.permissionMode);
     const resolvedEffort = resolveSessionEffort(sessionManager, sessionId, options.effort);
     let activeGoal: SessionGoal | null = null;
@@ -218,6 +241,7 @@ export class AgentRuntime extends EventEmitter {
       extraAllowedTools: [
         ...taskResolutionExtraTools(taskResolution),
       ],
+      systemPromptOverride: options.systemPromptOverride,
     };
 
     const loop = new AgentLoop(loopConfig);
@@ -270,6 +294,12 @@ export class AgentRuntime extends EventEmitter {
       agent.clearSessionStatus(sessionId);
       agent.adjustSessionCount(-1);
       SessionLeaseManager.getInstance().release(sessionId);
+      await sessionManager.setRuntimeStatus(sessionId, 'Idle').catch(() => {});
+    }
+    } finally {
+      if (this._sessionStartReservations.get(sessionId) === startReservation) {
+        this._sessionStartReservations.delete(sessionId);
+      }
     }
   }
 
@@ -400,15 +430,13 @@ export class AgentRuntime extends EventEmitter {
       }
 
       try {
-        const freshPermissionMode = normalizePermissionMode(currentGoal.permissionMode, 'Auto');
+        const freshPermissionMode = activeGoalPermissionMode(currentGoal.permissionMode);
         const freshEffort = resolveSessionEffort(sessionManager, sessionId);
         const settings = SettingsManager.getInstance();
-        const userMode = settings.get<string>('ui.userMode', 'simple');
         const locale = settings.get<string>('ui.lang', 'zh-CN');
         const root = sessionManager.getRootSession(sessionId);
         const taskResolution = await this._resolveGoalTask(
           `${currentGoal.objective}\nAcceptance criteria: ${currentGoal.acceptanceCriteria}`,
-          userMode,
           locale,
         );
         const resolutionBlocker = goalResolutionBlocker(taskResolution);
@@ -428,7 +456,6 @@ export class AgentRuntime extends EventEmitter {
           workspace: currentGoal.workspace,
           permissionMode: freshPermissionMode,
           effort: freshEffort,
-          userMode,
         });
         if (!runGoal || runGoal.status !== 'active' || !runGoal.currentRunId) {
           WsServer.getInstance().send(root.id, {
@@ -451,7 +478,6 @@ export class AgentRuntime extends EventEmitter {
           workspace: runGoal.workspace,
           permissionMode: freshPermissionMode,
           effort: freshEffort,
-          userMode,
           locale,
           taskResolution,
         });
@@ -537,7 +563,6 @@ export class AgentRuntime extends EventEmitter {
       const settings = SettingsManager.getInstance();
       const result = await new TaskResolver().resolve({
         message: message.content,
-        userMode: settings.get<string>('ui.userMode', 'simple'),
         locale: settings.get<string>('ui.lang', 'zh-CN'),
         includeUnavailable: true,
       });
@@ -563,13 +588,11 @@ export class AgentRuntime extends EventEmitter {
 
   private async _resolveGoalTask(
     objective: string,
-    userMode: string,
     locale: string,
   ): Promise<TaskResolveResult | null> {
     try {
       const result = await new TaskResolver().resolve({
         message: objective,
-        userMode,
         locale,
         includeUnavailable: true,
       });
@@ -712,464 +735,509 @@ export class AgentRuntime extends EventEmitter {
 
 
   /**
-   * Delegate a task to a subordinate agent. Creates a sub-session
-   * and runs the target agent's loop with the task as a user message.
-   *
-   * @returns ToolResult with the delegation outcome
-   */
-  async delegateTask(
-    targetAgentId: string,
-    task: string,
-    parentSessionId: string,
-    parentAgentId: string,
-    priority: string = 'normal',
-  ): Promise<ToolResult> {
-
-    const delegator = AgentRegistry.getInstance().findAgent(parentAgentId);
-    if (!delegator || !delegator.isManagerRole()) {
-      return {
-        toolCallId: `delegate-${targetAgentId}`,
-        success: false,
-        content: '',
-        errorMessage: `Permission denied: role "${delegator?.role}" cannot delegate tasks (requires Manager or MainAgent)`,
-        tokensUsed: 0,
-        startedAt: Date.now(),
-        finishedAt: Date.now(),
-        durationMs: 0,
-        wasTruncated: false,
-      };
-    }
-    const logger = createLogger('anochat.agent');
-    logger.info('Delegation started', { parentSid: parentSessionId, targetAid: targetAgentId, taskPreview: task.slice(0, 60) });
-
-    const registry = AgentRegistry.getInstance();
-    const targetAgent = registry.findAgent(targetAgentId);
-    if (!targetAgent) {
-      return {
-        toolCallId: `delegate-${targetAgentId}`,
-        success: false,
-        content: '',
-        errorMessage: `Target agent not found: ${targetAgentId}`,
-        tokensUsed: 0,
-        startedAt: Date.now(),
-        finishedAt: Date.now(),
-        durationMs: 0,
-        wasTruncated: false,
-      };
-    }
-
-    if (!targetAgent.isActive) {
-      return {
-        toolCallId: `delegate-${targetAgentId}`,
-        success: false,
-        content: '',
-        errorMessage: `Target agent ${targetAgentId} is destroyed`,
-        tokensUsed: 0,
-        startedAt: Date.now(),
-        finishedAt: Date.now(),
-        durationMs: 0,
-        wasTruncated: false,
-      };
-    }
-
-
-    // Tasks can ONLY be delegated to direct subordinates (immediate children).
-    if (targetAgent.parentAgentId !== parentAgentId) {
-      return {
-        toolCallId: `delegate-${targetAgentId}`,
-        success: false,
-        content: '',
-        errorMessage: `Cannot delegate to '${targetAgentId}': tasks can only be assigned to your direct subordinates (immediate children).`,
-        tokensUsed: 0,
-        startedAt: Date.now(),
-        finishedAt: Date.now(),
-        durationMs: 0,
-        wasTruncated: false,
-      };
-    }
-
-    // Create a real sub-session via SessionManager (use agent's internal ID, not LLM-provided name)
-    const actualAgentId = targetAgent.id; // internal ID like "manager-research", not "Research-Manager"
-    const sessionManager = SessionManager.getInstance();
-    let subSessionId: string;
-    try {
-      const subSession = await sessionManager.createSubSession(parentSessionId, actualAgentId,
-        `Task: ${task.slice(0, 40)}`);
-      subSessionId = subSession.id;
-
-      InterruptController.getInstance().linkChild(parentSessionId, subSessionId);
-      logger.info('Sub-session created for delegation', { parentSid: parentSessionId, subSid: subSessionId, targetAid: actualAgentId });
-
-      TypedEventBus.emit('delegation:subsession_created', {
-        sessionId: subSessionId,
-        parentSessionId,
-        agentId: actualAgentId,
-        title: `Task: ${task.slice(0, 40)}`,
-      });
-    } catch (err) {
-      return {
-        toolCallId: `delegate-${targetAgentId}`,
-        success: false,
-        content: '',
-        errorMessage: `Failed to create sub-session: ${(err as Error).message}`,
-        tokensUsed: 0,
-        startedAt: Date.now(),
-        finishedAt: Date.now(),
-        durationMs: 0,
-        wasTruncated: false,
-      };
-    }
-
-
-    // Append a structured summary of the parent conversation so the sub-agent
-    // understands the broader goal (prevents "memory rupture").
-    const taskParts: string[] = [task];
-    try {
-      const parentHistory = await sessionManager.getHistory(parentSessionId);
-      if (parentHistory.length > 0) {
-        const contextParts: string[] = [];
-        // User's original request (most important)
-        const userMsgs = parentHistory.filter((m: Message) => m.role === 'user');
-        const lastUser = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1] : parentHistory[parentHistory.length - 1];
-        if (lastUser && lastUser.content) {
-          contextParts.push(`**Original Request:** ${lastUser.content.slice(0, 300)}`);
-        }
-        // Last 3 conversation turns for direction
-        const recent = parentHistory.slice(-3);
-        if (recent.length > 1) {
-          contextParts.push(`**Recent Context:** ${recent.map((m: Message) => `[${m.role}] ${(m.content || '').slice(0, 80)}`).join(' | ')}`);
-        }
-        taskParts.push('\n\n---\n# Parent Session Context\n' + contextParts.join('\n'));
-      }
-    } catch {}
-
-    // Store parent context in sub-session metadata for DelegationContextSection
-    try {
-      const parentHistory = await sessionManager.getHistory(parentSessionId);
-      if (parentHistory.length > 0) {
-        const contextStr = buildContextSummary(parentHistory);
-        const subSession = sessionManager.session(subSessionId);
-        if (subSession) {
-          subSession.setMetadata('parentContext', contextStr);
-          subSession.setMetadata('parentSessionId', parentSessionId);
-        }
-      }
-    } catch { /* non-critical */ }
-
-
-    const teamScope = delegator?.teamName || parentSessionId;
-    try {
-      SharedContextStore.getInstance().set(teamScope, `task:${subSessionId}`, task, parentAgentId);
-      SharedContextStore.getInstance().set(teamScope, `status:${subSessionId}`, 'started', parentAgentId);
-    } catch { /* non-critical */ }
-
-    // Inject live SharedContextStore entries into the delegation message so the
-    // sub-agent can see team-wide context updates (other active sub-agents, progress).
-    try {
-      const contextEntries = SharedContextStore.getInstance().getAll(teamScope);
-      if (contextEntries.length > 0) {
-        const contextSummary = contextEntries
-          .map(e => `[${e.writtenBy}]: ${e.key}=${String(e.value).slice(0, 200)}`)
-          .join('\n');
-        taskParts.push('\n\n---\n# Shared Context (live updates from team)\n' + contextSummary);
-      }
-    } catch { /* non-critical */ }
-
-    const enrichedTask = taskParts.join('');
-
-    // Build delegation message
-    const parentAgent = AgentRegistry.getInstance().agent(parentAgentId);
-    const delegatorName = parentAgent?.name || parentAgentId;
-    const delegationMessage: Message = {
-      id: `delegate-msg-${Date.now()}`,
-      sessionId: subSessionId,
-      role: MessageRole.System,
-      content: `[Task delegated by ${delegatorName} (priority: ${priority})]:\n\n${enrichedTask}`,
-      tokenCount: TokenCounter.estimate(`[Task delegated by ${delegatorName} (priority: ${priority})]:\n\n${enrichedTask}`),
-      compressed: false,
-      timestamp: new Date().toISOString(),
-      agentId: parentAgentId,
-      agentName: delegatorName,
-    };
-
-    const startedAt = Date.now();
-
-
-    const state: DelegationState = {
-      fullContent: '',
-      thinking: '',
-      turnCount: 0,
-      currentTool: undefined,
-    };
-
-
-    // inject the task as a soft interrupt instead of creating a new background task.
-    // This keeps the "one agent = one session = one AgentLoop" contract intact.
-    if (this.isSessionActive(subSessionId)) {
-      try {
-        await sessionManager.appendMessage(subSessionId, delegationMessage);
-      } catch { /* non-critical */ }
-      InterruptController.getInstance().setPendingUserMessage(
-        subSessionId,
-        `[New task from ${delegatorName}]:\n\n${task}`,
-      );
-      InterruptController.getInstance().wakeOnly(subSessionId);
-      logger.info('Task injected into active session', { subSid: subSessionId, targetAid: actualAgentId });
-      return {
-        toolCallId: `delegate-${actualAgentId}`,
-        success: true,
-        content: `Task injected into existing session for '${actualAgentId}' (${subSessionId}).\n` +
-          `The agent is currently working -- your task will be picked up on its next turn.`,
-        structured: {
-          status: 'queued',
-          type: 'subagent',
-          subSessionId,
-          targetAgentId: actualAgentId,
-          parentSessionId,
-          parentAgentId,
-          priority,
-          background: false,
-          activeSession: true,
-        },
-        tokensUsed: 0,
-        startedAt,
-        finishedAt: Date.now(),
-        durationMs: Date.now() - startedAt,
-        wasTruncated: false,
-      };
-    }
-
-
-    const bgManager = BackgroundTaskManager.getInstance();
-    const taskId = bgManager.register({
-      type: 'subagent',
-      parentSessionId,
-      parentAgentId,
-      summary: task.slice(0, 60),
-    });
-
-
-    // oneShot: true = auto-unsubscribe after first delivery, no manual cleanup needed
-    const esm = EventSubscriptionManager.getInstance();
-    esm.subscribe(parentSessionId, parentAgentId, `task:completed:${taskId}`, { oneShot: true });
-    esm.subscribe(parentSessionId, parentAgentId, `task:failed:${taskId}`, { oneShot: true });
-
-    // Per-event persistence via StreamPersister (unified with main.ts)
-    const store = SessionStore.getInstance();
-    const turnMsgId = `msg-sub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    const initialPrevUuid = '00000000-0000-0000-0000-000000000000';
-    const { StreamPersister } = await import('../../infra/StreamPersister.js');
-    const persister = new StreamPersister(store, subSessionId, turnMsgId, initialPrevUuid, actualAgentId);
-
-
-    (async () => {
-      let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
-      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-
-      try {
-
-        // Also detects unresponsive sub-agents and auto-kills them.
-        heartbeatInterval = setInterval(() => {
-          const supMgr = SupervisionManager.getInstance();
-
-
-          if (supMgr.isUnresponsive(subSessionId)) {
-            logger.warn('Sub-agent unresponsive, auto-killing', {
-              subSid: subSessionId,
-              targetAid: actualAgentId,
-              secondsSinceHeartbeat: supMgr.secondsSinceLastHeartbeat(subSessionId),
-            });
-            InterruptController.getInstance().requestInterrupt(subSessionId, InterruptReason.Timeout);
-            if (heartbeatInterval) clearInterval(heartbeatInterval);
-            return;
-          }
-
-          supMgr.setCurrentTool(subSessionId, state.currentTool);
-
-          // heartbeat when the AgentLoop is in its background-task wait loop.
-          supMgr.heartbeat(subSessionId);
-          emitDelegationStatus(this, parentSessionId, subSessionId, actualAgentId, {
-            phase: 'working',
-            taskSummary: task.slice(0, 60),
-            turnCount: state.turnCount,
-            currentTool: state.currentTool,
-            elapsedMs: Date.now() - startedAt,
-          });
-          // Update BackgroundTaskManager progress (rate-limited internally)
-          bgManager.updateProgress(taskId, { turnCount: state.turnCount, currentTool: state.currentTool });
-        }, 5000);
-
-
-        const DELEGATION_TIMEOUT_MS = 600000;
-        timeoutHandle = setTimeout(() => {
-          logger.warn('Delegation timeout, aborting sub-session', { subSid: subSessionId, targetAid: actualAgentId });
-          InterruptController.getInstance().requestInterrupt(subSessionId, InterruptReason.Timeout);
-        }, DELEGATION_TIMEOUT_MS);
-
-
-        await handleSubAgentOutput(
-          this,
-          this.processMessage(subSessionId, actualAgentId, delegationMessage),
-          parentSessionId,
-          subSessionId,
-          actualAgentId,
-          task.slice(0, 60),
-          startedAt,
-          persister,
-          state,
-        );
-
-        const durationMs = Date.now() - startedAt;
-
-
-        if (state.turnCount === 0 && !state.fullContent.trim()) {
-          const abortReason = state.fullContent.includes('[ERROR]')
-            ? `Sub-agent process error: ${state.fullContent.replace('[ERROR] ', '')}`
-            : 'Sub-agent exited immediately with no output. The agent may have failed to start (check model config, API key, or agent setup).';
-          logger.warn('Delegation aborted - sub-agent produced no output', { parentSid: parentSessionId, subSid: subSessionId, targetAid: actualAgentId, durationMs });
-
-          emitDelegationStatus(this, parentSessionId, subSessionId, actualAgentId, {
-            phase: 'error',
-            taskSummary: task.slice(0, 60),
-            elapsedMs: durationMs,
-          });
-
-          await bgManager.fail(taskId, abortReason, durationMs);
-        } else {
-
-          emitDelegationStatus(this, parentSessionId, subSessionId, actualAgentId, {
-            phase: 'completed',
-            taskSummary: task.slice(0, 60),
-            turnCount: state.turnCount,
-            elapsedMs: durationMs,
-          });
-
-          await bgManager.complete(taskId, { content: state.fullContent, turnCount: state.turnCount, durationMs });
-        }
-
-        logger.info('Delegation completed (background)', { parentSid: parentSessionId, subSid: subSessionId, targetAid: actualAgentId, turnCount: state.turnCount, durationMs });
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        const durationMs = Date.now() - startedAt;
-
-        logger.error('Delegation failed (background)', { parentSid: parentSessionId, subSid: subSessionId, targetAid: actualAgentId, error: errorMessage.slice(0, 200) });
-
-
-        emitDelegationStatus(this, parentSessionId, subSessionId, actualAgentId, {
-          phase: 'error',
-          taskSummary: task.slice(0, 60),
-          elapsedMs: durationMs,
-        });
-
-        // Fail in BackgroundTaskManager (injects error message into parent)
-        await bgManager.fail(taskId, errorMessage, durationMs);
-      } finally {
-        if (timeoutHandle) clearTimeout(timeoutHandle);
-        if (heartbeatInterval) clearInterval(heartbeatInterval);
-        InterruptController.getInstance().unlinkChild(subSessionId);
-      }
-    })();
-
-
-    return {
-      toolCallId: `delegate-${actualAgentId}`,
-      success: true,
-      content: `Task dispatched to '${actualAgentId}' (session: ${subSessionId}).\n` +
-        `Task ID: ${taskId}\n` +
-        `The agent will work on it independently.\n` +
-        `Use TaskList to monitor progress, AgentMessage to communicate, or TaskOutput to get the final result when complete.`,
-      structured: {
-        taskId,
-        status: 'running',
-        type: 'subagent',
-        subSessionId,
-        targetAgentId: actualAgentId,
-        parentSessionId,
-        parentAgentId,
-        priority,
-        background: true,
-      },
-      tokensUsed: 0,
-      startedAt,
-      finishedAt: Date.now(),
-      durationMs: Date.now() - startedAt,
-      wasTruncated: false,
-    };
-  }
-
-
-
-
-  /**
    * Create a temporary SubAgent and execute a task synchronously. The SubAgent
-   * is destroyed after completion (or error). If config.persist is true, the
-   * SubAgent survives and is set to Idle for reuse.
+   * is always destroyed after completion or error; its task and transcript remain.
    */
   async spawnSubAgent(config: SubAgentConfig, callerAgentId?: string, parentSessionId?: string): Promise<ToolResult> {
     return spawnSubAgent(this, config, callerAgentId, parentSessionId);
   }
 
-
-
   /**
-   * Execute multiple delegated tasks in dependency-ordered parallel batches.
-   *
-   * @param tasks - Array of {agentId, description, dependsOn?}. dependsOn lists
-   *   task IDs (by their 0-based index in the array) that must complete first.
-   * @returns Formatted summary string for the delegating agent.
+   * Execute one durable coordination task. The scheduler is the only caller.
+   * Completion is committed after the AgentLoop terminal event, never after dispatch.
    */
-  async executeParallelPlan(
-    tasks: Array<{agentId: string; description: string; dependsOn?: string[]}>,
-    parentSessionId: string,
-    parentAgentId: string,
-  ): Promise<string> {
-    const logger = createLogger('anochat.agent');
-    const dag = new TaskDAG();
-
-    for (let i = 0; i < tasks.length; i++) {
-      const t = tasks[i];
-      dag.addTask({
-        id: `task-${i}`,
-        agentId: t.agentId,
-        description: t.description,
-        dependsOn: (t.dependsOn || []).map(d => d.startsWith('task-') ? d : `task-${d}`),
-        status: 'pending',
-      });
+  async runCoordinationTask(task: CoordinationTask): Promise<void> {
+    const service = CoordinationService.getInstance();
+    const registry = AgentRegistry.getInstance();
+    const sessionManager = SessionManager.getInstance();
+    const agent = task.assigneeAgentId ? registry.findAgent(task.assigneeAgentId) : undefined;
+    if (!agent?.isActive) {
+      await service.updateTask(task.rootSessionId, task.id, {
+        status: 'blocked',
+        blocker: 'assignee_unavailable',
+        error: `Assigned agent is unavailable: ${task.assigneeAgentId || '(none)'}`,
+      }, task.creatorAgentId);
+      return;
     }
 
-    logger.info('executeParallelPlan starting', {
-      parentSessionId,
-      parentAgentId,
-      taskCount: tasks.length,
-    });
-
-    const plan = new ExecutionPlan(dag, AgentRegistry.getInstance());
-    const results = await plan.execute(parentSessionId, parentAgentId);
-
-    // Format summary
-    let summary = `## Parallel Plan Results\n\n${dag.summary()}\n\n`;
-    for (const task of dag.tasks.values()) {
-      const icon = task.status === 'completed' ? '[done]' : '[pending]';
-      summary += `- ${icon} **${task.agentId}**: ${task.description.slice(0, 60)}`;
-      if (task.result) {
-        summary += `\n  Result: ${task.result.slice(0, 200)}`;
+    let current = service.getTask(task.rootSessionId, task.id) || task;
+    const resumesAfterChildren = current.blocker === CHILD_TASKS_READY_BLOCKER;
+    let session = resumesAfterChildren && current.sessionId
+      ? sessionManager.session(current.sessionId)
+      : undefined;
+    if (resumesAfterChildren) {
+      if (!session || session.metadata.coordinationTaskId !== task.id) {
+        await service.updateTask(task.rootSessionId, task.id, {
+          status: 'blocked',
+          blocker: 'continuation_session_missing',
+          error: `Cannot resume coordination session: ${current.sessionId || '(none)'}`,
+        }, agent.id, current.version);
+        return;
       }
-      summary += '\n';
+    } else {
+      const parentSessionId = task.mode === 'swarm'
+        ? task.rootSessionId
+        : task.sourceSessionId;
+      const scopeId = task.mode === 'swarm' && task.teamId
+        ? `team-${task.teamId}`
+        : undefined;
+      session = await sessionManager.createSubSession(
+        parentSessionId,
+        agent.id,
+        `Coordination: ${task.subject.slice(0, 80)}`,
+        {
+          scopeId,
+          metadata: {
+            coordinationTaskId: task.id,
+            coordinationRootSessionId: task.rootSessionId,
+            coordinationTeamId: task.teamId,
+            coordinationMode: task.mode,
+          },
+        },
+      );
+      await sessionManager.setMetadataPersisted(session.id, 'coordinationTaskId', task.id);
+      await sessionManager.setMetadataPersisted(session.id, 'coordinationRootSessionId', task.rootSessionId);
+      if (task.teamId) await sessionManager.setMetadataPersisted(session.id, 'coordinationTeamId', task.teamId);
     }
 
-    return summary;
+    current = await service.updateTask(task.rootSessionId, task.id, {
+      status: 'running',
+      sessionId: session.id,
+      heartbeatAt: new Date().toISOString(),
+      progress: 0,
+      blocker: undefined,
+      error: undefined,
+    }, agent.id, current.version);
+
+    const taskContent = resumesAfterChildren
+      ? renderChildTaskContinuation(
+        current,
+        this.directChildTasks(current),
+      )
+      : renderTaskPacket(await buildTaskPacket(current));
+    const message: Message = {
+      id: resumesAfterChildren
+        ? `coord-task-continuation-${task.id}-${current.attempt}`
+        : `coord-task-${task.id}-${current.attempt}`,
+      sessionId: session.id,
+      role: MessageRole.System,
+      content: taskContent,
+      tokenCount: TokenCounter.estimate(taskContent),
+      compressed: false,
+      timestamp: new Date().toISOString(),
+      agentId: task.creatorAgentId,
+      agentName: registry.findAgent(task.creatorAgentId)?.name || task.creatorAgentId,
+    };
+    await sessionManager.appendMessage(session.id, message);
+    const history = (await sessionManager.getHistory(session.id)).filter((entry) => entry.id !== message.id);
+    const { SessionTurnRecorder } = await import('../../infra/SessionTurnRecorder.js');
+    const recorder = new SessionTurnRecorder(
+      session.id,
+      agent.id,
+      `coord-${task.id}-${current.attempt}`,
+    );
+    const startedAt = Date.now();
+    let content = '';
+    let failure = '';
+    let turnCount = 0;
+    let tokenUsage = 0;
+    let currentTool: string | undefined;
+    let requiresChildContinuation = false;
+    const ttlMs = SettingsManager.getInstance().get<number>(
+      'coordination.workspaceLeaseTtlMs',
+      30_000,
+    );
+    const timeoutMs = SettingsManager.getInstance().get<number>(
+      'coordination.maxTaskRuntimeMs',
+      600_000,
+    );
+    const heartbeat = setInterval(() => {
+      const latest = service.getTask(task.rootSessionId, task.id);
+      if (!latest || latest.status !== 'running') return;
+      void service.renewTaskLeases(task.rootSessionId, task.id, ttlMs, agent.id).catch(() => {});
+      void service.updateTask(task.rootSessionId, task.id, {
+        heartbeatAt: new Date().toISOString(),
+        currentTool,
+      }, agent.id).catch(() => {});
+    }, Math.max(1_000, Math.min(5_000, Math.floor(ttlMs / 2))));
+    const timeout = setTimeout(() => {
+      InterruptController.getInstance().requestInterrupt(session.id, InterruptReason.Timeout);
+      failure = `Coordination task timed out after ${timeoutMs}ms`;
+    }, timeoutMs);
+
+    try {
+      for await (const event of this.processMessage(session.id, agent.id, message, history, {
+        permissionMode: 'AutoEdit',
+        effort: 'HIGH',
+      })) {
+        await recorder.record(event, 'coordination');
+        if (event.type === SSEEventType.Text) content += String(event.content || '');
+        if (event.type === SSEEventType.ToolCall) {
+          currentTool = String(event.toolName || '');
+          turnCount += 1;
+          await service.updateTask(task.rootSessionId, task.id, {
+            heartbeatAt: new Date().toISOString(),
+            currentTool,
+            progress: Math.min(95, Math.max(1, turnCount * 5)),
+          }, agent.id);
+        } else if (event.type === SSEEventType.ToolResult) {
+          currentTool = undefined;
+        } else if (event.type === SSEEventType.Error) {
+          failure = String(event.errorMessage || event.content || 'AgentLoop failed');
+        } else if (event.type === SSEEventType.Done) {
+          tokenUsage = Number((event.tokenUsage as { total?: number } | undefined)?.total || 0);
+        }
+        WsServer.getInstance().send(session.id, event as unknown as Record<string, unknown>);
+      }
+      const afterLoopTask = service.getTask(task.rootSessionId, task.id);
+      const directChildren = afterLoopTask
+        ? this.directChildTasks(afterLoopTask)
+        : [];
+      requiresChildContinuation = directChildren.length > 0
+        && (
+          !resumesAfterChildren
+          || !directChildren.every((child) => (
+            service.isTaskTerminal(child)
+            && service.hasConsumableTaskResult(child)
+          ))
+        );
+      await recorder.finalize();
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error);
+      await recorder.recordError(failure, 'coordination').catch(() => {});
+      await recorder.finalize().catch(() => {});
+    } finally {
+      clearInterval(heartbeat);
+      clearTimeout(timeout);
+      await sessionManager.setRuntimeStatus(session.id, 'Idle').catch(() => {});
+    }
+
+    const latest = service.getTask(task.rootSessionId, task.id);
+    if (!latest) return;
+    if (latest.status === 'cancelled' || latest.status === 'completed' || latest.status === 'failed') {
+      await service.releaseTaskLeases(
+        latest.rootSessionId,
+        latest.id,
+        latest.assigneeAgentId || latest.creatorAgentId,
+      ).catch(() => {});
+      return;
+    }
+
+    const cancellationPatch: Parameters<CoordinationService['updateTask']>[2] = {
+      status: 'cancelled',
+      blocker: undefined,
+      currentTool: undefined,
+      heartbeatAt: new Date().toISOString(),
+      resultSummary: content.trim().slice(0, 2_000) || undefined,
+      outputRef: `session:${session.id}`,
+      tokenUsage,
+    };
+    const commitAfterLoop = async (
+      desiredPatch: Parameters<CoordinationService['updateTask']>[2],
+    ): Promise<CoordinationTask | undefined> => {
+      for (let conflictAttempt = 0; conflictAttempt < 3; conflictAttempt++) {
+        const candidate = service.getTask(task.rootSessionId, task.id);
+        if (!candidate || service.isTaskTerminal(candidate)) return candidate;
+        const patch = candidate.blocker === CANCELLATION_REQUESTED_BLOCKER
+          ? cancellationPatch
+          : desiredPatch;
+        try {
+          return await service.updateTask(
+            task.rootSessionId,
+            task.id,
+            patch,
+            agent.id,
+            candidate.version,
+          );
+        } catch (error) {
+          const refreshed = service.getTask(task.rootSessionId, task.id);
+          if (!refreshed || refreshed.version === candidate.version) throw error;
+        }
+      }
+      throw new Error(`Coordination task finalization kept changing: ${task.id}`);
+    };
+
+    if (latest.blocker === CANCELLATION_REQUESTED_BLOCKER) {
+      await commitAfterLoop(cancellationPatch);
+      return;
+    }
+    if (failure) {
+      const failed = await commitAfterLoop({
+        status: 'failed',
+        error: failure.slice(0, 2_000),
+        resultSummary: content.trim().slice(0, 2_000) || undefined,
+        outputRef: `session:${session.id}`,
+        tokenUsage,
+      });
+      if (!failed || failed.status !== 'failed') return;
+      if (isTransientCoordinationError(failure) && failed.attempt < failed.maxAttempts) {
+        await service.retryTask(task.rootSessionId, task.id, agent.id);
+        return;
+      }
+      await this.deliverCoordinationResult(failed, 'failed');
+      return;
+    }
+
+    if (requiresChildContinuation) {
+      // Release before publishing the blocked transition. That transition can
+      // immediately make an already-ready continuation schedulable.
+      await service.releaseTaskLeases(
+        latest.rootSessionId,
+        latest.id,
+        latest.assigneeAgentId || latest.creatorAgentId,
+      ).catch(() => {});
+      const waiting = await commitAfterLoop({
+        status: 'blocked',
+        blocker: WAITING_FOR_CHILD_TASKS_BLOCKER,
+        progress: Math.min(99, Math.max(1, latest.progress || 0)),
+        currentTool: undefined,
+        heartbeatAt: new Date().toISOString(),
+        resultSummary: content.trim().slice(0, 2_000) || 'Waiting for direct child task results.',
+        outputRef: `session:${session.id}`,
+        tokenUsage,
+        evidence: [
+          `Session transcript: ${session.id}`,
+          `Waiting for direct child tasks after attempt ${latest.attempt}`,
+        ],
+      });
+      if (!waiting || waiting.status !== 'blocked') return;
+      return;
+    }
+
+    const completed = await commitAfterLoop({
+      status: 'completed',
+      progress: 100,
+      currentTool: undefined,
+      heartbeatAt: new Date().toISOString(),
+      resultSummary: content.trim().slice(0, 2_000) || 'Task completed without a text summary.',
+      outputRef: `session:${session.id}`,
+      tokenUsage,
+      evidence: [`Session transcript: ${session.id}`, `Turns: ${turnCount}`, `Duration: ${Date.now() - startedAt}ms`],
+    });
+    if (!completed || completed.status !== 'completed') return;
+    await this.deliverCoordinationResult(completed, 'completed');
+  }
+
+  async deliverCoordinationResult(
+    task: CoordinationTask,
+    status: 'completed' | 'failed' | 'cancelled',
+  ): Promise<void> {
+    const service = CoordinationService.getInstance();
+    const sessionManager = SessionManager.getInstance();
+    const message = await service.queueMessage({
+      rootSessionId: task.rootSessionId,
+      teamId: task.teamId,
+      taskId: task.id,
+      fromAgentId: task.assigneeAgentId || task.creatorAgentId,
+      toAgentId: task.creatorAgentId,
+      kind: 'task_result',
+      summary: `${task.subject}: ${status}`,
+      content: task.resultSummary || task.error || status,
+      idempotencyKey: `task-result:${task.id}:${task.attempt}:${status}`,
+    });
+    const source = sessionManager.session(task.sourceSessionId)
+      || sessionManager.session(task.rootSessionId);
+    if (!source) return;
+    const xml = [
+      [
+        `<coordination-event root-session-id="${task.rootSessionId}"`,
+        task.teamId ? `team-id="${task.teamId}"` : '',
+        `task-id="${task.id}"`,
+        `from-agent="${message.fromAgentId}"`,
+        `to-agent="${task.creatorAgentId}"`,
+        task.sessionId ? `session-id="${task.sessionId}"` : '',
+        `status="${status}">`,
+      ].filter(Boolean).join(' '),
+      `Subject: ${task.subject}`,
+      `Result: ${message.content}`,
+      task.outputRef ? `Output: ${task.outputRef}` : '',
+      '</coordination-event>',
+    ].filter(Boolean).join('\n');
+    const sessionMessage: Message = {
+      id: message.id,
+      sessionId: source.id,
+      role: MessageRole.User,
+      content: xml,
+      tokenCount: TokenCounter.estimate(xml),
+      compressed: false,
+      timestamp: new Date().toISOString(),
+      agentId: message.fromAgentId,
+      agentName: registryAgentName(message.fromAgentId),
+    };
+    const sourceHistory = await sessionManager.getHistory(source.id).catch(() => []);
+    if (!sourceHistory.some((entry) => entry.id === message.id)) {
+      await sessionManager.appendMessage(source.id, sessionMessage);
+    }
+    if (message.status === 'queued') {
+      await service.updateMessageStatus(task.rootSessionId, message.id, 'delivered', task.creatorAgentId);
+    } else if (message.status === 'acknowledged' || message.status === 'dead_letter') {
+      return;
+    }
+    const coordinationParentId = typeof source.metadata?.coordinationTaskId === 'string'
+      ? source.metadata.coordinationTaskId
+      : undefined;
+    const coordinationParent = coordinationParentId
+      ? service.getTask(task.rootSessionId, coordinationParentId)
+      : undefined;
+    const isOwnedChildResult = coordinationParent
+      && coordinationParent.id !== task.id
+      && this.directChildTasks(coordinationParent).some((child) => child.id === task.id);
+    if (coordinationParentId) {
+      // The scheduler owns continuation of a coordination parent. Starting a
+      // generic idle wake here would race the same-session continuation. A
+      // stale execution session is also never allowed to reopen history.
+      if (
+        isOwnedChildResult
+        && this.isSessionActive(source.id)
+        && coordinationParent
+        && !service.isTaskTerminal(coordinationParent)
+      ) {
+        InterruptController.getInstance().requestSteerInterrupt(source.id);
+      }
+      return;
+    }
+    if (this.isSessionActive(source.id)) {
+      InterruptController.getInstance().requestSteerInterrupt(source.id);
+      return;
+    }
+    this.enqueueIdleSessionWake({
+      sessionId: source.id,
+      agentId: task.creatorAgentId,
+      notificationId: message.id,
+      content: '[System notification] A coordination task finished. Review the most recent <coordination-event>, respond to it, and continue any dependent work.',
+      source: 'coordination_result',
+    });
+  }
+
+  private directChildTasks(parent: CoordinationTask): CoordinationTask[] {
+    if (!parent.sessionId) return [];
+    const session = SessionManager.getInstance().session(parent.sessionId);
+    if (session?.metadata.coordinationTaskId !== parent.id) return [];
+    return CoordinationService.getInstance().listDirectChildTasks(parent);
+  }
+
+  private enqueueIdleSessionWake(request: IdleSessionWakeRequest): void {
+    if (this._idleSessionWakeIds.has(request.notificationId)) return;
+    this._idleSessionWakeIds.add(request.notificationId);
+
+    const previous = this._idleSessionWakeQueues.get(request.sessionId) || Promise.resolve();
+    let current: Promise<void>;
+    current = previous
+      .catch(() => {})
+      .then(() => this.processIdleSessionWake(request))
+      .catch((error) => {
+        createLogger('anochat.agent').warn('Idle session wake failed', {
+          sid: request.sessionId,
+          aid: request.agentId,
+          notificationId: request.notificationId,
+          source: request.source,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => {
+        this._idleSessionWakeIds.delete(request.notificationId);
+        if (this._idleSessionWakeQueues.get(request.sessionId) === current) {
+          this._idleSessionWakeQueues.delete(request.sessionId);
+        }
+      });
+    this._idleSessionWakeQueues.set(request.sessionId, current);
+  }
+
+  private async processIdleSessionWake(request: IdleSessionWakeRequest): Promise<void> {
+    const sessionManager = SessionManager.getInstance();
+    const session = sessionManager.session(request.sessionId);
+    const agent = AgentRegistry.getInstance().agent(request.agentId);
+    if (!session || !agent?.isActive) {
+      createLogger('anochat.agent').warn('Skipping idle session wake for unavailable target', {
+        sid: request.sessionId,
+        aid: request.agentId,
+        notificationId: request.notificationId,
+      });
+      return;
+    }
+
+    // A foreground turn may have started after the result was delivered but
+    // before this queued wake acquired its session slot.
+    if (this.isSessionActive(request.sessionId)) {
+      InterruptController.getInstance().requestSteerInterrupt(request.sessionId);
+      return;
+    }
+
+    const history = await sessionManager.getHistory(request.sessionId);
+    const wakeMessage: Message = {
+      id: `wake-${request.notificationId}`,
+      sessionId: request.sessionId,
+      role: MessageRole.System,
+      content: request.content,
+      tokenCount: TokenCounter.estimate(request.content),
+      compressed: false,
+      timestamp: new Date().toISOString(),
+      agentId: request.agentId,
+      agentName: agent.name,
+    };
+    const { SessionTurnRecorder } = await import('../../infra/SessionTurnRecorder.js');
+    const { StreamConsumer } = await import('../../infra/stream/StreamConsumer.js');
+    const recorder = new SessionTurnRecorder(
+      request.sessionId,
+      request.agentId,
+      `msg-${request.notificationId}`,
+    );
+    const consumer = new StreamConsumer(WsServer.getInstance(), request.sessionId, recorder);
+
+    try {
+      for await (const event of this.processMessage(
+        request.sessionId,
+        request.agentId,
+        wakeMessage,
+        history,
+      )) {
+        switch (event.type) {
+          case SSEEventType.Text:
+            consumer.onDelta('text', String(event.content || ''));
+            break;
+          case SSEEventType.Think:
+            consumer.onDelta('think', String(event.content || ''));
+            break;
+          case SSEEventType.ToolCall:
+          case SSEEventType.ToolResult:
+          case SSEEventType.Error:
+            await consumer.beforeToolEvent();
+            await recorder.record(event, request.source);
+            consumer.sendDirect(event as unknown as Record<string, unknown>);
+            break;
+          default:
+            consumer.sendDirect(event as unknown as Record<string, unknown>);
+        }
+      }
+      await consumer.flushAndFinalize();
+      await sessionManager.rebuildMessageCache(request.sessionId);
+      createLogger('anochat.agent').info('Idle session processed durable notification', {
+        sid: request.sessionId,
+        aid: request.agentId,
+        notificationId: request.notificationId,
+        source: request.source,
+      });
+    } catch (error) {
+      await recorder.recordError(
+        error instanceof Error ? error.message : String(error),
+        request.source,
+      ).catch(() => {});
+      await recorder.finalize().catch(() => {});
+      throw error;
+    }
   }
 
 
 
   /** Check if a session has an active AgentLoop running. */
   isSessionActive(sessionId: string): boolean {
-    return this._activeLoops.has(sessionId);
+    return this._activeLoops.has(sessionId) || this._sessionStartReservations.has(sessionId);
   }
 
   /** Manually clean up a stuck/broken AgentLoop for a session. */
   cleanupSession(sessionId: string): void {
     this._activeLoops.delete(sessionId);
+    this._sessionStartReservations.delete(sessionId);
   }
 
   /** Subscribe to background task completion/failure notifications (global, called once). */
@@ -1203,7 +1271,7 @@ export class AgentRuntime extends EventEmitter {
           return;
         }
 
-        sm.appendMessage(payload.parentSessionId, {
+        const persistNotification = sm.appendMessage(payload.parentSessionId, {
           id: `tn-${payload.taskId}`,
           sessionId: payload.parentSessionId,
           role: MessageRole.User,
@@ -1212,98 +1280,57 @@ export class AgentRuntime extends EventEmitter {
           compressed: false,
           timestamp,
           agentId: payload.parentAgentId,
-        }).catch(err => {
+        }).then(() => true).catch(err => {
           log.warn('Failed to inject task notification', { taskId: payload.taskId, error: (err as Error).message });
+          return false;
         });
 
         // Wake the agent so it sees the notification.
         // If session is idle (no active AgentLoop), start background processing.
         if (this.isSessionActive(payload.parentSessionId)) {
-          InterruptController.getInstance().requestSteerInterrupt(payload.parentSessionId);
-        } else {
-
-          // so the user sees the CEO's streaming response via WebSocket.
-          (async () => {
-            try {
-              const history = await sm.getHistory(payload.parentSessionId).catch(() => []);
-              const wakeMessage: Message = {
-                id: `tn-msg-${payload.taskId}`,
-                sessionId: payload.parentSessionId,
-                role: MessageRole.System,
-                content: `[System notification] A background task finished. Check the most recent <task-notification> message for details.`,
-                tokenCount: 0,
-                compressed: false,
-                timestamp,
-                agentId: payload.parentAgentId,
-              };
-
-              const { StreamPersister } = await import('../../infra/StreamPersister.js');
-              const { StreamConsumer } = await import('../../infra/stream/StreamConsumer.js');
-              const store = SessionStore.getInstance();
-              const turnMsgId = `msg-wake-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-              const persister = new StreamPersister(store, payload.parentSessionId, turnMsgId, '00000000-0000-0000-0000-000000000000', payload.parentAgentId);
-              const consumer = new StreamConsumer(WsServer.getInstance(), payload.parentSessionId, persister);
-
-              for await (const event of this.processMessage(payload.parentSessionId, payload.parentAgentId, wakeMessage, history)) {
-                switch (event.type) {
-                  case 'text':
-                    consumer.onDelta('text', event.content as string);
-                    break;
-                  case 'think':
-                    consumer.onDelta('think', event.content as string);
-                    break;
-                  case 'tool_call':
-                    await persister.flushDeltas();
-                    await consumer.beforeToolEvent();
-                    await persister.persistEvent('tool_call', {
-                      id: (event.toolCallId || event.id || event.toolId || '') as string,
-                      name: (event.toolName || event.name || '') as string,
-                      input: (event.params || event.args || event.input || event.toolInput || {}) as Record<string, unknown>,
-                    });
-                    consumer.sendDirect(event as unknown as Record<string, unknown>);
-                    break;
-                  case 'tool_result':
-                    await persister.flushDeltas();
-                    await consumer.beforeToolEvent();
-                    const structured = (event as Record<string, unknown>).structured as Record<string, unknown> | undefined;
-                    const todosPayload = structured?.todos as Array<{ content: string; status: string; activeForm: string }> | undefined;
-                    await persister.persistEvent('tool_result', {
-                      toolCallId: (event.toolCallId || event.toolId || '') as string,
-                      is_error: event.success === false,
-                      content: (event.result || event.content || '') as string,
-                      ...(todosPayload ? { todos: todosPayload } : {}),
-                    });
-                    if (todosPayload && Array.isArray(todosPayload)) {
-                      await persister.persistEvent('todo_write', {
-                        todos: todosPayload.map(t => ({ content: t.content, status: t.status, activeForm: t.activeForm })),
-                      });
-                    }
-                    consumer.sendDirect(event as unknown as Record<string, unknown>);
-                    break;
-                  case 'error':
-                    await consumer.beforeToolEvent();
-                    await persister.persistEvent('error', {
-                      error: (event.errorMessage || event.message || event.content || 'Unknown error') as string,
-                      source: 'task_notification',
-                    });
-                    consumer.sendDirect(event as unknown as Record<string, unknown>);
-                    break;
-                  default:
-                    consumer.sendDirect(event as unknown as Record<string, unknown>);
-                }
-              }
-              await consumer.flushAndFinalize();
-              sm.rebuildMessageCache(payload.parentSessionId).catch(() => {});
-              log.info('Task notification processed by idle agent', { taskId: payload.taskId, sid: payload.parentSessionId });
-            } catch (err) {
-              log.warn('Task notification background processing error', { taskId: payload.taskId, error: (err as Error).message });
+          void persistNotification.then((persisted) => {
+            if (persisted) {
+              InterruptController.getInstance().requestSteerInterrupt(payload.parentSessionId);
             }
-          })();
+          });
+        } else {
+          void persistNotification.then((persisted) => {
+            if (!persisted) return;
+            this.enqueueIdleSessionWake({
+              sessionId: payload.parentSessionId,
+              agentId: payload.parentAgentId,
+              notificationId: `tn-${payload.taskId}`,
+              content: '[System notification] A background task finished. Check the most recent <task-notification> message for details.',
+              source: 'task_notification',
+            });
+          });
         }
       };
 
     this._unsubTaskCompleted = TypedEventBus.on('task:completed', handler('task:completed'));
     this._unsubTaskFailed = TypedEventBus.on('task:failed', handler('task:failed'));
+  }
+
+  /**
+   * Cancellation may finish while a task is pending or blocked and therefore
+   * has no runner to deliver its result. Listen to the durable state change so
+   * every newly-cancelled task follows the same idempotent upstream path.
+   */
+  private _subscribeToCoordinationTaskNotifications(): void {
+    if (this._unsubCoordinationTaskChanged) return;
+    this._unsubCoordinationTaskChanged = TypedEventBus.on(
+      'coordination:task_changed',
+      ({ task }) => {
+        if (task.status !== 'cancelled') return;
+        void this.deliverCoordinationResult(task, 'cancelled').catch((error) => {
+          createLogger('anochat.agent').warn('Cancelled coordination result delivery failed', {
+            rootSessionId: task.rootSessionId,
+            taskId: task.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      },
+    );
   }
 
   /** Get the number of currently active sessions. */
@@ -1318,7 +1345,6 @@ export interface GoalContinuationContext {
   workspace: string;
   permissionMode: string;
   effort: 'HIGH' | 'NORMAL';
-  userMode: string;
   locale?: string;
   taskResolution?: TaskResolveResult | null;
 }
@@ -1341,7 +1367,6 @@ export function buildGoalContinuationContent(ctx: GoalContinuationContext): stri
     `Workspace: ${ctx.workspace || '(default workspace)'}`,
     `Permission mode: ${ctx.permissionMode}`,
     `Effort: ${ctx.effort}`,
-    `User mode: ${ctx.userMode}`,
     ctx.locale ? `Locale: ${ctx.locale}` : '',
   ].filter(Boolean);
 
@@ -1352,26 +1377,23 @@ export function buildGoalContinuationContent(ctx: GoalContinuationContext): stri
 
   lines.push('', '# Goal Execution Rules');
   lines.push(
-    '- Treat the workspace as the primary working context. Inspect current files, artifacts, and project state before broad assumptions.',
+    '- Treat the workspace as the primary working context. Inspect current files, deliverables, and project state before broad assumptions.',
     '- Advance exactly one meaningful next step unless the goal clearly requires a short burst of tightly coupled steps.',
-    '- Prefer durable artifacts, code changes, tests, or concrete workspace updates over vague progress summaries.',
+    '- Prefer durable deliverables, code changes, tests, or concrete workspace updates over vague progress summaries.',
     '- If the goal is already complete, say so clearly and stop taking further action.',
     '- If blocked, name the blocker, preserve useful partial work, and suggest the next concrete unblock action.',
     '- Before ending this run, call GoalReport exactly once with the Run ID above. A run without GoalReport is treated as a failed no-progress run.',
     '- Use waiting_review when the acceptance criteria appear satisfied. Do not keep working after submitting a terminal or waiting outcome.',
   );
 
-  if (ctx.userMode === 'coding') {
+  const routedDomain = ctx.taskResolution?.bestCapability?.domain;
+  if (routedDomain === 'coding') {
     lines.push(
-      '- Coding mode: start from the current IDE/workspace context, inspect relevant files before edits, and run focused build/test checks after changes.',
+      '- Coding task: start from the current IDE/workspace context, inspect relevant files before edits, and run focused build/test checks after changes.',
     );
-  } else if (ctx.userMode === 'office') {
+  } else if (routedDomain && ['office', 'pdf', 'data'].includes(routedDomain)) {
     lines.push(
-      '- Office mode: prefer Artifact and Workspace outputs such as documents, reports, slides, spreadsheets, previews, and downloadable files.',
-    );
-  } else if (ctx.userMode === 'professional') {
-    lines.push(
-      '- Professional mode: expose concise tool/log reasoning when it helps verify correctness, plugin behavior, or workflow state.',
+      '- Document task: prefer downloadable and Workspace outputs such as documents, reports, slides, spreadsheets, previews, and files.',
     );
   }
 
@@ -1382,6 +1404,10 @@ export function buildGoalContinuationContent(ctx: GoalContinuationContext): stri
   } else if (ctx.permissionMode === 'Ask') {
     lines.push(
       '- Ask mode is active: request confirmation before file changes, command execution, or other side effects.',
+    );
+  } else if (ctx.permissionMode === 'AutoEdit') {
+    lines.push(
+      '- Auto Edit is active: all allowed tools are pre-authorized. Execute them directly without requesting approval.',
     );
   }
 
@@ -1450,7 +1476,7 @@ function buildTaskResolutionContext(taskResolution: UserTaskResolution): string 
 
   const requiredTools = capabilityToolNames(capability);
   const outputs = (capability.outputs || [])
-    .map((output) => [output.label, output.extension, output.artifactType].filter(Boolean).join(' / '))
+    .map((output) => [output.label, output.extension].filter(Boolean).join(' / '))
     .filter(Boolean);
 
   const lines = [
@@ -1459,7 +1485,6 @@ function buildTaskResolutionContext(taskResolution: UserTaskResolution): string 
     `Capability title: ${capability.title}`,
     `Domain: ${capability.domain}`,
     `Kind: ${capability.kind || 'utility'}`,
-    `User mode: ${result.userMode}`,
     `Confidence: ${result.confidence.toFixed(2)}`,
     `Reason: ${result.reason}`,
   ];
@@ -1502,7 +1527,6 @@ function summarizeTaskResolution(result: TaskResolveResult): Record<string, unkn
   return {
     intent: result.intent,
     query: result.query,
-    userMode: result.userMode,
     locale: result.locale,
     confidence: result.confidence,
     nextAction: result.nextAction,
@@ -1599,6 +1623,27 @@ function buildImmediateDoneEvent(): SSEEvent {
   };
 }
 
+function renderChildTaskContinuation(
+  parent: CoordinationTask,
+  children: CoordinationTask[],
+): string {
+  const childLines = children.map((child) => [
+    `- ${child.id} [${child.status}] ${child.subject}`,
+    `  Result: ${child.resultSummary || child.error || '(see the durable coordination event in this session)'}`,
+    child.outputRef ? `  Output: ${child.outputRef}` : '',
+  ].filter(Boolean).join('\n'));
+  return [
+    `<coordination-continuation task-id="${parent.id}" root-session-id="${parent.rootSessionId}" attempt="${parent.attempt}">`,
+    'All direct child tasks from the previous run are terminal and each final result is now durable in this session.',
+    'Review the recent <coordination-event> messages and synthesize the final answer for the parent task.',
+    'Treat completed, failed, and cancelled child outcomes explicitly. Do not report success for missing or cancelled work.',
+    'Do not create another delegation merely to wait. Return the final integrated result now.',
+    '',
+    ...childLines,
+    '</coordination-continuation>',
+  ].join('\n');
+}
+
 
 
 /** Run post-loop memory lifecycle: auto-extract facts, decay old memories, prune archives. Non-blocking. */
@@ -1615,4 +1660,13 @@ async function runMemoryLifecycle(agentId: string, sessionId: string): Promise<v
     if (!messages.length) return;
     await runSessionCloseLifecycle(agentId, sessionId, messages);
   } catch { /* lifecycle is best-effort, never throw */ }
+}
+
+function isTransientCoordinationError(message: string): boolean {
+  return /ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|rate.?limit|too many requests|overloaded|bad gateway|service unavailable|5\d\d/i
+    .test(message);
+}
+
+function registryAgentName(agentId: string): string {
+  return AgentRegistry.getInstance().findAgent(agentId)?.name || agentId;
 }

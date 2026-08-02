@@ -1,16 +1,12 @@
 /**
  * AgentMessageDelegate — editorial AI reply block.
  * Left 1px bar, full markdown body with syntax highlighting + images.
- * Footer includes StarRating widget for quality feedback.
- * Star ratings are suppressed for system notifications — interrupt messages,
- * halt markers ("Halted."), and ultra-short content — to avoid prompting
- * the user to rate non-substantive system output.
  */
 
 import type { ConversationMessage } from '../types.js';
 import { renderMarkdown } from '../../../MarkdownRenderer.js';
-import { StarRating } from '../../evolution/StarRating.js';
-import { App } from '../../../app.js';
+import { parseInterruptNotice } from '../CoordinationPresentation.js';
+import { InterruptNoticeDelegate } from './CoordinationMessageDelegate.js';
 
 export class AgentMessageDelegate {
   element: HTMLElement;
@@ -21,8 +17,13 @@ export class AgentMessageDelegate {
     this.element = this.render();
   }
 
-  /** Build the editorial block: agent label → markdown body → star rating footer. */
+  /** Build the editorial block: agent label followed by the markdown body. */
   render(): HTMLElement {
+    const interrupt = parseInterruptNotice(this._msg.content || '');
+    if (interrupt) {
+      return new InterruptNoticeDelegate(this._msg, interrupt).element;
+    }
+
     const block = document.createElement('div');
     block.className = 'cinema-agent-block';
 
@@ -40,37 +41,6 @@ export class AgentMessageDelegate {
     body.className = 'cinema-message-body';
     body.innerHTML = renderMarkdown(this._msg.content || '', { sessionId: this._msg.sessionId });
     block.appendChild(body);
-
-    // Star rating footer — skip for system notifications and trivial content
-    // to avoid asking the user to rate "Halted." or interrupt messages
-    const content = this._msg.content || '';
-    const isSystemNotification = content.includes('[Request interrupted') || content === 'Halted.' || content.length < 10;
-    if (!isSystemNotification) {
-      const footer = document.createElement('div');
-      footer.className = 'star-rating__footer';
-      const app = App.getInstance();
-      const sessionId = this._msg.sessionId || app.sessionVM.activeSession?.id || '';
-      const sessionAgentId = sessionId ? app.sessionVM.sessions.getById(sessionId)?.agentId : '';
-      const starRating = new StarRating(footer, {
-        messageId: this._msg.id || `msg-${Date.now()}`,
-        sessionId,
-        agentId: this._msg.agentId || sessionAgentId || '',
-        turnNumber: 0,
-      });
-      // Wire star-click → quality-score WS message
-      starRating.on('rate', (data: Record<string, unknown>) => {
-        app.sendQualityScore({
-          messageId: data.messageId as string,
-          sessionId: data.sessionId as string,
-          agentId: data.agentId as string,
-          turnNumber: data.turnNumber as number,
-          score: data.score as number,
-          comment: data.comment as string,
-        });
-      });
-      starRating.render();
-      block.appendChild(footer);
-    }
 
     return block;
   }

@@ -1,6 +1,6 @@
 # Tool Framework — `src/server/core/tools/`
 
-The Tool Framework is the execution backbone for all 34 built-in tools and plugin tools. Every tool call flows through a standardized 5-stage pipeline: validation, security, execution, retry, and normalization. Tools are auto-discovered from the `builtin/` directory — no manual registration.
+The Tool Framework is the execution backbone for built-in and plugin tools. Every tool call flows through a standardized 5-stage pipeline: validation, security, execution, retry, and normalization. Tools are auto-discovered from the `builtin/` directory — no manual registration.
 
 ---
 
@@ -310,7 +310,7 @@ interface ExecutionContext {
   sessionId: string;        // Current session identifier
   agentId: string;          // Calling agent identifier
   workspace: string;        // Agent's workspace directory
-  userConfirmed: boolean;   // Whether user approved this tool call
+  userConfirmed: boolean;   // User approval or Auto Edit pre-authorization
   callerRole?: AgentRole;   // Role for permission checks ('MainAgent' | 'Manager' | 'Member' | 'SubAgent')
   signal?: AbortSignal;     // From InterruptController — tools should abort when signaled
 }
@@ -328,7 +328,7 @@ enum RiskLevel {
   Low      = 'Low',        // Minor side effects
   Medium   = 'Medium',     // Moderate risk
   High     = 'High',       // Requires user confirmation (unless already given)
-  Critical = 'Critical',   // Always requires user confirmation
+  Critical = 'Critical',   // Requires confirmation except in Auto Edit
 }
 ```
 
@@ -359,10 +359,10 @@ A caller at level N can use any tool requiring level ≥ N. Returns `true` if `c
 
 | Role | Tools |
 |---|---|
-| `MainAgent` (0) only | `AskUserQuestion` |
-| `Manager` (1)+ | `HireEmployee`, `TaskAssign`, `UpdateOrg` |
-| `Member` (2)+ | `SubAgentSpawn` |
-| `SubAgent` (3)+ | All other tools (the default) |
+| `MainAgent` (0) only | `AskUserQuestion`; `Organization` action `reassign` |
+| `Manager` (1)+ | `Organization` action `hire` |
+| `Member` (2)+ | `Team`, `Task`, `AgentMessage`; Organization access still follows the allowlist |
+| `SubAgent` (3)+ | Regular non-coordination tools |
 
 ---
 
@@ -464,12 +464,12 @@ Choose one of the 8 existing categories (or a new one — new categories auto-cr
 |---|---|
 | `File & Code` | Bash, Read, Write, Edit, Glob, Grep, NotebookEdit |
 | `Search & Web` | WebFetch, WebSearch |
-| `Task Delegation` | TaskAssign, TaskList, AgentMessage, SubAgentSpawn |
+| `Agent Teams` | Organization, Team, AgentMessage |
+| `Task Coordination` | Task |
 | `Planning & Communication` | TodoWrite, Sleep, AskUserQuestion, EnterPlanMode |
-| `Organization Management` | HireEmployee, ListEmployees, UpdateOrg |
 | `Memory & Skills` | MemorySave, MemorySearch, Skill, SkillList |
 | `Browser` | BrowserAgent |
-| `System` | ApiCall, RestartServer |
+| `System` | ApiCall, RunProgram, RestartServer |
 
 ---
 

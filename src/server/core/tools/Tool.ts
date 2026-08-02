@@ -78,14 +78,14 @@ export abstract class Tool {
   // ── Safety ──
 
   /** Risk level for UI permission gating. Default: Safe. */
-  riskLevel(): RiskLevel {
+  riskLevel(_params?: Record<string, unknown>): RiskLevel {
     return RiskLevel.Safe;
   }
 
   /** Whether this tool requires user confirmation before execution. */
-  requiresConfirmation(_ctx: ExecutionContext): boolean {
-    if (this.riskLevel() === RiskLevel.Critical) return true;
-    if (this.riskLevel() === RiskLevel.High && !_ctx.userConfirmed) return true;
+  requiresConfirmation(_ctx: ExecutionContext, params?: Record<string, unknown>): boolean {
+    if (this.riskLevel(params) === RiskLevel.Critical) return true;
+    if (this.riskLevel(params) === RiskLevel.High && !_ctx.userConfirmed) return true;
     return false;
   }
 
@@ -140,7 +140,7 @@ export abstract class Tool {
 
   // ── Registry helpers ──
 
-  isReadOnly(): boolean { return false; }
+  isReadOnly(_params?: Record<string, unknown>): boolean { return false; }
   isConcurrencySafe(): boolean { return false; }
 
   /** Whether this tool has destructive side effects (file writes, deletes, etc).
@@ -224,19 +224,6 @@ export abstract class Tool {
 
     // Set a default toolCallId if not provided
     const effectiveToolCallId = toolCallId ?? `${this.name()}-${startedAt}`;
-
-    // Track file state before destructive edits (for withdrawal/rewind)
-    if (this.isDestructive()) {
-      const pathParams = this.workspacePathParams();
-      for (const key of pathParams) {
-        const fp = params[key] as string | undefined;
-        if (fp) {
-          // Lazy-import to avoid circular dependency
-          const { getFileHistoryTracker } = await import('../session/FileHistoryTracker.js');
-          getFileHistoryTracker(ctx.sessionId).trackEdit(ctx.sessionId, fp).catch(() => {});
-        }
-      }
-    }
 
     TypedEventBus.emit('tool:executed', {
       toolName: this.name(),

@@ -35,12 +35,7 @@ export class CompressionStrategy {
     contextWindow: number,
     threshold: number = COMPRESSION_TRIGGER_RATIO,
   ): CompressionLevel | null {
-    // L5: Check for semantic duplicates
-    if (this.hasDuplicateToolResults(messages)) {
-      return CompressionLevel.L5_SemanticDedup;
-    }
-
-    // L4: Token usage over threshold
+    // Context pressure always wins over cheaper clean-ups.
     if (TokenCounter.isOverThreshold(tokenCount, contextWindow, threshold)) {
       return CompressionLevel.L4_LLMSummary;
     }
@@ -59,6 +54,11 @@ export class CompressionStrategy {
           }
         }
       }
+    }
+
+    // L5 is a low-pressure clean-up. It must never mask L4.
+    if (this.hasDuplicateToolResults(messages)) {
+      return CompressionLevel.L5_SemanticDedup;
     }
 
     // L1: Token buffer trimming — always active (handled by ContextCompressor)

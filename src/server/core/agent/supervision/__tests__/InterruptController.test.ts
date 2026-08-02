@@ -87,6 +87,56 @@ describe('InterruptController', () => {
       expect(controller.isInterrupted('session-1')).toBe(false);
     });
 
+    it('can persist a stop request until the controller is created', () => {
+      controller.requestInterruptWhenAvailable('session-1', InterruptReason.ParentStop);
+
+      const created = controller.createController('session-1');
+
+      expect(created.signal.aborted).toBe(true);
+      expect(controller.reason('session-1')).toBe(InterruptReason.ParentStop);
+    });
+
+    it('keeps the first pending reason so precise task cancellation is not overwritten', () => {
+      controller.requestInterruptWhenAvailable('session-1', InterruptReason.TaskSelfCancel);
+      controller.requestInterruptWhenAvailable('session-1', InterruptReason.ParentStop);
+
+      const created = controller.createController('session-1');
+
+      expect(created.signal.aborted).toBe(true);
+      expect(controller.reason('session-1')).toBe(InterruptReason.TaskSelfCancel);
+    });
+
+    it.each([
+      InterruptReason.TaskSelfCancel,
+      InterruptReason.TaskCreatorCancel,
+      InterruptReason.TaskCoordinatorCancel,
+    ])('lets hard task cancellation %s replace a pending soft steer', (reason) => {
+      controller.requestInterruptWhenAvailable('session-1', InterruptReason.UserSteer);
+      controller.requestInterruptWhenAvailable('session-1', reason);
+
+      controller.createController('session-1');
+
+      expect(controller.reason('session-1')).toBe(reason);
+    });
+
+    it('upgrades a pending generic ParentStop to a precise task cancellation', () => {
+      controller.requestInterruptWhenAvailable('session-1', InterruptReason.ParentStop);
+      controller.requestInterruptWhenAvailable('session-1', InterruptReason.TaskCreatorCancel);
+
+      controller.createController('session-1');
+
+      expect(controller.reason('session-1')).toBe(InterruptReason.TaskCreatorCancel);
+    });
+
+    it('does not let a later soft steer overwrite an existing hard pending interrupt', () => {
+      controller.requestInterruptWhenAvailable('session-1', InterruptReason.Timeout);
+      controller.requestInterruptWhenAvailable('session-1', InterruptReason.UserSteer);
+
+      controller.createController('session-1');
+
+      expect(controller.reason('session-1')).toBe(InterruptReason.Timeout);
+    });
+
     it('interrupts with different reasons', () => {
       controller.createController('session-1');
 
@@ -215,9 +265,11 @@ describe('InterruptController', () => {
       expect(controller.takePendingUserMessage('session-b')).toBe('Message B');
     });
 
-    it('overwrites previous pending message for same session', () => {
+    it('preserves FIFO pending messages for the same session', () => {
       controller.setPendingUserMessage('session-1', 'First');
       controller.setPendingUserMessage('session-1', 'Second');
+      expect(controller.pendingMessageCount('session-1')).toBe(2);
+      expect(controller.takePendingUserMessage('session-1')).toBe('First');
       expect(controller.takePendingUserMessage('session-1')).toBe('Second');
     });
   });

@@ -4,6 +4,8 @@
  * Click navigates to sub-session. Shows parent session info when available.
  */
 
+import { t } from '../../../i18n/index.js';
+
 export interface SubSessionCardData {
   subSessionId: string;
   subAgentId: string;
@@ -33,7 +35,11 @@ export class SubSessionCardDelegate {
     const line = document.createElement('div');
     line.className = 'cinema-subsession-line';
     line.style.cursor = 'pointer';
-    line.title = `Sub-session ${this._data.subSessionId.slice(0, 12)}… — click to view`;
+    const titleParams = { id: this._data.subSessionId.slice(0, 12) };
+    line.title = t('message.subSessionTitle', titleParams);
+    line.setAttribute('data-i18n-key', 'message.subSessionTitle');
+    line.setAttribute('data-i18n-params', JSON.stringify(titleParams));
+    line.setAttribute('data-i18n-attr', 'title');
     line.addEventListener('click', () => {
       if (this._data.onNavigate) {
         this._data.onNavigate(this._data.subSessionId);
@@ -44,7 +50,8 @@ export class SubSessionCardDelegate {
 
     const label = document.createElement('span');
     label.className = 'cinema-label';
-    label.textContent = 'SUB-AGENT';
+    label.textContent = t('message.subAgent');
+    label.setAttribute('data-i18n-key', 'message.subAgent');
     line.appendChild(label);
 
     const dot = document.createElement('span');
@@ -59,7 +66,7 @@ export class SubSessionCardDelegate {
     line.appendChild(dot);
 
     const desc = document.createElement('span');
-    const agentName = this._data.subAgentName || 'Agent';
+    const agentName = this._data.subAgentName || t('message.agent');
     const task = this._data.taskDescription || '';
     desc.textContent = `${agentName}${task ? ` · ${task.slice(0, 80)}` : ''}`;
     desc.style.cssText = 'flex:1;';
@@ -81,7 +88,7 @@ export class SubSessionCardDelegate {
         ? this._data.parentSessionTitle.slice(0, 20)
         : this._data.parentSessionId.slice(0, 8);
       parentLink.textContent = `<- ${parentLabel}`;
-      parentLink.title = `Parent: ${this._data.parentSessionId}`;
+      parentLink.title = `${t('message.parent')}: ${this._data.parentSessionId}`;
       parentLink.addEventListener('click', (e) => {
         e.stopPropagation();
         window.dispatchEvent(new CustomEvent('select-session', { detail: { id: this._data.parentSessionId } }));

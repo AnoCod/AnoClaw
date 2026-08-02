@@ -54,7 +54,7 @@ function countTailByBudget(
   let tailCount = 0;
   let tailTokens = 0;
   for (let i = messages.length - 1; i >= 1; i--) {
-    const msgTokens = TokenCounter.estimate(messages[i].content);
+    const msgTokens = TokenCounter.estimateMessages([messages[i]]);
     if (tailTokens + msgTokens > budget && tailCount >= minKeep) break;
     tailTokens += msgTokens;
     tailCount++;
@@ -67,29 +67,39 @@ function countTailByBudget(
 /**
  * Fix orphaned tool_call / tool_result pairs at the tail boundary.
  * If a tool_result is in the tail but its corresponding tool_call is in the compaction zone,
- * expand the tail to include that tool_result.
+ * expand the tail to include the complete assistant tool_call group.
  */
 function fixOrphanedPairs(
   messages: Message[],
   tailStart: number,
   tailCount: number,
 ): number {
-  let adjusted = tailCount;
+  let earliest = tailStart;
+  const resultIds = new Set<string>();
   for (let i = tailStart; i < messages.length; i++) {
-    const m = messages[i];
-    if (m.toolResults) {
-      for (const tr of m.toolResults) {
-        const callExistsBefore = messages.some(
-          (x, idx) =>
-            idx < tailStart &&
-            x.role === 'assistant' &&
-            x.toolCalls?.some((tc: ToolCall) => tc.id === tr.toolCallId),
-        );
-        if (callExistsBefore) adjusted++;
-      }
+    for (const tr of messages[i].toolResults || []) {
+      if (tr.toolCallId) resultIds.add(tr.toolCallId);
     }
   }
-  return Math.min(adjusted, messages.length - 1);
+  if (resultIds.size === 0) return tailCount;
+
+  for (let i = tailStart - 1; i >= 1; i--) {
+    const calls = messages[i].toolCalls || [];
+    if (calls.some((tc: ToolCall) => resultIds.has(tc.id))) {
+      earliest = i;
+    }
+  }
+  return Math.min(messages.length - earliest, messages.length - 1);
+}
+
+/** Ensure the newest real user request is never summarized away. */
+function includeLatestUserMessage(messages: Message[], tailCount: number): number {
+  for (let i = messages.length - 1; i >= 1; i--) {
+    if (messages[i].role !== MessageRole.User) continue;
+    const tailStart = messages.length - tailCount;
+    return i < tailStart ? messages.length - i : tailCount;
+  }
+  return tailCount;
 }
 
 /**
@@ -197,35 +207,34 @@ export class ContextCompressor extends EventEmitter {
       return { messages: msgs, summary: null, wasCompacted: false, prunedCount: 0 };
     }
 
-    // L2.5: Content-aware tool output compression — runs BEFORE L2 truncation
-    // so intelligently compressed outputs don't need to be blindly truncated
+    if (level === CompressionLevel.L5_SemanticDedup) {
+      const deduped = this._strategy.deduplicateToolResults(msgs);
+      return { messages: deduped, summary: null, wasCompacted: false, prunedCount };
+    }
+
+    // L2.5 runs before blind truncation for L2-L4.
     const contentAware = this.compressToolOutputsWithStrategy(msgs);
+    const truncated = this.truncateToolOutputs(contentAware);
 
-    // L2: Tool output truncation — only truncates outputs still oversized after L2.5
-    const truncated = (level <= CompressionLevel.L2_ToolTruncation)
-      ? this.truncateToolOutputs(contentAware)
-      : contentAware;
+    if (level === CompressionLevel.L2_ToolTruncation) {
+      return { messages: truncated, summary: null, wasCompacted: false, prunedCount: 0 };
+    }
 
-    // L3: Message pruning — run when indicated or higher
-    const pruned = (level <= CompressionLevel.L3_MessagePruning && truncated.length > 10)
+    // L3 clears old tool payloads but deliberately does not delete messages.
+    const pruned = truncated.length > 10
       ? this.pruneMessages(truncated, contextWindow)
       : truncated;
     prunedCount = truncated.length - pruned.length;
 
-    // L4: LLM summary compression — only when strategy says so
-    if (level <= CompressionLevel.L4_LLMSummary) {
-      const compacted = await this.generateSummary(pruned, contextWindow, threshold, summarizer);
-      if (compacted.wasCompacted) {
-        summary = compacted.summary;
-        wasCompacted = true;
-        return { messages: compacted.messages, summary, wasCompacted, prunedCount };
-      }
+    if (level === CompressionLevel.L3_MessagePruning) {
+      return { messages: pruned, summary: null, wasCompacted: false, prunedCount };
     }
 
-    // L5: Semantic dedup as fallback clean-up
-    if (level <= CompressionLevel.L5_SemanticDedup) {
-      const deduped = this._strategy.deduplicateToolResults(pruned);
-      return { messages: deduped, summary: null, wasCompacted: false, prunedCount };
+    const compacted = await this.generateSummary(pruned, contextWindow, threshold, summarizer);
+    if (compacted.wasCompacted) {
+      summary = compacted.summary;
+      wasCompacted = true;
+      return { messages: compacted.messages, summary, wasCompacted, prunedCount };
     }
 
     return { messages: pruned, summary: null, wasCompacted, prunedCount };
@@ -308,11 +317,12 @@ export class ContextCompressor extends EventEmitter {
     if (messages.length <= 10) return messages;
 
     // Calculate tail budget: keep recent tokens proportional to remaining capacity
-    const tailTokenBudget = Math.max(contextWindow * 0.05, contextWindow * 0.15);
+    const tailTokenBudget = contextWindow * 0.15;
 
     let tailCount = countTailByBudget(messages, tailTokenBudget, 2);
     // Minimum 3 recent messages, maximum all but system
     tailCount = Math.max(tailCount, Math.min(3, messages.length - 1));
+    tailCount = includeLatestUserMessage(messages, tailCount);
 
     // Fix orphaned tool_call/tool_result pairs at tail boundary
     const tailStart = messages.length - tailCount;
@@ -375,6 +385,7 @@ export class ContextCompressor extends EventEmitter {
 
     let tailCount = countTailByBudget(messages, tailTokenBudget, 3);
     tailCount = Math.max(tailCount, Math.min(8, messages.length - 1));
+    tailCount = includeLatestUserMessage(messages, tailCount);
 
     // Fix orphaned pairs at boundary
     const tailStart = messages.length - tailCount;
@@ -392,7 +403,7 @@ export class ContextCompressor extends EventEmitter {
     const pruned = this.pruneToolResultsForSummarizer(messages, tailCount);
 
     // Prepare summarizer input
-    const { transcript, files } = this.prepareSummarizerInput(pruned, tailCount);
+    const { transcript } = this.prepareSummarizerInput(pruned, tailCount);
 
     if (transcript.length < 500) {
       // Not enough content to summarize — just keep recent
@@ -411,13 +422,14 @@ export class ContextCompressor extends EventEmitter {
           timeoutHandle = setTimeout(() => reject(new Error('Summarizer timeout')), COMPACTION_TIMEOUT_MS);
         });
         summaryText = await Promise.race([
-          summarize(messages.slice(1, messages.length - tailCount), summaryBudget),
+          summarize(pruned.slice(1, pruned.length - tailCount), summaryBudget),
           timeoutPromise,
         ]);
-        if (timeoutHandle) clearTimeout(timeoutHandle);
       } catch (e) {
         createLogger('anochat.llm').warn('Context compressor summarizer failed', { error: (e as Error).message });
         summaryText = this.buildFallbackSummary(messages, tailCount);
+      } finally {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
       }
     } else {
       summaryText = this.buildFallbackSummary(messages, tailCount);
@@ -430,14 +442,15 @@ export class ContextCompressor extends EventEmitter {
     // Build compacted messages: system + summary with prefix + recent tail
     const tailMsgs = messages.slice(-tailCount);
     const sMsg = messages[0];
+    const summaryContent = SUMMARY_PREFIX + '\n\n' + summaryText;
     const compacted: Message[] = [
       sMsg,
       {
         id: `compact-summary-${Date.now()}`,
         sessionId: messages[0]?.sessionId || '',
         role: MessageRole.System,
-        content: SUMMARY_PREFIX + '\n\n' + summaryText,
-        tokenCount: TokenCounter.estimate(summaryText),
+        content: summaryContent,
+        tokenCount: TokenCounter.estimate(summaryContent),
         compressed: true,
         timestamp: new Date().toISOString(),
       },
@@ -453,7 +466,7 @@ export class ContextCompressor extends EventEmitter {
     TypedEventBus.emit('loop:compaction_triggered', {
       sessionId: messages[0]?.sessionId || '',
       beforeTokens: estimatedTokens,
-      afterTokens: TokenCounter.estimate(summaryText) + TokenCounter.estimateMessages(tailMsgs),
+      afterTokens: TokenCounter.estimate(summaryContent) + TokenCounter.estimateMessages(tailMsgs),
     });
 
     return { messages: compacted, summary: summaryText, wasCompacted: true };

@@ -6,6 +6,8 @@
 
 插件运行在 Worker Thread 中，不能直接访问主线程对象、内核 singleton 或其他插件内存。所有能力通过 `api` 对象走 MessageChannel RPC：
 
+这里的“不能直接访问”是进程内对象边界，不是操作系统权限边界。Worker 与 AnoClaw 主进程使用同一个操作系统用户；插件可以直接导入 Node.js 的 `fs`、`child_process`、`net` 等模块。因而 Worker 只能降低插件崩溃对主线程的影响，不能防御恶意插件。安装第三方插件前必须审查来源与代码，并把安装视为授予本机代码执行权限。
+
 ```text
 extension.js / extension.ts
   -> PluginAPI.ts in Worker

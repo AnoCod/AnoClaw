@@ -80,7 +80,7 @@ Topics use colon-delimited namespacing:
 | `agent:message:<id>` | `agent:message:agent-abc123` |
 | `session:*` | `session:created`, `session:archiving` |
 | `tool:*` | `tool:execution_started`, `tool:execution_completed` |
-| `loop:*` | `loop:completed`, `loop:compaction_triggered`, `loop:keyword_turn` |
+| `loop:*` | `loop:completed`, `loop:compaction_triggered` |
 | `task:*` | `task:completed:<subSessionId>` |
 | `delegation:*` | `delegation:started`, `delegation:working`, `delegation:completed`, `delegation:error` |
 | `agent:*` | `agent:status_changed`, `agent:registered` |
@@ -104,10 +104,9 @@ Topics use colon-delimited namespacing:
 
 These are fire-and-forget system events (not targeted at specific sessions):
 
-- `tool:execution_completed` → StatsCollector records usage, PatternDetector buffers sequence
-- `loop:completed` → SessionTagger auto-tags, tool buffer flushed
+- `tool:execution_completed` → tool lifecycle subscribers and the frontend bridge
+- `loop:completed` → session lifecycle subscribers
 - `loop:compaction_triggered` → audit/monitoring
-- `loop:keyword_turn` → KeywordExtractor runs
 - `session:created` → WsForwardSubscriber notifies frontend
 - `session:archiving` → EventSubscriptionManager cleans up all subs for that session
 - `agent:status_changed` → frontend updates
@@ -119,7 +118,7 @@ These are fire-and-forget system events (not targeted at specific sessions):
 ## Dependencies
 
 ### Called by
-- **Every core service** — `AgentLoop`, `AgentRuntime`, `MemoryManager`, `SessionManager`, `PluginHostManager`, `ContextCompressor`, `EvolutionExtension`, `InterruptController`, `BackgroundTaskManager`, `WsForwardSubscriber`
+- **Every core service** — `AgentLoop`, `AgentRuntime`, `MemoryManager`, `SessionManager`, `PluginHostManager`, `ContextCompressor`, `InterruptController`, `BackgroundTaskManager`, `WsForwardSubscriber`
 - `PluginHostManager` — installs `onAny()` for kernel→plugin event forwarding
 
 ### Depends on

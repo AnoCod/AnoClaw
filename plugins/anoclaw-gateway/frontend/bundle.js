@@ -4,40 +4,328 @@
   var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
   var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
+  // plugins/anoclaw-gateway/frontend/src/i18n.ts
+  var enUS = {
+    "gateway.title": "Gateway",
+    "gateway.platforms": "Platforms",
+    "gateway.connections": "Connections",
+    "gateway.connection.one": "{count} connection",
+    "gateway.connection.many": "{count} connections",
+    "gateway.connection.connected": "Connected",
+    "gateway.connection.disconnected": "Disconnected",
+    "gateway.connection.setupGuide": "Setup Guide",
+    "gateway.connection.connect": "Connect",
+    "gateway.connection.disconnect": "Disconnect",
+    "gateway.connection.empty": "No connections configured.",
+    "gateway.connection.emptyHint": "Click a platform above to add one.",
+    "gateway.connection.add": "Add {platform} Connection",
+    "gateway.connection.deleteConfirm": "Delete connection?",
+    "gateway.ws.live": "Live",
+    "gateway.ws.reconnecting": "Reconnecting...",
+    "gateway.tab.inbox": "Inbox",
+    "gateway.tab.templates": "Templates",
+    "gateway.tab.retry": "Retry",
+    "gateway.tab.health": "Health",
+    "gateway.search.placeholder": "Search messages...",
+    "gateway.search.allPlatforms": "All platforms",
+    "gateway.search.search": "Search",
+    "gateway.search.clear": "Clear",
+    "gateway.inbox.empty": "No messages yet.",
+    "gateway.inbox.noMatch": "No messages match your search.",
+    "gateway.inbox.unknownSender": "Unknown",
+    "gateway.inbox.sendMessage": "Send Message",
+    "gateway.inbox.target": "Target:",
+    "gateway.inbox.messagePlaceholder": "Type a message...",
+    "gateway.inbox.send": "Send",
+    "gateway.inbox.count.one": "{count} message",
+    "gateway.inbox.count.many": "{count} messages",
+    "gateway.inbox.filtered": "filtered",
+    "gateway.inbox.clear": "Clear",
+    "gateway.detail.title": "Message Detail",
+    "gateway.detail.close": "Close",
+    "gateway.detail.platform": "Platform",
+    "gateway.detail.sender": "Sender",
+    "gateway.detail.chatId": "Chat ID",
+    "gateway.detail.time": "Time",
+    "gateway.detail.media": "Media",
+    "gateway.detail.callback": "Callback",
+    "gateway.detail.connection": "Connection",
+    "gateway.detail.noText": "(no text content)",
+    "gateway.common.notAvailable": "N/A",
+    "gateway.template.empty": "No templates yet.",
+    "gateway.template.emptyHint": "Create one to reuse message formats.",
+    "gateway.template.count.one": "{count} template",
+    "gateway.template.count.many": "{count} templates",
+    "gateway.template.new": "+ New Template",
+    "gateway.template.use": "Use",
+    "gateway.template.create": "Create Template",
+    "gateway.template.name": "Name",
+    "gateway.template.namePlaceholder": "e.g., Welcome Message",
+    "gateway.template.platform": "Platform",
+    "gateway.template.any": "Any",
+    "gateway.template.content": "Content (use {syntax} for substitution)",
+    "gateway.template.contentPlaceholder": "Hello {nameToken}, welcome to {groupToken}!",
+    "gateway.template.category": "Category",
+    "gateway.template.categoryPlaceholder": "e.g., welcome, notification",
+    "gateway.template.createAction": "Create",
+    "gateway.template.cancel": "Cancel",
+    "gateway.template.applied": "Template applied:\n\n{content}",
+    "gateway.template.deleteConfirm": "Delete this template?",
+    "gateway.retry.empty": "No pending retries.",
+    "gateway.retry.count.one": "{count} item in queue",
+    "gateway.retry.count.many": "{count} items in queue",
+    "gateway.retry.clearAll": "Clear All",
+    "gateway.retry.attempt": "Attempt {attempt}/{max}",
+    "gateway.retry.waiting": "Waiting...",
+    "gateway.retry.next": "Next: {time}",
+    "gateway.retry.status.pending": "Pending",
+    "gateway.retry.status.failed": "Failed",
+    "gateway.health.noData": "No health data available.",
+    "gateway.health.noAdapters": "No adapters reporting.",
+    "gateway.health.adapterStatus": "Adapter Status",
+    "gateway.health.messages": "{count} msgs",
+    "gateway.health.uptime": "up {duration}",
+    "gateway.wizard.title": "{platform} Setup Guide",
+    "gateway.wizard.subtitle": "Follow these steps to connect your {platform} bot",
+    "gateway.wizard.close": "Close",
+    "gateway.wizard.previous": "Previous",
+    "gateway.wizard.next": "Next",
+    "gateway.wizard.done": "Done",
+    "gateway.form.save": "Save",
+    "gateway.form.cancel": "Cancel",
+    "gateway.platform.telegram.botToken": "Bot Token",
+    "gateway.platform.telegram.botTokenHelp": "Get from @BotFather on Telegram",
+    "gateway.platform.telegram.allowedUsers": "Allowed User IDs",
+    "gateway.platform.telegram.allowedUsersHelp": "Comma-separated user IDs. Leave empty for all.",
+    "gateway.platform.telegram.step1": "Open Telegram and search for @BotFather",
+    "gateway.platform.telegram.step2": "Send /newbot and follow the prompts to create your bot",
+    "gateway.platform.telegram.step3": "Copy the bot token from BotFather",
+    "gateway.platform.telegram.step4": "Optionally, start a chat with your bot and send /start",
+    "gateway.platform.telegram.step5": "Paste the bot token above and click Connect",
+    "gateway.platform.wechat.token": "Token",
+    "gateway.platform.wechat.tokenHelp": "Your WeChat iLink Bot API token",
+    "gateway.platform.wechat.accountId": "Account ID",
+    "gateway.platform.wechat.accountIdHelp": "Your WeChat account ID",
+    "gateway.platform.wechat.step1": "Register at the WeChat iLink Bot API portal",
+    "gateway.platform.wechat.step2": "Create a new bot application",
+    "gateway.platform.wechat.step3": "Get your API token from the dashboard",
+    "gateway.platform.wechat.step4": "Copy your account ID from settings",
+    "gateway.platform.wechat.step5": "Enter credentials above and click Connect",
+    "gateway.platform.feishu.appId": "App ID",
+    "gateway.platform.feishu.appIdHelp": "Your Feishu app ID (starts with cli_)",
+    "gateway.platform.feishu.appSecret": "App Secret",
+    "gateway.platform.feishu.appSecretHelp": "Your Feishu app secret key",
+    "gateway.platform.feishu.step1": "Go to the Feishu Open Platform (open.feishu.cn)",
+    "gateway.platform.feishu.step2": "Create a new application",
+    "gateway.platform.feishu.step3": "Copy the App ID from app credentials",
+    "gateway.platform.feishu.step4": "Copy the App Secret from app credentials",
+    "gateway.platform.feishu.step5": "Enable bot capabilities in the app settings",
+    "gateway.platform.feishu.step6": "Enter credentials above and click Connect",
+    "gateway.time.justNow": "just now",
+    "gateway.time.minutesAgo": "{count}m ago",
+    "gateway.time.hoursAgo": "{count}h ago"
+  };
+  var zhCN = {
+    "gateway.title": "\u7F51\u5173",
+    "gateway.platforms": "\u5E73\u53F0",
+    "gateway.connections": "\u8FDE\u63A5",
+    "gateway.connection.one": "{count} \u4E2A\u8FDE\u63A5",
+    "gateway.connection.many": "{count} \u4E2A\u8FDE\u63A5",
+    "gateway.connection.connected": "\u5DF2\u8FDE\u63A5",
+    "gateway.connection.disconnected": "\u672A\u8FDE\u63A5",
+    "gateway.connection.setupGuide": "\u8BBE\u7F6E\u6307\u5357",
+    "gateway.connection.connect": "\u8FDE\u63A5",
+    "gateway.connection.disconnect": "\u65AD\u5F00",
+    "gateway.connection.empty": "\u5C1A\u672A\u914D\u7F6E\u8FDE\u63A5\u3002",
+    "gateway.connection.emptyHint": "\u70B9\u51FB\u4E0A\u65B9\u5E73\u53F0\u5373\u53EF\u6DFB\u52A0\u3002",
+    "gateway.connection.add": "\u6DFB\u52A0 {platform} \u8FDE\u63A5",
+    "gateway.connection.deleteConfirm": "\u786E\u5B9A\u5220\u9664\u8FD9\u4E2A\u8FDE\u63A5\u5417\uFF1F",
+    "gateway.ws.live": "\u5B9E\u65F6",
+    "gateway.ws.reconnecting": "\u6B63\u5728\u91CD\u65B0\u8FDE\u63A5\u2026",
+    "gateway.tab.inbox": "\u6536\u4EF6\u7BB1",
+    "gateway.tab.templates": "\u6A21\u677F",
+    "gateway.tab.retry": "\u91CD\u8BD5",
+    "gateway.tab.health": "\u5065\u5EB7\u72B6\u6001",
+    "gateway.search.placeholder": "\u641C\u7D22\u6D88\u606F\u2026",
+    "gateway.search.allPlatforms": "\u5168\u90E8\u5E73\u53F0",
+    "gateway.search.search": "\u641C\u7D22",
+    "gateway.search.clear": "\u6E05\u9664",
+    "gateway.inbox.empty": "\u6682\u65E0\u6D88\u606F\u3002",
+    "gateway.inbox.noMatch": "\u6CA1\u6709\u7B26\u5408\u641C\u7D22\u6761\u4EF6\u7684\u6D88\u606F\u3002",
+    "gateway.inbox.unknownSender": "\u672A\u77E5",
+    "gateway.inbox.sendMessage": "\u53D1\u9001\u6D88\u606F",
+    "gateway.inbox.target": "\u76EE\u6807\uFF1A",
+    "gateway.inbox.messagePlaceholder": "\u8F93\u5165\u6D88\u606F\u2026",
+    "gateway.inbox.send": "\u53D1\u9001",
+    "gateway.inbox.count.one": "{count} \u6761\u6D88\u606F",
+    "gateway.inbox.count.many": "{count} \u6761\u6D88\u606F",
+    "gateway.inbox.filtered": "\u5DF2\u7B5B\u9009",
+    "gateway.inbox.clear": "\u6E05\u7A7A",
+    "gateway.detail.title": "\u6D88\u606F\u8BE6\u60C5",
+    "gateway.detail.close": "\u5173\u95ED",
+    "gateway.detail.platform": "\u5E73\u53F0",
+    "gateway.detail.sender": "\u53D1\u9001\u8005",
+    "gateway.detail.chatId": "\u804A\u5929 ID",
+    "gateway.detail.time": "\u65F6\u95F4",
+    "gateway.detail.media": "\u5A92\u4F53",
+    "gateway.detail.callback": "\u56DE\u8C03",
+    "gateway.detail.connection": "\u8FDE\u63A5",
+    "gateway.detail.noText": "\uFF08\u65E0\u6587\u672C\u5185\u5BB9\uFF09",
+    "gateway.common.notAvailable": "\u4E0D\u53EF\u7528",
+    "gateway.template.empty": "\u6682\u65E0\u6A21\u677F\u3002",
+    "gateway.template.emptyHint": "\u521B\u5EFA\u6A21\u677F\u540E\u53EF\u91CD\u590D\u4F7F\u7528\u6D88\u606F\u683C\u5F0F\u3002",
+    "gateway.template.count.one": "{count} \u4E2A\u6A21\u677F",
+    "gateway.template.count.many": "{count} \u4E2A\u6A21\u677F",
+    "gateway.template.new": "+ \u65B0\u5EFA\u6A21\u677F",
+    "gateway.template.use": "\u4F7F\u7528",
+    "gateway.template.create": "\u521B\u5EFA\u6A21\u677F",
+    "gateway.template.name": "\u540D\u79F0",
+    "gateway.template.namePlaceholder": "\u4F8B\u5982\uFF1A\u6B22\u8FCE\u6D88\u606F",
+    "gateway.template.platform": "\u5E73\u53F0",
+    "gateway.template.any": "\u4EFB\u610F",
+    "gateway.template.content": "\u5185\u5BB9\uFF08\u4F7F\u7528 {syntax} \u4F5C\u4E3A\u66FF\u6362\u53D8\u91CF\uFF09",
+    "gateway.template.contentPlaceholder": "\u4F60\u597D {nameToken}\uFF0C\u6B22\u8FCE\u52A0\u5165 {groupToken}\uFF01",
+    "gateway.template.category": "\u5206\u7C7B",
+    "gateway.template.categoryPlaceholder": "\u4F8B\u5982\uFF1Awelcome\u3001notification",
+    "gateway.template.createAction": "\u521B\u5EFA",
+    "gateway.template.cancel": "\u53D6\u6D88",
+    "gateway.template.applied": "\u5DF2\u5E94\u7528\u6A21\u677F\uFF1A\n\n{content}",
+    "gateway.template.deleteConfirm": "\u786E\u5B9A\u5220\u9664\u8FD9\u4E2A\u6A21\u677F\u5417\uFF1F",
+    "gateway.retry.empty": "\u6CA1\u6709\u5F85\u91CD\u8BD5\u9879\u76EE\u3002",
+    "gateway.retry.count.one": "\u961F\u5217\u4E2D\u6709 {count} \u4E2A\u9879\u76EE",
+    "gateway.retry.count.many": "\u961F\u5217\u4E2D\u6709 {count} \u4E2A\u9879\u76EE",
+    "gateway.retry.clearAll": "\u5168\u90E8\u6E05\u9664",
+    "gateway.retry.attempt": "\u7B2C {attempt}/{max} \u6B21\u5C1D\u8BD5",
+    "gateway.retry.waiting": "\u7B49\u5F85\u4E2D\u2026",
+    "gateway.retry.next": "\u4E0B\u6B21\uFF1A{time}",
+    "gateway.retry.status.pending": "\u7B49\u5F85\u91CD\u8BD5",
+    "gateway.retry.status.failed": "\u91CD\u8BD5\u5931\u8D25",
+    "gateway.health.noData": "\u6682\u65E0\u5065\u5EB7\u72B6\u6001\u6570\u636E\u3002",
+    "gateway.health.noAdapters": "\u6682\u65E0\u9002\u914D\u5668\u4E0A\u62A5\u72B6\u6001\u3002",
+    "gateway.health.adapterStatus": "\u9002\u914D\u5668\u72B6\u6001",
+    "gateway.health.messages": "{count} \u6761\u6D88\u606F",
+    "gateway.health.uptime": "\u5DF2\u8FD0\u884C {duration}",
+    "gateway.wizard.title": "{platform} \u8BBE\u7F6E\u6307\u5357",
+    "gateway.wizard.subtitle": "\u6309\u7167\u4EE5\u4E0B\u6B65\u9AA4\u8FDE\u63A5\u4F60\u7684 {platform} \u673A\u5668\u4EBA",
+    "gateway.wizard.close": "\u5173\u95ED",
+    "gateway.wizard.previous": "\u4E0A\u4E00\u6B65",
+    "gateway.wizard.next": "\u4E0B\u4E00\u6B65",
+    "gateway.wizard.done": "\u5B8C\u6210",
+    "gateway.form.save": "\u4FDD\u5B58",
+    "gateway.form.cancel": "\u53D6\u6D88",
+    "gateway.platform.telegram.botToken": "\u673A\u5668\u4EBA\u4EE4\u724C",
+    "gateway.platform.telegram.botTokenHelp": "\u4ECE Telegram \u7684 @BotFather \u83B7\u53D6",
+    "gateway.platform.telegram.allowedUsers": "\u5141\u8BB8\u7684\u7528\u6237 ID",
+    "gateway.platform.telegram.allowedUsersHelp": "\u7528\u9017\u53F7\u5206\u9694\u7528\u6237 ID\uFF1B\u7559\u7A7A\u8868\u793A\u5141\u8BB8\u6240\u6709\u7528\u6237\u3002",
+    "gateway.platform.telegram.step1": "\u6253\u5F00 Telegram \u5E76\u641C\u7D22 @BotFather",
+    "gateway.platform.telegram.step2": "\u53D1\u9001 /newbot\uFF0C\u5E76\u6309\u7167\u63D0\u793A\u521B\u5EFA\u673A\u5668\u4EBA",
+    "gateway.platform.telegram.step3": "\u4ECE BotFather \u590D\u5236\u673A\u5668\u4EBA\u4EE4\u724C",
+    "gateway.platform.telegram.step4": "\u53EF\u9009\uFF1A\u4E0E\u4F60\u7684\u673A\u5668\u4EBA\u5F00\u59CB\u804A\u5929\u5E76\u53D1\u9001 /start",
+    "gateway.platform.telegram.step5": "\u5728\u4E0A\u65B9\u7C98\u8D34\u673A\u5668\u4EBA\u4EE4\u724C\uFF0C\u7136\u540E\u70B9\u51FB\u201C\u8FDE\u63A5\u201D",
+    "gateway.platform.wechat.token": "\u4EE4\u724C",
+    "gateway.platform.wechat.tokenHelp": "\u4F60\u7684\u5FAE\u4FE1 iLink \u673A\u5668\u4EBA API \u4EE4\u724C",
+    "gateway.platform.wechat.accountId": "\u8D26\u6237 ID",
+    "gateway.platform.wechat.accountIdHelp": "\u4F60\u7684\u5FAE\u4FE1\u8D26\u6237 ID",
+    "gateway.platform.wechat.step1": "\u5728\u5FAE\u4FE1 iLink \u673A\u5668\u4EBA API \u95E8\u6237\u6CE8\u518C",
+    "gateway.platform.wechat.step2": "\u521B\u5EFA\u65B0\u7684\u673A\u5668\u4EBA\u5E94\u7528",
+    "gateway.platform.wechat.step3": "\u4ECE\u63A7\u5236\u53F0\u83B7\u53D6 API \u4EE4\u724C",
+    "gateway.platform.wechat.step4": "\u4ECE\u8BBE\u7F6E\u4E2D\u590D\u5236\u8D26\u6237 ID",
+    "gateway.platform.wechat.step5": "\u5728\u4E0A\u65B9\u8F93\u5165\u51ED\u636E\uFF0C\u7136\u540E\u70B9\u51FB\u201C\u8FDE\u63A5\u201D",
+    "gateway.platform.feishu.appId": "\u5E94\u7528 ID",
+    "gateway.platform.feishu.appIdHelp": "\u4F60\u7684\u98DE\u4E66\u5E94\u7528 ID\uFF08\u4EE5 cli_ \u5F00\u5934\uFF09",
+    "gateway.platform.feishu.appSecret": "\u5E94\u7528\u5BC6\u94A5",
+    "gateway.platform.feishu.appSecretHelp": "\u4F60\u7684\u98DE\u4E66\u5E94\u7528\u5BC6\u94A5",
+    "gateway.platform.feishu.step1": "\u6253\u5F00\u98DE\u4E66\u5F00\u653E\u5E73\u53F0\uFF08open.feishu.cn\uFF09",
+    "gateway.platform.feishu.step2": "\u521B\u5EFA\u65B0\u7684\u5E94\u7528",
+    "gateway.platform.feishu.step3": "\u4ECE\u5E94\u7528\u51ED\u636E\u4E2D\u590D\u5236 App ID",
+    "gateway.platform.feishu.step4": "\u4ECE\u5E94\u7528\u51ED\u636E\u4E2D\u590D\u5236 App Secret",
+    "gateway.platform.feishu.step5": "\u5728\u5E94\u7528\u8BBE\u7F6E\u4E2D\u542F\u7528\u673A\u5668\u4EBA\u80FD\u529B",
+    "gateway.platform.feishu.step6": "\u5728\u4E0A\u65B9\u8F93\u5165\u51ED\u636E\uFF0C\u7136\u540E\u70B9\u51FB\u201C\u8FDE\u63A5\u201D",
+    "gateway.time.justNow": "\u521A\u521A",
+    "gateway.time.minutesAgo": "{count} \u5206\u949F\u524D",
+    "gateway.time.hoursAgo": "{count} \u5C0F\u65F6\u524D"
+  };
+  var dictionaries = {
+    "zh-CN": zhCN,
+    "en-US": enUS
+  };
+  var currentLocale = normalizePluginLocale(
+    typeof window === "undefined" ? void 0 : window.__ANOCLAW_LOCALE__
+  );
+  function normalizePluginLocale(value) {
+    const raw = String(value || "").trim().toLowerCase();
+    return raw === "en" || raw === "en-us" ? "en-US" : "zh-CN";
+  }
+  function setPluginLocale(value) {
+    currentLocale = normalizePluginLocale(value);
+    if (typeof document !== "undefined") {
+      document.documentElement.lang = currentLocale;
+    }
+    return currentLocale;
+  }
+  function t(key, params = {}) {
+    const template = dictionaries[currentLocale][key] || dictionaries["en-US"][key] || key;
+    return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, name) => {
+      const value = params[name];
+      return value === void 0 || value === null ? "" : String(value);
+    });
+  }
+  function dateLocale() {
+    return currentLocale;
+  }
+
+  // plugins/anoclaw-gateway/frontend/src/websocket-url.ts
+  function resolvePluginWebSocketUrl(...baseCandidates) {
+    for (const candidate of baseCandidates) {
+      if (!candidate) continue;
+      try {
+        const base = new URL(candidate);
+        if (base.protocol !== "http:" && base.protocol !== "https:") continue;
+        const websocketUrl = new URL("/ws", base);
+        websocketUrl.protocol = base.protocol === "https:" ? "wss:" : "ws:";
+        return websocketUrl.href;
+      } catch {
+      }
+    }
+    throw new Error("Unable to resolve the AnoClaw WebSocket URL");
+  }
+
   // plugins/anoclaw-gateway/frontend/src/main.ts
-  var PLATFORMS = [
-    { id: "telegram", name: "Telegram", icon: "telegram", color: "#57c1ff", colorSoft: "rgba(87,193,255,0.15)", fields: [
-      { key: "botToken", label: "Bot Token", type: "password", placeholder: "123456:ABC-DEF...", required: true, help: "Get from @BotFather on Telegram" },
-      { key: "allowedUserIds", label: "Allowed User IDs", type: "text", placeholder: "123,456", required: false, help: "Comma-separated user IDs. Leave empty for all." }
-    ], setupSteps: [
-      "1. Open Telegram and search for @BotFather",
-      "2. Send /newbot and follow the prompts to create your bot",
-      "3. Copy the bot token from BotFather",
-      "4. Optionally, start a chat with your bot and send /start",
-      "5. Paste the bot token above and click Connect"
-    ] },
-    { id: "wechat", name: "WeChat", icon: "wechat", color: "#59d499", colorSoft: "rgba(89,212,153,0.15)", fields: [
-      { key: "token", label: "Token", type: "password", placeholder: "iLink Bot Token", required: true, help: "Your WeChat iLink Bot API token" },
-      { key: "accountId", label: "Account ID", type: "text", placeholder: "wechat account id", required: true, help: "Your WeChat account ID" }
-    ], setupSteps: [
-      "1. Register at the WeChat iLink Bot API portal",
-      "2. Create a new bot application",
-      "3. Get your API token from the dashboard",
-      "4. Copy your account ID from settings",
-      "5. Enter credentials above and click Connect"
-    ] },
-    { id: "feishu", name: "Feishu", icon: "feishu", color: "#ffc533", colorSoft: "rgba(255,197,51,0.15)", fields: [
-      { key: "appId", label: "App ID", type: "text", placeholder: "cli_...", required: true, help: "Your Feishu app ID (starts with cli_)" },
-      { key: "appSecret", label: "App Secret", type: "password", placeholder: "", required: true, help: "Your Feishu app secret key" }
-    ], setupSteps: [
-      "1. Go to the Feishu Open Platform (open.feishu.cn)",
-      "2. Create a new application",
-      "3. Copy the App ID from app credentials",
-      "4. Copy the App Secret from app credentials",
-      "5. Enable bot capabilities in the app settings",
-      "6. Enter credentials above and click Connect"
-    ] }
-  ];
+  function platformDefinitions() {
+    return [
+      { id: "telegram", name: "Telegram", icon: "telegram", color: "#57c1ff", colorSoft: "rgba(87,193,255,0.15)", fields: [
+        { key: "botToken", label: t("gateway.platform.telegram.botToken"), type: "password", placeholder: "123456:ABC-DEF...", required: true, help: t("gateway.platform.telegram.botTokenHelp") },
+        { key: "allowedUserIds", label: t("gateway.platform.telegram.allowedUsers"), type: "text", placeholder: "123,456", required: false, help: t("gateway.platform.telegram.allowedUsersHelp") }
+      ], setupSteps: [
+        t("gateway.platform.telegram.step1"),
+        t("gateway.platform.telegram.step2"),
+        t("gateway.platform.telegram.step3"),
+        t("gateway.platform.telegram.step4"),
+        t("gateway.platform.telegram.step5")
+      ] },
+      { id: "wechat", name: "WeChat", icon: "wechat", color: "#59d499", colorSoft: "rgba(89,212,153,0.15)", fields: [
+        { key: "token", label: t("gateway.platform.wechat.token"), type: "password", placeholder: "iLink Bot Token", required: true, help: t("gateway.platform.wechat.tokenHelp") },
+        { key: "accountId", label: t("gateway.platform.wechat.accountId"), type: "text", placeholder: "wechat account id", required: true, help: t("gateway.platform.wechat.accountIdHelp") }
+      ], setupSteps: [
+        t("gateway.platform.wechat.step1"),
+        t("gateway.platform.wechat.step2"),
+        t("gateway.platform.wechat.step3"),
+        t("gateway.platform.wechat.step4"),
+        t("gateway.platform.wechat.step5")
+      ] },
+      { id: "feishu", name: "Feishu", icon: "feishu", color: "#ffc533", colorSoft: "rgba(255,197,51,0.15)", fields: [
+        { key: "appId", label: t("gateway.platform.feishu.appId"), type: "text", placeholder: "cli_...", required: true, help: t("gateway.platform.feishu.appIdHelp") },
+        { key: "appSecret", label: t("gateway.platform.feishu.appSecret"), type: "password", placeholder: "", required: true, help: t("gateway.platform.feishu.appSecretHelp") }
+      ], setupSteps: [
+        t("gateway.platform.feishu.step1"),
+        t("gateway.platform.feishu.step2"),
+        t("gateway.platform.feishu.step3"),
+        t("gateway.platform.feishu.step4"),
+        t("gateway.platform.feishu.step5"),
+        t("gateway.platform.feishu.step6")
+      ] }
+    ];
+  }
   var ICONS = {
     telegram: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>`,
     wechat: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12a1 1 0 1 0-2 0 1 1 0 0 0 2 0z" fill="currentColor" stroke="none"/><path d="M15 12a1 1 0 1 0-2 0 1 1 0 0 0 2 0z" fill="currentColor" stroke="none"/><path d="M12 22c-4.97 0-9-2.69-9-6 0-2.22 1.47-4.18 3.63-5.37L9 9"/><path d="M12 22c4.97 0 9-2.69 9-6 0-1.47-.68-2.81-1.75-3.83"/><circle cx="12" cy="12" r="10"/></svg>`,
@@ -78,9 +366,61 @@
       __publicField(this, "_selectedMessage", null);
       __publicField(this, "_wizardConnectionId", null);
       __publicField(this, "_wizardStep", 0);
+      __publicField(this, "_onHostMessage", (event) => {
+        if (event.source !== window.parent || event.data?.type !== "anoclaw:locale") return;
+        this._refreshLocale(event.data.locale);
+      });
       this.container = document.createElement("div");
       this.container.innerHTML = `<div class="gw-inner"></div>`;
       this._injectStyles();
+      window.addEventListener("message", this._onHostMessage);
+    }
+    _captureUiDraft() {
+      const active = document.activeElement;
+      const form = this.container.querySelector("#gw-add-form");
+      const formValues = {};
+      form?.querySelectorAll("input[id], textarea[id], select[id]").forEach((field) => {
+        formValues[field.id] = field.value;
+      });
+      return {
+        focusedId: active?.id || void 0,
+        searchText: this.container.querySelector("#gw-search-input")?.value,
+        composeText: this.container.querySelector("#gw-compose-input")?.value,
+        composeTarget: this.container.querySelector("#gw-compose-target")?.value,
+        form: form ? {
+          kind: form.dataset.kind === "template" ? "template" : "connection",
+          platform: form.dataset.platform,
+          values: formValues
+        } : void 0,
+        wizardConnectionId: this.container.querySelector("#gw-wizard-panel") ? this._wizardConnectionId || void 0 : void 0
+      };
+    }
+    _refreshLocale(locale) {
+      const draft = this._captureUiDraft();
+      setPluginLocale(locale);
+      this._render();
+      if (draft.form?.kind === "connection" && draft.form.platform) {
+        this._showAdd(draft.form.platform);
+      } else if (draft.form?.kind === "template") {
+        this.container.querySelector("#gw-add-template")?.click();
+      } else if (draft.wizardConnectionId) {
+        this._showWizard(draft.wizardConnectionId);
+      }
+      const search = this.container.querySelector("#gw-search-input");
+      if (search && draft.searchText !== void 0) search.value = draft.searchText;
+      const compose = this.container.querySelector("#gw-compose-input");
+      if (compose && draft.composeText !== void 0) compose.value = draft.composeText;
+      const target = this.container.querySelector("#gw-compose-target");
+      if (target && draft.composeTarget !== void 0) target.value = draft.composeTarget;
+      if (draft.form) {
+        for (const [id, value] of Object.entries(draft.form.values)) {
+          const field = this.container.querySelector(`#${CSS.escape(id)}`);
+          if (field) field.value = value;
+        }
+      }
+      if (draft.focusedId) {
+        this.container.querySelector(`#${CSS.escape(draft.focusedId)}`)?.focus();
+      }
     }
     _injectStyles() {
       if (document.getElementById("gw-styles")) return;
@@ -511,8 +851,12 @@
     _connectWebSocket() {
       if (this._ws) return;
       try {
-        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        this._ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+        const bundleUrl = Array.from(document.scripts).map((script) => script.src).find((src) => /\/bundle\.js(?:\?|$)/.test(src));
+        this._ws = new WebSocket(resolvePluginWebSocketUrl(
+          bundleUrl,
+          document.referrer,
+          document.baseURI
+        ));
         this._ws.onopen = () => {
           this._wsConnected = true;
           this._updateWsStatus();
@@ -549,7 +893,7 @@
       const dot = this.container.querySelector(".gw-ws-dot");
       const label = this.container.querySelector(".gw-ws-label");
       if (dot) dot.classList.toggle("connected", this._wsConnected);
-      if (label) label.textContent = this._wsConnected ? "Live" : "Reconnecting...";
+      if (label) label.textContent = this._wsConnected ? t("gateway.ws.live") : t("gateway.ws.reconnecting");
     }
     _bumpCounter() {
       const counter = this.container.querySelector(".gw-msg-counter");
@@ -609,58 +953,66 @@
       this._render();
     }
     // ── Rendering ──
+    _countLabel(count, singular, plural) {
+      return t(count === 1 ? singular : plural, { count });
+    }
     _render() {
       const inner = this.container.querySelector(".gw-inner");
+      const platforms = platformDefinitions();
       inner.innerHTML = `
       <div class="gw-header">
-        <div class="gw-header-title">Gateway</div>
+        <div class="gw-header-title">${t("gateway.title")}</div>
         <div class="gw-header-status">
           <span class="gw-msg-counter">${this._inbox.length}</span>
           <span class="gw-ws-dot ${this._wsConnected ? "connected" : ""}"></span>
-          <span class="gw-ws-label">${this._wsConnected ? "Live" : "Reconnecting..."}</span>
+          <span class="gw-ws-label">${this._wsConnected ? t("gateway.ws.live") : t("gateway.ws.reconnecting")}</span>
         </div>
       </div>
 
-      <div class="gw-platforms-label">Platforms</div>
+      <div class="gw-platforms-label">${t("gateway.platforms")}</div>
       <div class="gw-platforms-grid">
-        ${PLATFORMS.map((p) => `
+        ${platforms.map((p) => `
           <div class="gw-platform-card" data-platform="${p.id}">
             <div class="gw-platform-icon" style="color:${p.color};">
               ${platformIcon(p.icon)}
             </div>
             <div class="gw-platform-name">${p.name}</div>
-            <div class="gw-platform-desc">${this._connections.filter((c) => c.platform === p.id).length} connection${this._connections.filter((c) => c.platform === p.id).length !== 1 ? "s" : ""}</div>
+            <div class="gw-platform-desc">${this._countLabel(
+        this._connections.filter((c) => c.platform === p.id).length,
+        "gateway.connection.one",
+        "gateway.connection.many"
+      )}</div>
           </div>`).join("")}
       </div>
 
       ${this._connections.length ? `
-        <div class="gw-section-legend" style="margin-bottom:8px;">Connections</div>
+        <div class="gw-section-legend" style="margin-bottom:8px;">${t("gateway.connections")}</div>
         ${this._connections.map((c) => `
           <div class="gw-conn-card">
             <div class="gw-conn-info">
               <span class="gw-conn-status ${c.connected ? "connected" : "disconnected"}"></span>
               <div>
                 <div class="gw-conn-name">${esc(c.name || c.id)}</div>
-                <div class="gw-conn-meta">${c.platform} \xB7 ${c.connected ? "Connected" : "Disconnected"}</div>
+                <div class="gw-conn-meta">${c.platform} \xB7 ${c.connected ? t("gateway.connection.connected") : t("gateway.connection.disconnected")}</div>
               </div>
             </div>
             <div class="gw-conn-actions">
-              <button class="gw-btn gw-btn-sm" data-act="wizard" data-id="${c.id}" title="Setup Guide">${ICONS.wizard}</button>
+              <button class="gw-btn gw-btn-sm" data-act="wizard" data-id="${c.id}" title="${t("gateway.connection.setupGuide")}">${ICONS.wizard}</button>
               <button class="gw-btn ${c.connected ? "gw-btn-danger" : "gw-btn-connect"}" data-act="toggle" data-id="${c.id}">
-                ${c.connected ? `${ICONS.disconnect} Disconnect` : `${ICONS.connect} Connect`}
+                ${c.connected ? `${ICONS.disconnect} ${t("gateway.connection.disconnect")}` : `${ICONS.connect} ${t("gateway.connection.connect")}`}
               </button>
               <button class="gw-btn gw-btn-danger" data-act="remove" data-id="${c.id}">
                 ${ICONS.trash}
               </button>
             </div>
           </div>`).join("")}
-      ` : `<div class="gw-empty">${ICONS.connect}<br>No connections configured.<br>Click a platform above to add one.</div>`}
+      ` : `<div class="gw-empty">${ICONS.connect}<br>${t("gateway.connection.empty")}<br>${t("gateway.connection.emptyHint")}</div>`}
 
       <div class="gw-tabs" style="margin-top:20px;">
-        <button class="gw-tab ${this._activeTab === "inbox" ? "active" : ""}" data-tab="inbox">${ICONS.inbox} Inbox <span class="gw-tab-badge">${this._inbox.length}</span></button>
-        <button class="gw-tab ${this._activeTab === "templates" ? "active" : ""}" data-tab="templates">${ICONS.template} Templates</button>
-        <button class="gw-tab ${this._activeTab === "retry" ? "active" : ""}" data-tab="retry">${ICONS.retry} Retry ${this._retryQueue.length > 0 ? `<span class="gw-tab-badge">${this._retryQueue.length}</span>` : ""}</button>
-        <button class="gw-tab ${this._activeTab === "health" ? "active" : ""}" data-tab="health">${ICONS.health} Health</button>
+        <button class="gw-tab ${this._activeTab === "inbox" ? "active" : ""}" data-tab="inbox">${ICONS.inbox} ${t("gateway.tab.inbox")} <span class="gw-tab-badge">${this._inbox.length}</span></button>
+        <button class="gw-tab ${this._activeTab === "templates" ? "active" : ""}" data-tab="templates">${ICONS.template} ${t("gateway.tab.templates")}</button>
+        <button class="gw-tab ${this._activeTab === "retry" ? "active" : ""}" data-tab="retry">${ICONS.retry} ${t("gateway.tab.retry")} ${this._retryQueue.length > 0 ? `<span class="gw-tab-badge">${this._retryQueue.length}</span>` : ""}</button>
+        <button class="gw-tab ${this._activeTab === "health" ? "active" : ""}" data-tab="health">${ICONS.health} ${t("gateway.tab.health")}</button>
       </div>
 
       <div id="gw-tab-content"></div>
@@ -718,18 +1070,18 @@
       const msgs = displayMessages.slice(-30).reverse();
       const searchBar = `
       <div class="gw-search-bar">
-        <input class="gw-search-input" id="gw-search-input" type="text" placeholder="Search messages..." value="${esc(this._searchQuery)}">
+        <input class="gw-search-input" id="gw-search-input" type="text" placeholder="${t("gateway.search.placeholder")}" value="${esc(this._searchQuery)}">
         <select class="gw-search-select" id="gw-search-platform">
-          <option value="">All platforms</option>
+          <option value="">${t("gateway.search.allPlatforms")}</option>
           <option value="telegram" ${this._searchPlatform === "telegram" ? "selected" : ""}>Telegram</option>
           <option value="wechat" ${this._searchPlatform === "wechat" ? "selected" : ""}>WeChat</option>
           <option value="feishu" ${this._searchPlatform === "feishu" ? "selected" : ""}>Feishu</option>
         </select>
-        <button class="gw-btn gw-btn-sm" id="gw-search-btn">${ICONS.search} Search</button>
-        ${this._searchResults !== null ? `<button class="gw-btn gw-btn-sm" id="gw-search-clear">Clear</button>` : ""}
+        <button class="gw-btn gw-btn-sm" id="gw-search-btn">${ICONS.search} ${t("gateway.search.search")}</button>
+        ${this._searchResults !== null ? `<button class="gw-btn gw-btn-sm" id="gw-search-clear">${t("gateway.search.clear")}</button>` : ""}
       </div>`;
       const detailView = this._selectedMessage ? this._renderMessageDetail(this._selectedMessage) : "";
-      const bubbleList = msgs.length === 0 ? `<div class="gw-empty">${ICONS.inbox}<br>${this._searchResults !== null ? "No messages match your search." : "No messages yet."}</div>` : `<div class="gw-inbox-list">
+      const bubbleList = msgs.length === 0 ? `<div class="gw-empty">${ICONS.inbox}<br>${this._searchResults !== null ? t("gateway.inbox.noMatch") : t("gateway.inbox.empty")}</div>` : `<div class="gw-inbox-list">
           ${msgs.map((m) => {
         const pc = platformColors[m.platform] || { bg: "rgba(255,255,255,0.08)", fg: "#9c9c9d" };
         const initials = (m.senderId || "?").slice(0, 2).toUpperCase();
@@ -740,7 +1092,7 @@
                 <div class="gw-msg-avatar" style="background:${pc.bg};color:${pc.fg};">${initials}</div>
                 <div class="gw-msg-body">
                   <div class="gw-msg-header">
-                    <span class="gw-msg-sender">${esc(m.senderId || "Unknown")}</span>
+                    <span class="gw-msg-sender">${esc(m.senderId || t("gateway.inbox.unknownSender"))}</span>
                     <span class="gw-msg-platform-badge" style="background:${pc.bg};color:${pc.fg};">${m.platform}</span>
                     <span class="gw-msg-time">${timeAgo(m.timestamp)}</span>
                   </div>
@@ -752,16 +1104,16 @@
       const connectedConns = this._connections.filter((c) => c.connected);
       const composeBox = connectedConns.length > 0 ? `
       <div class="gw-compose">
-        <div class="gw-compose-label">Send Message</div>
+        <div class="gw-compose-label">${t("gateway.inbox.sendMessage")}</div>
         <div class="gw-compose-target">
-          <label>Target:</label>
+          <label>${t("gateway.inbox.target")}</label>
           <select id="gw-compose-target">
             ${connectedConns.map((c) => `<option value="${c.id}">${esc(c.name || c.id)} (${c.platform})</option>`).join("")}
           </select>
         </div>
         <div class="gw-compose-row">
-          <textarea class="gw-compose-input" id="gw-compose-input" placeholder="Type a message..." rows="1"></textarea>
-          <button class="gw-compose-send" id="gw-compose-send">${ICONS.send} Send</button>
+          <textarea class="gw-compose-input" id="gw-compose-input" placeholder="${t("gateway.inbox.messagePlaceholder")}" rows="1"></textarea>
+          <button class="gw-compose-send" id="gw-compose-send">${ICONS.send} ${t("gateway.inbox.send")}</button>
         </div>
       </div>
     ` : "";
@@ -769,8 +1121,8 @@
       ${searchBar}
       ${detailView}
       <div class="gw-inbox-header">
-        <div class="gw-inbox-count">${displayMessages.length} message${displayMessages.length !== 1 ? "s" : ""}${this._searchResults !== null ? " (filtered)" : ""}</div>
-        ${this._inbox.length > 0 ? `<button class="gw-btn gw-btn-danger gw-btn-sm" id="gw-clear-inbox">${ICONS.trash} Clear</button>` : ""}
+        <div class="gw-inbox-count">${this._countLabel(displayMessages.length, "gateway.inbox.count.one", "gateway.inbox.count.many")}${this._searchResults !== null ? ` (${t("gateway.inbox.filtered")})` : ""}</div>
+        ${this._inbox.length > 0 ? `<button class="gw-btn gw-btn-danger gw-btn-sm" id="gw-clear-inbox">${ICONS.trash} ${t("gateway.inbox.clear")}</button>` : ""}
       </div>
       ${bubbleList}
       ${composeBox}
@@ -781,23 +1133,23 @@
       return `
       <div class="gw-detail-panel">
         <div class="gw-detail-header">
-          <div class="gw-detail-title">${ICONS.detail} Message Detail</div>
-          <button class="gw-btn gw-btn-sm" id="gw-detail-close">${ICONS.close} Close</button>
+          <div class="gw-detail-title">${ICONS.detail} ${t("gateway.detail.title")}</div>
+          <button class="gw-btn gw-btn-sm" id="gw-detail-close">${ICONS.close} ${t("gateway.detail.close")}</button>
         </div>
         <div class="gw-detail-meta">
-          <span class="gw-detail-label">Platform</span>
+          <span class="gw-detail-label">${t("gateway.detail.platform")}</span>
           <span class="gw-detail-value"><span class="gw-msg-platform-badge" style="background:${pc.bg};color:${pc.fg};">${msg.platform}</span></span>
-          <span class="gw-detail-label">Sender</span>
-          <span class="gw-detail-value">${esc(msg.senderId || "Unknown")}</span>
-          <span class="gw-detail-label">Chat ID</span>
-          <span class="gw-detail-value">${esc(msg.chatId || "N/A")}</span>
-          <span class="gw-detail-label">Time</span>
-          <span class="gw-detail-value">${msg.timestamp ? new Date(msg.timestamp).toLocaleString() : "N/A"}</span>
-          ${msg.media_type ? `<span class="gw-detail-label">Media</span><span class="gw-detail-value">${esc(msg.media_type)}${msg.media_url ? ` - ${esc(msg.media_url)}` : ""}</span>` : ""}
-          ${msg.callback_data ? `<span class="gw-detail-label">Callback</span><span class="gw-detail-value">${esc(msg.callback_data)}</span>` : ""}
-          ${msg.connectionId ? `<span class="gw-detail-label">Connection</span><span class="gw-detail-value">${esc(msg.connectionId)}</span>` : ""}
+          <span class="gw-detail-label">${t("gateway.detail.sender")}</span>
+          <span class="gw-detail-value">${esc(msg.senderId || t("gateway.inbox.unknownSender"))}</span>
+          <span class="gw-detail-label">${t("gateway.detail.chatId")}</span>
+          <span class="gw-detail-value">${esc(msg.chatId || t("gateway.common.notAvailable"))}</span>
+          <span class="gw-detail-label">${t("gateway.detail.time")}</span>
+          <span class="gw-detail-value">${msg.timestamp ? new Date(msg.timestamp).toLocaleString(dateLocale()) : t("gateway.common.notAvailable")}</span>
+          ${msg.media_type ? `<span class="gw-detail-label">${t("gateway.detail.media")}</span><span class="gw-detail-value">${esc(msg.media_type)}${msg.media_url ? ` - ${esc(msg.media_url)}` : ""}</span>` : ""}
+          ${msg.callback_data ? `<span class="gw-detail-label">${t("gateway.detail.callback")}</span><span class="gw-detail-value">${esc(msg.callback_data)}</span>` : ""}
+          ${msg.connectionId ? `<span class="gw-detail-label">${t("gateway.detail.connection")}</span><span class="gw-detail-value">${esc(msg.connectionId)}</span>` : ""}
         </div>
-        <div class="gw-detail-content">${esc(msg.text || "(no text content)")}</div>
+        <div class="gw-detail-content">${esc(msg.text || t("gateway.detail.noText"))}</div>
       </div>`;
     }
     _bindInboxCompose() {
@@ -888,23 +1240,23 @@
     }
     _renderTemplatesTabHtml() {
       if (this._templates.length === 0) {
-        return `<div class="gw-empty">${ICONS.template}<br>No templates yet.<br>Create one to reuse message formats.</div>`;
+        return `<div class="gw-empty">${ICONS.template}<br>${t("gateway.template.empty")}<br>${t("gateway.template.emptyHint")}</div>`;
       }
       return `
       <div class="gw-inbox-header">
-        <div class="gw-inbox-count">${this._templates.length} template${this._templates.length !== 1 ? "s" : ""}</div>
-        <button class="gw-btn gw-btn-sm gw-btn-primary" id="gw-add-template">+ New Template</button>
+        <div class="gw-inbox-count">${this._countLabel(this._templates.length, "gateway.template.count.one", "gateway.template.count.many")}</div>
+        <button class="gw-btn gw-btn-sm gw-btn-primary" id="gw-add-template">${t("gateway.template.new")}</button>
       </div>
-      ${this._templates.map((t) => `
+      ${this._templates.map((template) => `
         <div class="gw-template-card">
           <div class="gw-template-info">
-            <div class="gw-template-name">${esc(t.name)}</div>
-            <div class="gw-template-meta">${t.platform} \xB7 ${t.category} \xB7 ${t.mediaType}</div>
-            <div class="gw-template-preview">${esc(t.content)}</div>
+            <div class="gw-template-name">${esc(template.name)}</div>
+            <div class="gw-template-meta">${template.platform} \xB7 ${template.category} \xB7 ${template.mediaType}</div>
+            <div class="gw-template-preview">${esc(template.content)}</div>
           </div>
           <div class="gw-conn-actions">
-            <button class="gw-btn gw-btn-sm" data-act="use-template" data-id="${t.id}">Use</button>
-            <button class="gw-btn gw-btn-sm gw-btn-danger" data-act="delete-template" data-id="${t.id}">${ICONS.trash}</button>
+            <button class="gw-btn gw-btn-sm" data-act="use-template" data-id="${template.id}">${t("gateway.template.use")}</button>
+            <button class="gw-btn gw-btn-sm gw-btn-danger" data-act="delete-template" data-id="${template.id}">${ICONS.trash}</button>
           </div>
         </div>`).join("")}
     `;
@@ -919,32 +1271,33 @@
           const form = document.createElement("div");
           form.id = "gw-add-form";
           form.className = "gw-add-form";
+          form.dataset.kind = "template";
           form.innerHTML = `
-          <div class="gw-add-form-title">Create Template</div>
+          <div class="gw-add-form-title">${t("gateway.template.create")}</div>
           <div class="gw-form-field">
-            <label class="gw-form-label">Name</label>
-            <input class="gw-form-input" id="gw-tpl-name" type="text" placeholder="e.g., Welcome Message">
+            <label class="gw-form-label">${t("gateway.template.name")}</label>
+            <input class="gw-form-input" id="gw-tpl-name" type="text" placeholder="${t("gateway.template.namePlaceholder")}">
           </div>
           <div class="gw-form-field">
-            <label class="gw-form-label">Platform</label>
+            <label class="gw-form-label">${t("gateway.template.platform")}</label>
             <select class="gw-form-input" id="gw-tpl-platform">
-              <option value="any">Any</option>
+              <option value="any">${t("gateway.template.any")}</option>
               <option value="telegram">Telegram</option>
               <option value="wechat">WeChat</option>
               <option value="feishu">Feishu</option>
             </select>
           </div>
           <div class="gw-form-field">
-            <label class="gw-form-label">Content (use {{variable}} for substitution)</label>
-            <textarea class="gw-form-input" id="gw-tpl-content" rows="3" placeholder="Hello {{name}}, welcome to {{group}}!"></textarea>
+            <label class="gw-form-label">${t("gateway.template.content", { syntax: "{{variable}}" })}</label>
+            <textarea class="gw-form-input" id="gw-tpl-content" rows="3" placeholder="${t("gateway.template.contentPlaceholder", { nameToken: "{{name}}", groupToken: "{{group}}" })}"></textarea>
           </div>
           <div class="gw-form-field">
-            <label class="gw-form-label">Category</label>
-            <input class="gw-form-input" id="gw-tpl-category" type="text" placeholder="e.g., welcome, notification" value="general">
+            <label class="gw-form-label">${t("gateway.template.category")}</label>
+            <input class="gw-form-input" id="gw-tpl-category" type="text" placeholder="${t("gateway.template.categoryPlaceholder")}" value="general">
           </div>
           <div class="gw-form-actions">
-            <button class="gw-form-save">Create</button>
-            <button class="gw-form-cancel">Cancel</button>
+            <button class="gw-form-save">${t("gateway.template.createAction")}</button>
+            <button class="gw-form-cancel">${t("gateway.template.cancel")}</button>
           </div>`;
           inner.appendChild(form);
           form.querySelector(".gw-form-save")?.addEventListener("click", async () => {
@@ -966,9 +1319,7 @@
             const r = await fetch(`/api/gateway/templates/${id}/apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
             if (r.ok) {
               const d = await r.json();
-              alert(`Template applied:
-
-${d.content}`);
+              alert(t("gateway.template.applied", { content: d.content }));
             }
           } catch {
           }
@@ -977,7 +1328,7 @@ ${d.content}`);
       this.container.querySelectorAll('[data-act="delete-template"]').forEach((btn) => {
         btn.addEventListener("click", async () => {
           const id = btn.dataset.id;
-          if (!confirm("Delete this template?")) return;
+          if (!confirm(t("gateway.template.deleteConfirm"))) return;
           await fetch(`/api/gateway/templates/${id}`, { method: "DELETE" });
           this._load();
         });
@@ -985,23 +1336,23 @@ ${d.content}`);
     }
     _renderRetryTabHtml() {
       if (this._retryQueue.length === 0) {
-        return `<div class="gw-empty">${ICONS.retry}<br>No pending retries.</div>`;
+        return `<div class="gw-empty">${ICONS.retry}<br>${t("gateway.retry.empty")}</div>`;
       }
       return `
       <div class="gw-inbox-header">
-        <div class="gw-inbox-count">${this._retryQueue.length} item${this._retryQueue.length !== 1 ? "s" : ""} in queue</div>
-        <button class="gw-btn gw-btn-sm gw-btn-danger" id="gw-clear-retry">${ICONS.trash} Clear All</button>
+        <div class="gw-inbox-count">${this._countLabel(this._retryQueue.length, "gateway.retry.count.one", "gateway.retry.count.many")}</div>
+        <button class="gw-btn gw-btn-sm gw-btn-danger" id="gw-clear-retry">${ICONS.trash} ${t("gateway.retry.clearAll")}</button>
       </div>
       ${this._retryQueue.map((r) => `
         <div class="gw-retry-card">
-          <span class="gw-retry-status ${r.status}">${r.status}</span>
+          <span class="gw-retry-status ${r.status}">${r.status === "pending" ? t("gateway.retry.status.pending") : r.status === "failed" ? t("gateway.retry.status.failed") : esc(r.status)}</span>
           <div style="flex:1;min-width:0;">
             <div style="font-size:12px;font-weight:500;color:var(--gw-text-primary);">${esc(r.platform)} -> ${esc(r.chatId)}</div>
-            <div style="font-size:10px;color:var(--gw-text-quaternary);margin-top:2px;">Attempt ${r.attempt}/${r.maxAttempts} \xB7 ${r.lastError ? esc(r.lastError) : "Waiting..."}</div>
+            <div style="font-size:10px;color:var(--gw-text-quaternary);margin-top:2px;">${t("gateway.retry.attempt", { attempt: r.attempt, max: r.maxAttempts })} \xB7 ${r.lastError ? esc(r.lastError) : t("gateway.retry.waiting")}</div>
           </div>
           <div style="font-size:9px;color:var(--gw-text-quaternary);text-align:right;">
             <div>${timeAgo(r.createdAt)}</div>
-            ${r.status === "pending" ? `<div>Next: ${new Date(r.nextRetryAt).toLocaleTimeString()}</div>` : ""}
+            ${r.status === "pending" ? `<div>${t("gateway.retry.next", { time: new Date(r.nextRetryAt).toLocaleTimeString(dateLocale()) })}</div>` : ""}
           </div>
           <button class="gw-btn gw-btn-sm gw-btn-danger" data-act="remove-retry" data-id="${r.id}">${ICONS.trash}</button>
         </div>`).join("")}
@@ -1024,13 +1375,13 @@ ${d.content}`);
       });
     }
     _renderHealthTabHtml() {
-      if (!this._health) return '<div class="gw-empty">No health data available.</div>';
+      if (!this._health) return `<div class="gw-empty">${t("gateway.health.noData")}</div>`;
       const adapters = this._health.adapters || {};
       const keys = Object.keys(adapters);
-      if (!keys.length) return '<div class="gw-empty">No adapters reporting.</div>';
+      if (!keys.length) return `<div class="gw-empty">${t("gateway.health.noAdapters")}</div>`;
       return `
       <div class="gw-health-card">
-        <div class="gw-health-title">Adapter Status</div>
+        <div class="gw-health-title">${t("gateway.health.adapterStatus")}</div>
         <div class="gw-health-grid">
           ${keys.map((id) => {
         const a = adapters[id];
@@ -1040,11 +1391,11 @@ ${d.content}`);
                 <span class="gw-health-dot" style="background:${dotColor};"></span>
                 <div>
                   <div class="gw-health-name">${esc(id)}</div>
-                  <div class="gw-health-detail">${a.platform} \xB7 ${a.connected ? "Connected" : "Disconnected"}</div>
+                  <div class="gw-health-detail">${a.platform} \xB7 ${a.connected ? t("gateway.connection.connected") : t("gateway.connection.disconnected")}</div>
                 </div>
                 <div class="gw-health-stats">
-                  ${a.totalReceived ? `<div>${a.totalReceived} msgs</div>` : ""}
-                  ${a.uptime ? `<div>up ${formatUptime(a.uptime)}</div>` : ""}
+                  ${a.totalReceived ? `<div>${t("gateway.health.messages", { count: a.totalReceived })}</div>` : ""}
+                  ${a.uptime ? `<div>${t("gateway.health.uptime", { duration: formatUptime(a.uptime) })}</div>` : ""}
                 </div>
               </div>`;
       }).join("")}
@@ -1055,8 +1406,9 @@ ${d.content}`);
     _showWizard(connectionId) {
       const conn = this._connections.find((c) => c.id === connectionId);
       if (!conn) return;
-      const platform = PLATFORMS.find((p) => p.id === conn.platform);
+      const platform = platformDefinitions().find((p) => p.id === conn.platform);
       if (!platform || !platform.setupSteps) return;
+      this._wizardConnectionId = connectionId;
       const inner = this.container.querySelector(".gw-inner");
       const existing = inner.querySelector("#gw-wizard-panel");
       if (existing) existing.remove();
@@ -1066,10 +1418,10 @@ ${d.content}`);
       panel.innerHTML = `
       <div class="gw-detail-header">
         <div>
-          <div class="gw-wizard-title">${platform.name} Setup Guide</div>
-          <div class="gw-wizard-subtitle">Follow these steps to connect your ${platform.name} bot</div>
+          <div class="gw-wizard-title">${t("gateway.wizard.title", { platform: platform.name })}</div>
+          <div class="gw-wizard-subtitle">${t("gateway.wizard.subtitle", { platform: platform.name })}</div>
         </div>
-        <button class="gw-btn gw-btn-sm" id="gw-wizard-close">${ICONS.close} Close</button>
+        <button class="gw-btn gw-btn-sm" id="gw-wizard-close">${ICONS.close} ${t("gateway.wizard.close")}</button>
       </div>
       <ol class="gw-wizard-steps">
         ${platform.setupSteps.map((step, i) => `
@@ -1079,14 +1431,15 @@ ${d.content}`);
           </li>`).join("")}
       </ol>
       <div style="display:flex;gap:8px;">
-        <button class="gw-btn gw-btn-sm" id="gw-wizard-prev" ${this._wizardStep === 0 ? 'disabled style="opacity:0.3"' : ""}>Previous</button>
-        <button class="gw-btn gw-btn-sm gw-btn-primary" id="gw-wizard-next">${this._wizardStep >= platform.setupSteps.length - 1 ? "Done" : "Next"}</button>
+        <button class="gw-btn gw-btn-sm" id="gw-wizard-prev" ${this._wizardStep === 0 ? 'disabled style="opacity:0.3"' : ""}>${t("gateway.wizard.previous")}</button>
+        <button class="gw-btn gw-btn-sm gw-btn-primary" id="gw-wizard-next">${this._wizardStep >= platform.setupSteps.length - 1 ? t("gateway.wizard.done") : t("gateway.wizard.next")}</button>
       </div>
     `;
       inner.appendChild(panel);
       panel.querySelector("#gw-wizard-close")?.addEventListener("click", () => {
         panel.remove();
         this._wizardStep = 0;
+        this._wizardConnectionId = null;
       });
       panel.querySelector("#gw-wizard-prev")?.addEventListener("click", () => {
         if (this._wizardStep > 0) {
@@ -1101,12 +1454,13 @@ ${d.content}`);
         } else {
           panel.remove();
           this._wizardStep = 0;
+          this._wizardConnectionId = null;
         }
       });
     }
     // ── Add Connection Form ──
     _showAdd(platform) {
-      const p = PLATFORMS.find((p2) => p2.id === platform);
+      const p = platformDefinitions().find((p2) => p2.id === platform);
       if (!p) return;
       const inner = this.container.querySelector(".gw-inner");
       const existing = inner.querySelector("#gw-add-form");
@@ -1114,8 +1468,10 @@ ${d.content}`);
       const form = document.createElement("div");
       form.id = "gw-add-form";
       form.className = "gw-add-form";
+      form.dataset.kind = "connection";
+      form.dataset.platform = platform;
       form.innerHTML = `
-      <div class="gw-add-form-title">Add ${p.name} Connection</div>
+      <div class="gw-add-form-title">${t("gateway.connection.add", { platform: p.name })}</div>
       ${p.fields.map((f) => `
         <div class="gw-form-field">
           <label class="gw-form-label">${f.label}</label>
@@ -1123,8 +1479,8 @@ ${d.content}`);
           ${f.help ? `<div class="gw-form-help">${esc(f.help)}</div>` : ""}
         </div>`).join("")}
       <div class="gw-form-actions">
-        <button class="gw-form-save">Save</button>
-        <button class="gw-form-cancel">Cancel</button>
+        <button class="gw-form-save">${t("gateway.form.save")}</button>
+        <button class="gw-form-cancel">${t("gateway.form.cancel")}</button>
       </div>`;
       inner.appendChild(form);
       form.querySelector(".gw-form-save")?.addEventListener("click", async () => {
@@ -1142,7 +1498,7 @@ ${d.content}`);
       this._load();
     }
     async remove(id) {
-      if (!confirm("Delete connection?")) return;
+      if (!confirm(t("gateway.connection.deleteConfirm"))) return;
       await fetch(`/api/gateway/connections/${id}`, { method: "DELETE" });
       this._load();
     }
@@ -1161,10 +1517,10 @@ ${d.content}`);
   }
   function timeAgo(ts) {
     const diff = Date.now() - new Date(ts).getTime();
-    if (diff < 6e4) return "just now";
-    if (diff < 36e5) return `${Math.floor(diff / 6e4)}m ago`;
-    if (diff < 864e5) return `${Math.floor(diff / 36e5)}h ago`;
-    return new Date(ts).toLocaleDateString();
+    if (diff < 6e4) return t("gateway.time.justNow");
+    if (diff < 36e5) return t("gateway.time.minutesAgo", { count: Math.floor(diff / 6e4) });
+    if (diff < 864e5) return t("gateway.time.hoursAgo", { count: Math.floor(diff / 36e5) });
+    return new Date(ts).toLocaleDateString(dateLocale());
   }
   function formatUptime(seconds) {
     if (seconds < 60) return `${seconds}s`;

@@ -8,6 +8,7 @@ import { WorkspaceTabGroup } from './WorkspaceTabGroup.js';
 import { WorkspaceSplitContainer } from './WorkspaceSplitContainer.js';
 import { WorkspaceBindingDialog } from '../../WorkspaceBindingDialog.js';
 import { ToastManager } from '../../../ToastManager.js';
+import { onLocaleChange, t } from '../../../i18n/index.js';
 
 interface AgentBrowserEvent {
   sessionId: string;
@@ -90,12 +91,15 @@ export class WorkspacePage implements Page {
   private _loadGeneration = 0;
   private _loadAbortController: AbortController | null = null;
   private _workspacePath = '';
+  private _toolbarKicker!: HTMLElement;
   private _toolbarPath!: HTMLElement;
+  private _switchButton!: HTMLButtonElement;
   private _fileTree!: WorkspaceFileTree;
   private _treeGrip!: HTMLElement;
   private _tabMount!: HTMLElement;
   private _currentGroup: WorkspaceSplitContainer | null = null;
   private _onSessionChange: ((node: any) => void) | null = null;
+  private _onSessionsRemoved: ((sessionIds: unknown) => void) | null = null;
   private _onRevealWorkspacePath: ((event: Event) => void) | null = null;
   private _onWorkspaceDownloadComplete: ((event: Event) => void) | null = null;
   private _tabCache = new Map<string, WorkspaceSplitContainer>();
@@ -109,6 +113,7 @@ export class WorkspacePage implements Page {
     this.container.style.display = 'none';
     this.container.setAttribute('data-page', 'workspace');
     this._buildDOM();
+    onLocaleChange(() => this._refreshLocale());
   }
 
   private _buildDOM(): void {
@@ -119,19 +124,21 @@ export class WorkspacePage implements Page {
     toolbarTitle.className = 'ws-toolbar-title';
     const toolbarKicker = document.createElement('span');
     toolbarKicker.className = 'ws-toolbar-kicker';
-    toolbarKicker.textContent = 'Workspace';
+    toolbarKicker.textContent = t('workspace.title');
+    this._toolbarKicker = toolbarKicker;
     toolbarTitle.appendChild(toolbarKicker);
 
     this._toolbarPath = document.createElement('span');
     this._toolbarPath.className = 'ws-toolbar-path';
-    this._toolbarPath.textContent = 'No workspace';
+    this._toolbarPath.textContent = t('workspace.noWorkspace');
     toolbarTitle.appendChild(this._toolbarPath);
     toolbar.appendChild(toolbarTitle);
 
-    const switchBtn = document.createElement('button');
-    switchBtn.className = 'ws-toolbar-btn'; switchBtn.textContent = 'Switch';
-    switchBtn.addEventListener('click', () => void this._switchWorkspace());
-    toolbar.appendChild(switchBtn);
+    this._switchButton = document.createElement('button');
+    this._switchButton.className = 'ws-toolbar-btn';
+    this._switchButton.textContent = t('workspace.switchAction');
+    this._switchButton.addEventListener('click', () => void this._switchWorkspace());
+    toolbar.appendChild(this._switchButton);
     this.container.appendChild(toolbar);
 
     const content = document.createElement('div');
@@ -153,11 +160,18 @@ export class WorkspacePage implements Page {
   }
 
   onEnter(): void {
-    if (this._onSessionChange) { App.getInstance().sessionVM?.off('sessionSelected', this._onSessionChange); this._onSessionChange = null; }
+    this._unwireSessionEvents();
     if (this._onRevealWorkspacePath) { window.removeEventListener('ws-reveal-workspace-path', this._onRevealWorkspacePath); this._onRevealWorkspacePath = null; }
     if (this._onWorkspaceDownloadComplete) { window.removeEventListener('ws-workspace-download-complete', this._onWorkspaceDownloadComplete); this._onWorkspaceDownloadComplete = null; }
     this._onSessionChange = () => { void this._onSessionSwitched(); };
-    App.getInstance().sessionVM?.on('sessionSelected', this._onSessionChange);
+    const sessionVM = App.getInstance().sessionVM;
+    sessionVM?.on('sessionSelected', this._onSessionChange);
+    sessionVM?.on('sessionDeselected', this._onSessionChange);
+    this._onSessionsRemoved = (sessionIds: unknown) => {
+      if (!Array.isArray(sessionIds)) return;
+      this._handleSessionsRemoved(sessionIds.filter((id): id is string => typeof id === 'string'));
+    };
+    sessionVM?.on('sessionsRemoved', this._onSessionsRemoved);
     this._onRevealWorkspacePath = (event: Event) => {
       const detail = (event as CustomEvent).detail || {};
       void this._revealWorkspacePath(String(detail.path || ''), Boolean(detail.open));
@@ -168,14 +182,15 @@ export class WorkspacePage implements Page {
     };
     window.addEventListener('ws-reveal-workspace-path', this._onRevealWorkspacePath);
     window.addEventListener('ws-workspace-download-complete', this._onWorkspaceDownloadComplete);
-    const sid = App.getInstance().sessionVM?.activeSessionId || '';
+    this._pruneStaleSessionCaches();
+    const sid = sessionVM?.activeSessionId || '';
     if (sid) { void this._loadWorkspaceForSession(sid); }
-    else { this._sessionId = ''; this._workspacePath = ''; this._toolbarPath.textContent = 'No workspace'; this._showWorkspaceIdle(); }
+    else { this._clearWorkspaceView(); }
   }
 
   onExit(): void {
     try {
-      if (this._onSessionChange) { App.getInstance().sessionVM?.off('sessionSelected', this._onSessionChange); this._onSessionChange = null; }
+      this._unwireSessionEvents();
       if (this._onRevealWorkspacePath) { window.removeEventListener('ws-reveal-workspace-path', this._onRevealWorkspacePath); this._onRevealWorkspacePath = null; }
       if (this._onWorkspaceDownloadComplete) { window.removeEventListener('ws-workspace-download-complete', this._onWorkspaceDownloadComplete); this._onWorkspaceDownloadComplete = null; }
       if (this._extChangeTimer) { clearInterval(this._extChangeTimer); this._extChangeTimer = 0; }
@@ -190,15 +205,64 @@ export class WorkspacePage implements Page {
   private async _onSessionSwitched(): Promise<void> {
     const newSid = App.getInstance().sessionVM?.activeSessionId || '';
     if (!newSid) {
-      this._sessionId = '';
-      this._workspacePath = '';
-      this._toolbarPath.textContent = 'No workspace';
-      this._fileTree.suspend();
-      this._showWorkspaceIdle();
+      this._clearWorkspaceView();
       return;
     }
     if (newSid === this._sessionId) return;
     await this._loadWorkspaceForSession(newSid);
+  }
+
+  private _unwireSessionEvents(): void {
+    const sessionVM = App.getInstance().sessionVM;
+    if (this._onSessionChange) {
+      sessionVM?.off('sessionSelected', this._onSessionChange);
+      sessionVM?.off('sessionDeselected', this._onSessionChange);
+      this._onSessionChange = null;
+    }
+    if (this._onSessionsRemoved) {
+      sessionVM?.off('sessionsRemoved', this._onSessionsRemoved);
+      this._onSessionsRemoved = null;
+    }
+  }
+
+  private _clearWorkspaceView(): void {
+    this._loadGeneration++;
+    this._loadAbortController?.abort();
+    this._loadAbortController = null;
+    if (this._extChangeTimer) { clearInterval(this._extChangeTimer); this._extChangeTimer = 0; }
+    this._currentGroup?.suspend();
+    this._currentGroup = null;
+    this._sessionId = '';
+    this._workspacePath = '';
+    this._toolbarPath.textContent = t('workspace.noWorkspace');
+    void this._fileTree.loadRoot('');
+    this._showWorkspaceIdle();
+  }
+
+  private _handleSessionsRemoved(sessionIds: string[]): void {
+    const removedCurrentSession = Boolean(this._sessionId && sessionIds.includes(this._sessionId));
+    this._disposeSessionCaches(sessionIds);
+    if (!removedCurrentSession) return;
+
+    const activeSessionId = App.getInstance().sessionVM?.activeSessionId || '';
+    if (activeSessionId) void this._loadWorkspaceForSession(activeSessionId);
+    else this._clearWorkspaceView();
+  }
+
+  private _pruneStaleSessionCaches(): void {
+    const liveIds = new Set(App.getInstance().sessionVM?.sessions.all.map((session) => session.id) || []);
+    const staleIds = Array.from(this._tabCache.keys()).filter((sessionId) => !liveIds.has(sessionId));
+    this._disposeSessionCaches(staleIds);
+  }
+
+  private _disposeSessionCaches(sessionIds: Iterable<string>): void {
+    for (const sessionId of sessionIds) {
+      const group = this._tabCache.get(sessionId);
+      if (!group) continue;
+      if (this._currentGroup === group) this._currentGroup = null;
+      group.dispose();
+      this._tabCache.delete(sessionId);
+    }
   }
 
   private async _loadWorkspaceForSession(sid: string): Promise<void> {
@@ -214,7 +278,7 @@ export class WorkspacePage implements Page {
       if (this._sessionId && this._currentGroup?.hasTabs) { this._tabCache.set(this._sessionId, this._currentGroup); }
       this._sessionId = sid; this._workspacePath = newPath;
       App.getInstance().sessionVM?.updateSessionWorkspace(sid, newPath);
-      this._toolbarPath.textContent = newPath || 'Default workspace';
+      this._toolbarPath.textContent = newPath || t('workspace.defaultWorkspace');
       await this._fileTree.loadRoot(sid);
       if (generation !== this._loadGeneration || App.getInstance().sessionVM?.activeSessionId !== sid) return;
       if (this._currentGroup) { this._currentGroup.element.remove(); }
@@ -267,15 +331,15 @@ export class WorkspacePage implements Page {
     const dlg = new WorkspaceBindingDialog();
     const result = await dlg.show(this._workspacePath);
     if (!result || !this._sessionId) return;
-    if (this._currentGroup && !await this._currentGroup.prepareToDiscardAll('switching workspaces')) return;
+    if (this._currentGroup && !await this._currentGroup.prepareToDiscardAll(t('workspace.action.switching'))) return;
     try {
       const resp = await fetch(`/api/v1/sessions/${encodeURIComponent(this._sessionId)}/bind-workspace`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: result.path }) });
-      if (!resp.ok) throw new Error(`Workspace binding failed (HTTP ${resp.status})`);
+      if (!resp.ok) throw new Error(t('workspace.bindingFailed', { status: resp.status }));
       const payload = await resp.json() as { workspace?: string };
       const boundPath = payload.workspace || result.path;
       this._workspacePath = boundPath;
       App.getInstance().sessionVM?.updateSessionWorkspace(this._sessionId, boundPath);
-      this._toolbarPath.textContent = boundPath || 'Default workspace';
+      this._toolbarPath.textContent = boundPath || t('workspace.defaultWorkspace');
       this._tabCache.get(this._sessionId)?.dispose(); this._tabCache.delete(this._sessionId); this._currentGroup = null;
       this._tabMount.innerHTML = '';
       const fresh = new WorkspaceSplitContainer(); fresh.setSessionId(this._sessionId);
@@ -287,7 +351,7 @@ export class WorkspacePage implements Page {
       await this._fileTree.loadRoot(this._sessionId);
       this._startExternalChangePolling();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Workspace switch failed';
+      const message = err instanceof Error ? err.message : t('workspace.switchFailed');
       ToastManager.getInstance().error(message);
       console.debug('WorkspacePage: session switch cleanup failed');
     }
@@ -320,9 +384,9 @@ export class WorkspacePage implements Page {
   private _wireTreeGrip(): void {
     const grip = this._treeGrip; const tree = this._fileTree.element;
     let dragging = false, startX = 0, startW = 0;
-    grip.addEventListener('mousedown', (e) => { dragging = true; startX = e.clientX; startW = tree.getBoundingClientRect().width; grip.style.background = 'var(--color-hairline-strong)'; document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'; e.preventDefault(); });
+    grip.addEventListener('mousedown', (e) => { dragging = true; startX = e.clientX; startW = tree.getBoundingClientRect().width; grip.classList.add('active'); document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'; e.preventDefault(); });
     window.addEventListener('mousemove', (e) => { if (!dragging) return; tree.style.width = Math.max(150, startW + e.clientX - startX) + 'px'; tree.style.flexShrink = '0'; });
-    window.addEventListener('mouseup', () => { dragging = false; grip.style.background = ''; document.body.style.cursor = ''; document.body.style.userSelect = ''; });
+    window.addEventListener('mouseup', () => { dragging = false; grip.classList.remove('active'); document.body.style.cursor = ''; document.body.style.userSelect = ''; });
   }
 
   private _showWorkspaceIdle(): void {
@@ -330,9 +394,20 @@ export class WorkspacePage implements Page {
       <div class="ws-editor-empty ws-editor-empty--workspace">
         <div class="ws-editor-empty-panel">
           <div class="ws-editor-empty-mark"></div>
-          <div class="ws-editor-empty-title">No file open</div>
-          <div class="ws-editor-empty-meta">Workspace editor idle</div>
+          <div class="ws-editor-empty-title">${t('workspace.noFileOpen')}</div>
+          <div class="ws-editor-empty-meta">${t('workspace.editorIdle')}</div>
         </div>
       </div>`;
+  }
+
+  private _refreshLocale(): void {
+    this._toolbarKicker.textContent = t('workspace.title');
+    this._switchButton.textContent = t('workspace.switchAction');
+    this._toolbarPath.textContent = this._workspacePath
+      ? this._workspacePath
+      : this._sessionId
+        ? t('workspace.defaultWorkspace')
+        : t('workspace.noWorkspace');
+    if (!this._currentGroup) this._showWorkspaceIdle();
   }
 }

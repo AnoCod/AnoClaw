@@ -24,7 +24,7 @@ describe('SessionManager goal context', () => {
     }
   });
 
-  it('records each active goal run with workspace and mode context', async () => {
+  it('records each active goal run with workspace and execution context', async () => {
     const workspaceA = path.join(tmpDir, 'workspace-a');
     const workspaceB = path.join(tmpDir, 'workspace-b');
     const session = await manager.createMainSession('agent-main', 'Goal Session', workspaceA);
@@ -35,18 +35,16 @@ describe('SessionManager goal context', () => {
     const started = await manager.setGoal(session.id, '强化 workspace 和 goal mode');
     expect(started.runCount).toBe(0);
 
-    const firstRun = await manager.touchGoalRun(session.id, { userMode: 'coding' });
+    const firstRun = await manager.touchGoalRun(session.id);
     expect(firstRun?.runCount).toBe(1);
     expect(firstRun?.lastWorkspace).toBe(workspaceA);
-    expect(firstRun?.lastPermissionMode).toBe('Plan');
+    expect(firstRun?.lastPermissionMode).toBe('AutoEdit');
     expect(firstRun?.lastEffort).toBe('NORMAL');
-    expect(firstRun?.lastUserMode).toBe('coding');
 
     await manager.setWorkspace(session.id, workspaceB);
     const secondRun = await manager.touchGoalRun(session.id, {
       permissionMode: 'AutoEdit',
       effort: 'HIGH',
-      userMode: 'office',
     });
 
     expect(secondRun?.runCount).toBe(2);
@@ -54,7 +52,6 @@ describe('SessionManager goal context', () => {
     expect(secondRun?.lastWorkspace).toBe(workspaceA);
     expect(secondRun?.lastPermissionMode).toBe('AutoEdit');
     expect(secondRun?.lastEffort).toBe('HIGH');
-    expect(secondRun?.lastUserMode).toBe('office');
 
     const meta = JSON.parse(
       await fsp.readFile(path.join(tmpDir, 'sessions', session.id, 'meta.json'), 'utf-8'),
@@ -71,7 +68,7 @@ describe('SessionManager goal context', () => {
       objective: '完成可验证交付物',
       acceptanceCriteria: '报告存在且测试通过',
       workspace,
-      permissionMode: 'Auto',
+      permissionMode: 'AutoEdit',
       maxRuns: 8,
       maxConsecutiveFailures: 2,
       wakeIntervalMs: 5000,
@@ -178,6 +175,7 @@ describe('SessionManager goal context', () => {
     session.setMetadata('goal', {
       objective: '旧版目标',
       status: 'active',
+      permissionMode: 'Ask',
       createdAt: '2026-07-01T00:00:00.000Z',
       updatedAt: '2026-07-01T00:00:00.000Z',
       runCount: 2,
@@ -186,8 +184,29 @@ describe('SessionManager goal context', () => {
     const migrated = manager.getGoal(session.id);
     expect(migrated?.goalId).toBeTruthy();
     expect(migrated?.maxRuns).toBeGreaterThan(2);
-    expect(migrated?.permissionMode).toBeTruthy();
+    expect(migrated?.permissionMode).toBe('AutoEdit');
     expect(migrated?.runCount).toBe(2);
+  });
+
+  it('keeps legacy waiting-confirmation Goals recoverable under Auto Edit', async () => {
+    const session = await manager.createMainSession('agent-main', 'Legacy Approval Goal', tmpDir);
+    session.setMetadata('goal', {
+      objective: '恢复旧审批等待',
+      status: 'waiting_confirmation',
+      permissionMode: 'Plan',
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z',
+      runCount: 1,
+    });
+
+    expect(manager.getGoal(session.id)).toMatchObject({
+      status: 'waiting_confirmation',
+      permissionMode: 'AutoEdit',
+    });
+    await expect(manager.updateGoalStatus(session.id, 'active')).resolves.toMatchObject({
+      status: 'active',
+      permissionMode: 'AutoEdit',
+    });
   });
 
   it('records an interrupted persisted run before recovering with a new run', async () => {
@@ -227,7 +246,7 @@ describe('SessionManager goal context', () => {
     });
 
     expect(edited.currentRunId).toBeUndefined();
-    expect(edited.permissionMode).toBe('Ask');
+    expect(edited.permissionMode).toBe('AutoEdit');
     expect(edited.recentRuns?.find(run => run.runId === running?.currentRunId)?.outcome).toBe('paused');
   });
 

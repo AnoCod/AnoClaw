@@ -4,6 +4,7 @@
  */
 
 import type { TodoWriteEvent, TodoItem, TodoStatus } from '../types.js';
+import { t } from '../../../i18n/index.js';
 
 export class TodoWriteDelegate {
   element: HTMLElement;
@@ -44,7 +45,11 @@ export class TodoWriteDelegate {
 
     const label = document.createElement('span');
     const counts = this._summarize(event.todos);
-    label.textContent = 'TODO' + (counts ? ` - ${counts}` : '');
+    const title = document.createElement('span');
+    title.textContent = t('message.todo');
+    title.setAttribute('data-i18n-key', 'message.todo');
+    label.appendChild(title);
+    if (counts) label.append(` - ${counts}`);
     label.style.cssText = 'flex:1;';
     header.appendChild(label);
 

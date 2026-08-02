@@ -39,6 +39,7 @@ export function messageToJsonlEvents(
       sessionId: msg.sessionId,
       timestamp: msg.timestamp,
       message: {
+        id: msg.id,
         role: 'user',
         content: [{ type: 'text', text: msg.content }],
       },
@@ -56,6 +57,7 @@ export function messageToJsonlEvents(
       sessionId: msg.sessionId,
       timestamp: msg.timestamp,
       message: {
+        id: msg.id,
         role: 'system',
         content: [{ type: 'text', text: msg.content }],
       },
@@ -223,7 +225,7 @@ export function jsonlEventsToMessages(events: JsonlEvent[], flat?: boolean): Mes
       flushAcc();
       if (textBlock) {
         messages.push({
-          id: ev.uuid,
+          id: userEv.message.id || ev.uuid,
           sessionId: ev.sessionId,
           role: MessageRoles.User,
           content: textBlock.text,
@@ -243,7 +245,7 @@ export function jsonlEventsToMessages(events: JsonlEvent[], flat?: boolean): Mes
       const textBlock = sysEv.message.content.find((c): c is TextBlock => c.type === 'text');
       if (textBlock) {
         messages.push({
-          id: ev.uuid,
+          id: sysEv.message.id || ev.uuid,
           sessionId: ev.sessionId,
           role: MessageRoles.System,
           content: textBlock.text,
@@ -397,7 +399,7 @@ function jsonlEventsToFlat(events: JsonlEvent[]): Message[] {
 
       if (textBlock) {
         messages.push({
-          id: ev.uuid, sessionId: ev.sessionId,
+          id: userEv.message.id || ev.uuid, sessionId: ev.sessionId,
           role: MessageRoles.User, content: textBlock.text,
           tokenCount: 0, compressed: false, timestamp: ev.timestamp,
           agentId: userEv.agentId, agentName: userEv.agentName,
@@ -412,7 +414,7 @@ function jsonlEventsToFlat(events: JsonlEvent[]): Message[] {
       const textBlock = sysEv.message.content.find((c): c is TextBlock => c.type === 'text');
       if (textBlock) {
         messages.push({
-          id: ev.uuid, sessionId: ev.sessionId,
+          id: sysEv.message.id || ev.uuid, sessionId: ev.sessionId,
           role: MessageRoles.System, content: textBlock.text,
           tokenCount: 0, compressed: false, timestamp: ev.timestamp,
           agentId: sysEv.agentId, agentName: sysEv.agentName,

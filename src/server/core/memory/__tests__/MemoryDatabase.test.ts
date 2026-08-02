@@ -9,9 +9,12 @@ vi.mock('sql.js', () => {
     export: vi.fn().mockReturnValue(new Uint8Array()),
     close: vi.fn(),
   };
+  const Database = vi.fn(function MockDatabase() {
+    return mockDB;
+  });
   return {
     default: vi.fn().mockResolvedValue({
-      Database: vi.fn(() => mockDB),
+      Database,
     }),
   };
 });
@@ -27,11 +30,13 @@ vi.mock('node:fs', () => ({
 }));
 
 import { MemoryDatabase, tokenize } from '../storage/MemoryDatabase.js';
+import { writeFile } from 'node:fs/promises';
 
 describe('MemoryDatabase', () => {
   let db: MemoryDatabase;
 
   beforeEach(() => {
+    vi.mocked(writeFile).mockResolvedValue(undefined);
     MemoryDatabase.resetInstance();
     db = MemoryDatabase.getInstance({ dbPath: ':memory:', embeddingDim: 384, bm25K1: 1.2, bm25B: 0.75, maxDocuments: 100, autoSaveIntervalMs: 5000 });
   });
@@ -62,6 +67,24 @@ describe('MemoryDatabase', () => {
     try { await db.getAllDocuments(); } catch { /* mock might fail */ }
     // After init attempt, DB should be open
     expect(db.isReady).toBe(true);
+  });
+
+  it('does not report a mutation complete before its snapshot is written', async () => {
+    await db.getAllDocuments();
+    let releaseWrite!: () => void;
+    vi.mocked(writeFile).mockImplementationOnce(() => new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    }));
+
+    let settled = false;
+    const mutation = db.upsertEmbedding('doc-1', new Float32Array([1, 2]), 'test-model')
+      .then(() => { settled = true; });
+    await vi.waitFor(() => expect(releaseWrite).toBeTypeOf('function'));
+    expect(settled).toBe(false);
+
+    releaseWrite();
+    await mutation;
+    expect(settled).toBe(true);
   });
 
   // ── Config ───────────────────────────────────────────────────

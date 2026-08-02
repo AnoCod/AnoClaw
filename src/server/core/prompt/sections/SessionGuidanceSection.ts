@@ -44,7 +44,8 @@ export function createSessionGuidanceSection(): SystemPromptSection {
 
       lines.push(
         '',
-        'Coordination tools: TaskAssign starts durable child work; AgentMessage updates active child work; TaskList and TaskOutput inspect delegated task status; TaskStop cancels running tasks.',
+        'Organization actions list, hire, and reassign manage the durable roster. Team actions create, update, status, and delete manage only current-root-session collaboration. AgentMessage handles hierarchy, Team, and MainAgent organization-wide communication.',
+        'Task actions create, assign, claim, update, list, output, stop, and spawn cover durable work and temporary helpers.',
       );
 
       return lines.join('\n');

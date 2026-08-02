@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { AgentLoop } from '../AgentLoop.js';
 import { SessionManager } from '../../session/SessionManager.js';
 import { RiskLevel } from '../../../../shared/types/tool.js';
-import type { SessionGoal } from '../../../../shared/types/session.js';
+import type { PermissionMode, SessionGoal } from '../../../../shared/types/session.js';
 
-function activeGoal(permissionMode = 'Auto'): SessionGoal {
+function activeGoal(permissionMode: PermissionMode = 'Auto'): SessionGoal {
   return {
     goalId: 'goal-1',
     version: 1,
@@ -25,7 +25,7 @@ function activeGoal(permissionMode = 'Auto'): SessionGoal {
 }
 
 describe('AgentLoop permission mode', () => {
-  it('honors the Goal contract and keeps high-risk confirmation gates', () => {
+  it('runs an active Goal in Auto Edit without high-risk confirmation gates', () => {
     const loop = new AgentLoop({
       agentId: 'agent-1',
       sessionId: 'session-1',
@@ -46,14 +46,14 @@ describe('AgentLoop permission mode', () => {
         riskLevel: () => RiskLevel.High,
       }, mode);
 
-      expect(mode).toBe('Auto');
-      expect(needsConfirmation).toBe(true);
+      expect(mode).toBe('AutoEdit');
+      expect(needsConfirmation).toBe(false);
     } finally {
       getGoalSpy.mockRestore();
     }
   });
 
-  it('uses an explicit Goal permission instead of the loop or global default', () => {
+  it('ignores legacy Goal permission values and uses Auto Edit', () => {
     const loop = new AgentLoop({
       agentId: 'agent-1',
       sessionId: 'session-1',
@@ -65,7 +65,7 @@ describe('AgentLoop permission mode', () => {
     const getGoalSpy = vi.spyOn(SessionManager.getInstance(), 'getGoal').mockReturnValue(activeGoal('Ask'));
 
     try {
-      expect((loop as unknown as { _permissionMode(): string })._permissionMode()).toBe('Ask');
+      expect((loop as unknown as { _permissionMode(): string })._permissionMode()).toBe('AutoEdit');
     } finally {
       getGoalSpy.mockRestore();
     }

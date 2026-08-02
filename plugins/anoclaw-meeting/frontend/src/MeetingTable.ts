@@ -248,8 +248,17 @@ export class MeetingTable {
         opacity:0;transition:opacity 0.15s;z-index:10;
         display:flex;align-items:center;gap:4px;
       `;
-      const roleTag = p.role ? `<span style="font-size:7px;color:rgba(255,255,255,0.4);text-transform:uppercase;">${p.role}</span>` : '';
-      tooltip.innerHTML = `<span style="color:${color};font-weight:500;">${p.name || p.id}</span>${roleTag}`;
+      const nameLabel = document.createElement('span');
+      nameLabel.style.color = color;
+      nameLabel.style.fontWeight = '500';
+      nameLabel.textContent = p.name || p.id;
+      tooltip.appendChild(nameLabel);
+      if (p.role) {
+        const roleTag = document.createElement('span');
+        roleTag.style.cssText = 'font-size:7px;color:rgba(255,255,255,0.4);text-transform:uppercase;';
+        roleTag.textContent = p.role;
+        tooltip.appendChild(roleTag);
+      }
       seat.appendChild(tooltip);
 
       // Hover events

@@ -24,6 +24,9 @@ export enum InterruptReason {
   UserStop = 'user_stop',
   UserSteer = 'user_steer',
   ParentStop = 'parent_stop',
+  TaskSelfCancel = 'task_self_cancel',
+  TaskCreatorCancel = 'task_creator_cancel',
+  TaskCoordinatorCancel = 'task_coordinator_cancel',
   Timeout = 'timeout',
 }
 
@@ -40,7 +43,8 @@ export class InterruptController {
   private _controllers: Map<string, AbortController> = new Map();
   private _reasons: Map<string, InterruptReason> = new Map();
   private _parentMap: Map<string, string> = new Map();
-  private _pendingMessages: Map<string, string> = new Map();
+  private _pendingMessages: Map<string, string[]> = new Map();
+  private _pendingInterrupts: Map<string, InterruptReason> = new Map();
 
   private constructor() {
   }
@@ -58,8 +62,29 @@ export class InterruptController {
     this._reasons.delete(sessionId);
     const controller = new AbortController();
     this._controllers.set(sessionId, controller);
+    const pendingReason = this._pendingInterrupts.get(sessionId);
+    if (pendingReason) {
+      this._pendingInterrupts.delete(sessionId);
+      controller.abort();
+      this._reasons.set(sessionId, pendingReason);
+    }
     log.debug('Interrupt controller created', { sid: sessionId });
     return controller;
+  }
+
+  /** Abort now, or persist the request until the session controller exists. */
+  requestInterruptWhenAvailable(sessionId: string, reason: InterruptReason): void {
+    if (!this._controllers.has(sessionId)) {
+      const existing = this._pendingInterrupts.get(sessionId);
+      // UserSteer is only a soft wake and must yield to a later hard stop.
+      // ParentStop is a legacy/generic hard stop that may be upgraded to an
+      // exact coordination cancellation. Otherwise the first hard reason wins.
+      if (!existing || shouldReplacePendingInterrupt(existing, reason)) {
+        this._pendingInterrupts.set(sessionId, reason);
+      }
+      return;
+    }
+    this.requestInterrupt(sessionId, reason);
   }
 
   requestInterrupt(sessionId: string, reason: InterruptReason): void {
@@ -71,17 +96,24 @@ export class InterruptController {
     }
   }
 
+  /** Abort every active controller during process shutdown. */
+  interruptAll(reason: InterruptReason = InterruptReason.UserStop): void {
+    for (const sessionId of [...this._controllers.keys()]) {
+      this._interruptOne(sessionId, reason);
+    }
+  }
+
   /** Wake an idle agent session — interrupts ONLY this session, never cascades to children. */
   requestSteerInterrupt(sessionId: string): void {
     this.setPendingUserMessage(sessionId,
       '[System notification] A background task finished. Check the latest message for details.');
-    this._interruptOne(sessionId, InterruptReason.UserSteer);
+    this.requestInterruptWhenAvailable(sessionId, InterruptReason.UserSteer);
   }
 
   /** Abort without cascading to children and without setting a pending message.
    *  Caller should set their own pending message before calling this. */
   wakeOnly(sessionId: string): void {
-    this._interruptOne(sessionId, InterruptReason.UserSteer);
+    this.requestInterruptWhenAvailable(sessionId, InterruptReason.UserSteer);
   }
 
   private _interruptOne(sessionId: string, reason: InterruptReason): void {
@@ -107,6 +139,7 @@ export class InterruptController {
     this._reasons.delete(sessionId);
     this._parentMap.delete(sessionId);
     this._pendingMessages.delete(sessionId);
+    this._pendingInterrupts.delete(sessionId);
 
     // Remove all descendant sessions recursively
     for (const childId of descendants) {
@@ -114,6 +147,7 @@ export class InterruptController {
       this._reasons.delete(childId);
       this._parentMap.delete(childId);
       this._pendingMessages.delete(childId);
+      this._pendingInterrupts.delete(childId);
     }
 
     log.debug('Interrupt controller removed', { sid: sessionId, descendants: descendants.size });
@@ -148,16 +182,40 @@ export class InterruptController {
   }
 
   setPendingUserMessage(sessionId: string, content: string): void {
-    this._pendingMessages.set(sessionId, content);
+    const queue = this._pendingMessages.get(sessionId) || [];
+    queue.push(content);
+    this._pendingMessages.set(sessionId, queue);
   }
 
   takePendingUserMessage(sessionId: string): string | null {
-    const msg = this._pendingMessages.get(sessionId) || null;
-    this._pendingMessages.delete(sessionId);
-    return msg;
+    const queue = this._pendingMessages.get(sessionId);
+    if (!queue?.length) return null;
+    const message = queue.shift()!;
+    if (queue.length === 0) this._pendingMessages.delete(sessionId);
+    return message;
   }
 
   hasPendingUserMessage(sessionId: string): boolean {
-    return this._pendingMessages.has(sessionId);
+    return (this._pendingMessages.get(sessionId)?.length || 0) > 0;
   }
+
+  pendingMessageCount(sessionId: string): number {
+    return this._pendingMessages.get(sessionId)?.length || 0;
+  }
+}
+
+function shouldReplacePendingInterrupt(
+  existing: InterruptReason,
+  incoming: InterruptReason,
+): boolean {
+  if (existing === InterruptReason.UserSteer) {
+    return incoming !== InterruptReason.UserSteer;
+  }
+  return existing === InterruptReason.ParentStop && isTaskCancellation(incoming);
+}
+
+function isTaskCancellation(reason: InterruptReason): boolean {
+  return reason === InterruptReason.TaskSelfCancel
+    || reason === InterruptReason.TaskCreatorCancel
+    || reason === InterruptReason.TaskCoordinatorCancel;
 }

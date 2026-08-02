@@ -13,6 +13,8 @@ import { ClientLogger } from '../../ClientLogger.js';
 import { TalentPoolPanel } from './talent-pool/TalentPoolPanel.js';
 import { showHireDialog } from './talent-pool/HireDialog.js';
 import { showSaveToPoolDialog } from './talent-pool/SaveToPoolDialog.js';
+import { CoordinationStore } from '../../viewmodel/CoordinationStore.js';
+import { onLocaleChange, t } from '../../i18n/index.js';
 
 declare const d3: any;
 
@@ -75,6 +77,10 @@ export class AgentsPage implements Page {
 
   // Guard: prevent double reload when save triggers agentsChanged
   private _reloading = false;
+  private _coordination = CoordinationStore.getInstance();
+  private _onCoordinationChanged = () => {
+    if (this._active) this._renderAll();
+  };
 
   // Pending create defaults (from ghost button click)
   private _createDefaults: { parentAgentId: string; role: string } | null = null;
@@ -89,6 +95,7 @@ export class AgentsPage implements Page {
     // Auto-refresh talent pool on external changes
     const sse = App.getInstance().sseClient;
     sse.on('talent_pool_changed', () => this._talentPool?.reload());
+    onLocaleChange(() => this._refreshLocale());
   }
 
   private _initTalentPool(): void {
@@ -110,13 +117,13 @@ export class AgentsPage implements Page {
         });
         const data = await resp.json();
         if (!resp.ok) {
-          ToastManager.getInstance().error(data.error || 'Hire failed');
+          ToastManager.getInstance().error(data.error || t('agents.toast.hireFailed'));
           return;
         }
-        ToastManager.getInstance().success(`${result.name} has joined the team!`);
+        ToastManager.getInstance().success(t('agents.toast.joined', { name: result.name }));
         App.getInstance().agentVM.loadAgents().then(() => this._load());
       } catch (err) {
-        ToastManager.getInstance().error('Hire failed: network error');
+        ToastManager.getInstance().error(t('agents.toast.hireNetwork'));
         ClientLogger.ui.error('hireTemplate', { error: String(err) });
       }
     });
@@ -129,11 +136,15 @@ export class AgentsPage implements Page {
     this.container.addEventListener('wheel', this._onWheel, { passive: false });
     this._load();
     App.getInstance().agentVM.on('agentsChanged', this._onAgentsChanged);
+    this._coordination.on('changed', this._onCoordinationChanged);
+    const activeSessionId = App.getInstance().conversationVM.getActiveSessionId();
+    if (activeSessionId) void this._coordination.loadForSession(activeSessionId);
   }
 
   onExit(): void {
     this._active = false;
     App.getInstance().agentVM.off('agentsChanged', this._onAgentsChanged);
+    this._coordination.off('changed', this._onCoordinationChanged);
     this.container.removeEventListener('wheel', this._onWheel);
     this._savePositions();
     if (this._sim) { this._sim.stop(); this._sim = null; }
@@ -165,9 +176,9 @@ export class AgentsPage implements Page {
     if (!agents || agents.length === 0) {
       this.container.innerHTML = `
         <div class="ag-empty">
-          <span class="ag-empty-title">No CEO configured</span>
-          <span class="ag-empty-desc">Create a CEO/MainAgent first, then add managers and members under it.</span>
-          <button class="ag-empty-btn" id="ag-create-first">Create CEO</button>
+          <span class="ag-empty-title">${t('agents.emptyTitle')}</span>
+          <span class="ag-empty-desc">${t('agents.emptyDescription')}</span>
+          <button class="ag-empty-btn" id="ag-create-first">${t('agents.createCeo')}</button>
         </div>
       `;
       this.container.querySelector('#ag-create-first')!.addEventListener('click', () => this._openEditPanel(this._firstAgentDraft()));
@@ -384,7 +395,7 @@ export class AgentsPage implements Page {
     // Talent pool button
     const tb = document.createElement('button');
     tb.className = 'ag-talent-btn';
-    tb.innerHTML = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--color-info);"></span> Talent Pool';
+    tb.innerHTML = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--color-info);"></span> ${t('agents.talentPool')}`;
     tb.addEventListener('click', () => {
       tb.classList.toggle('active');
       this._talentPool?.toggle();
@@ -443,7 +454,7 @@ export class AgentsPage implements Page {
         g.appendChild(plus);
         const lbl = document.createElementNS(svgNS, 'text');
         lbl.setAttribute('class', 'ag-node-label'); lbl.setAttribute('text-anchor', 'middle');
-        lbl.setAttribute('dy', String(GHOST_R + 14)); lbl.textContent = n.addRole || '';
+        lbl.setAttribute('dy', String(GHOST_R + 14)); lbl.textContent = this._roleLabel(n.addRole || '');
         lbl.style.pointerEvents = 'none';
         g.appendChild(lbl);
         // Click ghost → open edit panel to create
@@ -458,6 +469,14 @@ export class AgentsPage implements Page {
           }
         });
       } else {
+        const activeSessionId = App.getInstance().conversationVM.getActiveSessionId();
+        const coordination = activeSessionId
+          ? this._coordination.stateForSession(activeSessionId)
+          : undefined;
+        const activeTeam = coordination?.teams.find((team) => team.state === 'active');
+        const coordinatedTask = coordination?.tasks.find(
+          (task) => task.assigneeAgentId === n.id && !['completed', 'failed', 'cancelled'].includes(task.status),
+        );
         const style = n.agent ? (ROLE_STYLES[n.agent.role] || DEFAULT_STYLE) : DEFAULT_STYLE;
         const issue = n.agent ? App.getInstance().agentVM.agentRunnableProblem(n.agent) : null;
         if (issue) {
@@ -495,6 +514,19 @@ export class AgentsPage implements Page {
           marker.setAttribute('y', String(-style.r + 5));
           marker.textContent = '!';
           g.appendChild(marker);
+        }
+        if (activeTeam?.memberAgentIds.includes(n.id)) {
+          const badge = document.createElementNS(svgNS, 'text');
+          badge.setAttribute('class', `ag-team-badge ag-team-badge-${coordinatedTask?.status || 'idle'}`);
+          badge.setAttribute('x', String(style.r + 7));
+          badge.setAttribute('y', String(-style.r - 2));
+          badge.textContent = coordinatedTask ? this._taskStatusLabel(coordinatedTask.status) : t('agents.team');
+          const badgeTitle = document.createElementNS(svgNS, 'title');
+          badgeTitle.textContent = coordinatedTask
+            ? `${activeTeam.name}: ${coordinatedTask.subject} (${this._taskStatusLabel(coordinatedTask.status)})`
+            : `${activeTeam.name}: ${t('agents.teamIdle')}`;
+          badge.appendChild(badgeTitle);
+          g.appendChild(badge);
         }
         const lbl = document.createElementNS(svgNS, 'text');
         lbl.setAttribute('class', 'ag-node-label'); lbl.setAttribute('text-anchor', 'middle');
@@ -705,7 +737,7 @@ export class AgentsPage implements Page {
 
     const panel = document.createElement('div');
     panel.className = 'ag-edit-panel';
-    panel.innerHTML = '<div class="ag-edit-body" style="text-align:center;padding:40px;">Loading tools...</div>';
+    panel.innerHTML = `<div class="ag-edit-body ag-tools-loading" style="text-align:center;padding:40px;">${t('agents.loadingTools')}</div>`;
     this.container.appendChild(panel);
     this._editPanel = panel;
 
@@ -715,7 +747,7 @@ export class AgentsPage implements Page {
     if (!agent) this._editingAgent = null; // may have changed
 
     const isNew = !agent;
-    const title = isNew ? 'Create Agent' : `Edit: ${agent!.name}`;
+    const title = isNew ? t('agents.createTitle') : t('agents.editTitle', { name: agent!.name });
     const nameVal = agent?.name || '';
     const roleVal = agent?.role || 'Member';
     const providerVal = agent?.provider || 'openai-compatible';
@@ -743,20 +775,22 @@ export class AgentsPage implements Page {
     const pluginGroups = new Map<string, AgentToolMeta[]>();
     for (const tool of sortedTools) {
       if (this._toolSource(tool) !== 'plugin') continue;
-      const pluginName = tool.pluginName || 'Unknown Plugin';
+      const pluginName = tool.pluginName || t('agents.tools.unknownPlugin');
       if (!pluginGroups.has(pluginName)) pluginGroups.set(pluginName, []);
       pluginGroups.get(pluginName)!.push(tool);
     }
 
-    const renderTool = (t: AgentToolMeta): string => {
-      const checked = allowedSet.has(t.name) ? ' checked' : '';
-      const displayName = t.displayName || t.name;
-      const group = t.group || 'Other';
-      const description = t.description || '';
-      const sourceLabel = this._toolSource(t) === 'plugin' ? (t.pluginName || 'Plugin') : 'Native';
-      const searchText = `${displayName} ${t.name} ${group} ${description} ${sourceLabel}`.toLowerCase();
+    const renderTool = (tool: AgentToolMeta): string => {
+      const checked = allowedSet.has(tool.name) ? ' checked' : '';
+      const displayName = tool.displayName || tool.name;
+      const group = tool.group || t('agents.tools.other');
+      const description = tool.description || '';
+      const sourceLabel = this._toolSource(tool) === 'plugin'
+        ? (tool.pluginName || t('agents.tools.pluginGeneric'))
+        : t('agents.tools.native');
+      const searchText = `${displayName} ${tool.name} ${group} ${description} ${sourceLabel}`.toLowerCase();
       return `<label class="ag-tool-card ag-tool-row${checked ? ' ag-tool-card--on' : ''}" data-search="${this._esc(searchText)}">
-        <input type="checkbox" value="${this._esc(t.name)}"${checked}>
+        <input type="checkbox" value="${this._esc(tool.name)}"${checked}>
         <span class="ag-tool-check" aria-hidden="true"></span>
         <span class="ag-tool-card-main">
           <span class="ag-tool-card-name">${this._esc(displayName)}</span>
@@ -766,101 +800,101 @@ export class AgentsPage implements Page {
       </label>`;
     };
 
-    const renderSection = (title: string, tools: AgentToolMeta[], kind: string): string => {
+    const renderSection = (title: string, tools: AgentToolMeta[], kind: string, pluginName = ''): string => {
       if (tools.length === 0) return '';
-      return `<section class="ag-tool-section" data-kind="${this._esc(kind)}">
+      return `<section class="ag-tool-section" data-kind="${this._esc(kind)}" data-plugin-name="${this._esc(pluginName)}">
         <div class="ag-tool-section-head">
           <span class="ag-tool-section-title">${this._esc(title)}</span>
-          <span class="ag-tool-section-count">${tools.length} tools</span>
+          <span class="ag-tool-section-count">${t('agents.tools.count', { count: tools.length })}</span>
         </div>
         <div class="ag-tool-section-items">${tools.map(renderTool).join('')}</div>
       </section>`;
     };
 
-    let toolsHtml = renderSection('Native Tools', nativeTools, 'builtin');
+    let toolsHtml = renderSection(t('agents.tools.native'), nativeTools, 'builtin');
     for (const [pluginName, tools] of pluginGroups) {
-      toolsHtml += renderSection(`Plugin: ${pluginName}`, tools, 'plugin');
+      toolsHtml += renderSection(t('agents.tools.plugin', { name: pluginName }), tools, 'plugin', pluginName);
     }
 
     panel.innerHTML = `
       <div class="ag-edit-header">
         <h3>${this._esc(title)}</h3>
-        <button class="ag-edit-close">&times;</button>
+        <button class="ag-edit-close" title="${t('agents.action.close')}" aria-label="${t('agents.action.close')}">&times;</button>
       </div>
       <div class="ag-edit-body">
         <div class="ag-edit-form">
           <div class="ag-field">
-            <label for="ag-edit-name">Name</label>
-            <input type="text" id="ag-edit-name" value="${this._esc(nameVal)}" placeholder="Agent name">
+            <label for="ag-edit-name">${t('agents.field.name')}</label>
+            <input type="text" id="ag-edit-name" value="${this._esc(nameVal)}" placeholder="${t('agents.placeholder.name')}">
           </div>
           <div class="ag-field">
-            <label for="ag-edit-role">Role</label>
+            <label for="ag-edit-role">${t('agents.field.role')}</label>
             <select id="ag-edit-role">
-              <option value="MainAgent" ${roleVal === 'MainAgent' ? 'selected' : ''}>CEO</option>
-              <option value="Manager" ${roleVal === 'Manager' ? 'selected' : ''}>Manager</option>
-              <option value="Member" ${roleVal === 'Member' ? 'selected' : ''}>Member</option>
+              <option value="MainAgent" ${roleVal === 'MainAgent' ? 'selected' : ''}>${t('agents.role.ceo')}</option>
+              <option value="Manager" ${roleVal === 'Manager' ? 'selected' : ''}>${t('agents.role.manager')}</option>
+              <option value="Member" ${roleVal === 'Member' ? 'selected' : ''}>${t('agents.role.member')}</option>
             </select>
           </div>
           <div class="ag-field">
-            <label for="ag-edit-provider">Provider</label>
+            <label for="ag-edit-provider">${t('agents.field.provider')}</label>
             <select id="ag-edit-provider">
               <option value="openai-compatible" ${providerVal !== 'ollama' ? 'selected' : ''}>OpenAI-compatible</option>
               <option value="ollama" ${providerVal === 'ollama' ? 'selected' : ''}>Ollama</option>
             </select>
           </div>
           <div class="ag-field">
-            <label for="ag-edit-api-url">API URL</label>
+            <label for="ag-edit-api-url">${t('agents.field.apiUrl')}</label>
             <input type="text" id="ag-edit-api-url" value="${this._esc(apiUrlVal)}" placeholder="https://api.openai.com">
           </div>
           <div class="ag-field">
-            <label for="ag-edit-api-key">API Key</label>
-            <input type="password" id="ag-edit-api-key" value="" placeholder="${isNew ? 'Required for cloud providers' : 'Leave blank to keep existing key'}" autocomplete="off">
-            ${!isNew && agent?.apiKey ? '<div class="ag-secret-note">A saved key exists. Enter a new key only when rotating it.</div>' : ''}
+            <label for="ag-edit-api-key">${t('agents.field.apiKey')}</label>
+            <input type="password" id="ag-edit-api-key" value="" placeholder="${isNew ? t('agents.placeholder.apiKeyNew') : t('agents.placeholder.apiKeyExisting')}" autocomplete="off">
+            ${!isNew && agent?.apiKey ? `<div class="ag-secret-note">${t('agents.secretSaved')}</div>` : ''}
           </div>
           <div class="ag-field">
-            <label for="ag-edit-model">Model</label>
-            <input type="text" id="ag-edit-model" value="${this._esc(modelVal)}" placeholder="e.g. claude-sonnet-4-6">
+            <label for="ag-edit-model">${t('agents.field.model')}</label>
+            <input type="text" id="ag-edit-model" value="${this._esc(modelVal)}" placeholder="${t('agents.placeholder.model')}">
           </div>
           <div class="ag-field ag-field-grid">
             <span>
-              <label for="ag-edit-context">Context</label>
+              <label for="ag-edit-context">${t('agents.field.context')}</label>
               <input type="number" id="ag-edit-context" value="${contextWindowVal}" min="1000" step="1000">
             </span>
             <span>
-              <label for="ag-edit-max-turns">Max turns</label>
+              <label for="ag-edit-max-turns">${t('agents.field.maxTurns')}</label>
               <input type="number" id="ag-edit-max-turns" value="${maxTurnsVal}" min="0" step="1">
             </span>
             <span>
-              <label for="ag-edit-temperature">Temp</label>
+              <label for="ag-edit-temperature">${t('agents.field.temperature')}</label>
               <input type="number" id="ag-edit-temperature" value="${temperatureVal}" min="0" max="2" step="0.1">
             </span>
           </div>
           <div class="ag-field ag-field-prompt">
-            <label for="ag-edit-prompt">System Prompt</label>
-            <textarea id="ag-edit-prompt" rows="10" placeholder="Agent system prompt">${this._esc(promptVal)}</textarea>
+            <label for="ag-edit-prompt">${t('agents.field.systemPrompt')}</label>
+            <textarea id="ag-edit-prompt" rows="10" placeholder="${t('agents.placeholder.systemPrompt')}">${this._esc(promptVal)}</textarea>
           </div>
         </div>
-        <section class="ag-tools-panel" aria-label="Allowed Tools">
+        <section class="ag-tools-panel" aria-label="${t('agents.tools.allowed')}">
           <div class="ag-tools-head">
             <div>
-              <label for="ag-tool-search">Allowed Tools</label>
-              <span class="ag-tools-count"><span id="ag-tool-count">${selectedToolCount}</span> / ${meta.tools.length} selected</span>
+              <label for="ag-tool-search">${t('agents.tools.allowed')}</label>
+              <span class="ag-tools-count"><span id="ag-tool-count">${selectedToolCount}</span><span class="ag-tools-count-label">${t('agents.tools.selectedSuffix', { total: meta.tools.length })}</span></span>
             </div>
             <div class="ag-tools-actions">
-              <button type="button" class="ag-tools-select-visible">Select visible</button>
-              <button type="button" class="ag-tools-clear">Clear</button>
+              <button type="button" class="ag-tools-select-visible">${t('agents.tools.selectVisible')}</button>
+              <button type="button" class="ag-tools-clear">${t('agents.tools.clear')}</button>
             </div>
           </div>
-          <input type="search" id="ag-tool-search" class="ag-tool-search" placeholder="Search tools by name, group, or description">
+          <input type="search" id="ag-tool-search" class="ag-tool-search" placeholder="${t('agents.tools.search')}">
           <div class="ag-tool-list">${toolsHtml}</div>
-          <div class="ag-tool-empty" hidden>No tools match this search.</div>
+          <div class="ag-tool-empty" hidden>${t('agents.tools.noMatch')}</div>
         </section>
       </div>
       <div class="ag-edit-footer">
-        ${!isNew ? '<button class="ag-edit-btn-delete">Delete</button>' : ''}
-        <button class="ag-edit-btn-test" type="button">Test</button>
-        <button class="ag-edit-btn-cancel">Cancel</button>
-        <button class="ag-edit-btn-save">Save</button>
+        ${!isNew ? `<button class="ag-edit-btn-delete">${t('common.delete')}</button>` : ''}
+        <button class="ag-edit-btn-test" type="button">${t('agents.action.test')}</button>
+        <button class="ag-edit-btn-cancel">${t('common.cancel')}</button>
+        <button class="ag-edit-btn-save">${t('common.save')}</button>
       </div>
     `;
 
@@ -897,7 +931,7 @@ export class AgentsPage implements Page {
     return {
       role,
       parentAgentId: parent.id,
-      name: `New ${role}`,
+      name: t('agents.newRole', { role: this._roleLabel(role) }),
       provider: parent.provider || 'openai-compatible',
       apiUrl: parent.apiUrl || '',
       model: parent.model || '',
@@ -928,12 +962,12 @@ export class AgentsPage implements Page {
 
   private _hierarchyError(role: string, parentAgentId: string | null): string | null {
     const agents = App.getInstance().agentVM.agents;
-    if (role === 'MainAgent') return parentAgentId ? 'CEO/MainAgent cannot have a parent' : null;
-    if (!parentAgentId) return `${role} requires a parent agent`;
+    if (role === 'MainAgent') return parentAgentId ? t('agents.validation.ceoNoParent') : null;
+    if (!parentAgentId) return t('agents.validation.parentRequired', { role: this._roleLabel(role) });
     const parent = agents.find(a => a.id === parentAgentId);
-    if (!parent) return 'Parent agent is not configured';
-    if (role === 'Manager' && parent.role !== 'MainAgent') return 'Managers must report directly to the CEO';
-    if (role === 'Member' && parent.role !== 'Manager') return 'Members must report to a Manager';
+    if (!parent) return t('agents.validation.parentMissing');
+    if (role === 'Manager' && parent.role !== 'MainAgent') return t('agents.validation.managerParent');
+    if (role === 'Member' && parent.role !== 'Manager') return t('agents.validation.memberParent');
     return null;
   }
 
@@ -1031,18 +1065,18 @@ export class AgentsPage implements Page {
     const checks = panel.querySelectorAll<HTMLInputElement>('.ag-tool-card input[type="checkbox"]:checked');
     const allowedTools = Array.from(checks).map(cb => cb.value);
 
-    if (!name) { ToastManager.getInstance().error('Name is required'); return; }
-    if (!model) { ToastManager.getInstance().error('Model is required'); return; }
-    if (!apiUrl) { ToastManager.getInstance().error('API URL is required'); return; }
+    if (!name) { ToastManager.getInstance().error(t('agents.validation.nameRequired')); return; }
+    if (!model) { ToastManager.getInstance().error(t('agents.validation.modelRequired')); return; }
+    if (!apiUrl) { ToastManager.getInstance().error(t('agents.validation.apiUrlRequired')); return; }
     const duplicateMainAgent = role === 'MainAgent'
       && App.getInstance().agentVM.agents.some(a => a.role === 'MainAgent' && a.id !== this._editingAgent?.id);
-    if (duplicateMainAgent) { ToastManager.getInstance().error('Only one CEO/MainAgent is allowed'); return; }
+    if (duplicateMainAgent) { ToastManager.getInstance().error(t('agents.validation.oneCeo')); return; }
     const parentAgentId = this._editingAgent?.parentAgentId || this._createDefaults?.parentAgentId || null;
     const hierarchyError = this._hierarchyError(role, parentAgentId);
     if (hierarchyError) { ToastManager.getInstance().error(hierarchyError); return; }
-    if (!Number.isFinite(contextWindow) || contextWindow < 1000) { ToastManager.getInstance().error('Context must be at least 1000'); return; }
-    if (!Number.isFinite(maxTurns) || maxTurns < 0 || !Number.isInteger(maxTurns)) { ToastManager.getInstance().error('Max turns must be a non-negative integer'); return; }
-    if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) { ToastManager.getInstance().error('Temperature must be between 0 and 2'); return; }
+    if (!Number.isFinite(contextWindow) || contextWindow < 1000) { ToastManager.getInstance().error(t('agents.validation.contextMin')); return; }
+    if (!Number.isFinite(maxTurns) || maxTurns < 0 || !Number.isInteger(maxTurns)) { ToastManager.getInstance().error(t('agents.validation.maxTurns')); return; }
+    if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) { ToastManager.getInstance().error(t('agents.validation.temperature')); return; }
 
     try {
       const vm = App.getInstance().agentVM;
@@ -1064,8 +1098,8 @@ export class AgentsPage implements Page {
       if (this._editingAgent && this._editingAgent.id) {
         // Editing existing agent
         const ok = await vm.updateAgent(this._editingAgent.id, payload);
-        if (!ok) { this._reloading = false; ToastManager.getInstance().error(vm.lastError || 'Update failed'); return; }
-        ToastManager.getInstance().success(`Updated ${name}`);
+        if (!ok) { this._reloading = false; ToastManager.getInstance().error(vm.lastError || t('agents.toast.updateFailed')); return; }
+        ToastManager.getInstance().success(t('agents.toast.updated', { name }));
       } else {
         // Creating new agent — include parentAgentId if set via ghost
         const createPayload: any = { ...payload };
@@ -1073,8 +1107,8 @@ export class AgentsPage implements Page {
           createPayload.parentAgentId = this._createDefaults.parentAgentId;
         }
         const result = await vm.createAgent(createPayload);
-        if (!result) { this._reloading = false; ToastManager.getInstance().error(vm.lastError || 'Create failed'); return; }
-        ToastManager.getInstance().success(`Created ${name}`);
+        if (!result) { this._reloading = false; ToastManager.getInstance().error(vm.lastError || t('agents.toast.createFailed')); return; }
+        ToastManager.getInstance().success(t('agents.toast.created', { name }));
       }
       this._closeEditPanel();
       this._createDefaults = null;
@@ -1082,7 +1116,7 @@ export class AgentsPage implements Page {
       await vm.loadAgents();
       this._load();
       this._reloading = false;
-    } catch (err) { this._reloading = false; ToastManager.getInstance().error('Save failed'); ClientLogger.ui.error('AgentsPage saveEdit', { error: String(err) }); }
+    } catch (err) { this._reloading = false; ToastManager.getInstance().error(t('agents.toast.saveFailed')); ClientLogger.ui.error('AgentsPage saveEdit', { error: String(err) }); }
   }
 
   private async _testConnection(): Promise<void> {
@@ -1095,16 +1129,16 @@ export class AgentsPage implements Page {
     const model = (panel.querySelector('#ag-edit-model') as HTMLInputElement).value.trim();
     const btn = panel.querySelector<HTMLButtonElement>('.ag-edit-btn-test');
 
-    if (!model) { ToastManager.getInstance().error('Model is required'); return; }
-    if (!apiUrl) { ToastManager.getInstance().error('API URL is required'); return; }
+    if (!model) { ToastManager.getInstance().error(t('agents.validation.modelRequired')); return; }
+    if (!apiUrl) { ToastManager.getInstance().error(t('agents.validation.apiUrlRequired')); return; }
     if (provider !== 'ollama' && !apiKey && !this._editingAgent?.id) {
-      ToastManager.getInstance().error('API key is required for new cloud agents');
+      ToastManager.getInstance().error(t('agents.validation.apiKeyRequired'));
       return;
     }
 
     if (btn) {
       btn.disabled = true;
-      btn.textContent = 'Testing';
+      btn.textContent = t('agents.action.testing');
     }
 
     try {
@@ -1116,15 +1150,20 @@ export class AgentsPage implements Page {
         model,
       });
       if (result.ok) {
-        const suffix = typeof result.durationMs === 'number' ? ` (${Math.max(1, Math.round(result.durationMs / 1000))}s)` : '';
-        ToastManager.getInstance().success(`${result.message}${suffix}`);
+        const message = typeof result.durationMs === 'number'
+          ? t('agents.toast.connectionDuration', {
+            message: result.message,
+            seconds: Math.max(1, Math.round(result.durationMs / 1000)),
+          })
+          : result.message;
+        ToastManager.getInstance().success(message);
       } else {
         ToastManager.getInstance().error(result.message);
       }
     } finally {
       if (btn) {
         btn.disabled = false;
-        btn.textContent = 'Test';
+        btn.textContent = t('agents.action.test');
       }
     }
   }
@@ -1133,19 +1172,16 @@ export class AgentsPage implements Page {
     if (!this._editingAgent) return;
     const agent = this._editingAgent;
     const descendantCount = this._descendantCount(agent.id);
-    const suffix = descendantCount > 0
-      ? ` This will also delete ${descendantCount} child agent${descendantCount === 1 ? '' : 's'}.`
-      : '';
-    const ok = await ConfirmDialog.show(`Delete ${agent.name}?${suffix}`);
+    const ok = await ConfirmDialog.show(this._deletePrompt(agent.name, descendantCount));
     if (!ok) return;
     try {
       const vm = App.getInstance().agentVM;
       const deleted = await vm.deleteAgent(agent.id, descendantCount > 0);
-      if (!deleted) throw new Error(vm.lastError || 'Delete failed');
-      ToastManager.getInstance().success(`Deleted ${agent.name}`);
+      if (!deleted) throw new Error(vm.lastError || t('agents.toast.deleteFailed'));
+      ToastManager.getInstance().success(t('agents.toast.deleted', { name: agent.name }));
       this._closeEditPanel();
       App.getInstance().agentVM.loadAgents().then(() => this._load());
-    } catch (err) { ToastManager.getInstance().error('Delete failed'); ClientLogger.ui.error('AgentsPage delete', { error: String(err) }); }
+    } catch (err) { ToastManager.getInstance().error(t('agents.toast.deleteFailed')); ClientLogger.ui.error('AgentsPage delete', { error: String(err) }); }
   }
 
   // ═══ Context menu ═════════════════════════════════════════
@@ -1155,18 +1191,18 @@ export class AgentsPage implements Page {
     const menu = document.createElement('div'); menu.className = 'ag-ctx-menu'; menu.style.left = x + 'px'; menu.style.top = y + 'px';
     const items: Array<{ label: string; action: () => void; sep?: boolean }> = [];
     if (agent) {
-      items.push({ label: 'Edit', action: () => { this._createDefaults = null; this._openEditPanel(agent); } });
+      items.push({ label: t('agents.action.edit'), action: () => { this._createDefaults = null; this._openEditPanel(agent); } });
       if (agent.role === 'MainAgent') {
-        items.push({ label: 'Add Manager', action: () => { this._createDefaults = { parentAgentId: agent.id, role: 'Manager' }; this._openEditPanel(this._childDraft(agent, 'Manager')); } });
+        items.push({ label: t('agents.action.addManager'), action: () => { this._createDefaults = { parentAgentId: agent.id, role: 'Manager' }; this._openEditPanel(this._childDraft(agent, 'Manager')); } });
       } else if (agent.role === 'Manager') {
-        items.push({ label: 'Add Member', action: () => { this._createDefaults = { parentAgentId: agent.id, role: 'Member' }; this._openEditPanel(this._childDraft(agent, 'Member')); } });
+        items.push({ label: t('agents.action.addMember'), action: () => { this._createDefaults = { parentAgentId: agent.id, role: 'Member' }; this._openEditPanel(this._childDraft(agent, 'Member')); } });
       }
       items.push({ label: '', action: () => {}, sep: true });
-      items.push({ label: 'Save to Talent Pool', action: () => this._saveAgentToPool(agent) });
+      items.push({ label: t('agents.action.saveToPool'), action: () => this._saveAgentToPool(agent) });
       items.push({ label: '', action: () => {}, sep: true });
-      items.push({ label: 'Delete', action: () => this._confirmDelete(agent) });
+      items.push({ label: t('common.delete'), action: () => this._confirmDelete(agent) });
     } else {
-      items.push({ label: 'Create Agent', action: () => {
+      items.push({ label: t('agents.action.create'), action: () => {
         const draft = this._rootAgentDraft();
         this._createDefaults = draft?.parentAgentId ? { parentAgentId: draft.parentAgentId, role: draft.role || 'Manager' } : null;
         this._openEditPanel(draft);
@@ -1198,25 +1234,22 @@ export class AgentsPage implements Page {
         body: JSON.stringify({ ...this._childDraft(parent, role), allowedTools: [] }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      ToastManager.getInstance().success(`Created ${role}`);
+      ToastManager.getInstance().success(t('agents.toast.roleCreated', { role: this._roleLabel(role) }));
       App.getInstance().agentVM.loadAgents().then(() => this._load());
-    } catch (err) { ToastManager.getInstance().error('Failed to create'); ClientLogger.ui.error('AgentsPage createChild', { error: String(err) }); }
+    } catch (err) { ToastManager.getInstance().error(t('agents.toast.createFailed')); ClientLogger.ui.error('AgentsPage createChild', { error: String(err) }); }
   }
 
   private async _confirmDelete(agent: AgentConfig): Promise<void> {
     const descendantCount = this._descendantCount(agent.id);
-    const suffix = descendantCount > 0
-      ? ` This will also delete ${descendantCount} child agent${descendantCount === 1 ? '' : 's'}.`
-      : '';
-    const ok = await ConfirmDialog.show(`Delete ${agent.name}?${suffix}`);
+    const ok = await ConfirmDialog.show(this._deletePrompt(agent.name, descendantCount));
     if (!ok) return;
     try {
       const vm = App.getInstance().agentVM;
       const deleted = await vm.deleteAgent(agent.id, descendantCount > 0);
-      if (!deleted) throw new Error(vm.lastError || 'Delete failed');
-      ToastManager.getInstance().success(`Deleted ${agent.name}`);
+      if (!deleted) throw new Error(vm.lastError || t('agents.toast.deleteFailed'));
+      ToastManager.getInstance().success(t('agents.toast.deleted', { name: agent.name }));
       App.getInstance().agentVM.loadAgents().then(() => this._load());
-    } catch (err) { ToastManager.getInstance().error('Delete failed'); ClientLogger.ui.error('AgentsPage delete', { error: String(err) }); }
+    } catch (err) { ToastManager.getInstance().error(t('agents.toast.deleteFailed')); ClientLogger.ui.error('AgentsPage delete', { error: String(err) }); }
   }
 
   // ═══ Talent Pool Integration ════════════════════════════════
@@ -1224,11 +1257,11 @@ export class AgentsPage implements Page {
   private async _saveAgentToPool(agent: AgentConfig): Promise<void> {
     try {
       const gRes = await fetch('/api/v1/talent-pool/groups');
-      if (!gRes.ok) { ToastManager.getInstance().error('Failed to load talent pool groups'); return; }
+      if (!gRes.ok) { ToastManager.getInstance().error(t('agents.toast.loadPoolGroupsFailed')); return; }
       const gData = await gRes.json();
       const groups = gData.groups || [];
       if (groups.length === 0) {
-        ToastManager.getInstance().error('Create a domain in Talent Pool first');
+        ToastManager.getInstance().error(t('agents.toast.createPoolDomainFirst'));
         this._talentPool?.open();
         return;
       }
@@ -1247,15 +1280,144 @@ export class AgentsPage implements Page {
         }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      ToastManager.getInstance().success(`Saved "${result.name}" to Talent Pool`);
+      ToastManager.getInstance().success(t('agents.toast.savedToPool', { name: result.name }));
       if (this._talentPool?.visible) {
         this._talentPool.close();
         this._talentPool.open();
       }
     } catch (err) {
-      ToastManager.getInstance().error('Save failed');
+      ToastManager.getInstance().error(t('agents.toast.saveFailed'));
       ClientLogger.ui.error('saveAgentToPool', { error: String(err) });
     }
+  }
+
+  private _refreshLocale(): void {
+    const emptyTitle = this.container.querySelector<HTMLElement>('.ag-empty-title');
+    if (emptyTitle) {
+      emptyTitle.textContent = t('agents.emptyTitle');
+      const description = this.container.querySelector<HTMLElement>('.ag-empty-desc');
+      const create = this.container.querySelector<HTMLButtonElement>('#ag-create-first');
+      if (description) description.textContent = t('agents.emptyDescription');
+      if (create) create.textContent = t('agents.createCeo');
+    }
+
+    if (this._talentBtn) {
+      this._talentBtn.innerHTML = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--color-info);"></span> ${t('agents.talentPool')}`;
+    }
+    if (this._nodeGroup && this._edgeGroup) this._renderAll();
+
+    const panel = this._editPanel;
+    if (!panel) return;
+    const loading = panel.querySelector<HTMLElement>('.ag-tools-loading');
+    if (loading) {
+      loading.textContent = t('agents.loadingTools');
+      return;
+    }
+
+    const setText = (selector: string, value: string): void => {
+      const element = panel.querySelector<HTMLElement>(selector);
+      if (element) element.textContent = value;
+    };
+    const setPlaceholder = (selector: string, value: string): void => {
+      const input = panel.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector);
+      if (input) input.placeholder = value;
+    };
+
+    const isNew = !this._editingAgent;
+    setText('.ag-edit-header h3', isNew
+      ? t('agents.createTitle')
+      : t('agents.editTitle', { name: this._editingAgent?.name || '' }));
+    const close = panel.querySelector<HTMLButtonElement>('.ag-edit-close');
+    if (close) {
+      close.title = t('agents.action.close');
+      close.setAttribute('aria-label', t('agents.action.close'));
+    }
+
+    const fieldLabels: Array<[string, string]> = [
+      ['ag-edit-name', t('agents.field.name')],
+      ['ag-edit-role', t('agents.field.role')],
+      ['ag-edit-provider', t('agents.field.provider')],
+      ['ag-edit-api-url', t('agents.field.apiUrl')],
+      ['ag-edit-api-key', t('agents.field.apiKey')],
+      ['ag-edit-model', t('agents.field.model')],
+      ['ag-edit-context', t('agents.field.context')],
+      ['ag-edit-max-turns', t('agents.field.maxTurns')],
+      ['ag-edit-temperature', t('agents.field.temperature')],
+      ['ag-edit-prompt', t('agents.field.systemPrompt')],
+      ['ag-tool-search', t('agents.tools.allowed')],
+    ];
+    for (const [id, label] of fieldLabels) setText(`label[for="${id}"]`, label);
+
+    setText('#ag-edit-role option[value="MainAgent"]', t('agents.role.ceo'));
+    setText('#ag-edit-role option[value="Manager"]', t('agents.role.manager'));
+    setText('#ag-edit-role option[value="Member"]', t('agents.role.member'));
+    setPlaceholder('#ag-edit-name', t('agents.placeholder.name'));
+    setPlaceholder('#ag-edit-api-key', isNew
+      ? t('agents.placeholder.apiKeyNew')
+      : t('agents.placeholder.apiKeyExisting'));
+    setPlaceholder('#ag-edit-model', t('agents.placeholder.model'));
+    setPlaceholder('#ag-edit-prompt', t('agents.placeholder.systemPrompt'));
+    setPlaceholder('#ag-tool-search', t('agents.tools.search'));
+    setText('.ag-secret-note', t('agents.secretSaved'));
+
+    const toolsPanel = panel.querySelector<HTMLElement>('.ag-tools-panel');
+    toolsPanel?.setAttribute('aria-label', t('agents.tools.allowed'));
+    const toolTotal = panel.querySelectorAll('.ag-tool-card').length;
+    setText('.ag-tools-count-label', t('agents.tools.selectedSuffix', { total: toolTotal }));
+    setText('.ag-tools-select-visible', t('agents.tools.selectVisible'));
+    setText('.ag-tools-clear', t('agents.tools.clear'));
+    setText('.ag-tool-empty', t('agents.tools.noMatch'));
+    panel.querySelectorAll<HTMLElement>('.ag-tool-section').forEach((section) => {
+      const title = section.querySelector<HTMLElement>('.ag-tool-section-title');
+      const count = section.querySelector<HTMLElement>('.ag-tool-section-count');
+      const sectionCount = section.querySelectorAll('.ag-tool-card').length;
+      if (title) {
+        title.textContent = section.dataset.kind === 'plugin'
+          ? t('agents.tools.plugin', { name: section.dataset.pluginName || '' })
+          : t('agents.tools.native');
+      }
+      if (count) count.textContent = t('agents.tools.count', { count: sectionCount });
+    });
+
+    setText('.ag-edit-btn-delete', t('common.delete'));
+    const testButton = panel.querySelector<HTMLButtonElement>('.ag-edit-btn-test');
+    if (testButton) {
+      testButton.textContent = testButton.disabled
+        ? t('agents.action.testing')
+        : t('agents.action.test');
+    }
+    setText('.ag-edit-btn-cancel', t('common.cancel'));
+    setText('.ag-edit-btn-save', t('common.save'));
+  }
+
+  private _roleLabel(role: string): string {
+    if (role === 'MainAgent') return t('agents.role.ceo');
+    if (role === 'Manager') return t('agents.role.manager');
+    if (role === 'Member') return t('agents.role.member');
+    return role;
+  }
+
+  private _taskStatusLabel(status: string): string {
+    const keys = {
+      pending: 'agents.taskStatus.pending',
+      ready: 'agents.taskStatus.ready',
+      assigned: 'agents.taskStatus.assigned',
+      running: 'agents.taskStatus.running',
+      paused: 'agents.taskStatus.paused',
+      completed: 'agents.taskStatus.completed',
+      failed: 'agents.taskStatus.failed',
+      cancelled: 'agents.taskStatus.cancelled',
+    } as const;
+    return status in keys ? t(keys[status as keyof typeof keys]) : status.toUpperCase();
+  }
+
+  private _deletePrompt(name: string, descendantCount: number): string {
+    const descendants = descendantCount < 1
+      ? ''
+      : t(descendantCount === 1 ? 'agents.deleteDescendants.one' : 'agents.deleteDescendants.many', {
+        count: descendantCount,
+      });
+    return t('agents.deleteConfirm', { name, descendants }).trim();
   }
 
   // ═══ Persistence ═════════════════════════════════════════

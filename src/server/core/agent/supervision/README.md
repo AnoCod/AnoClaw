@@ -222,12 +222,14 @@ processMessage()
   │     └── SupervisionManager.heartbeat(sessionId)      // every event
   └── InterruptController.removeController(sessionId)     // cleanup
 
-delegateTask()
-  ├── InterruptController.linkChild(parent, child)       // tree setup
-  ├── BackgroundTaskManager.register(...)                // tracking
-  └── [sub-agent loop in background]
-      ├── InterruptController.unlinkChild(child)         // cleanup
-      └── BackgroundTaskManager.complete/fail(...)       // notification
+CoordinationScheduler
+  ├── CoordinationService.claimTask()                    // atomic ownership
+  ├── WorkspaceLeaseService.acquire()                    // write isolation
+  ├── AgentRuntime.runCoordinationTask()                 // durable worker loop
+  └── task termination
+      ├── InterruptController unlink/cascade             // cleanup
+      ├── WorkspaceLeaseService.release()                // cleanup
+      └── CoordinationService.updateTask()               // durable result
 ```
 
 ### With Gateway / Infra
@@ -239,7 +241,7 @@ SendMessageHandler / StopHandler
 SessionMessageRoute / SessionControlRoutes
   → InterruptController.requestInterrupt()
 
-BackgroundTaskRoute
+Job routes/tools
   → BackgroundTaskManager.getActive() / getTask()
 ```
 

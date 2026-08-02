@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞私密报告
+    url: https://github.com/AnoCod/AnoClaw/security
+    about: 请勿公开漏洞细节；在 Security 页面使用可用的私密报告入口。

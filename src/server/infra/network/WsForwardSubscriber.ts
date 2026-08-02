@@ -13,6 +13,8 @@ import { WsServer } from './WsServer.js';
 import { SessionManager } from '../../core/session/SessionManager.js';
 import { WsMessageType } from '../../../shared/types/ws-protocol.js';
 
+const forwardingInstalled = new WeakSet<WsServer>();
+
 function resolveRootSessionId(sessionId: string): string {
   try {
     const sm = SessionManager.getInstance();
@@ -25,6 +27,7 @@ function resolveRootSessionId(sessionId: string): string {
 
 export function installWsForwarding(): void {
   const ws = WsServer.getInstance();
+  if (forwardingInstalled.has(ws)) return;
 
   // ═══════════════════════════════════════════════════════════════
   // Session lifecycle events
@@ -420,52 +423,68 @@ export function installWsForwarding(): void {
     }
   });
 
-  TypedEventBus.on('artifact:created', (payload) => {
-    const rootId = resolveRootSessionId(payload.sessionId);
-    if (ws.isConnected(rootId)) {
-      ws.send(rootId, {
-        type: WsMessageType.ArtifactCreated,
-        sessionId: payload.sessionId,
-        artifactId: payload.artifactId,
-        artifact: payload.artifact,
+  // ═══════════════════════════════════════════════════════════════
+  // Durable Agent Team coordination
+  // ═══════════════════════════════════════════════════════════════
+
+  TypedEventBus.on('coordination:team_changed', (payload) => {
+    if (ws.isConnected(payload.rootSessionId)) {
+      ws.send(payload.rootSessionId, {
+        type: WsMessageType.TeamChanged,
+        rootSessionId: payload.rootSessionId,
+        revision: payload.revision,
+        team: payload.team,
       });
     }
   });
 
-  TypedEventBus.on('artifact:updated', (payload) => {
-    const rootId = resolveRootSessionId(payload.sessionId);
-    if (ws.isConnected(rootId)) {
-      ws.send(rootId, {
-        type: WsMessageType.ArtifactUpdated,
-        sessionId: payload.sessionId,
-        artifactId: payload.artifactId,
-        artifact: payload.artifact,
+  TypedEventBus.on('coordination:task_changed', (payload) => {
+    if (ws.isConnected(payload.rootSessionId)) {
+      ws.send(payload.rootSessionId, {
+        type: payload.task.status === 'running'
+          ? WsMessageType.CoordinationTaskProgress
+          : WsMessageType.CoordinationTaskChanged,
+        rootSessionId: payload.rootSessionId,
+        revision: payload.revision,
+        task: payload.task,
       });
     }
   });
 
-  TypedEventBus.on('artifact:preview', (payload) => {
-    const rootId = resolveRootSessionId(payload.sessionId);
-    if (ws.isConnected(rootId)) {
-      ws.send(rootId, {
-        type: WsMessageType.ArtifactPreview,
-        sessionId: payload.sessionId,
-        artifactId: payload.artifactId,
-        preview: payload.preview,
-        artifact: payload.artifact,
+  TypedEventBus.on('coordination:message', (payload) => {
+    if (ws.isConnected(payload.rootSessionId)) {
+      ws.send(payload.rootSessionId, {
+        type: WsMessageType.CoordinationMessage,
+        rootSessionId: payload.rootSessionId,
+        revision: payload.revision,
+        coordinationMessage: payload.message,
       });
     }
   });
 
-  TypedEventBus.on('artifact:done', (payload) => {
-    const rootId = resolveRootSessionId(payload.sessionId);
-    if (ws.isConnected(rootId)) {
-      ws.send(rootId, {
-        type: WsMessageType.ArtifactDone,
-        sessionId: payload.sessionId,
-        artifactId: payload.artifactId,
-        artifact: payload.artifact,
+  TypedEventBus.on('coordination:workspace_conflict', (payload) => {
+    if (ws.isConnected(payload.rootSessionId)) {
+      ws.send(payload.rootSessionId, {
+        type: WsMessageType.WorkspaceConflict,
+        rootSessionId: payload.rootSessionId,
+        revision: payload.revision,
+        taskId: payload.taskId,
+        requestedScopes: payload.requestedScopes,
+        lease: payload.holder,
       });
     }
   });
+
+  TypedEventBus.on('coordination:snapshot_required', (payload) => {
+    if (ws.isConnected(payload.rootSessionId)) {
+      ws.send(payload.rootSessionId, {
+        type: WsMessageType.CoordinationSnapshotRequired,
+        rootSessionId: payload.rootSessionId,
+        revision: payload.revision,
+        reason: payload.reason,
+      });
+    }
+  });
+
+  forwardingInstalled.add(ws);
 }

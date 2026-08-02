@@ -15,9 +15,20 @@ import type { Tool } from './Tool.js';
 import type { ToolResult } from '../../../shared/types/tool.js';
 import { InterruptBehavior, RiskLevel } from '../../../shared/types/tool.js';
 import type { ExecutionContext } from '../../../shared/types/session.js';
+import {
+  executionModeToPermissionMode,
+  isAutoApprovedExecutionMode,
+  toolRequiresConfirmation,
+} from '../agent/PermissionModePolicy.js';
 import { createLogger } from '../logger.js';
 import { makeError } from './ToolResult.js';
 import * as path from 'path';
+import {
+  WorkspaceLeaseService,
+  normalizeScope,
+  pathWithinScope,
+} from '../coordination/WorkspaceLeaseService.js';
+import { resolveWorkspacePath } from '../workspace/WorkspacePathBoundary.js';
 
 // ══════════════════════════════════════════════════════════════
 // Configuration constants
@@ -128,21 +139,24 @@ export class ToolPipeline {
     ctx: ExecutionContext,
     toolCallId: string,
   ): Promise<ToolResult> {
+    const effectiveCtx = isAutoApprovedExecutionMode(ctx.mode) && !ctx.userConfirmed
+      ? { ...ctx, userConfirmed: true }
+      : ctx;
 
     // ── Stage 0: Schema Validation ──
     const validationError = ToolPipeline.validateParams(tool, params);
     if (validationError) return ToolPipeline.normalizeOutput(withToolCallId(validationError, toolCallId), tool);
 
     // ── Stage 1: Security Check ──
-    const securityBlock = ToolPipeline.securityCheck(tool, params, ctx);
+    const securityBlock = ToolPipeline.securityCheck(tool, params, effectiveCtx);
     if (securityBlock) return ToolPipeline.normalizeOutput(withToolCallId(securityBlock, toolCallId), tool);
 
     // ── Stage 2: Execute ──
-    let result = await ToolPipeline.execute(tool, params, ctx, toolCallId);
+    let result = await ToolPipeline.execute(tool, params, effectiveCtx, toolCallId);
 
     // ── Stage 3: Retry (only on transient errors) ──
     if (!result.success) {
-      result = await ToolPipeline.retry(tool, params, ctx, result);
+      result = await ToolPipeline.retry(tool, params, effectiveCtx, result);
     }
 
     // ── Stage 4: Output/Error Normalization ──
@@ -171,8 +185,67 @@ export class ToolPipeline {
   ): ToolResult | null {
     const mode = ctx.mode;
 
+    const workspaceMutationTools = new Set(['Write', 'Edit', 'NotebookEdit', 'Bash', 'RunProgram']);
+    if (ctx.coordination && workspaceMutationTools.has(tool.name())) {
+      if (ctx.coordination.readOnly) {
+        return makeError(
+          `Tool "${tool.name()}" is blocked because coordination task "${ctx.coordination.taskId}" is read-only.`,
+          { toolCallId: '' },
+        );
+      }
+      const leases = WorkspaceLeaseService.getInstance().getForTask(ctx.coordination.taskId);
+      if (leases.length === 0) {
+        return makeError(
+          `Workspace lease missing for coordination task "${ctx.coordination.taskId}".`,
+          { toolCallId: '' },
+        );
+      }
+      const pathParams = tool.workspacePathParams();
+      if (tool.name() === 'Bash' || tool.name() === 'RunProgram' || pathParams.length === 0) {
+        if (!leases.some((lease) => lease.scopes.includes('.'))) {
+          return makeError(
+            `Tool "${tool.name()}" requires an exclusive full-workspace lease.`,
+            { toolCallId: '' },
+          );
+        }
+        if (tool.name() === 'Bash' || tool.name() === 'RunProgram') {
+          const processBoundaryError = coordinationProcessBoundaryError(
+            tool.name(),
+            params,
+            ctx.workspace,
+          );
+          if (processBoundaryError) {
+            return makeError(processBoundaryError, { toolCallId: '' });
+          }
+        }
+      } else {
+        for (const paramName of pathParams) {
+          const raw = params[paramName];
+          if (typeof raw !== 'string' || !raw) continue;
+          let rawRelative: string;
+          try {
+            rawRelative = resolveWorkspacePath(ctx.workspace, raw).relativePath;
+          } catch {
+            return makeError(
+              `Path "${raw}" resolves outside the coordination workspace.`,
+              { toolCallId: '' },
+            );
+          }
+          const relative = normalizeScope(rawRelative || '.');
+          const declared = ctx.coordination.writeScope.some((scope) => pathWithinScope(scope, relative));
+          const leased = leases.some((lease) => lease.scopes.some((scope) => pathWithinScope(scope, relative)));
+          if (!declared || !leased) {
+            return makeError(
+              `Path "${raw}" is outside the declared or leased write scope for task "${ctx.coordination.taskId}".`,
+              { toolCallId: '' },
+            );
+          }
+        }
+      }
+    }
+
     // Block non-read-only tools in read-only mode
-    if (!tool.isReadOnly()) {
+    if (!tool.isReadOnly(params)) {
       if (mode === 'read_only' || mode === 'readOnly') {
         return makeError(
           `Tool "${tool.name()}" is not read-only; blocked in ${mode} mode.`,
@@ -182,7 +255,7 @@ export class ToolPipeline {
     }
 
     // Block non-read-only tools in plan mode (except EnterPlanMode/ExitPlanMode gatekeepers)
-    if ((ToolPipeline.isPlanMode(ctx.sessionId) || ToolPipeline.isPlanMode()) && !tool.isReadOnly()) {
+    if ((ToolPipeline.isPlanMode(ctx.sessionId) || ToolPipeline.isPlanMode()) && !tool.isReadOnly(params)) {
       const name = tool.name();
       if (name !== 'EnterPlanMode' && name !== 'ExitPlanMode') {
         return makeError(
@@ -196,13 +269,23 @@ export class ToolPipeline {
     // when the concrete tool action exactly matches what the user approved.
     const allowed = ToolPipeline._allowedPrompts.get(ctx.sessionId);
     const hasApprovedPrompt = allowed ? matchesAllowedPrompt(tool, params, allowed) : false;
-    const hasAutoEditApproval = isAutoEditExecutionMode(mode);
+    const hasAutoEditApproval = isAutoApprovedExecutionMode(mode);
+    const permissionMode = executionModeToPermissionMode(mode);
+    const requiresModeConfirmation = permissionMode
+      ? toolRequiresConfirmation(permissionMode, tool, params)
+      : false;
+    const requiresToolConfirmation = tool.requiresConfirmation(ctx, params);
 
-    // Delegate to the tool's own requiresConfirmation() unless the execution
-    // mode itself is an explicit Auto Edit grant.
-    if (!hasApprovedPrompt && !hasAutoEditApproval && tool.requiresConfirmation(ctx)) {
+    // The selected mode and the tool's own safety policy both participate.
+    // Auto Edit is an explicit pre-authorization for both layers.
+    if (
+      !hasApprovedPrompt
+      && !hasAutoEditApproval
+      && !ctx.userConfirmed
+      && (requiresModeConfirmation || requiresToolConfirmation)
+    ) {
       return makeError(
-        `Tool "${tool.name()}" requires user confirmation (risk: ${tool.riskLevel()}).`,
+        `Tool "${tool.name()}" requires user confirmation (risk: ${tool.riskLevel(params)}).`,
         { toolCallId: '' },
       );
     }
@@ -215,29 +298,13 @@ export class ToolPipeline {
     if (ws) {
       const pathParams = tool.workspacePathParams();
       if (pathParams.length > 0) {
-        // Resolve workspace to a fully-qualified absolute path (adds drive
-        // letter on Windows so we compare apples-to-apples).
-        const workspaceAbs = path.resolve(ws);
-
         for (const paramName of pathParams) {
           const raw = params[paramName];
           if (typeof raw !== 'string' || raw.length === 0) continue;
 
-          // Resolve the same way tools do: absolute paths kept as-is,
-          // relative paths resolved against the workspace.
-          const resolved = path.isAbsolute(raw)
-            ? path.resolve(raw)
-            : path.resolve(workspaceAbs, raw);
-
-          const resolvedNorm = path.normalize(resolved);
-          const wsNorm = path.normalize(workspaceAbs);
-          const inside = process.platform === 'win32'
-            ? resolvedNorm.toLowerCase() === wsNorm.toLowerCase() ||
-              resolvedNorm.toLowerCase().startsWith(wsNorm.toLowerCase() + '\\')
-            : resolvedNorm === wsNorm ||
-              resolvedNorm.startsWith(wsNorm + path.sep);
-
-          if (!inside) {
+          try {
+            resolveWorkspacePath(ws, raw);
+          } catch {
             return makeError(
               `Path boundary violation: "${raw}" resolves outside the workspace.`,
               { toolCallId: '' },
@@ -522,12 +589,6 @@ function waitForRetryDelay(
   });
 }
 
-function isAutoEditExecutionMode(mode: unknown): boolean {
-  if (typeof mode !== 'string') return false;
-  const key = mode.trim().toLowerCase().replace(/-/g, '_');
-  return key === 'auto_edit' || key === 'autoedit';
-}
-
 function makePipelineFailure(
   tool: Tool,
   toolCallId: string,
@@ -577,6 +638,135 @@ function normalizePromptText(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function coordinationProcessBoundaryError(
+  toolName: string,
+  params: Record<string, unknown>,
+  workspaceValue: string,
+): string | null {
+  if (!workspaceValue) {
+    return `Tool "${toolName}" is blocked because the coordination workspace is unavailable.`;
+  }
+
+  const cwd = typeof params.cwd === 'string' && params.cwd.trim()
+    ? params.cwd.trim()
+    : workspaceValue;
+  if (!pathReferenceInsideWorkspace(cwd, workspaceValue, workspaceValue)) {
+    return `Tool "${toolName}" cwd resolves outside the coordination workspace.`;
+  }
+
+  if (toolName === 'Bash') {
+    const command = typeof params.command === 'string' ? params.command : '';
+    const external = externalProcessPathReference(command, workspaceValue, cwd);
+    if (external) {
+      return `Bash command references path "${external}" outside the coordination workspace.`;
+    }
+    if (containsParentTraversal(command)) {
+      return 'Bash command uses parent-directory traversal, which is blocked for coordination tasks.';
+    }
+    if (containsExternalPathVariable(command)) {
+      return 'Bash command references an external user/data directory variable, which is blocked for coordination tasks.';
+    }
+    return null;
+  }
+
+  const program = typeof params.program === 'string' ? params.program.trim() : '';
+  if (looksLikeExplicitProgramPath(program)
+    && !pathReferenceInsideWorkspace(program, workspaceValue, cwd)) {
+    return `RunProgram executable "${program}" resolves outside the coordination workspace; use a PATH command name instead.`;
+  }
+  const args = Array.isArray(params.args)
+    ? params.args.filter((value): value is string => typeof value === 'string')
+    : [];
+  for (const arg of args) {
+    const external = externalProcessPathReference(arg, workspaceValue, cwd);
+    if (external) {
+      return `RunProgram argument references path "${external}" outside the coordination workspace.`;
+    }
+    if (containsParentTraversal(arg) || containsExternalPathVariable(arg)) {
+      return 'RunProgram argument may escape the coordination workspace.';
+    }
+  }
+  return null;
+}
+
+function pathReferenceInsideWorkspace(
+  candidateValue: string,
+  workspaceValue: string,
+  baseValue: string,
+): boolean {
+  const useWindowsPaths = looksLikeWindowsAbsolute(workspaceValue)
+    || looksLikeWindowsAbsolute(candidateValue)
+    || looksLikeWindowsAbsolute(baseValue);
+  const pathApi = useWindowsPaths ? path.win32 : path.posix;
+  const workspace = pathApi.resolve(workspaceValue);
+  const candidate = pathApi.isAbsolute(candidateValue)
+    ? pathApi.resolve(candidateValue)
+    : pathApi.resolve(baseValue, candidateValue);
+  const relative = pathApi.relative(workspace, candidate);
+  return relative === ''
+    || (relative !== '..' && !relative.startsWith(`..${pathApi.sep}`) && !pathApi.isAbsolute(relative));
+}
+
+function externalProcessPathReference(
+  value: string,
+  workspaceValue: string,
+  baseValue: string,
+): string | null {
+  const candidates = looksLikeWindowsAbsolute(workspaceValue)
+    ? extractWindowsAbsolutePaths(value)
+    : extractPosixAbsolutePaths(value);
+  for (const candidate of candidates) {
+    if (!pathReferenceInsideWorkspace(candidate, workspaceValue, baseValue)) return candidate;
+  }
+  return null;
+}
+
+function extractWindowsAbsolutePaths(value: string): string[] {
+  const quoted = [...value.matchAll(/(["'`])((?:[A-Za-z]:[\\/]|\\\\).*?)\1/g)]
+    .map((match) => match[2]);
+  const unquoted = [
+    ...value.matchAll(/(?:^|[\s=(:,])([A-Za-z]:[\\/][^"'`;&|<>\s\r\n]*)/g),
+    ...value.matchAll(/(?:^|[\s=(:,])(\\\\[^\\/"'`;&|<>\s]+\\[^"'`;&|<>\s\r\n]*)/g),
+  ].map((match) => match[1]);
+  return [...quoted, ...unquoted].map(cleanShellPathCandidate);
+}
+
+function extractPosixAbsolutePaths(value: string): string[] {
+  const quoted = [...value.matchAll(/(["'`])(\/.*?)\1/g)].map((match) => match[2]);
+  const unquoted = [...value.matchAll(/(?:^|[\s=(:,])(\/[^"'`;&|<>\s\r\n]*)/g)]
+    .map((match) => match[1]);
+  return [...quoted, ...unquoted]
+    .map(cleanShellPathCandidate)
+    .filter((candidate) => candidate.startsWith('/'));
+}
+
+function cleanShellPathCandidate(value: string): string {
+  return value.trim().replace(/[),:\]]+$/, '');
+}
+
+function looksLikeWindowsAbsolute(value: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(value) || /^\\\\/.test(value);
+}
+
+function looksLikeExplicitProgramPath(value: string): boolean {
+  return looksLikeWindowsAbsolute(value)
+    || value.startsWith('/')
+    || value.startsWith('./')
+    || value.startsWith('.\\')
+    || value.includes('/')
+    || value.includes('\\');
+}
+
+function containsParentTraversal(value: string): boolean {
+  return /(?:^|[\s"'`=(:,;|&])\.\.(?:[\\/]|$)/.test(value)
+    || /[\\/]\.\.(?:[\\/]|$)/.test(value)
+    || /(?:^|[\s"'`=(:,;|&])~[\\/]/.test(value);
+}
+
+function containsExternalPathVariable(value: string): boolean {
+  return /(?:\$(?:env:)?|\$\{|%)(?:HOME|USERPROFILE|APPDATA|LOCALAPPDATA|PROGRAMDATA|CODEX_HOME)(?:\}|%|[\\/]|$)/i.test(value);
 }
 
 function validateJsonSchemaNode(schema: JsonSchemaNode, value: unknown, pathName: string): string | null {

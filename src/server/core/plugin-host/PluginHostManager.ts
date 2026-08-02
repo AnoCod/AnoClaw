@@ -355,7 +355,14 @@ export class PluginHostManager extends EventEmitter {
   // ── Communication ──
 
   /** Send an RPC from main to a specific plugin's worker and wait for response. */
-  async executeHandler(pluginName: string, handler: string, reqData: { body: unknown; params: Record<string, string>; query: string }): Promise<unknown> {
+  async executeHandler(pluginName: string, handler: string, reqData: {
+    body: unknown;
+    params: Record<string, string>;
+    query: string;
+    headers: Record<string, string>;
+    method: string;
+    path: string;
+  }): Promise<unknown> {
     return this._sendToWorker(pluginName, 'plugin.execute', { pluginName, handler, ...reqData });
   }
 

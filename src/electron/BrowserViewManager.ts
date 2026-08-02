@@ -165,6 +165,7 @@ export class BrowserViewManager {
 
     const mainWin = this._getMainWindow?.() ?? null;
     if (mainWin?.contentView) mainWin.contentView.addChildView(view);
+    view.setVisible(false);
     view.setBounds({ x: 0, y: 0, width: 1, height: 1 }); // hidden until positioned
 
     this._views.set(viewId, {
@@ -256,9 +257,12 @@ export class BrowserViewManager {
     const entry = this._views.get(viewId);
     if (!entry) return;
     entry.bounds = { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
-    if (w > 0 && h > 0) {
-      entry.view.setBounds({ x: Math.round(x), y: Math.round(y), width: Math.round(w), height: Math.round(h) });
+    if (w <= 0 || h <= 0) {
+      entry.view.setVisible(false);
+      return;
     }
+    entry.view.setBounds({ x: Math.round(x), y: Math.round(y), width: Math.round(w), height: Math.round(h) });
+    entry.view.setVisible(true);
   }
 
   /** Return all view IDs, newest first. */

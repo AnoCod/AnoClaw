@@ -1,15 +1,14 @@
 /**
  * AnoClaw — SessionsPage Supervision
  * Builds supervision controls (Stop, View Logs) for sub-sessions,
- * manages sub-session card delegates, and handles delegation status updates.
+ * and shows the session chain for delegated work.
  */
 import { App } from '../../app.js';
-import { escapeHtml, formatAgentName } from './SessionsPageUtils.js';
+import { escapeHtml } from './SessionsPageUtils.js';
 import { ConfirmDialog } from '../ConfirmDialog.js';
-import { SubSessionCardDelegate } from '../conversation/delegates/SubSessionCardDelegate.js';
-import type { Message } from '../../types.js';
 import type { SessionNode } from '../../types.js';
 import { ClientLogger } from '../../ClientLogger.js';
+import { onLocaleChange, t } from '../../i18n/index.js';
 
 /**
  * Build and append supervision control buttons for a sub-session node
@@ -36,11 +35,12 @@ export function buildSupervisionButtons(node: SessionNode, overviewPane: HTMLEle
     color: var(--color-text-primary);
     margin-bottom: 2px;
   `;
-  heading.textContent = 'Supervision';
+  heading.textContent = t('supervision.title');
   controls.appendChild(heading);
 
   // Stop Task button
   const stopBtn = document.createElement('button');
+  stopBtn.className = 'supervision-stop-btn';
   stopBtn.style.cssText = `
     padding: 8px 12px;
     background: rgba(239,68,68,0.1);
@@ -53,10 +53,10 @@ export function buildSupervisionButtons(node: SessionNode, overviewPane: HTMLEle
     font-weight: 500;
     transition: opacity 0.15s;
   `;
-  stopBtn.innerHTML = '<span style="margin-right:4px;">⏹</span> Stop Task';
-  stopBtn.title = `Terminate task for session ${node.id}`;
+  stopBtn.innerHTML = `<span style="margin-right:4px;">⏹</span> ${t('supervision.stop')}`;
+  stopBtn.title = t('supervision.stopTitle', { id: node.id });
   stopBtn.addEventListener('click', async () => {
-    const ok = await ConfirmDialog.show(`Stop task for session "${node.title}"?`, 'Stop Task');
+    const ok = await ConfirmDialog.show(t('supervision.stopConfirm', { title: node.title }), t('supervision.stop'));
     if (ok) {
       const convVM = App.getInstance().conversationVM;
       const sessionVM = App.getInstance().sessionVM;
@@ -70,6 +70,7 @@ export function buildSupervisionButtons(node: SessionNode, overviewPane: HTMLEle
 
   // View Logs button
   const logBtn = document.createElement('button');
+  logBtn.className = 'supervision-log-btn';
   logBtn.style.cssText = `
     padding: 8px 12px;
     background: rgba(255,255,255,0.06);
@@ -82,8 +83,8 @@ export function buildSupervisionButtons(node: SessionNode, overviewPane: HTMLEle
     font-weight: 500;
     transition: background 0.15s;
   `;
-  logBtn.innerHTML = '<span style="margin-right:4px;">📋</span> View Logs';
-  logBtn.title = 'View logs for this sub-session';
+  logBtn.innerHTML = `<span style="margin-right:4px;">📋</span> ${t('supervision.logs')}`;
+  logBtn.title = t('supervision.logsTitle');
   logBtn.addEventListener('click', () => { ClientLogger.ui.debug('View logs clicked', { sid: node.id }); });
   logBtn.addEventListener('mouseenter', () => { logBtn.style.background = 'rgba(255,255,255,0.1)'; });
   logBtn.addEventListener('mouseleave', () => { logBtn.style.background = 'rgba(255,255,255,0.06)'; });
@@ -101,64 +102,38 @@ export function buildSupervisionButtons(node: SessionNode, overviewPane: HTMLEle
       font-size: 11px;
       color: var(--color-text-secondary);
     `;
-    chain.innerHTML = `
-      <div style="font-weight:500;color:var(--color-text-primary);margin-bottom:4px;">Session Chain</div>
-      <div>Parent: ${escapeHtml(node.parentSessionId)}</div>
-      <div>Agent: ${escapeHtml(node.agentName || 'Unknown')}</div>
-      <div>Type: ${node.type || 'Sub'}</div>
-    `;
+    const renderChain = () => {
+      chain.innerHTML = `
+        <div style="font-weight:500;color:var(--color-text-primary);margin-bottom:4px;">${t('supervision.chain')}</div>
+        <div>${t('supervision.parent')}: ${escapeHtml(node.parentSessionId!)}</div>
+        <div>${t('supervision.agent')}: ${escapeHtml(node.agentName || t('supervision.unknown'))}</div>
+        <div>${t('supervision.type')}: ${node.type || t('supervision.sub')}</div>
+      `;
+    };
+    renderChain();
     controls.appendChild(chain);
   }
 
+  const stopLocaleListener = onLocaleChange(() => {
+    if (!controls.isConnected) {
+      stopLocaleListener();
+      return;
+    }
+    heading.textContent = t('supervision.title');
+    stopBtn.innerHTML = `<span style="margin-right:4px;">⏹</span> ${t('supervision.stop')}`;
+    stopBtn.title = t('supervision.stopTitle', { id: node.id });
+    logBtn.innerHTML = `<span style="margin-right:4px;">📋</span> ${t('supervision.logs')}`;
+    logBtn.title = t('supervision.logsTitle');
+    const chain = controls.lastElementChild as HTMLElement | null;
+    if (node.parentSessionId && chain?.style) {
+      chain.innerHTML = `
+        <div style="font-weight:500;color:var(--color-text-primary);margin-bottom:4px;">${t('supervision.chain')}</div>
+        <div>${t('supervision.parent')}: ${escapeHtml(node.parentSessionId)}</div>
+        <div>${t('supervision.agent')}: ${escapeHtml(node.agentName || t('supervision.unknown'))}</div>
+        <div>${t('supervision.type')}: ${node.type || t('supervision.sub')}</div>
+      `;
+    }
+  });
+
   overviewPane.appendChild(controls);
-}
-
-/** Manages sub-session card lifecycle: creation and delegation status updates. */
-export class SubSessionCardManager {
-  private _cards = new Map<string, SubSessionCardDelegate>();
-
-  /** Create a sub-session card from a TaskAssign tool result, if applicable. */
-  maybeAddCard(msg: Message, parentEl: HTMLElement): void {
-    if (msg.type !== 'tool_call' || msg.toolName !== 'TaskAssign' || msg.status !== 'success') return;
-
-    const content = msg.content || '';
-    const subSessionMatch = content.match(/Sub-session:\s*(\S+)/);
-    const agentMatch = content.match(/agent\s+'([^']+)'/);
-    const subSessionId = subSessionMatch ? subSessionMatch[1] : '';
-    const agentName = agentMatch ? agentMatch[1] : '';
-
-    if (!subSessionId) return;
-
-    const sessionVM = App.getInstance().sessionVM;
-    const subNode = sessionVM.sessions.getById(subSessionId);
-    const messageCount = subNode ? (subNode as any).messageCount || 0 : 0;
-    const parentSid = (subNode as any)?.parentSessionId as string | undefined;
-    const parentNode = parentSid ? sessionVM.sessions.getById(parentSid) : undefined;
-
-    const delegate = new SubSessionCardDelegate({
-      subSessionId,
-      subAgentId: agentName || subSessionId.split('-').slice(1).join('-'),
-      subAgentName: formatAgentName(agentName || subSessionId),
-      taskDescription: (msg.toolInput as any)?.task || '',
-      messageCount,
-      status: 'running',
-      parentSessionId: parentSid,
-      parentSessionTitle: parentNode?.title,
-      onNavigate: (sid: string) => { App.getInstance().sessionVM.selectSession(sid); },
-    });
-    parentEl.appendChild(delegate.element);
-    this._cards.set(subSessionId, delegate);
-  }
-
-  /** Update card status from WS delegation_status event. */
-  onDelegationStatus(data: { subSessionId: string; phase: string }): void {
-    const card = this._cards.get(data.subSessionId);
-    if (!card) return;
-    if (data.phase === 'completed') card.updateStatus('completed');
-    else if (data.phase === 'error') card.updateStatus('error');
-    else if (data.phase === 'started' || data.phase === 'working') card.updateStatus('running');
-  }
-
-  /** Clear all tracked cards (e.g. on session reset). */
-  clear(): void { this._cards.clear(); }
 }

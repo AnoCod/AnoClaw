@@ -526,6 +526,28 @@ describe('selectHistoryForContext', () => {
     expect(selected.length).toBeLessThan(history.length);
   });
 
+  it('recognizes persisted summaries by stable id when compressed metadata is absent', () => {
+    const summary = makeMessage({
+      id: 'compact-summary-persisted',
+      role: 'system',
+      content: '[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were summarized.',
+      compressed: false,
+    });
+    const history = [
+      makeMessage({ id: 'old', role: 'assistant', content: 'old '.repeat(1000) }),
+      summary,
+      makeMessage({ id: 'recent', role: 'user', content: 'continue the task' }),
+    ];
+
+    const selected = selectHistoryForContext(history, {
+      contextWindow: 2200,
+      reservedTokens: 200,
+    });
+
+    expect(selected.map(m => m.id)).toContain('compact-summary-persisted');
+    expect(selected.map(m => m.id)).toContain('recent');
+  });
+
   it('allows larger context windows to retain more history than smaller windows', () => {
     const history = Array.from({ length: 30 }, (_, i) => makeMessage({
       id: `m-${i}`,

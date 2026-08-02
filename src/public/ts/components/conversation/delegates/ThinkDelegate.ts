@@ -1,6 +1,7 @@
 
 
 import type { ThinkEvent } from '../types.js';
+import { t } from '../../../i18n/index.js';
 
 export class ThinkDelegate {
   element: HTMLElement;
@@ -39,7 +40,10 @@ export class ThinkDelegate {
     const durText = durationMs
       ? `${(durationMs / 1000).toFixed(1)}s`
       : '';
-    label.textContent = durText ? `THINKING - ${durText}` : 'THINKING';
+    const labelKey = durText ? 'message.thinkingDuration' : 'message.thinking';
+    label.textContent = t(labelKey, { duration: durText });
+    label.setAttribute('data-i18n-key', labelKey);
+    if (durText) label.setAttribute('data-i18n-params', JSON.stringify({ duration: durText }));
     indicator.appendChild(label);
 
     // Click header to toggle body visibility
@@ -73,7 +77,10 @@ export class ThinkDelegate {
     // Update duration label
     const labelEl = this.element.querySelector('.cinema-think-indicator span:last-child') as HTMLElement | null;
     if (labelEl && msg.durationMs) {
-      labelEl.textContent = `THINKING - ${((msg.durationMs as number) / 1000).toFixed(1)}s`;
+      const duration = `${((msg.durationMs as number) / 1000).toFixed(1)}s`;
+      labelEl.textContent = t('message.thinkingDuration', { duration });
+      labelEl.setAttribute('data-i18n-key', 'message.thinkingDuration');
+      labelEl.setAttribute('data-i18n-params', JSON.stringify({ duration }));
     }
     // Freeze dot when done
     if (!this._running) {

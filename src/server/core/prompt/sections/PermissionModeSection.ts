@@ -18,17 +18,17 @@ export function createPermissionModeSection(): SystemPromptSection {
       const session = SessionManager.getInstance().session(ctx.sessionId);
       const isSubSession = session ? !session.isMain() : false;
 
-      let mode = isSubSession ? 'Auto' : (ctx.permissionMode || settings.get<string>('ui.permissionMode', 'Auto'));
+      let mode = isSubSession ? 'AutoEdit' : (ctx.permissionMode || settings.get<string>('ui.permissionMode', 'Auto'));
       let effort = isSubSession ? 'HIGH' : (ctx.effort || settings.get<string>('ui.effort', 'NORMAL'));
 
       mode = normalizePermissionMode(mode);
       effort = normalizeEffort(effort);
 
       const modePrompts: Record<string, string> = {
-        Ask: 'You are in ASK mode. The system will pop up confirmation dialogs for non-read-only tools. Call tools directly — no need to ask for permission in text.',
-        AutoEdit: 'You are in AUTO_EDIT mode. All tools are auto-approved. Call any tool without confirmation.',
+        Ask: 'You are in ASK mode. Read-only tools run directly; every tool with side effects triggers a confirmation dialog. Call tools directly — do not ask for approval in text.',
+        AutoEdit: 'You are in AUTO_EDIT mode. The user has pre-authorized every allowed tool, including high-risk, critical, destructive Bash, and external side effects. Call tools directly without confirmation or a text approval request.',
         Plan: 'You are in PLAN mode. Explore first, present an implementation plan, and do not change files.',
-        Auto: 'You are in SAFE_AUTO mode. Low/Medium risk tools (Edit, Write) are auto-approved. High-risk tools (Bash) will trigger a confirmation dialog. Call tools directly.',
+        Auto: 'You are in SAFE_AUTO mode. Safe, low, and medium risk tools are auto-approved. High-risk and critical tools trigger a confirmation dialog. Call tools directly.',
       };
 
       const effortPrompts: Record<string, string> = {

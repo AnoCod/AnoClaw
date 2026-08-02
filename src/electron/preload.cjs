@@ -8,7 +8,6 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   // ── Window controls ──
   windowMinimize: () => ipcRenderer.send('window-minimize'),
-  windowMinimizeAnimate: () => ipcRenderer.send('window-minimize-animate'),
   windowMaximize: () => ipcRenderer.send('window-maximize'),
   windowClose: () => ipcRenderer.send('window-close'),
   isMaximized: () => ipcRenderer.invoke('window-is-maximized'),
@@ -26,29 +25,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getAutoStart: () => ipcRenderer.invoke('get-autostart'),
   setAutoStart: (enabled) => ipcRenderer.send('set-autostart', enabled),
-
-  // ── Floating ball IPC ──
-  onFloatingBallNewSession: (cb) => {
-    ipcRenderer.on('floating-ball-new-session', () => cb());
-  },
-  onFloatingBallOpenSession: (cb) => {
-    ipcRenderer.on('floating-ball-open-session', (_, idx) => cb(idx));
-  },
-  onFloatingBallCommand: (cb) => {
-    const handler = (_, payload) => cb(payload);
-    ipcRenderer.on('floating-ball-command', handler);
-    return () => ipcRenderer.removeListener('floating-ball-command', handler);
-  },
-  onFloatingBallStateChanged: (cb) => {
-    const handler = (_, state) => cb(state);
-    ipcRenderer.on('floating-ball-state-changed', handler);
-    return () => ipcRenderer.removeListener('floating-ball-state-changed', handler);
-  },
-  // Floating ball action (renderer -> main, via send)
-  floatingBallAction: (action, data) => ipcRenderer.send('floating-ball-action', action, data),
-  floatingBallGetSessions: () => ipcRenderer.invoke('floating-ball-sessions'),
-  floatingBallGetState: () => ipcRenderer.invoke('floating-ball-state'),
-  floatingBallUpdateState: (state) => ipcRenderer.send('floating-ball-update-state', state),
 
   // ── File/link opening ──
   openExternal: (url) => ipcRenderer.invoke('open-external', url),

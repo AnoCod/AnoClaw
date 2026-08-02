@@ -37,6 +37,15 @@ export function hasExternalContentChange(diskContent: string, editorContent: str
   return diskContent !== editorContent;
 }
 
+export function isSaveSnapshotCurrent(
+  sentRevision: number,
+  currentRevision: number,
+  sentContent: string,
+  currentContent: string,
+): boolean {
+  return sentRevision === currentRevision && sentContent === currentContent;
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;

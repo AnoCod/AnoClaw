@@ -1,5 +1,13 @@
 /* CJS bridge — first code that runs. */
 const m = require('electron');
+
+// Desktop processes can outlive the terminal/updater that launched them.
+// A broken inherited console pipe must never become an uncaught main-process
+// exception; persistent application logs remain available on disk.
+const ignoreConsoleStreamError = () => {};
+process.stdout?.on?.('error', ignoreConsoleStreamError);
+process.stderr?.on?.('error', ignoreConsoleStreamError);
+
 if (typeof m === 'string') {
   const { spawn } = require('child_process');
   const path = require('path');
@@ -10,8 +18,23 @@ if (typeof m === 'string') {
   // Packaged (asar): __dirname is virtual inside app.asar — use real path.
   const devDir = path.resolve(__dirname, '../..');
   const pkgDir = path.resolve(process.execPath, '..', 'resources', 'app.asar');
-  const appDir = fs.existsSync(pkgDir) ? pkgDir : devDir;
-  const child = spawn(m, [appDir], { stdio: 'inherit', env });
+  const isPackaged = fs.existsSync(pkgDir);
+  const appDir = isPackaged ? pkgDir : devDir;
+  const child = spawn(m, [appDir], isPackaged
+    ? {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: false,
+        env,
+      }
+    : { stdio: 'inherit', env });
+  if (isPackaged) {
+    // The compatibility bridge may be launched from a short-lived terminal or
+    // updater process. Detach the real Electron app so it never inherits a
+    // stdout/stderr pipe that can disappear and crash logging with EPIPE.
+    child.unref();
+    return;
+  }
   child.on('close', (c) => process.exit(c ?? 0));
   return;
 }

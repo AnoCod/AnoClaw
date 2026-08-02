@@ -65,7 +65,7 @@ export class PluginLoader {
   /** Load a single plugin by directory name. Returns null if invalid. */
   loadOne(pluginName: string): PluginState | null {
     safeName(pluginName);
-    const pluginPath = path.join(this._pluginsDir, pluginName);
+    const pluginPath = path.resolve(this._pluginsDir, pluginName);
     const manifestPath = path.join(pluginPath, 'plugin.json');
 
     if (!fs.existsSync(manifestPath)) {
@@ -88,11 +88,28 @@ export class PluginLoader {
 
     if (!manifest.name) return makeErrorState(pluginPath, 'Missing "name" in plugin.json');
     if (!manifest.main) return makeErrorState(pluginPath, 'Missing "main" in plugin.json');
+    if (manifest.name !== pluginName) {
+      return makeErrorState(pluginPath, `Manifest name "${manifest.name}" does not match directory "${pluginName}"`);
+    }
 
     // Resolve main entry to absolute path
     const mainPath = path.resolve(pluginPath, manifest.main);
+    const relativeMain = path.relative(pluginPath, mainPath);
+    if (relativeMain.startsWith('..') || path.isAbsolute(relativeMain)) {
+      return makeErrorState(pluginPath, `Entry file escapes plugin directory: ${manifest.main}`);
+    }
     if (!fs.existsSync(mainPath)) {
       return makeErrorState(pluginPath, `Entry file not found: ${manifest.main}`);
+    }
+    try {
+      const realPluginPath = fs.realpathSync(pluginPath);
+      const realMainPath = fs.realpathSync(mainPath);
+      const realRelativeMain = path.relative(realPluginPath, realMainPath);
+      if (realRelativeMain.startsWith('..') || path.isAbsolute(realRelativeMain)) {
+        return makeErrorState(pluginPath, `Entry file resolves outside plugin directory: ${manifest.main}`);
+      }
+    } catch (err) {
+      return makeErrorState(pluginPath, `Unable to resolve plugin entry: ${(err as Error).message}`);
     }
 
     return {

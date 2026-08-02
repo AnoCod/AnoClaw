@@ -87,6 +87,15 @@ class FakeElement {
     this.parentElement = null;
   }
 
+  replaceWith(replacement: FakeElement): void {
+    if (!this.parentElement) return;
+    const index = this.parentElement.children.indexOf(this);
+    if (index < 0) return;
+    replacement.parentElement = this.parentElement;
+    this.parentElement.children.splice(index, 1, replacement);
+    this.parentElement = null;
+  }
+
   contains(node: FakeElement): boolean {
     if (node === this) return true;
     return this.children.some((child) => child.contains(node));
@@ -200,6 +209,38 @@ afterEach(() => {
 });
 
 describe('ModeSelector', () => {
+  it('updates open menu labels without changing mode, effort, or Goal state', async () => {
+    const selector = await createSelector();
+    selector.setMode('ask', false);
+    selector.setEffort(false, false);
+    selector.setGoal({
+      goalId: 'goal-live',
+      version: 1,
+      status: 'active',
+      objective: 'Keep the current Goal running',
+      acceptanceCriteria: 'The state is unchanged',
+      workspace: 'F:/workspace',
+      runCount: 2,
+      consecutiveFailures: 0,
+      maxRuns: 20,
+      maxConsecutiveFailures: 3,
+      wakeIntervalMs: 15_000,
+      completionMode: 'review',
+      permissionMode: 'AutoEdit',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    openDropdown(selector as unknown as { element: FakeElement });
+
+    const { setLocale } = await import('../../../i18n/index.js');
+    setLocale('en-US');
+
+    expect(selector.getMode()).toBe('ask');
+    expect(selector.isEffortEnabled()).toBe(false);
+    expect((selector.element as unknown as FakeElement).children[0].textContent).toBe('Goal #2 · Ask');
+    expect(fakeDocument.body.children.some((child) => child.classList.contains('mode-dropdown'))).toBe(true);
+  });
+
   it('opens on pointerdown without the following click closing it', async () => {
     const selector = await createSelector();
 

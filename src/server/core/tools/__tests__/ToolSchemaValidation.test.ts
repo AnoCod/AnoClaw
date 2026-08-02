@@ -9,8 +9,8 @@ import { EnterPlanModeTool } from '../builtin/EnterPlanModeTool.js';
 import { ExitPlanModeTool } from '../builtin/ExitPlanModeTool.js';
 import { GlobTool } from '../builtin/GlobTool.js';
 import { GrepTool } from '../builtin/GrepTool.js';
-import { HireEmployeeTool } from '../builtin/HireEmployeeTool.js';
-import { ListEmployeesTool } from '../builtin/ListEmployeesTool.js';
+import { HireEmployeeTool } from '../operations/HireEmployeeTool.js';
+import { ListEmployeesTool } from '../operations/ListEmployeesTool.js';
 import { MemoryDeleteTool } from '../builtin/MemoryDeleteTool.js';
 import { MemoryRecallTool } from '../builtin/MemoryRecallTool.js';
 import { MemorySaveTool } from '../builtin/MemorySaveTool.js';
@@ -23,14 +23,13 @@ import { SkillListTool } from '../builtin/SkillListTool.js';
 import { SkillMatchingTool } from '../builtin/SkillMatchingTool.js';
 import { SkillTool } from '../builtin/SkillTool.js';
 import { SleepTool } from '../builtin/SleepTool.js';
-import { SubAgentDeleteTool } from '../builtin/SubAgentDeleteTool.js';
-import { SubAgentSpawnTool } from '../builtin/SubAgentSpawnTool.js';
-import { TaskAssignTool } from '../builtin/TaskAssignTool.js';
-import { TaskListTool } from '../builtin/TaskListTool.js';
-import { TaskOutputTool } from '../builtin/TaskOutputTool.js';
-import { TaskStopTool } from '../builtin/TaskStopTool.js';
+import { SubAgentSpawnTool } from '../operations/SubAgentSpawnTool.js';
+import { TaskAssignTool } from '../operations/TaskAssignTool.js';
+import { TaskListTool } from '../operations/TaskListTool.js';
+import { TaskOutputTool } from '../operations/TaskOutputTool.js';
+import { TaskStopTool } from '../operations/TaskStopTool.js';
 import { TodoWriteTool } from '../builtin/TodoWriteTool.js';
-import { UpdateOrgTool } from '../builtin/UpdateOrgTool.js';
+import { UpdateOrgTool } from '../operations/UpdateOrgTool.js';
 import { WebFetchTool } from '../builtin/WebFetchTool.js';
 import { WebSearchTool } from '../builtin/WebSearchTool.js';
 import { WriteTool } from '../builtin/WriteTool.js';
@@ -409,43 +408,35 @@ describe('native tool parameter schemas', () => {
     })?.errorMessage).toContain('expected <= 300');
 
     expect(ToolPipeline.validateParams(new TaskAssignTool(), {
+      taskId: 'task-1',
       targetAgentId: 'member-1',
-      task: 'Inspect the native tool tests.',
-      priority: 'normal',
+      expectedVersion: 1,
     })).toBeNull();
 
     expect(ToolPipeline.validateParams(new TaskAssignTool(), {
       targetAgentId: 'member-1',
-      task: '   ',
-    })?.errorMessage).toContain('Invalid format');
+    })?.errorMessage).toContain('taskId');
 
     expect(ToolPipeline.validateParams(new TaskAssignTool(), {
-      targetAgentId: 'member-1',
-      task: 'Inspect the native tool tests.',
-      priority: 'later',
-    })?.errorMessage).toContain('priority');
-
-    expect(ToolPipeline.validateParams(new TaskAssignTool(), {
+      taskId: 'task-1',
       targetAgentId: 'x'.repeat(201),
-      task: 'Inspect the native tool tests.',
     })?.errorMessage).toContain('targetAgentId');
 
     expect(ToolPipeline.validateParams(new TaskOutputTool(), {
-      task_id: 'task-1',
-      max_chars: 200,
-      include_history: true,
-      include_tool_messages: false,
-      tail_messages: 1,
+      taskId: 'task-1',
+      maxChars: 200,
+      wait: true,
+      timeoutMs: 100,
     })).toBeNull();
 
     expect(ToolPipeline.validateParams(new TaskOutputTool(), {
-      task_id: 'task-1',
-      max_chars: 199,
+      taskId: 'task-1',
+      maxChars: 199,
     })?.errorMessage).toContain('expected >= 200');
 
     expect(ToolPipeline.validateParams(new TaskOutputTool(), {
-      task_id: '   ',
-    })?.errorMessage).toContain('task_id');
+      taskId: 'x'.repeat(201),
+    })?.errorMessage).toContain('expected at most 200');
 
     expect(ToolPipeline.validateParams(new TaskStopTool(), {
       taskId: 'task-1',
@@ -456,17 +447,6 @@ describe('native tool parameter schemas', () => {
       anything: true,
     })?.errorMessage).toContain('Unexpected parameter');
 
-    expect(ToolPipeline.validateParams(new SubAgentDeleteTool(), {
-      agentId: 'subagent-1',
-      dry_run: true,
-      reason: 'cleanup',
-    })).toBeNull();
-
-    expect(ToolPipeline.validateParams(new SubAgentDeleteTool(), {
-      agentId: 'subagent-1',
-      dry_run: 'yes',
-    })?.errorMessage).toContain('dry_run');
-
     expect(ToolPipeline.validateParams(new EnterPlanModeTool(), {
       anything: true,
     })?.errorMessage).toContain('Unexpected parameter');
@@ -476,24 +456,28 @@ describe('native tool parameter schemas', () => {
     const tool = new AgentMessageTool();
 
     expect(ToolPipeline.validateParams(tool, {
-      targetAgentId: 'member-1',
+      to: 'member-1',
+      kind: 'note',
       content: 'Please check the current task status.',
       summary: 'Status check',
     })).toBeNull();
 
     expect(ToolPipeline.validateParams(tool, {
-      targetAgentId: 'member-1',
-      content: '   ',
-    })?.errorMessage).toContain('content');
+      to: 'member-1',
+      kind: 'note',
+      content: 'x'.repeat(20001),
+    })?.errorMessage).toContain('expected at most 20000');
 
     expect(ToolPipeline.validateParams(tool, {
-      targetAgentId: 'member-1',
+      to: 'member-1',
+      kind: 'note',
       content: 'Please check the current task status.',
       summary: 'x'.repeat(121),
     })?.errorMessage).toContain('summary');
 
     expect(ToolPipeline.validateParams(tool, {
-      targetAgentId: 'member-1',
+      to: 'member-1',
+      kind: 'note',
       content: 'Please check the current task status.',
       typo: true,
     })?.errorMessage).toContain('Unexpected parameter');
@@ -571,29 +555,30 @@ describe('native tool parameter schemas', () => {
     expect(ToolPipeline.validateParams(tool, {
       description: 'Inspect a focused subsystem',
       prompt: 'Review the relevant files and report findings.',
-      subagent_type: 'Explore',
+      type: 'Explore',
       model: 'sonnet',
-      persist: false,
-      run_in_background: true,
+      background: true,
+      contextMode: 'fork',
+      readOnly: true,
     })).toBeNull();
 
     expect(ToolPipeline.validateParams(tool, {
       description: 'Inspect a focused subsystem',
       prompt: 'Review the relevant files and report findings.',
-      subagent_type: 'Worker',
-    })?.errorMessage).toContain('subagent_type');
+      type: 'Worker',
+    })?.errorMessage).toContain('type');
 
     expect(ToolPipeline.validateParams(tool, {
       description: 'Inspect a focused subsystem',
       prompt: 'Review the relevant files and report findings.',
-      subagent_type: 'Explore',
-      run_in_background: 'false',
-    })?.errorMessage).toContain('run_in_background');
+      type: 'Explore',
+      background: 'false',
+    })?.errorMessage).toContain('background');
 
     expect(ToolPipeline.validateParams(tool, {
       description: 'Inspect a focused subsystem',
       prompt: 'Review the relevant files and report findings.',
-      subagent_type: 'Explore',
+      type: 'Explore',
       extra: true,
     })?.errorMessage).toContain('Unexpected parameter');
   });

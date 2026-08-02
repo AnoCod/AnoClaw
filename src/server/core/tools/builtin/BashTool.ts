@@ -469,7 +469,7 @@ export class BashTool extends Tool {
     return { isSearch: false, isRead: false };
   }
 
-  /** Get a snapshot of active background processes. For TaskStop / supervision. */
+  /** Get a snapshot of active background processes. For JobStop / supervision. */
   static getBackgroundProcesses(): ReadonlyMap<string, { pid: unknown; startedAt: number; command: string }> {
     const snapshot = new Map<string, { pid: unknown; startedAt: number; command: string }>();
     for (const [key, entry] of backgroundProcesses) {

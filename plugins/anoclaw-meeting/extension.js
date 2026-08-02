@@ -56,7 +56,7 @@ const MAX_TOOL_PROBE_BUDGET = 6;
 const BLOCKED_MEETING_TOOL_NAMES = new Set([
   'Write', 'Edit', 'Bash',
   'KillProcess', 'DeleteFile', 'MoveFile',
-  'HireEmployee', 'TaskAssign', 'SubAgentSpawn',
+  'Organization', 'Team', 'Task', 'AgentMessage',
 ]);
 
 const STOP_WORDS = new Set([

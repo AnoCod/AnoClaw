@@ -1,4 +1,4 @@
-// Registers WebSocket handlers for chat, session, plugin, and artifact events.
+// Registers WebSocket handlers for chat, session, and plugin events.
 
 import type { WSMessageRouter } from '../viewmodel/WSMessageRouter.js';
 import type { ConversationViewModel } from '../viewmodel/ConversationViewModel.js';
@@ -9,6 +9,8 @@ import { BackgroundTaskStore } from '../viewmodel/BackgroundTaskStore.js';
 import { slotRegistry } from '../SlotRegistry.js';
 import { ToastManager } from '../ToastManager.js';
 import { ToolConfirmationQueue } from '../viewmodel/ToolConfirmationQueue.js';
+import { CoordinationStore } from '../viewmodel/CoordinationStore.js';
+import { t } from '../i18n/index.js';
 
 export function registerChatHandlers(
   router: WSMessageRouter,
@@ -28,15 +30,6 @@ export function registerChatHandlers(
     });
   }
 
-  for (const type of ['artifact_created', 'artifact_updated', 'artifact_preview', 'artifact_done']) {
-    router.on(type, (ctx) => {
-      const sessionId = (ctx.data.sessionId as string | undefined) || ctx.sessionId;
-      if (!sessionId) return;
-      const agent = conversationVM.getAgent(sessionId);
-      agent.onServerEvent(ctx.type, { ...ctx.data, sessionId });
-    });
-  }
-
   router.on('command_result', (ctx) => {
     const data = ctx.data as { success: boolean; command: string; output: string };
     if (data.command === 'compact' && data.success) {
@@ -44,16 +37,20 @@ export function registerChatHandlers(
       if (sessionId) {
         ClientLogger.ui.info('Compact completed, reloading history');
         conversationVM.getAgent(sessionId).loadHistory().catch(() => {});
-        window.dispatchEvent(new CustomEvent('compaction-completed', { detail: { sessionId } }));
+        window.dispatchEvent(new CustomEvent('compaction-completed', {
+          detail: { sessionId, success: true, output: data.output },
+        }));
       }
     }
     if (data.command === 'compact' && !data.success) {
-      window.dispatchEvent(new CustomEvent('compaction-completed', { detail: { sessionId: ctx.sessionId } }));
+      window.dispatchEvent(new CustomEvent('compaction-completed', {
+        detail: { sessionId: ctx.sessionId, success: false, output: data.output },
+      }));
     }
     if (data.success) {
-      ToastManager.getInstance().success(data.output || `${data.command} completed`);
+      ToastManager.getInstance().success(data.output || t('chat.command.completed', { command: data.command }));
     } else {
-      ToastManager.getInstance().error(data.output || `${data.command} failed`);
+      ToastManager.getInstance().error(data.output || t('chat.command.failed', { command: data.command }));
     }
   });
 
@@ -125,19 +122,13 @@ export function registerChatHandlers(
     }
   });
 
-  router.on('quality_score_ack', (_ctx) => {
-    ClientLogger.ui.info('Quality score saved');
-  });
-
-  router.on('quality_score_error', (ctx) => {
-    const d = ctx.data as { error: string };
-    ClientLogger.ui.warn('Quality score failed', d);
-  });
-
   router.on('plugin_load_failed', (ctx) => {
     const d = ctx.data as { pluginName?: string; error?: string };
-    const name = d.pluginName || 'plugin';
-    ToastManager.getInstance().show('error', `Plugin "${name}" failed to load: ${d.error || 'unknown error'}`, 8000);
+    const name = d.pluginName || t('chat.plugin.defaultName');
+    ToastManager.getInstance().show('error', t('chat.plugin.loadFailed', {
+      name,
+      error: d.error || t('chat.plugin.unknownError'),
+    }), 8000);
   });
 
   router.on('tool_execution_started', (ctx) => {
@@ -160,6 +151,19 @@ export function registerChatHandlers(
     const store = BackgroundTaskStore.getInstance();
     store.upsert(d);
   });
+
+  for (const type of [
+    'team_changed',
+    'task_changed',
+    'task_progress',
+    'coordination_message',
+    'workspace_conflict',
+    'coordination_snapshot_required',
+  ]) {
+    router.on(type, (ctx) => {
+      CoordinationStore.getInstance().applyWs(ctx.data);
+    });
+  }
 
   router.on('plugin:ui:mount', (ctx) => {
     const d = ctx.data as { slot: string; htmlContent: string; opts?: { position?: 'append' | 'prepend'; replace?: boolean; id?: string; priority?: number }; pluginName: string };

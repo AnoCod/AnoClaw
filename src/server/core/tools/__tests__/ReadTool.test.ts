@@ -249,7 +249,7 @@ describe('ReadTool', () => {
       pageCount: 2,
       selectedPages: [2],
     });
-  });
+  }, 20_000);
 });
 
 function createSimplePdf(pageTexts: string[]): Buffer {

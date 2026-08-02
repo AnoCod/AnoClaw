@@ -9,6 +9,7 @@ import { ClientLogger } from '../ClientLogger.js';
 import type { SessionNode } from '../types.js';
 import { ToastManager } from '../ToastManager.js';
 import type { AgentViewModel } from './AgentViewModel.js';
+import { t } from '../i18n/index.js';
 
 /** localStorage key for persisting the active session across page refreshes. */
 const ACTIVE_SESSION_KEY = 'anoclaw-active-session';
@@ -29,6 +30,7 @@ export class SessionViewModel extends EventEmitter {
     this.sessions.on('sessionAdded', (node: unknown) => { this.emit('sessionAdded', node); });
     this.sessions.on('sessionUpdated', (node: unknown) => { this.emit('sessionUpdated', node); });
     this.sessions.on('sessionRemoved', (node: unknown) => { this.emit('sessionRemoved', node); });
+    this.sessions.on('sessionsCleared', () => { this.emit('sessionsCleared'); });
 
     // Listen for session title changes via WebSocket (e.g. CEO renames a session)
     this._sseClient.on('session_title_changed', (data: unknown) => {
@@ -51,7 +53,7 @@ export class SessionViewModel extends EventEmitter {
     this._sseClient.on('session_hard_deleted', (data: unknown) => {
       const d = data as { sessionId: string };
       if (d.sessionId) {
-        this.sessions.removeSession(d.sessionId);
+        this._removeSessionTree(d.sessionId);
       }
     });
   }
@@ -76,7 +78,7 @@ export class SessionViewModel extends EventEmitter {
     const session = this.sessions.getById(sessionId);
     const result = this._agentVM.selectRunnableAgent(session?.agentId);
     if (!result.ok) {
-      throw new Error(result.message || 'No runnable agent is configured. Open Agents and configure a model connection before sending a message.');
+      throw new Error(result.message || t('runtime.agent.noneRunnableSend'));
     }
   }
 
@@ -87,11 +89,18 @@ export class SessionViewModel extends EventEmitter {
       const resp = await fetch('/api/v1/sessions');
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const raw = await resp.json(); const data: SessionNode[] = Array.isArray(raw) ? raw : (raw.sessions || []);
+      const previousIds = new Set(this.sessions.all.map((session) => session.id));
+      const nextIds = new Set(data.map((session) => session.id));
       // Rebuild the tree from scratch
       this.sessions.clear();
       for (const node of data) {
         this.sessions.addSession(node);
       }
+      const removedIds = Array.from(previousIds).filter((id) => !nextIds.has(id));
+      if (this.activeSessionId && !nextIds.has(this.activeSessionId)) {
+        this._deselectActiveSession();
+      }
+      if (removedIds.length > 0) this.emit('sessionsRemoved', removedIds);
       this.emit('sessionsLoaded', this.sessions.tree);
       ClientLogger.vm.info('Sessions loaded', { count: this.sessions.tree.length });
     } catch (e) {
@@ -122,7 +131,7 @@ export class SessionViewModel extends EventEmitter {
       const resp = await fetch('/api/v1/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name || 'New Session', parentId: parentId || null }),
+        body: JSON.stringify({ name: name || t('runtime.session.newTitle'), parentId: parentId || null }),
       });
       if (!resp.ok) {
         let message = `HTTP ${resp.status}`;
@@ -139,7 +148,7 @@ export class SessionViewModel extends EventEmitter {
       return node;
     } catch (e) {
       ClientLogger.vm.error('Failed to create session', { error: (e as Error).message });
-      ToastManager.getInstance().error((e as Error).message || 'Failed to create session');
+      ToastManager.getInstance().error((e as Error).message || t('runtime.session.createFailed'));
       return null;
     }
   }
@@ -150,12 +159,7 @@ export class SessionViewModel extends EventEmitter {
     try {
       const resp = await fetch(`/api/v1/sessions/${id}`, { method: 'DELETE' });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      this.sessions.removeSession(id);
-      if (this.activeSessionId === id) {
-        this.activeSessionId = null;
-        try { localStorage.removeItem(ACTIVE_SESSION_KEY); } catch (_) { /* ignore */ }
-        this.emit('sessionDeselected');
-      }
+      this._removeSessionTree(id);
       this.emit('sessionArchived', id);
       ClientLogger.vm.info('Session archived', { sid: id });
       return true;
@@ -200,5 +204,22 @@ export class SessionViewModel extends EventEmitter {
       }
     } catch (_) { /* ignore */ }
     return false;
+  }
+
+  private _removeSessionTree(id: string): string[] {
+    const removedIds = this.sessions.removeSession(id);
+    if (removedIds.length === 0) return removedIds;
+    if (this.activeSessionId && removedIds.includes(this.activeSessionId)) {
+      this._deselectActiveSession();
+    }
+    this.emit('sessionsRemoved', removedIds);
+    return removedIds;
+  }
+
+  private _deselectActiveSession(): void {
+    if (this.activeSessionId === null) return;
+    this.activeSessionId = null;
+    try { localStorage.removeItem(ACTIVE_SESSION_KEY); } catch (_) { /* ignore */ }
+    this.emit('sessionDeselected');
   }
 }

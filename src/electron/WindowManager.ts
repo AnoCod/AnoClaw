@@ -1,12 +1,14 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import { app, BrowserWindow as BwType, screen } from 'electron';
+import { DEFAULT_PORT } from '../shared/constants.js';
 
 export class WindowManager {
   private static instance: WindowManager;
   private windows = new Set<BwType>();
   private mainWindow: BwType | null = null;
   private Bw: typeof BwType;
+  private serverPort = DEFAULT_PORT;
 
   private constructor(BrowserWindow: typeof BwType) {
     this.Bw = BrowserWindow;
@@ -21,9 +23,13 @@ export class WindowManager {
     WindowManager.instance = new WindowManager(BrowserWindow);
   }
 
+  setServerPort(port: number): void {
+    if (Number.isInteger(port) && port > 0 && port <= 65535) this.serverPort = port;
+  }
+
   createWindow(sessionId?: string): BwType {
     const state = this.loadState();
-    const port = 3456;
+    const port = this.serverPort;
     // app.getAppPath() works inside asar — Electron patches it to resolve correctly.
     const appRoot = app.getAppPath();
 

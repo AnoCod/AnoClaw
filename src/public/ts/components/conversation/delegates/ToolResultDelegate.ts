@@ -4,13 +4,17 @@
  */
 
 import type { ToolResultData } from '../types.js';
-import { generateToolResultSummary } from './ToolResultSummary.js';
+import {
+  generateToolResultSummaryDescriptor,
+  type ToolResultSummaryDescriptor,
+} from './ToolResultSummary.js';
+import { t, type TranslationKey } from '../../../i18n/index.js';
 
 type ToolTone = 'file' | 'shell' | 'web' | 'api' | 'agent' | 'skill' | 'plan' | 'memory' | 'browser' | 'generic';
 
 interface ToolVisualMeta {
   label: string;
-  category: string;
+  categoryKey: TranslationKey;
   tone: ToolTone;
 }
 
@@ -26,10 +30,9 @@ const FRIENDLY_NAMES: Record<string, string> = {
   WebFetch: 'Web Fetch',
   ApiCall: 'API Call',
   Browser: 'Browser',
-  TaskAssign: 'Task Assign',
-  TaskList: 'Task List',
-  TaskStop: 'Task Stop',
-  TaskOutput: 'Task Output',
+  Organization: 'Organization',
+  Team: 'Team',
+  Task: 'Task',
   Skill: 'Skill',
   SkillInspect: 'Skill Inspect',
   SkillList: 'Skill List',
@@ -37,9 +40,10 @@ const FRIENDLY_NAMES: Record<string, string> = {
   memory_search: 'Memory Search',
   memory_delete: 'Memory Delete',
   NotebookEdit: 'Notebook Edit',
-  AskUserQuestion: 'Ask User',
-  SubAgentSpawn: 'Sub-Agent Spawn',
-  SubAgentDelete: 'Sub-Agent Delete',
+  AskUserQuestion: 'AskUserQuestion',
+  JobList: 'Job List',
+  JobOutput: 'Job Output',
+  JobStop: 'Job Stop',
   AgentMessage: 'Agent Message',
   EnterPlanMode: 'Plan Enter',
   ExitPlanMode: 'Plan Exit',
@@ -49,48 +53,42 @@ const FRIENDLY_NAMES: Record<string, string> = {
   MCPListResources: 'MCP List',
   GatewaySend: 'Gateway Send',
   GatewayStatus: 'Gateway Status',
-  UpdateOrg: 'Update Org',
-  HireEmployee: 'Hire Employee',
-  ListEmployees: 'List Employees',
 };
 
 const TOOL_META: Record<string, ToolVisualMeta> = {
-  Read: { label: 'READ', category: 'File', tone: 'file' },
-  Write: { label: 'WRITE', category: 'File', tone: 'file' },
-  Edit: { label: 'EDIT', category: 'File', tone: 'file' },
-  Grep: { label: 'GREP', category: 'Search', tone: 'file' },
-  Glob: { label: 'GLOB', category: 'Search', tone: 'file' },
-  Bash: { label: 'BASH', category: 'Shell', tone: 'shell' },
-  WebSearch: { label: 'SEARCH', category: 'Web', tone: 'web' },
-  WebFetch: { label: 'FETCH', category: 'Web', tone: 'web' },
-  Browser: { label: 'BROWSER', category: 'Browser', tone: 'browser' },
-  ApiCall: { label: 'API', category: 'API', tone: 'api' },
-  TaskAssign: { label: 'TASK', category: 'Delegation', tone: 'agent' },
-  TaskList: { label: 'TASKS', category: 'Delegation', tone: 'agent' },
-  TaskStop: { label: 'STOP', category: 'Delegation', tone: 'agent' },
-  TaskOutput: { label: 'OUTPUT', category: 'Delegation', tone: 'agent' },
-  SubAgentSpawn: { label: 'SPAWN', category: 'Agent', tone: 'agent' },
-  SubAgentDelete: { label: 'DELETE', category: 'Agent', tone: 'agent' },
-  AgentMessage: { label: 'MESSAGE', category: 'Agent', tone: 'agent' },
-  HireEmployee: { label: 'HIRE', category: 'Org', tone: 'agent' },
-  ListEmployees: { label: 'ORG', category: 'Org', tone: 'agent' },
-  UpdateOrg: { label: 'ORG', category: 'Org', tone: 'agent' },
-  Skill: { label: 'SKILL', category: 'Skill', tone: 'skill' },
-  SkillInspect: { label: 'INSPECT', category: 'Skill', tone: 'skill' },
-  SkillList: { label: 'SKILLS', category: 'Skill', tone: 'skill' },
-  TodoWrite: { label: 'TODO', category: 'Planning', tone: 'plan' },
-  Sleep: { label: 'WAIT', category: 'Planning', tone: 'plan' },
-  EnterPlanMode: { label: 'PLAN', category: 'Planning', tone: 'plan' },
-  ExitPlanMode: { label: 'PLAN', category: 'Planning', tone: 'plan' },
-  memory_save: { label: 'SAVE', category: 'Memory', tone: 'memory' },
-  memory_search: { label: 'SEARCH', category: 'Memory', tone: 'memory' },
-  memory_delete: { label: 'DELETE', category: 'Memory', tone: 'memory' },
-  NotebookEdit: { label: 'NOTEBOOK', category: 'Notebook', tone: 'file' },
-  MCPTool: { label: 'MCP', category: 'MCP', tone: 'api' },
-  MCPReadResource: { label: 'MCP', category: 'MCP', tone: 'api' },
-  MCPListResources: { label: 'MCP', category: 'MCP', tone: 'api' },
-  GatewaySend: { label: 'GATEWAY', category: 'Gateway', tone: 'api' },
-  GatewayStatus: { label: 'GATEWAY', category: 'Gateway', tone: 'api' },
+  Read: { label: 'READ', categoryKey: 'message.tool.category.file', tone: 'file' },
+  Write: { label: 'WRITE', categoryKey: 'message.tool.category.file', tone: 'file' },
+  Edit: { label: 'EDIT', categoryKey: 'message.tool.category.file', tone: 'file' },
+  Grep: { label: 'GREP', categoryKey: 'message.tool.category.search', tone: 'file' },
+  Glob: { label: 'GLOB', categoryKey: 'message.tool.category.search', tone: 'file' },
+  Bash: { label: 'BASH', categoryKey: 'message.tool.category.shell', tone: 'shell' },
+  WebSearch: { label: 'SEARCH', categoryKey: 'message.tool.category.web', tone: 'web' },
+  WebFetch: { label: 'FETCH', categoryKey: 'message.tool.category.web', tone: 'web' },
+  Browser: { label: 'BROWSER', categoryKey: 'message.tool.category.browser', tone: 'browser' },
+  ApiCall: { label: 'API', categoryKey: 'message.tool.category.api', tone: 'api' },
+  Organization: { label: 'ORG', categoryKey: 'message.tool.category.coordination', tone: 'agent' },
+  Team: { label: 'TEAM', categoryKey: 'message.tool.category.coordination', tone: 'agent' },
+  Task: { label: 'TASK', categoryKey: 'message.tool.category.coordination', tone: 'agent' },
+  JobList: { label: 'JOBS', categoryKey: 'message.tool.category.process', tone: 'shell' },
+  JobOutput: { label: 'OUTPUT', categoryKey: 'message.tool.category.process', tone: 'shell' },
+  JobStop: { label: 'STOP', categoryKey: 'message.tool.category.process', tone: 'shell' },
+  AgentMessage: { label: 'MESSAGE', categoryKey: 'message.tool.category.team', tone: 'agent' },
+  Skill: { label: 'SKILL', categoryKey: 'message.tool.category.skill', tone: 'skill' },
+  SkillInspect: { label: 'INSPECT', categoryKey: 'message.tool.category.skill', tone: 'skill' },
+  SkillList: { label: 'SKILLS', categoryKey: 'message.tool.category.skill', tone: 'skill' },
+  TodoWrite: { label: 'TODO', categoryKey: 'message.tool.category.planning', tone: 'plan' },
+  Sleep: { label: 'WAIT', categoryKey: 'message.tool.category.planning', tone: 'plan' },
+  EnterPlanMode: { label: 'PLAN', categoryKey: 'message.tool.category.planning', tone: 'plan' },
+  ExitPlanMode: { label: 'PLAN', categoryKey: 'message.tool.category.planning', tone: 'plan' },
+  memory_save: { label: 'SAVE', categoryKey: 'message.tool.category.memory', tone: 'memory' },
+  memory_search: { label: 'SEARCH', categoryKey: 'message.tool.category.memory', tone: 'memory' },
+  memory_delete: { label: 'DELETE', categoryKey: 'message.tool.category.memory', tone: 'memory' },
+  NotebookEdit: { label: 'NOTEBOOK', categoryKey: 'message.tool.category.notebook', tone: 'file' },
+  MCPTool: { label: 'MCP', categoryKey: 'message.tool.category.mcp', tone: 'api' },
+  MCPReadResource: { label: 'MCP', categoryKey: 'message.tool.category.mcp', tone: 'api' },
+  MCPListResources: { label: 'MCP', categoryKey: 'message.tool.category.mcp', tone: 'api' },
+  GatewaySend: { label: 'GATEWAY', categoryKey: 'message.tool.category.gateway', tone: 'api' },
+  GatewayStatus: { label: 'GATEWAY', categoryKey: 'message.tool.category.gateway', tone: 'api' },
 };
 
 export class ToolResultDelegate {
@@ -102,6 +100,7 @@ export class ToolResultDelegate {
   private expandBtn: HTMLButtonElement | null;
   private fullContent: string;
   private truncatedLength: number;
+  private generatedSummary: ToolResultSummaryDescriptor | null = null;
 
   constructor(event: ToolResultData) {
     this.event = event;
@@ -111,20 +110,25 @@ export class ToolResultDelegate {
     this.truncatedLength = 700;
 
     if (!this.event.summary) {
-      this.event.summary = generateToolResultSummary(this.event);
+      this.generatedSummary = generateToolResultSummaryDescriptor(this.event);
+      this.event.summary = this.generatedSummary.text;
     }
 
     this.element = this.render();
   }
 
   private get userFacingName(): string {
-    return FRIENDLY_NAMES[this.event.toolName] || this.event.toolName;
+    if (this.event.toolName === 'AskUserQuestion') return t('askUser.title');
+    const base = FRIENDLY_NAMES[this.event.toolName] || this.event.toolName;
+    if (!['Organization', 'Team', 'Task'].includes(this.event.toolName)) return base;
+    const action = String(this.input.action || '');
+    return action ? `${base} ${action.charAt(0).toUpperCase()}${action.slice(1)}` : base;
   }
 
   private get meta(): ToolVisualMeta {
     return TOOL_META[this.event.toolName] || {
       label: this.event.toolName.replace(/([a-z])([A-Z])/g, '$1 $2').toUpperCase().slice(0, 14),
-      category: 'Tool',
+      categoryKey: 'message.tool.category.tool',
       tone: 'generic',
     };
   }
@@ -191,6 +195,9 @@ export class ToolResultDelegate {
     const title = document.createElement('span');
     title.className = 'tool-result-title';
     title.textContent = this.userFacingName;
+    if (this.event.toolName === 'AskUserQuestion') {
+      title.dataset.i18nKey = 'askUser.title';
+    }
     header.appendChild(title);
 
     const subjectText = this._headerSubject();
@@ -198,12 +205,17 @@ export class ToolResultDelegate {
       const subject = document.createElement('span');
       subject.className = 'tool-result-subject';
       subject.textContent = subjectText;
+      if (this.generatedSummary?.key && !this._preferredHeaderDetail()) {
+        subject.dataset.i18nKey = this.generatedSummary.key;
+        subject.dataset.i18nParams = JSON.stringify(this.generatedSummary.params || {});
+      }
       header.appendChild(subject);
     }
 
     const category = document.createElement('span');
     category.className = 'tool-result-category';
-    category.textContent = meta.category;
+    category.textContent = t(meta.categoryKey);
+    category.dataset.i18nKey = meta.categoryKey;
     header.appendChild(category);
 
     const spacer = document.createElement('span');
@@ -212,7 +224,9 @@ export class ToolResultDelegate {
 
     const status = document.createElement('span');
     status.className = 'tool-result-status';
-    status.textContent = this.event.isError ? 'Error' : 'Completed';
+    const statusKey = this.event.isError ? 'message.tool.error' : 'message.tool.completed';
+    status.textContent = t(statusKey);
+    status.setAttribute('data-i18n-key', statusKey);
     header.appendChild(status);
 
     if (typeof this.event.durationMs === 'number' && this.event.durationMs > 0) {
@@ -225,7 +239,10 @@ export class ToolResultDelegate {
     if (this.event.tokenCount) {
       const tokens = document.createElement('span');
       tokens.className = 'tool-result-badge';
-      tokens.textContent = this.formatTokens(this.event.tokenCount) + ' tokens';
+      const params = { count: this.formatTokens(this.event.tokenCount) };
+      tokens.textContent = t('message.tool.tokens', params);
+      tokens.setAttribute('data-i18n-key', 'message.tool.tokens');
+      tokens.setAttribute('data-i18n-params', JSON.stringify(params));
       header.appendChild(tokens);
     }
 
@@ -245,21 +262,25 @@ export class ToolResultDelegate {
     const summary = document.createElement('div');
     summary.className = 'tool-result-summary';
     summary.textContent = text;
+    if (this.generatedSummary?.key) {
+      summary.dataset.i18nKey = this.generatedSummary.key;
+      summary.dataset.i18nParams = JSON.stringify(this.generatedSummary.params || {});
+    }
     return summary;
   }
 
-  private _knownIssueCopy(): { title: string; body: string } | null {
+  private _knownIssueCopy(): { titleKey: TranslationKey; bodyKey: TranslationKey } | null {
     const content = this.fullContent.toLowerCase();
     if (this.event.toolName === 'Browser' && content.includes('electron desktop app')) {
       return {
-        title: 'Desktop browser context required',
-        body: 'Browser control is unavailable from CLI runs. Run the same task inside the AnoClaw desktop app.',
+        titleKey: 'message.tool.issue.browserTitle',
+        bodyKey: 'message.tool.issue.browserBody',
       };
     }
     if (this.event.toolName === 'Bash' && /\bdate\b/i.test(this.fullContent) && /(not found|not recognized|no such file|cannot)/i.test(this.fullContent)) {
       return {
-        title: 'Shell command compatibility',
-        body: 'This command looks shell-specific. On Windows, use PowerShell Get-Date; in Git Bash, prefer date +%s for epoch output.',
+        titleKey: 'message.tool.issue.shellTitle',
+        bodyKey: 'message.tool.issue.shellBody',
       };
     }
     return null;
@@ -268,15 +289,16 @@ export class ToolResultDelegate {
   private _buildKnownIssueNote(): HTMLElement | null {
     const copy = this._knownIssueCopy();
     if (!copy) return null;
-    const { title, body } = copy;
     const note = document.createElement('div');
     note.className = 'tool-result-note';
     const noteTitle = document.createElement('div');
     noteTitle.className = 'tool-result-note-title';
-    noteTitle.textContent = title;
+    noteTitle.textContent = t(copy.titleKey);
+    noteTitle.dataset.i18nKey = copy.titleKey;
     const noteBody = document.createElement('div');
     noteBody.className = 'tool-result-note-body';
-    noteBody.textContent = body;
+    noteBody.textContent = t(copy.bodyKey);
+    noteBody.dataset.i18nKey = copy.bodyKey;
     note.append(noteTitle, noteBody);
     return note;
   }
@@ -292,7 +314,8 @@ export class ToolResultDelegate {
       item.className = 'tool-result-detail';
       const key = document.createElement('span');
       key.className = 'tool-result-detail-key';
-      key.textContent = row[0];
+      key.textContent = t(row[0]);
+      key.dataset.i18nKey = row[0];
       const value = document.createElement('span');
       value.className = 'tool-result-detail-value';
       value.textContent = row[1];
@@ -302,16 +325,16 @@ export class ToolResultDelegate {
     return details;
   }
 
-  private _detailRows(): Array<[string, string]> {
+  private _detailRows(): Array<[TranslationKey, string]> {
     const input = this.input;
-    const rows: Array<[string, string]> = [];
-    const add = (label: string, value: unknown, max = 120) => {
+    const rows: Array<[TranslationKey, string]> = [];
+    const add = (label: TranslationKey, value: unknown, max = 120) => {
       if (value === undefined || value === null || value === '') return;
       const text = String(value).replace(/\s+/g, ' ').trim();
       if (!text) return;
       rows.push([label, text.length > max ? text.slice(0, max - 1) + '...' : text]);
     };
-    const addPath = (label: string, value: unknown) => {
+    const addPath = (label: TranslationKey, value: unknown) => {
       if (!value) return;
       const text = String(value).replace(/\\/g, '/');
       add(label, text, 140);
@@ -322,75 +345,93 @@ export class ToolResultDelegate {
       case 'Write':
       case 'Edit':
       case 'NotebookEdit':
-        addPath('Path', input.file_path || input.path || input.notebook_path);
+        addPath('message.tool.detail.path', input.file_path || input.path || input.notebook_path);
         break;
       case 'Grep':
-        add('Pattern', input.pattern || input.query);
-        addPath('Path', input.path || input.cwd);
+        add('message.tool.detail.pattern', input.pattern || input.query);
+        addPath('message.tool.detail.path', input.path || input.cwd);
         break;
       case 'Glob':
-        add('Pattern', input.pattern);
-        addPath('Path', input.path || input.cwd);
+        add('message.tool.detail.pattern', input.pattern);
+        addPath('message.tool.detail.path', input.path || input.cwd);
         break;
       case 'Bash':
-        add('Command', input.command, 180);
-        add('Timeout', input.timeout_ms || input.timeout);
+        add('message.tool.detail.command', input.command, 180);
+        add('message.tool.detail.timeout', input.timeout_ms || input.timeout);
         break;
       case 'WebSearch':
-        add('Query', input.query);
-        add('Domain', input.allowed_domains || input.domains);
+        add('message.tool.detail.query', input.query);
+        add('message.tool.detail.domain', input.allowed_domains || input.domains);
         break;
       case 'WebFetch':
       case 'ApiCall':
-        add('URL', input.url || input.path, 180);
-        add('Method', input.method);
+        add('message.tool.detail.url', input.url || input.path, 180);
+        add('message.tool.detail.method', input.method);
         break;
       case 'Browser':
-        add('Action', input.action || input.command || input.url);
+        add('message.tool.detail.action', input.action || input.command || input.url);
         break;
-      case 'TaskAssign':
-        add('Agent', input.agentName || input.agentId || input.agent_id);
-        add('Priority', input.priority);
-        add('Task', input.task || input.prompt || input.description, 180);
+      case 'Organization':
+        add('message.tool.detail.action', input.action);
+        if (input.action === 'hire') {
+          add('message.tool.detail.employee', input.name);
+          add('message.tool.detail.role', input.role);
+          add('message.tool.detail.manager', input.parentAgentId);
+        } else if (input.action === 'reassign') {
+          add('message.tool.detail.employee', input.agentId);
+          add('message.tool.detail.manager', input.newParentId);
+        }
         break;
-      case 'TaskOutput':
-      case 'TaskStop':
-        add('Task ID', input.task_id || input.taskId);
+      case 'Task':
+        add('message.tool.detail.action', input.action);
+        if (input.action === 'create') {
+          add('message.tool.detail.subject', input.subject);
+          add('message.tool.detail.agent', input.targetAgentId);
+          add('message.tool.detail.priority', input.priority);
+        } else if (input.action === 'spawn') {
+          add('message.tool.detail.type', input.type);
+          add('message.tool.detail.prompt', input.prompt || input.description, 180);
+        } else if (input.action === 'list') {
+          add('message.tool.detail.filter', input.status || input.assigneeAgentId || input.teamId);
+        } else {
+          add('message.tool.detail.taskId', input.taskId);
+          add('message.tool.detail.agent', input.targetAgentId);
+        }
         break;
-      case 'TaskList':
-        add('Filter', input.status || input.agentId || input.agent_id);
-        break;
-      case 'SubAgentSpawn':
-        add('Type', input.subagent_type || input.type);
-        add('Prompt', input.prompt || input.task || input.description, 180);
-        break;
-      case 'SubAgentDelete':
       case 'AgentMessage':
-        add('Agent', input.agentId || input.subAgentId || input.to || input.subAgentName);
-        add('Message', input.message || input.content, 180);
+        add('message.tool.detail.agent', input.agentId || input.subAgentId || input.to || input.subAgentName);
+        add('message.tool.detail.message', input.message || input.content, 180);
+        break;
+      case 'Team':
+        add('message.tool.detail.action', input.action);
+        add('message.tool.detail.team', input.name || input.teamId);
+        break;
+      case 'JobOutput':
+      case 'JobStop':
+        add('message.tool.detail.jobId', input.jobId || input.job_id);
         break;
       case 'Skill':
       case 'SkillInspect':
-        add('Skill', input.skill || input.name || input.skillName);
+        add('message.tool.detail.skill', input.skill || input.name || input.skillName);
         break;
       case 'TodoWrite': {
         const todos = Array.isArray(input.todos) ? input.todos : [];
-        add('Items', todos.length || input.count);
+        add('message.tool.detail.items', todos.length || input.count);
         break;
       }
       case 'Sleep':
-        add('Duration', input.seconds || input.duration || input.durationMs);
-        add('Task ID', input.wait_for_task_id || input.task_id || input.taskId);
+        add('message.tool.detail.duration', input.seconds || input.duration || input.durationMs);
+        add('message.tool.detail.taskId', input.wait_for_task_id || input.task_id || input.taskId);
         break;
       case 'memory_save':
       case 'memory_delete':
-        add('Key', input.key || input.name);
+        add('message.tool.detail.key', input.key || input.name);
         break;
       case 'memory_search':
-        add('Query', input.query);
+        add('message.tool.detail.query', input.query);
         break;
       default:
-        add('Input', this._compactJson(input), 180);
+        add('message.tool.detail.input', this._compactJson(input), 180);
         break;
     }
 
@@ -420,7 +461,7 @@ export class ToolResultDelegate {
     this.expandBtn = document.createElement('button');
     this.expandBtn.type = 'button';
     this.expandBtn.className = 'tool-result-expand';
-    this.expandBtn.textContent = 'Show details +';
+    this._setExpandButtonLabel('message.showDetails');
     this.expandBtn.addEventListener('click', (event) => {
       event.stopPropagation();
       this._toggleContent();
@@ -434,7 +475,7 @@ export class ToolResultDelegate {
     this.element.classList.toggle('is-expanded', this.isExpanded);
     this.element.classList.toggle('is-collapsed', !this.isExpanded);
     this.renderContent();
-    if (this.expandBtn) this.expandBtn.textContent = this.isExpanded ? 'Show less -' : 'Show details +';
+    this._setExpandButtonLabel(this.isExpanded ? 'message.showLess' : 'message.showDetails');
     const toggle = this.element.querySelector('.tool-result-toggle');
     if (toggle) toggle.textContent = this.isExpanded ? '-' : '+';
   }
@@ -442,7 +483,7 @@ export class ToolResultDelegate {
   private renderContent(): void {
     const hasContent = this.fullContent.trim().length > 0;
     const content = !hasContent
-      ? 'No output.'
+      ? t('message.noOutput')
       : this.isExpanded || this.fullContent.length <= this.truncatedLength
         ? this.fullContent
         : this.fullContent.substring(0, this.truncatedLength) + '\n\n...';
@@ -461,13 +502,20 @@ export class ToolResultDelegate {
   }
 
   private _headerSubject(): string {
-    const rows = this._detailRows();
-    const preferred = rows.find(([key]) => /^(command|path|query|pattern|url|task|agent|skill)$/i.test(key)) || rows[0];
-    if (preferred?.[1]) return this._truncateMiddle(preferred[1], 84);
+    const preferred = this._preferredHeaderDetail();
+    if (preferred) return this._truncateMiddle(preferred, 84);
     const summary = (this.event.summary || '').replace(/\s+/g, ' ').trim();
     if (summary) return this._truncateMiddle(summary, 84);
     const firstLine = this.fullContent.split('\n').map((line) => line.trim()).find(Boolean) || '';
     return this._truncateMiddle(firstLine, 84);
+  }
+
+  private _preferredHeaderDetail(): string {
+    const rows = this._detailRows();
+    const preferred = rows.find(([key]) =>
+      /\.(command|path|query|pattern|url|taskId|agent|skill)$/i.test(key),
+    ) || rows[0];
+    return preferred?.[1] || '';
   }
 
   private _truncateMiddle(text: string, max: number): string {
@@ -482,7 +530,7 @@ export class ToolResultDelegate {
     this.isExpanded = false;
     this.element.classList.remove('is-expanded');
     this.element.classList.add('is-collapsed');
-    if (this.expandBtn) this.expandBtn.textContent = 'Show details +';
+    this._setExpandButtonLabel('message.showDetails');
     const toggle = this.element.querySelector('.tool-result-toggle');
     if (toggle) toggle.textContent = '+';
     this.renderContent();
@@ -493,7 +541,7 @@ export class ToolResultDelegate {
     this.isExpanded = true;
     this.element.classList.add('is-expanded');
     this.element.classList.remove('is-collapsed');
-    if (this.expandBtn) this.expandBtn.textContent = 'Show less -';
+    this._setExpandButtonLabel('message.showLess');
     const toggle = this.element.querySelector('.tool-result-toggle');
     if (toggle) toggle.textContent = '-';
     this.renderContent();
@@ -517,5 +565,11 @@ export class ToolResultDelegate {
     const minutes = Math.floor(seconds / 60);
     const remainSec = Math.round(seconds % 60);
     return minutes + 'm ' + remainSec + 's';
+  }
+
+  private _setExpandButtonLabel(key: 'message.showDetails' | 'message.showLess'): void {
+    if (!this.expandBtn) return;
+    this.expandBtn.textContent = t(key);
+    this.expandBtn.setAttribute('data-i18n-key', key);
   }
 }

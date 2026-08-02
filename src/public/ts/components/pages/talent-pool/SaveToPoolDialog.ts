@@ -5,6 +5,7 @@ import { Dialog } from '../../ui/Dialog.js';
 import { Button } from '../../ui/Button.js';
 import type { TalentPoolGroup, AgentConfig } from '../../../types.js';
 import { ToastManager } from '../../../ToastManager.js';
+import { onLocaleChange, t } from '../../../i18n/index.js';
 
 export interface SaveToPoolResult {
   agentId: string;
@@ -16,6 +17,14 @@ export interface SaveToPoolResult {
 /** Shows the save-to-pool dialog. Returns null if cancelled, or SaveToPoolResult on confirm. */
 export function showSaveToPoolDialog(agent: AgentConfig, groups: TalentPoolGroup[]): Promise<SaveToPoolResult | null> {
   return new Promise((resolve) => {
+    let settled = false;
+    let unsubscribeLocale = () => {};
+    const finish = (result: SaveToPoolResult | null): void => {
+      if (settled) return;
+      settled = true;
+      unsubscribeLocale();
+      resolve(result);
+    };
     const defaultGroupId = groups.length > 0 ? groups[0].id : '';
 
     const body = document.createElement('div');
@@ -23,11 +32,11 @@ export function showSaveToPoolDialog(agent: AgentConfig, groups: TalentPoolGroup
 
     const desc = document.createElement('p');
     desc.style.cssText = 'margin:0;font-size:13px;color:var(--color-text-secondary);';
-    desc.innerHTML = `Save <strong>${_esc(agent.name)}</strong> as a reusable agent template.`;
+    desc.innerHTML = t('talent.save.description', { name: _esc(agent.name) });
     body.appendChild(desc);
 
     // Name
-    const nameLabel = _label('Template Name');
+    const nameLabel = _label(t('talent.save.templateName'));
     const nameInput = document.createElement('input');
     nameInput.value = agent.name;
     nameInput.style.cssText = _inputStyle();
@@ -35,15 +44,19 @@ export function showSaveToPoolDialog(agent: AgentConfig, groups: TalentPoolGroup
     body.appendChild(nameInput);
 
     // Description
-    const descLabel = _label('Description');
+    const descLabel = _label(t('talent.save.fieldDescription'));
     const descInput = document.createElement('input');
-    descInput.value = `${agent.role} agent: ${agent.name}`;
+    let generatedDescription = t('talent.save.defaultDescription', {
+      role: _roleLabel(agent.role),
+      name: agent.name,
+    });
+    descInput.value = generatedDescription;
     descInput.style.cssText = _inputStyle();
     body.appendChild(descLabel);
     body.appendChild(descInput);
 
     // Group
-    const groupLabel = _label('Domain');
+    const groupLabel = _label(t('talent.save.domain'));
     const groupSelect = document.createElement('select');
     groupSelect.style.cssText = _inputStyle();
     groupSelect.innerHTML = groups.map(g =>
@@ -55,31 +68,51 @@ export function showSaveToPoolDialog(agent: AgentConfig, groups: TalentPoolGroup
     // Footer
     const footer = document.createElement('div');
     footer.style.cssText = 'display:flex;gap:8px;';
-    const cancelBtn = new Button({ label: 'Cancel' });
-    const saveBtn = new Button({ label: 'Save', variant: 'primary' });
+    const cancelBtn = new Button({ label: t('common.cancel') });
+    const saveBtn = new Button({ label: t('common.save'), variant: 'primary' });
     footer.appendChild(cancelBtn.element);
     footer.appendChild(saveBtn.element);
 
     const dialog = new Dialog({
-      title: 'Save to Talent Pool',
+      title: t('talent.save.title'),
       body,
       footer,
       width: '420px',
+      onClose: () => finish(null),
     });
+
+    const refreshLocale = (): void => {
+      desc.innerHTML = t('talent.save.description', { name: _esc(agent.name) });
+      nameLabel.textContent = t('talent.save.templateName');
+      descLabel.textContent = t('talent.save.fieldDescription');
+      groupLabel.textContent = t('talent.save.domain');
+      if (descInput.value === generatedDescription) {
+        generatedDescription = t('talent.save.defaultDescription', {
+          role: _roleLabel(agent.role),
+          name: agent.name,
+        });
+        descInput.value = generatedDescription;
+      }
+      cancelBtn.label = t('common.cancel');
+      saveBtn.label = t('common.save');
+      const title = body.parentElement?.parentElement?.querySelector<HTMLElement>('.ui-dialog-title');
+      if (title) title.textContent = t('talent.save.title');
+    };
+    unsubscribeLocale = onLocaleChange(refreshLocale);
 
     saveBtn.element.addEventListener('click', () => {
       const name = nameInput.value.trim() || agent.name;
-      const description = descInput.value.trim() || `${agent.role} agent: ${agent.name}`;
+      const description = descInput.value.trim() || generatedDescription;
       const groupId = groupSelect.value;
       if (!groupId) {
-        ToastManager.getInstance().error('Select a domain.');
+        ToastManager.getInstance().error(t('talent.save.selectDomain'));
         return;
       }
-      resolve({ agentId: agent.id, groupId, name, description });
+      finish({ agentId: agent.id, groupId, name, description });
       dialog.close();
     });
 
-    cancelBtn.element.addEventListener('click', () => { resolve(null); dialog.close(); });
+    cancelBtn.element.addEventListener('click', () => { finish(null); dialog.close(); });
 
     body.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { saveBtn.element.click(); }
@@ -102,4 +135,11 @@ function _inputStyle(): string {
 
 function _esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+}
+
+function _roleLabel(role: string): string {
+  if (role === 'MainAgent') return t('agents.role.ceo');
+  if (role === 'Manager') return t('agents.role.manager');
+  if (role === 'Member') return t('agents.role.member');
+  return role;
 }

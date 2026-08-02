@@ -9,6 +9,7 @@ import { ClientLogger } from '../../ClientLogger.js';
 import { Button } from '../ui/Button.js';
 import { Dialog } from '../ui/Dialog.js';
 import { Toggle } from '../ui/Toggle.js';
+import { onLocaleChange, t } from '../../i18n/index.js';
 
 type SkillVisual = {
   tone: string;
@@ -23,6 +24,11 @@ export class SkillsPage implements Page {
   private _toneStripEl!: HTMLElement;
   private _toneLegendEl!: HTMLElement;
   private _gridEl!: HTMLElement;
+  private _kickerEl!: HTMLElement;
+  private _createButton!: Button;
+  private _importButton!: Button;
+  private _mapTitleEl!: HTMLElement;
+  private _mapHintEl!: HTMLElement;
   private _skills: SkillEntry[] = [];
   private _modalOverlay: HTMLElement | null = null;
 
@@ -41,30 +47,35 @@ export class SkillsPage implements Page {
     titleGroup.className = 'skills-workbench-title';
     const kicker = document.createElement('div');
     kicker.className = 'skills-kicker';
-    kicker.textContent = 'Skills';
+    kicker.textContent = t('skills.title');
+    this._kickerEl = kicker;
     titleGroup.appendChild(kicker);
     this._summaryEl = document.createElement('div');
     this._summaryEl.className = 'skills-summary';
-    this._summaryEl.textContent = 'Loading skills';
+    this._summaryEl.textContent = t('skills.loading');
     titleGroup.appendChild(this._summaryEl);
     header.appendChild(titleGroup);
     const btnGroup = document.createElement('div');
     btnGroup.className = 'skills-actions';
-    const createBtn = new Button({ label: '+ Create', variant: 'default', size: 'sm', onClick: () => this._showEditor(null) });
-    const importBtn = new Button({ label: 'Import', variant: 'default', size: 'sm', onClick: () => this._showImportForm() });
-    btnGroup.appendChild(createBtn.element);
-    btnGroup.appendChild(importBtn.element);
+    this._createButton = new Button({ label: t('skills.create'), variant: 'default', size: 'sm', onClick: () => this._showEditor(null) });
+    this._importButton = new Button({ label: t('skills.import'), variant: 'default', size: 'sm', onClick: () => this._showImportForm() });
+    btnGroup.appendChild(this._createButton.element);
+    btnGroup.appendChild(this._importButton.element);
     header.appendChild(btnGroup);
     inner.appendChild(header);
 
     const overview = document.createElement('div');
     overview.className = 'skills-map';
-    overview.innerHTML = `
-      <div class="skills-map-top">
-        <span>Skill map</span>
-        <span class="skills-map-note">enabled and type mix</span>
-      </div>
-    `;
+    const mapTop = document.createElement('div');
+    mapTop.className = 'skills-map-top';
+    this._mapTitleEl = document.createElement('span');
+    this._mapTitleEl.textContent = t('skills.map');
+    this._mapHintEl = document.createElement('span');
+    this._mapHintEl.className = 'skills-map-note';
+    this._mapHintEl.textContent = t('skills.mapHint');
+    mapTop.appendChild(this._mapTitleEl);
+    mapTop.appendChild(this._mapHintEl);
+    overview.appendChild(mapTop);
     this._toneStripEl = document.createElement('div');
     this._toneStripEl.className = 'skills-map-flow';
     overview.appendChild(this._toneStripEl);
@@ -80,6 +91,7 @@ export class SkillsPage implements Page {
     // Auto-refresh on external skill changes (CEO creates/deletes via tool)
     const sse = App.getInstance().sseClient;
     sse.on('skill_changed', () => this._loadSkills());
+    onLocaleChange(() => this._refreshLocale());
   }
 
   onEnter(): void { this._loadSkills(); }
@@ -104,7 +116,11 @@ export class SkillsPage implements Page {
     this._renderOverview();
     this._gridEl.innerHTML = '';
     if (!this._skills.length) {
-      this._gridEl.innerHTML = '<div class="ui-empty" style="grid-column:1/-1;"><div class="ui-empty-title">No skills loaded</div><div class="ui-empty-desc">Create or import a skill to get started.</div></div>';
+      const empty = document.createElement('div');
+      empty.className = 'ui-empty';
+      empty.style.gridColumn = '1 / -1';
+      empty.innerHTML = `<div class="ui-empty-title">${t('skills.emptyTitle')}</div><div class="ui-empty-desc">${t('skills.emptyDescription')}</div>`;
+      this._gridEl.appendChild(empty);
       return;
     }
     for (const sk of this._skills) this._gridEl.appendChild(this._buildCard(sk));
@@ -125,8 +141,8 @@ export class SkillsPage implements Page {
     }
 
     this._summaryEl.textContent = total
-      ? `${enabled}/${total} enabled · ${groups.size} skill types`
-      : 'No skills loaded';
+      ? t('skills.summary', { enabled, total, types: groups.size })
+      : t('skills.emptyTitle');
 
     this._toneStripEl.innerHTML = '';
     this._toneLegendEl.innerHTML = '';
@@ -139,22 +155,22 @@ export class SkillsPage implements Page {
       emptyValue.textContent = '0';
       const emptyLabel = document.createElement('span');
       emptyLabel.className = 'skills-map-node-label';
-      emptyLabel.textContent = 'Skills';
+      emptyLabel.textContent = t('skills.count');
       emptyNode.appendChild(emptyValue);
       emptyNode.appendChild(emptyLabel);
       this._toneStripEl.appendChild(emptyNode);
       const empty = document.createElement('div');
       empty.className = 'skills-map-empty';
-      empty.textContent = 'Create or import a skill to populate the map.';
+      empty.textContent = t('skills.mapEmpty');
       this._toneLegendEl.appendChild(empty);
       return;
     }
 
     const sorted = Array.from(groups.values()).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
     const nodeData = [
-      { label: 'Enabled', value: String(enabled), className: 'skills-map-node-primary' },
-      { label: 'Disabled', value: String(disabled), className: disabled ? 'skills-map-node-warning' : 'skills-map-node-muted' },
-      { label: 'Types', value: String(groups.size), className: 'skills-map-node-muted' },
+      { label: t('skills.enabledCount'), value: String(enabled), className: 'skills-map-node-primary' },
+      { label: t('skills.disabledCount'), value: String(disabled), className: disabled ? 'skills-map-node-warning' : 'skills-map-node-muted' },
+      { label: t('skills.typesCount'), value: String(groups.size), className: 'skills-map-node-muted' },
     ];
 
     for (const node of nodeData) {
@@ -198,7 +214,7 @@ export class SkillsPage implements Page {
 
     const status = document.createElement('div');
     status.className = 'skills-map-status';
-    status.textContent = disabled ? `${disabled} disabled` : 'All enabled';
+    status.textContent = disabled ? t('skills.disabledSummary', { count: disabled }) : t('common.allEnabled');
     this._toneLegendEl.appendChild(status);
   }
 
@@ -234,7 +250,7 @@ export class SkillsPage implements Page {
     metaEl.appendChild(kindEl);
     const stEl = document.createElement('span');
     stEl.className = 'skill-row-status';
-    stEl.textContent = skill.enabled ? 'Enabled' : 'Disabled';
+    stEl.textContent = skill.enabled ? t('common.enabled') : t('common.disabled');
     metaEl.appendChild(stEl);
     nameGroup.appendChild(metaEl);
     top.appendChild(nameGroup);
@@ -246,7 +262,7 @@ export class SkillsPage implements Page {
       skill.enabled = !skill.enabled;
       this._toggleSkill(skill);
       toggle.checked = skill.enabled;
-      stEl.textContent = skill.enabled ? 'Enabled' : 'Disabled';
+      stEl.textContent = skill.enabled ? t('common.enabled') : t('common.disabled');
       card.className = skill.enabled
         ? 'ui-card ui-card-interactive skill-row-card'
         : 'ui-card ui-card-interactive ui-card-disabled skill-row-card';
@@ -256,12 +272,12 @@ export class SkillsPage implements Page {
 
     // Description
     const desc = document.createElement('p');
-    desc.textContent = skill.description || 'No description';
+    desc.textContent = skill.description || t('common.noDescription');
     desc.className = 'skill-row-desc';
     card.appendChild(desc);
 
     // Edit button
-    const editBtn = new Button({ label: 'Edit', variant: 'default', size: 'sm', onClick: () => { this._showEditor(skill); } });
+    const editBtn = new Button({ label: t('common.edit'), variant: 'default', size: 'sm', onClick: () => { this._showEditor(skill); } });
     editBtn.element.classList.add('skill-row-edit');
     card.appendChild(editBtn.element);
 
@@ -274,39 +290,39 @@ export class SkillsPage implements Page {
     const has = (terms: string[]) => terms.some(term => text.includes(term));
 
     if (name.includes('design')) {
-      return { tone: 'design', label: 'Design', icon: this._iconDesign() };
+      return { tone: 'design', label: t('skills.type.design'), icon: this._iconDesign() };
     }
     if (name.includes('brainstorm') || name.includes('ideation')) {
-      return { tone: 'idea', label: 'Idea', icon: this._iconIdea() };
+      return { tone: 'idea', label: t('skills.type.idea'), icon: this._iconIdea() };
     }
     if (name.includes('computer-use') || has(['desktop', 'local app', 'clicking', 'typing', 'scrolling'])) {
-      return { tone: 'control', label: 'Control', icon: this._iconControl() };
+      return { tone: 'control', label: t('skills.type.control'), icon: this._iconControl() };
     }
     if (has(['browser', 'web ', 'web-', 'screenshot', 'forms', 'page'])) {
-      return { tone: 'browser', label: 'Browser', icon: this._iconBrowser() };
+      return { tone: 'browser', label: t('skills.type.browser'), icon: this._iconBrowser() };
     }
     if (has(['data', 'csv', 'json', 'excel', 'analysis', 'python', 'statistics'])) {
-      return { tone: 'data', label: 'Data', icon: this._iconData() };
+      return { tone: 'data', label: t('skills.type.data'), icon: this._iconData() };
     }
     if (has(['docx', 'document', 'pdf', 'word', 'presentation', 'spreadsheet', 'report'])) {
-      return { tone: 'docs', label: 'Docs', icon: this._iconDocs() };
+      return { tone: 'docs', label: t('skills.type.docs'), icon: this._iconDocs() };
     }
     if (has(['brainstorm', 'ideation', 'requirements', 'planning']) || text.includes('user intent')) {
-      return { tone: 'idea', label: 'Idea', icon: this._iconIdea() };
+      return { tone: 'idea', label: t('skills.type.idea'), icon: this._iconIdea() };
     }
     if (has(['design', 'creative', 'visual', 'interface', 'ui'])) {
-      return { tone: 'design', label: 'Design', icon: this._iconDesign() };
+      return { tone: 'design', label: t('skills.type.design'), icon: this._iconDesign() };
     }
     if (has(['code', 'frontend', 'debug', 'review', 'security', 'merge', 'implementation', 'repo'])) {
-      return { tone: 'code', label: 'Code', icon: this._iconCode() };
+      return { tone: 'code', label: t('skills.type.code'), icon: this._iconCode() };
     }
     if (has(['test', 'qa', 'verification', 'audit'])) {
-      return { tone: 'quality', label: 'Quality', icon: this._iconQuality() };
+      return { tone: 'quality', label: t('skills.type.quality'), icon: this._iconQuality() };
     }
     if (has(['memory', 'context', 'knowledge'])) {
-      return { tone: 'memory', label: 'Memory', icon: this._iconMemory() };
+      return { tone: 'memory', label: t('skills.type.memory'), icon: this._iconMemory() };
     }
-    return { tone: 'system', label: 'System', icon: this._iconSystem() };
+    return { tone: 'system', label: t('skills.type.system'), icon: this._iconSystem() };
   }
 
   private _svg(paths: string): string {
@@ -362,27 +378,27 @@ export class SkillsPage implements Page {
     const body = document.createElement('div');
     body.style.cssText = 'display:flex;flex-direction:column;gap:10px;';
     const nameInput = document.createElement('input');
-    nameInput.placeholder = 'Name';
+    nameInput.placeholder = t('skills.namePlaceholder');
     nameInput.style.cssText = 'background:transparent;border:none;border-bottom:1px solid var(--hairline-cinema);color:var(--cinema-text-primary);padding:8px 0;font-size:13px;outline:none;font-family:var(--font-sans);';
     nameInput.value = skill?.name || '';
     body.appendChild(nameInput);
 
     const descInput = document.createElement('input');
-    descInput.placeholder = 'Description';
+    descInput.placeholder = t('skills.descriptionPlaceholder');
     descInput.style.cssText = 'background:transparent;border:none;border-bottom:1px solid var(--hairline-cinema);color:var(--cinema-text-primary);padding:8px 0;font-size:13px;outline:none;font-family:var(--font-sans);';
     descInput.value = skill?.description || '';
     body.appendChild(descInput);
 
     const contentTa = document.createElement('textarea');
-    contentTa.placeholder = 'Content (Markdown)';
+    contentTa.placeholder = t('skills.contentPlaceholder');
     contentTa.rows = 12;
     contentTa.style.cssText = 'background:transparent;border:none;border-bottom:1px solid var(--hairline-cinema);color:var(--cinema-text-primary);padding:8px 0;font-size:12px;outline:none;font-family:var(--font-mono);resize:vertical;';
     contentTa.value = skill?.content || '';
     body.appendChild(contentTa);
 
     const footer = document.createElement('div');
-    const cancelBtn = new Button({ label: 'Cancel', variant: 'default', onClick: () => dlg.close() });
-    const saveBtn = new Button({ label: 'Save', variant: 'primary', onClick: () => {
+    const cancelBtn = new Button({ label: t('common.cancel'), variant: 'default', onClick: () => dlg.close() });
+    const saveBtn = new Button({ label: t('common.save'), variant: 'primary', onClick: () => {
       const n = nameInput.value.trim();
       if (!n) return;
       isNew ? this._createSkill(n, descInput.value.trim(), contentTa.value) : this._updateSkill(skill!.id, n, descInput.value.trim(), contentTa.value);
@@ -392,7 +408,7 @@ export class SkillsPage implements Page {
     footer.appendChild(saveBtn.element);
 
     const dlg = new Dialog({
-      title: isNew ? 'Create Skill' : 'Edit Skill',
+      title: isNew ? t('skills.createTitle') : t('skills.editTitle'),
       body,
       footer,
       onClose: () => this._closeModal(),
@@ -408,7 +424,7 @@ export class SkillsPage implements Page {
     const body = document.createElement('div');
     const desc = document.createElement('p');
     desc.style.cssText = 'font-size:11px;color:var(--cinema-text-edge);margin-bottom:12px;';
-    desc.innerHTML = 'Select a <code>.md</code> skill file. YAML frontmatter with <code>name</code> and <code>description</code> fields is supported.';
+    desc.innerHTML = t('skills.importHint');
     body.appendChild(desc);
 
     const fileInput = document.createElement('input');
@@ -423,11 +439,11 @@ export class SkillsPage implements Page {
     body.appendChild(status);
 
     const footer = document.createElement('div');
-    const cancelBtn = new Button({ label: 'Cancel', onClick: () => dlg.close() });
+    const cancelBtn = new Button({ label: t('common.cancel'), onClick: () => dlg.close() });
     footer.appendChild(cancelBtn.element);
 
     const dlg = new Dialog({
-      title: 'Import Skill',
+      title: t('skills.importTitle'),
       body,
       footer,
       onClose: () => this._closeModal(),
@@ -449,10 +465,19 @@ export class SkillsPage implements Page {
           c = text.replace(/^---\n[\s\S]*?\n---\n?/, '');
         }
         const r = await fetch('/api/v1/skills', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name:n,description:d,content:c}) });
-        if (r.ok) { status.textContent=`Imported "${n}".`; status.style.color='var(--color-success)'; this._loadSkills(); setTimeout(()=>dlg.close(),1200); }
-        else { status.textContent='Import failed.'; status.style.color='var(--color-error)'; }
-      } catch (err: any) { status.textContent=`Error: ${err.message}`; status.style.color='var(--color-error)'; }
+        if (r.ok) { status.textContent=t('skills.imported', { name: n }); status.style.color='var(--color-success)'; this._loadSkills(); setTimeout(()=>dlg.close(),1200); }
+        else { status.textContent=t('skills.importFailed'); status.style.color='var(--color-error)'; }
+      } catch (err: any) { status.textContent=t('skills.importError', { message: err.message }); status.style.color='var(--color-error)'; }
     });
+  }
+
+  private _refreshLocale(): void {
+    this._kickerEl.textContent = t('skills.title');
+    this._createButton.label = t('skills.create');
+    this._importButton.label = t('skills.import');
+    this._mapTitleEl.textContent = t('skills.map');
+    this._mapHintEl.textContent = t('skills.mapHint');
+    this._renderGrid();
   }
 
   private _closeModal(): void { if (this._modalOverlay) { this._modalOverlay = null; } }

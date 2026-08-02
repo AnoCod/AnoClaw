@@ -2,8 +2,10 @@
 // Code, image, PDF, markdown via local handling. Browser tabs via Electron WebContentsView.
 
 import { ToastManager } from '../../../ToastManager.js';
+import { onLocaleChange, t, type TranslationKey } from '../../../i18n/index.js';
 import {
   hasExternalContentChange,
+  isSaveSnapshotCurrent,
   workspaceModelUri,
   workspaceReadOnlyReason,
 } from './WorkspaceIdeUtils.js';
@@ -183,7 +185,7 @@ interface BrowserFindResult {
 
 interface BrowserViewportPreset {
   name: string;
-  label: string;
+  labelKey: TranslationKey;
   width?: number;
   height?: number;
   mobile?: boolean;
@@ -353,6 +355,10 @@ interface OpenTab {
   agentTrace?: AgentBrowserEvent[];
   tableRows?:string[][];
   originalContent?:string; // snapshot at open — for diff detection
+  diskSha256?:string;
+  pendingExternalSha256?:string;
+  editRevision?:number;
+  savePromise?:Promise<boolean>;
 }
 
 export class WorkspaceTabGroup {
@@ -379,10 +385,15 @@ export class WorkspaceTabGroup {
   private _inlineCompletionRequestId = 0;
   private _modelSequence = 0;
   private _inlineCompletionState: 'idle' | 'waiting' | 'thinking' | 'ready' | 'empty' | 'error' = 'idle';
-  private _inlineCompletionMessage = 'AI Ready';
+  private _inlineCompletionMessageKey: TranslationKey = 'workspace.editor.ai.ready';
+  private _inlineCompletionMessageParams: Record<string, string | number> = {};
+  private _inlineCompletionStatusVersion = 0;
   private _diagnosticsTimer = 0;
   private _languageStatusState: 'idle' | 'working' | 'ready' | 'error' = 'idle';
-  private _languageStatusMessage = 'LS Ready';
+  private _languageStatusMessageKey: TranslationKey = 'workspace.editor.ls.ready';
+  private _languageStatusMessageParams: Record<string, string | number> = {};
+  private _languageStatusVersion = 0;
+  private _stopLocaleListener: (() => void) | null = null;
   onOpenFile: ((path:string, name:string)=>void)|null = null;
   /** Called (throttled) whenever editor state changes — cursor, selection, tab switch. */
   onEditorContextChange: (()=>void)|null = null;
@@ -392,12 +403,12 @@ export class WorkspaceTabGroup {
     this.element = document.createElement('div'); this.element.className = 'ws-tab-group';
     this._tabBar = document.createElement('div'); this._tabBar.className = 'ws-tab-bar';
     this._tabBar.setAttribute('role', 'tablist');
-    this._tabBar.setAttribute('aria-label', 'Workspace tabs');
+    this._tabBar.setAttribute('aria-label', t('workspace.tabsAria'));
     this.element.appendChild(this._tabBar);
 
     this._plusBtn = document.createElement('button'); this._plusBtn.className = 'ws-tab-plus';
     this._plusBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`;
-    this._plusBtn.title = 'New File / Browser';
+    this._plusBtn.title = t('workspace.newFileOrBrowser');
     this._plusBtn.addEventListener('click', (e) => { e.stopPropagation(); this._showPlusDialog(); });
     this._tabBar.appendChild(this._plusBtn);
 
@@ -426,6 +437,7 @@ export class WorkspaceTabGroup {
     // Sync WebContentsView bounds on window resize
     this._windowResizeHandler = () => this._syncWvBounds();
     window.addEventListener('resize', this._windowResizeHandler);
+    this._stopLocaleListener = onLocaleChange(() => this._refreshLocale());
 
     // Listen for WebContentsView state changes (loading, title, favicon)
     const api = this._api();
@@ -609,10 +621,10 @@ export class WorkspaceTabGroup {
     const card = document.createElement('div');
     card.className = 'dialog';
     card.innerHTML = `
-      <h2 class="dialog-title">New Tab</h2>
+      <h2 class="dialog-title">${t('workspace.newTab')}</h2>
       <div class="dialog-actions" style="flex-direction:column;gap:8px;align-items:stretch;">
-        <button id="ws-plus-new-file" class="btn-dialog-confirm">New File</button>
-        <button id="ws-plus-new-browser" class="btn-dialog-confirm">New Browser</button>
+        <button id="ws-plus-new-file" class="btn-dialog-confirm">${t('workspace.newFile')}</button>
+        <button id="ws-plus-new-browser" class="btn-dialog-confirm">${t('workspace.newBrowser')}</button>
       </div>`;
     overlay.appendChild(card);
     document.body.appendChild(overlay);
@@ -625,14 +637,14 @@ export class WorkspaceTabGroup {
   }
 
   private _promptNewFile(): void {
-    this._showInputDialog('New File', 'File name (e.g. app.ts, style.css)', (name) => {
+    this._showInputDialog(t('workspace.newFile'), t('workspace.fileNameExample'), (name) => {
       if (!name) return;
       fetch('/api/v1/workspace/create-file', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({sessionId:this._sessionId, path:'/', name}) })
         .then(async resp => {
-          if (!resp.ok) throw new Error(await _responseError(resp, 'Create file failed'));
+          if (!resp.ok) throw new Error(await _responseError(resp, t('workspace.createFileFailed')));
           await this.openFile(name, name);
         })
-        .catch(err => ToastManager.getInstance().error(err instanceof Error ? err.message : 'Create file failed'));
+        .catch(err => ToastManager.getInstance().error(err instanceof Error ? err.message : t('workspace.createFileFailed')));
     });
   }
 
@@ -644,7 +656,7 @@ export class WorkspaceTabGroup {
 
     const tabId = 'browser:' + Date.now();
     const tab: OpenTab = {
-      path: tabId, name: restore?.title || (url === 'about:blank' ? 'New Tab' : url.replace(/^https?:\/\//,'').substring(0, 30)),
+      path: tabId, name: restore?.title || (url === 'about:blank' ? t('workspace.newTabName') : url.replace(/^https?:\/\//,'').substring(0, 30)),
       fileType: 'browser', isDirty: false, language: '', model: null, viewState: null,
       browserUrl: url, wvId: result?.viewId || undefined, agentTrace: [],
       browserTitle: restore?.title, browserFavicon: restore?.favicon,
@@ -676,7 +688,7 @@ export class WorkspaceTabGroup {
     }
     const tab: OpenTab = {
       path: 'browser:' + Date.now(),
-      name: url === 'about:blank' ? 'New Tab' : url.replace(/^https?:\/\//,'').substring(0, 30),
+      name: url === 'about:blank' ? t('workspace.newTabName') : url.replace(/^https?:\/\//,'').substring(0, 30),
       fileType: 'browser', isDirty: false, language: '', model: null, viewState: null,
       browserUrl: url, wvId: viewId, agentTrace: [], browserZoomFactor: 1, browserRecentUrls: url !== 'about:blank' ? [url] : [], downloads: [],
       networkEvents: [], consoleLogs: [], securityEvents: [], browserPanel: null,
@@ -694,7 +706,7 @@ export class WorkspaceTabGroup {
       const url = event.url || 'about:blank';
       tab = {
         path: 'browser:' + Date.now(),
-        name: url === 'about:blank' ? 'Agent Browser' : url.replace(/^https?:\/\//,'').substring(0, 30),
+        name: url === 'about:blank' ? t('workspace.agentBrowser') : url.replace(/^https?:\/\//,'').substring(0, 30),
         fileType: 'browser', isDirty: false, language: '', model: null, viewState: null,
         browserUrl: url, wvId: event.viewId, agentTrace: [], browserZoomFactor: 1, browserRecentUrls: url !== 'about:blank' ? [url] : [], downloads: [],
         networkEvents: [], consoleLogs: [], securityEvents: [], browserPanel: null,
@@ -719,7 +731,7 @@ export class WorkspaceTabGroup {
       const recent = (tab.browserRecentUrls || []).filter(item => item !== url);
       tab.browserRecentUrls = [...recent, url].slice(-20);
     }
-    if (!tab.browserTitle) tab.name = url === 'about:blank' ? 'Agent Browser' : url.replace(/^https?:\/\//,'').substring(0, 30);
+    if (!tab.browserTitle) tab.name = url === 'about:blank' ? t('workspace.agentBrowser') : url.replace(/^https?:\/\//,'').substring(0, 30);
     const btn = this._tabBar.querySelector(`[data-tab-path="${_escAttr(tab.path)}"] .ws-tab-name`) as HTMLElement | null;
     if (btn) btn.textContent = tab.name;
     this._scheduleBrowserStateSave();
@@ -738,8 +750,8 @@ export class WorkspaceTabGroup {
       <h2 class="dialog-title">${_escHtml(title)}</h2>
       <input id="ws-input-dlg-field" type="text" class="dialog-input" placeholder="${_escHtml(placeholder)}" autofocus style="width:100%;padding:6px 10px;background:var(--color-bg);border:1px solid var(--color-hairline);border-radius:6px;color:var(--color-text);font-size:13px;font-family:inherit;outline:none;margin:8px 0;box-sizing:border-box;">
       <div class="dialog-actions">
-        <button class="btn-dialog-cancel" id="ws-input-dlg-cancel">Cancel</button>
-        <button class="btn-dialog-confirm" id="ws-input-dlg-ok">OK</button>
+        <button class="btn-dialog-cancel" id="ws-input-dlg-cancel">${t('common.cancel')}</button>
+        <button class="btn-dialog-confirm" id="ws-input-dlg-ok">${t('workspace.ok')}</button>
       </div>`;
     overlay.appendChild(card);
     document.body.appendChild(overlay);
@@ -860,6 +872,8 @@ export class WorkspaceTabGroup {
         viewState:null,
         originalContent: content,
         readOnlyReason: workspaceReadOnlyReason(data),
+        diskSha256: typeof data.sha256 === 'string' ? data.sha256 : undefined,
+        editRevision: 0,
       };
       this._tabs.push(tab); this._renderTabBtn(tab); this._activate(tab);
       if (fileType === 'code') this._revealEditorLocation(line, column);
@@ -896,7 +910,7 @@ export class WorkspaceTabGroup {
     const cls = document.createElement('span');
     cls.className = 'ws-tab-close';
     cls.setAttribute('role', 'button');
-    cls.setAttribute('aria-label', `Close ${tab.name}`);
+    cls.setAttribute('aria-label', t('workspace.closeTab', { name: tab.name }));
     cls.setAttribute('tabindex', '-1');
     cls.innerHTML = _SVG_TAB_CLOSE;
     cls.addEventListener('click', (e) => { e.stopPropagation(); this.closeTab(tab.path); });
@@ -957,7 +971,7 @@ export class WorkspaceTabGroup {
   }
 
   private async _confirmCloseDirty(tab: OpenTab, idx: number): Promise<void> {
-    const action = await this._promptDirtyAction(tab, 'closing');
+    const action = await this._promptDirtyAction(tab, t('workspace.action.closing'));
     if (action === 'cancel') return;
     if (action === 'save' && !await this.saveFile(tab)) return;
     this._doCloseTab(tab, idx);
@@ -979,12 +993,12 @@ export class WorkspaceTabGroup {
       const card = document.createElement('div');
       card.className = 'dialog';
       card.innerHTML = `
-        <h2 class="dialog-title">Unsaved changes</h2>
-        <p class="dialog-message">Save changes to "${_escHtml(tab.name)}" before ${_escHtml(actionLabel)}?</p>
+        <h2 class="dialog-title">${t('workspace.unsavedTitle')}</h2>
+        <p class="dialog-message">${t('workspace.unsavedMessage', { name: _escHtml(tab.name), action: _escHtml(actionLabel) })}</p>
         <div class="dialog-actions">
-          <button class="btn-dialog-cancel" data-action="cancel">Cancel</button>
-          <button class="btn-dialog-cancel" data-action="discard">Discard</button>
-          <button class="btn-dialog-confirm" data-action="save">Save</button>
+          <button class="btn-dialog-cancel" data-action="cancel">${t('common.cancel')}</button>
+          <button class="btn-dialog-cancel" data-action="discard">${t('workspace.discard')}</button>
+          <button class="btn-dialog-confirm" data-action="save">${t('common.save')}</button>
         </div>`;
       overlay.appendChild(card);
       document.body.appendChild(overlay);
@@ -1038,7 +1052,10 @@ export class WorkspaceTabGroup {
       });
       this._editor.onDidChangeModelContent(() => {
         const active = this._tabs.find(t => t.path===this._activePath);
-        if (active && !active.readOnlyReason && !active.isDirty) { active.isDirty = true; this._updateDirty(active); }
+        if (active && !active.readOnlyReason) {
+          active.editRevision = (active.editRevision || 0) + 1;
+          if (!active.isDirty) { active.isDirty = true; this._updateDirty(active); }
+        }
         this._scheduleDiagnostics(this._editor.getModel());
       });
       // Update status bar on cursor change
@@ -1046,7 +1063,7 @@ export class WorkspaceTabGroup {
         const status = this._contentArea.querySelector('.ws-editor-status') as HTMLElement;
         if (status) {
           const cp = status.querySelector('[data-role="cursor-pos"]') as HTMLElement | null;
-          if (cp) cp.textContent = `Ln ${e.position.lineNumber}, Col ${e.position.column}`;
+          if (cp) cp.textContent = t('workspace.editor.position', { line: e.position.lineNumber, column: e.position.column });
         }
         this._notifyContextChange();
       });
@@ -1094,13 +1111,14 @@ export class WorkspaceTabGroup {
     // Cursor position
     const posEl = document.createElement('span');
     const pos = this._editor.getPosition();
-    posEl.textContent = pos ? `Ln ${pos.lineNumber}, Col ${pos.column}` : 'Ln 1, Col 1';
+    posEl.textContent = t('workspace.editor.position', { line: pos?.lineNumber || 1, column: pos?.column || 1 });
     posEl.setAttribute('data-role', 'cursor-pos');
     statusBar.appendChild(posEl);
 
     // Tab size
     const tabSizeEl = document.createElement('span');
-    tabSizeEl.textContent = 'Spaces: 2';
+    tabSizeEl.textContent = t('workspace.editor.spaces');
+    tabSizeEl.setAttribute('data-i18n-key', 'workspace.editor.spaces');
     tabSizeEl.style.cssText = 'opacity:0.5;';
     statusBar.appendChild(tabSizeEl);
 
@@ -1114,8 +1132,8 @@ export class WorkspaceTabGroup {
     lsEl.type = 'button';
     lsEl.className = `ws-editor-ls-status ${this._languageStatusState}`;
     lsEl.setAttribute('data-role', 'language-service-status');
-    lsEl.title = 'Language service: completions, hover, diagnostics, definitions, and imports.';
-    lsEl.textContent = this._languageStatusMessage;
+    lsEl.title = t('workspace.editor.languageServiceTitle');
+    lsEl.textContent = t(this._languageStatusMessageKey, this._languageStatusMessageParams);
     lsEl.addEventListener('click', () => { void this._goToDefinitionFromEditor(); });
     statusBar.appendChild(lsEl);
 
@@ -1123,8 +1141,8 @@ export class WorkspaceTabGroup {
     aiEl.type = 'button';
     aiEl.className = `ws-editor-ai-status ${this._inlineCompletionState}`;
     aiEl.setAttribute('data-role', 'inline-completion-status');
-    aiEl.title = 'AI completion: wait briefly after typing, or click / use Alt+\\ to complete at cursor.';
-    aiEl.textContent = this._inlineCompletionMessage;
+    aiEl.title = t('workspace.editor.aiCompletionTitle');
+    aiEl.textContent = t(this._inlineCompletionMessageKey, this._inlineCompletionMessageParams);
     aiEl.addEventListener('click', () => { void this._triggerInlineCompletion(true); });
     statusBar.appendChild(aiEl);
 
@@ -1179,7 +1197,7 @@ export class WorkspaceTabGroup {
     const wrapper = document.createElement('div');
     wrapper.className = 'ws-preview-table-wrap';
     if (!rows.length) {
-      wrapper.innerHTML = `<div class="ws-preview-empty">${_escHtml(title)}<span>No rows found.</span></div>`;
+      wrapper.innerHTML = `<div class="ws-preview-empty">${_escHtml(title)}<span>${t('workspace.preview.noRows')}</span></div>`;
       this._contentArea.appendChild(wrapper);
       return;
     }
@@ -1239,13 +1257,13 @@ export class WorkspaceTabGroup {
     // Left group: Back / Forward / Reload
     const leftGroup = document.createElement('div');
     leftGroup.className = 'ws-browser-group';
-    const backBtn = this._browserBtn('Go Back', _SVG_BROWSER_BACK);
+    const backBtn = this._browserBtn(t('workspace.browser.back'), _SVG_BROWSER_BACK, 'workspace.browser.back');
     backBtn.setAttribute('data-action', 'back');
     (backBtn as HTMLButtonElement).disabled = !tab.browserCanGoBack;
-    const forwardBtn = this._browserBtn('Go Forward', _SVG_BROWSER_FORWARD);
+    const forwardBtn = this._browserBtn(t('workspace.browser.forward'), _SVG_BROWSER_FORWARD, 'workspace.browser.forward');
     forwardBtn.setAttribute('data-action', 'forward');
     (forwardBtn as HTMLButtonElement).disabled = !tab.browserCanGoForward;
-    const reloadBtn = this._browserBtn('Reload', _SVG_BROWSER_RELOAD);
+    const reloadBtn = this._browserBtn(t('workspace.browser.reload'), _SVG_BROWSER_RELOAD, 'workspace.browser.reload');
     reloadBtn.setAttribute('data-action', 'reload');
     leftGroup.append(backBtn, forwardBtn, reloadBtn);
     bar.appendChild(leftGroup);
@@ -1263,7 +1281,7 @@ export class WorkspaceTabGroup {
     const input = document.createElement('input');
     input.type = 'text'; input.className = 'ws-browser-url';
     input.value = tab.browserUrl && tab.browserUrl !== 'about:blank' ? tab.browserUrl : '';
-    input.placeholder = 'Search or enter URL';
+    input.placeholder = t('workspace.browser.address');
     input.style.cssText = 'flex:1;padding:4px 8px;padding-left:26px;border:1px solid var(--color-hairline,#242728);border-radius:6px;background:var(--color-bg,#07080a);color:var(--color-text,#f4f4f6);font-size:12px;font-family:inherit;outline:none;min-width:120px;';
     input.addEventListener('focus', () => input.select());
     urlWrapper.appendChild(input);
@@ -1273,34 +1291,37 @@ export class WorkspaceTabGroup {
     const rightGroup = document.createElement('div');
     rightGroup.className = 'ws-browser-group';
 
-    const viewportBtn = this._browserBtn(tab.browserViewport?.label || 'Viewport Presets', _SVG_BROWSER_DEVICE);
+    const viewportBtn = this._browserBtn(
+      tab.browserViewport ? _viewportLabel(tab.browserViewport) : t('workspace.browser.viewport'),
+      _SVG_BROWSER_DEVICE,
+    );
     viewportBtn.classList.add('ws-browser-viewport-btn');
     viewportBtn.addEventListener('click', (e) => { e.stopPropagation(); this._showViewportMenu(viewportBtn, tab); });
     rightGroup.appendChild(viewportBtn);
 
-    const panelBtn = this._browserBtn('Network / Console', _SVG_BROWSER_PANEL);
+    const panelBtn = this._browserBtn(t('workspace.browser.panel'), _SVG_BROWSER_PANEL, 'workspace.browser.panel');
     panelBtn.classList.toggle('active', Boolean(tab.browserPanel));
     panelBtn.addEventListener('click', () => { void this._toggleBrowserPanel(tab, tab.browserPanel || 'network'); });
     rightGroup.appendChild(panelBtn);
 
     // Share with Agent
-    const shareBtn = this._browserBtn('Share with Agent', _SVG_BROWSER_SHARE);
+    const shareBtn = this._browserBtn(t('workspace.browser.share'), _SVG_BROWSER_SHARE, 'workspace.browser.share');
     shareBtn.addEventListener('click', () => { void this._sendPageContextToAgent(tab); });
     rightGroup.appendChild(shareBtn);
 
     // Add element to chat
-    const addDropdown = this._browserBtn('Add to Chat', _SVG_BROWSER_PLUS);
+    const addDropdown = this._browserBtn(t('workspace.browser.addToChat'), _SVG_BROWSER_PLUS, 'workspace.browser.addToChat');
     addDropdown.style.position = 'relative';
     addDropdown.addEventListener('click', (e) => { e.stopPropagation(); this._showAddToChatMenu(addDropdown, tab); });
     rightGroup.appendChild(addDropdown);
 
     // DevTools
-    const devBtn = this._browserBtn('Developer Tools', _SVG_BROWSER_DEVTOOLS);
+    const devBtn = this._browserBtn(t('workspace.browser.devtools'), _SVG_BROWSER_DEVTOOLS, 'workspace.browser.devtools');
     devBtn.addEventListener('click', () => this._api()?.wvDevTools?.(tab.wvId));
     rightGroup.appendChild(devBtn);
 
     // More menu
-    const moreBtn = this._browserBtn('More', _SVG_BROWSER_MORE);
+    const moreBtn = this._browserBtn(t('workspace.browser.more'), _SVG_BROWSER_MORE, 'workspace.browser.more');
     moreBtn.addEventListener('click', (e) => { e.stopPropagation(); this._showBrowserMoreMenu(moreBtn, tab); });
     rightGroup.appendChild(moreBtn);
 
@@ -1404,7 +1425,7 @@ export class WorkspaceTabGroup {
     box.innerHTML = '';
     const label = document.createElement('span');
     label.className = 'ws-browser-agent-trace-label';
-    label.textContent = 'AGENT';
+    label.textContent = t('workspace.browser.agent').toLocaleUpperCase();
     box.appendChild(label);
 
     for (const item of trace) {
@@ -1470,7 +1491,7 @@ export class WorkspaceTabGroup {
 
       const title = document.createElement('div');
       title.className = 'ws-browser-download-title';
-      title.textContent = item.filename || 'download';
+      title.textContent = item.filename || t('workspace.browser.download');
       title.title = item.savePath || item.url || item.filename;
       main.appendChild(title);
 
@@ -1478,11 +1499,11 @@ export class WorkspaceTabGroup {
       status.className = 'ws-browser-download-status';
       const total = item.totalBytes || 0;
       const pct = total > 0 ? Math.min(100, Math.round((item.receivedBytes / total) * 100)) : 0;
-      const stateText = item.state === 'completed' ? 'Done'
-        : item.state === 'interrupted' ? 'Interrupted'
-        : item.state === 'cancelled' ? 'Cancelled'
+      const stateText = item.state === 'completed' ? t('workspace.browser.downloadDone')
+        : item.state === 'interrupted' ? t('workspace.browser.downloadInterrupted')
+        : item.state === 'cancelled' ? t('workspace.browser.downloadCancelled')
         : total > 0 ? `${pct}%`
-        : 'Downloading';
+        : t('workspace.browser.downloading');
       const sizeText = total > 0 ? `${_formatBytes(item.receivedBytes)} / ${_formatBytes(total)}` : _formatBytes(item.receivedBytes);
       status.textContent = `${stateText}${sizeText ? ` - ${sizeText}` : ''}`;
       main.appendChild(status);
@@ -1498,9 +1519,9 @@ export class WorkspaceTabGroup {
       const actions = document.createElement('div');
       actions.className = 'ws-browser-download-actions';
       if (item.state === 'completed') {
-        const openBtn = this._downloadActionButton('Open', () => this._openDownload(item));
-        const locateBtn = this._downloadActionButton('Locate', () => this._locateDownload(item));
-        const agentBtn = this._downloadActionButton('Agent', () => this._sendDownloadToAgent(item));
+        const openBtn = this._downloadActionButton(t('workspace.open'), () => this._openDownload(item));
+        const locateBtn = this._downloadActionButton(t('workspace.browser.locate'), () => this._locateDownload(item));
+        const agentBtn = this._downloadActionButton(t('workspace.browser.agent'), () => this._sendDownloadToAgent(item));
         actions.append(openBtn, locateBtn, agentBtn);
       }
       row.appendChild(actions);
@@ -1602,7 +1623,7 @@ export class WorkspaceTabGroup {
     const input = document.createElement('input');
     input.className = 'ws-browser-find-input';
     input.type = 'text';
-    input.placeholder = 'Find';
+    input.placeholder = t('workspace.browser.find');
     input.value = tab.findQuery || '';
     input.addEventListener('input', () => {
       tab.findQuery = input.value;
@@ -1630,15 +1651,15 @@ export class WorkspaceTabGroup {
     count.textContent = matches ? `${active}/${matches}` : '0/0';
     bar.appendChild(count);
 
-    const prev = this._smallCommandButton('Prev', () => this._runFind(tab, false, true));
-    const next = this._smallCommandButton('Next', () => this._runFind(tab, true, true));
+    const prev = this._smallCommandButton(t('workspace.browser.previous'), () => this._runFind(tab, false, true));
+    const next = this._smallCommandButton(t('workspace.browser.next'), () => this._runFind(tab, true, true));
     const matchCase = this._smallCommandButton('Aa', () => {
       tab.findMatchCase = !tab.findMatchCase;
       this._runFind(tab, true, false);
       this._renderFindBar(tab);
     });
     matchCase.classList.toggle('active', Boolean(tab.findMatchCase));
-    const close = this._smallCommandButton('Close', () => this._closeFindBar(tab));
+    const close = this._smallCommandButton(t('workspace.browser.close'), () => this._closeFindBar(tab));
     bar.append(prev, next, matchCase, close);
   }
 
@@ -1696,8 +1717,8 @@ export class WorkspaceTabGroup {
       text.title = event.url || event.message;
       row.appendChild(text);
       if (event.decision === 'prompt') {
-        const allow = this._smallCommandButton('Allow', () => this._resolvePermission(event.id, true));
-        const block = this._smallCommandButton('Block', () => this._resolvePermission(event.id, false));
+        const allow = this._smallCommandButton(t('workspace.browser.allow'), () => this._resolvePermission(event.id, true));
+        const block = this._smallCommandButton(t('workspace.browser.block'), () => this._resolvePermission(event.id, false));
         row.append(allow, block);
       }
       box.appendChild(row);
@@ -1756,14 +1777,14 @@ export class WorkspaceTabGroup {
       btn.type = 'button';
       btn.className = 'ws-browser-panel-tab';
       btn.classList.toggle('active', tab.browserPanel === mode);
-      btn.textContent = mode === 'network' ? 'Network' : mode === 'console' ? 'Console' : 'Security';
+      btn.textContent = mode === 'network' ? t('workspace.browser.network') : mode === 'console' ? t('workspace.browser.console') : t('workspace.browser.security');
       btn.addEventListener('click', () => this._switchBrowserPanel(tab, mode));
       header.appendChild(btn);
     }
     const spacer = document.createElement('div');
     spacer.style.flex = '1';
     header.appendChild(spacer);
-    header.appendChild(this._smallCommandButton('Close', () => { tab.browserPanel = null; this._renderBrowserPanel(tab); setTimeout(() => this._syncWvBounds(), 0); }));
+    header.appendChild(this._smallCommandButton(t('workspace.browser.close'), () => { tab.browserPanel = null; this._renderBrowserPanel(tab); setTimeout(() => this._syncWvBounds(), 0); }));
     panel.appendChild(header);
 
     const body = document.createElement('div');
@@ -1776,7 +1797,7 @@ export class WorkspaceTabGroup {
 
   private _renderNetworkRows(tab: OpenTab, body: HTMLElement): void {
     const rows = (tab.networkEvents || []).slice(-80).reverse();
-    if (!rows.length) { this._renderPanelEmpty(body, 'No network activity yet'); return; }
+    if (!rows.length) { this._renderPanelEmpty(body, t('workspace.browser.noNetwork')); return; }
     for (const item of rows) {
       const row = document.createElement('div');
       row.className = `ws-browser-panel-row ${item.state === 'failed' ? 'error' : ''}`;
@@ -1793,7 +1814,7 @@ export class WorkspaceTabGroup {
 
   private _renderConsoleRows(tab: OpenTab, body: HTMLElement): void {
     const rows = (tab.consoleLogs || []).slice(-100).reverse();
-    if (!rows.length) { this._renderPanelEmpty(body, 'No console output yet'); return; }
+    if (!rows.length) { this._renderPanelEmpty(body, t('workspace.browser.noConsole')); return; }
     for (const item of rows) {
       const row = document.createElement('div');
       row.className = `ws-browser-panel-row ${item.level === 'error' ? 'error' : item.level === 'warning' || item.level === 'warn' ? 'warn' : ''}`;
@@ -1806,7 +1827,7 @@ export class WorkspaceTabGroup {
 
   private _renderSecurityRows(tab: OpenTab, body: HTMLElement): void {
     const rows = (tab.securityEvents || []).slice(-80).reverse();
-    if (!rows.length) { this._renderPanelEmpty(body, 'No security events yet'); return; }
+    if (!rows.length) { this._renderPanelEmpty(body, t('workspace.browser.noSecurity')); return; }
     for (const item of rows) {
       const row = document.createElement('div');
       row.className = `ws-browser-panel-row ${item.decision === 'blocked' ? 'warn' : ''}`;
@@ -1816,8 +1837,8 @@ export class WorkspaceTabGroup {
       if (item.decision === 'prompt') {
         const actions = document.createElement('div');
         actions.className = 'ws-browser-panel-actions';
-        actions.append(this._smallCommandButton('Allow', () => this._resolvePermission(item.id, true)));
-        actions.append(this._smallCommandButton('Block', () => this._resolvePermission(item.id, false)));
+        actions.append(this._smallCommandButton(t('workspace.browser.allow'), () => this._resolvePermission(item.id, true)));
+        actions.append(this._smallCommandButton(t('workspace.browser.block'), () => this._resolvePermission(item.id, false)));
         row.appendChild(actions);
       }
       row.title = item.url || item.message;
@@ -1846,7 +1867,8 @@ export class WorkspaceTabGroup {
     for (const preset of BROWSER_VIEWPORT_PRESETS) {
       const item = document.createElement('div');
       item.className = 'ws-browser-menu-item';
-      item.textContent = preset.width && preset.height ? `${preset.label} ${preset.width}x${preset.height}` : preset.label;
+      const label = _viewportLabel(preset);
+      item.textContent = preset.width && preset.height ? `${label} ${preset.width}x${preset.height}` : label;
       item.addEventListener('click', () => {
         this._closeAllMenus();
         void this._setViewportPreset(tab, preset);
@@ -1864,16 +1886,21 @@ export class WorkspaceTabGroup {
     this._scheduleBrowserStateSave();
     if (tab.path === this._activePath) {
       const btn = this._contentArea.querySelector('.ws-browser-viewport-btn') as HTMLButtonElement | null;
-      if (btn) btn.title = preset.label;
+      if (btn) {
+        const label = _viewportLabel(preset);
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+      }
     }
   }
 
-  private _browserBtn(title: string, icon: string): HTMLButtonElement {
+  private _browserBtn(title: string, icon: string, translationKey?: TranslationKey): HTMLButtonElement {
     const btn = document.createElement('button');
     btn.className = 'ws-browser-nav-btn ws-browser-action';
     btn.type = 'button';
     btn.title = title;
     btn.setAttribute('aria-label', title);
+    if (translationKey) btn.dataset.i18nTitle = translationKey;
     btn.innerHTML = icon;
     return btn;
   }
@@ -1924,11 +1951,11 @@ export class WorkspaceTabGroup {
     const menu = document.createElement('div');
     menu.className = 'ws-browser-menu';
     menu.innerHTML = `
-      <div class="ws-browser-menu-item" data-action="add-page-context">Add Page Context to Chat</div>
-      <div class="ws-browser-menu-item" data-action="add-element">Add Element to Chat</div>
-      <div class="ws-browser-menu-item" data-action="add-console">Add Console Logs to Chat</div>
-      <div class="ws-browser-menu-item" data-action="add-screenshot">Add Screenshot to Chat</div>
-      <div class="ws-browser-menu-item" data-action="add-area-screenshot">Add Area Screenshot to Chat</div>`;
+      <div class="ws-browser-menu-item" data-action="add-page-context">${t('workspace.browser.addPageContext')}</div>
+      <div class="ws-browser-menu-item" data-action="add-element">${t('workspace.browser.addElement')}</div>
+      <div class="ws-browser-menu-item" data-action="add-console">${t('workspace.browser.addConsole')}</div>
+      <div class="ws-browser-menu-item" data-action="add-screenshot">${t('workspace.browser.addScreenshot')}</div>
+      <div class="ws-browser-menu-item" data-action="add-area-screenshot">${t('workspace.browser.addAreaScreenshot')}</div>`;
     anchor.appendChild(menu);
     (this as any)._openMenu = menu;
 
@@ -1946,12 +1973,12 @@ export class WorkspaceTabGroup {
     const menu = document.createElement('div');
     menu.className = 'ws-browser-menu';
     menu.innerHTML = `
-      <div class="ws-browser-menu-item" data-action="zoom-in">Zoom In</div>
-      <div class="ws-browser-menu-item" data-action="zoom-out">Zoom Out</div>
-      <div class="ws-browser-menu-item" data-action="zoom-reset">Reset Zoom</div>
+      <div class="ws-browser-menu-item" data-action="zoom-in">${t('workspace.browser.zoomIn')}</div>
+      <div class="ws-browser-menu-item" data-action="zoom-out">${t('workspace.browser.zoomOut')}</div>
+      <div class="ws-browser-menu-item" data-action="zoom-reset">${t('workspace.browser.zoomReset')}</div>
       <div class="ws-browser-menu-divider"></div>
-      <div class="ws-browser-menu-item" data-action="find">Find in Page</div>
-      <div class="ws-browser-menu-item" data-action="view-source">View Page Source</div>`;
+      <div class="ws-browser-menu-item" data-action="find">${t('workspace.browser.findInPage')}</div>
+      <div class="ws-browser-menu-item" data-action="view-source">${t('workspace.browser.viewSource')}</div>`;
     anchor.appendChild(menu);
     (this as any)._openMenu = menu;
 
@@ -2269,7 +2296,7 @@ export class WorkspaceTabGroup {
     fav.src = tab.browserFavicon;
   }
 
-  private _showBinaryNotice(tab: OpenTab): void { this._destroyContent(); this._contentArea.style.cssText = 'display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:var(--color-text-secondary,#9c9c9d);font-size:13px;'; this._contentArea.innerHTML = `<div>${_escHtml(tab.name)}</div><div style="font-size:11px;opacity:0.5;">Binary file — cannot preview</div>`; }
+  private _showBinaryNotice(tab: OpenTab): void { this._destroyContent(); this._contentArea.style.cssText = 'display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:var(--color-text-secondary,#9c9c9d);font-size:13px;'; this._contentArea.innerHTML = `<div>${_escHtml(tab.name)}</div><div style="font-size:11px;opacity:0.5;">${t('workspace.preview.binary')}</div>`; }
 
   // ── Office document preview ──
 
@@ -2294,7 +2321,7 @@ export class WorkspaceTabGroup {
   private async _showOffice(tab: OpenTab): Promise<void> {
     this._destroyContent();
     this._contentArea.style.cssText = 'display:flex;align-items:center;justify-content:center;';
-    this._contentArea.innerHTML = '<div style="color:var(--color-text-secondary,#9c9c9d);font-size:13px;">Loading preview...</div>';
+    this._contentArea.innerHTML = `<div style="color:var(--color-text-secondary,#9c9c9d);font-size:13px;">${t('workspace.preview.loading')}</div>`;
 
     try {
       const resp = await fetch(`/api/v1/workspace/convert-office?path=${encodeURIComponent(tab.path)}&sessionId=${encodeURIComponent(this._sessionId)}`);
@@ -2332,7 +2359,7 @@ export class WorkspaceTabGroup {
       } else if (data.type === 'text') {
         const pre = document.createElement('pre');
         pre.style.cssText = 'padding:20px 28px;font-size:12px;line-height:1.6;color:var(--color-text,#f4f4f6);white-space:pre-wrap;word-break:break-word;font-family:var(--font-mono);';
-        pre.textContent = data.content || 'No readable content found.';
+        pre.textContent = data.content || t('workspace.preview.noReadableContent');
         this._contentArea.appendChild(pre);
       } else if (data.type === 'image') {
         const img = document.createElement('img');
@@ -2343,7 +2370,7 @@ export class WorkspaceTabGroup {
         this._contentArea.appendChild(img);
       }
     } catch {
-      this._contentArea.innerHTML = `<div style="color:var(--color-text-secondary,#9c9c9d);font-size:13px;">${_escHtml(tab.name)}</div><div style="font-size:11px;opacity:0.5;margin-top:8px;">Preview not available</div>`;
+      this._contentArea.innerHTML = `<div style="color:var(--color-text-secondary,#9c9c9d);font-size:13px;">${_escHtml(tab.name)}</div><div style="font-size:11px;opacity:0.5;margin-top:8px;">${t('workspace.preview.unavailable')}</div>`;
       this._contentArea.style.cssText = 'display:flex;align-items:center;justify-content:center;flex-direction:column;';
     }
   }
@@ -2361,15 +2388,51 @@ export class WorkspaceTabGroup {
       ToastManager.getInstance().error(tab.readOnlyReason);
       return false;
     }
+    if (tab.savePromise) {
+      const previousSucceeded = await tab.savePromise;
+      if (!previousSucceeded || !tab.isDirty) return previousSucceeded;
+    }
+    const operation = this._saveFileSnapshot(tab);
+    tab.savePromise = operation;
+    try {
+      return await operation;
+    } finally {
+      if (tab.savePromise === operation) tab.savePromise = undefined;
+    }
+  }
+
+  private async _saveFileSnapshot(tab: OpenTab): Promise<boolean> {
     try {
       const content = tab.model.getValue();
-      const resp = await fetch('/api/v1/workspace/write', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({sessionId:this._sessionId, path:tab.path, content}) });
-      if (!resp.ok) throw new Error(await _responseError(resp, `Save failed (${resp.status})`));
+      const sentRevision = tab.editRevision || 0;
+      const resp = await fetch('/api/v1/workspace/write', {
+        method:'PUT',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          sessionId:this._sessionId,
+          path:tab.path,
+          content,
+          ...(tab.diskSha256 ? { expectedSha256: tab.diskSha256 } : {}),
+        }),
+      });
+      if (!resp.ok) {
+        throw new Error(await _responseError(resp, t('workspace.saveFailedStatus', { status: resp.status })));
+      }
+      const result = await resp.json() as { sha256?: string };
+      if (result.sha256) tab.diskSha256 = result.sha256;
       tab.originalContent = content;
-      tab.isDirty = false; this._updateDirty(tab);
+      tab.isDirty = !isSaveSnapshotCurrent(
+        sentRevision,
+        tab.editRevision || 0,
+        content,
+        tab.model.getValue(),
+      );
+      this._updateDirty(tab);
       return true;
     } catch (err) {
-      ToastManager.getInstance().error(err instanceof Error ? err.message : `Failed to save ${tab.name}`);
+      ToastManager.getInstance().error(
+        err instanceof Error ? err.message : t('workspace.saveNamedFailed', { name: tab.name }),
+      );
       return false;
     }
   }
@@ -2390,7 +2453,7 @@ export class WorkspaceTabGroup {
   async prepareForPathRemoval(targetPath: string): Promise<boolean> {
     const impacted = this._tabs.filter(tab => _pathMatches(tab.path, targetPath) && tab.isDirty);
     for (const tab of impacted) {
-      const action = await this._promptDirtyAction(tab, `deleting ${targetPath}`);
+      const action = await this._promptDirtyAction(tab, t('workspace.action.deleting', { path: targetPath }));
       if (action === 'cancel') return false;
       if (action === 'save' && !await this.saveFile(tab)) return false;
     }
@@ -2438,44 +2501,49 @@ export class WorkspaceTabGroup {
   // ── Agent integration: context menu + editor state ──
 
   private _agentActionsRegistered = false;
+  private _agentActionDisposables: Array<{ dispose: () => void }> = [];
   private _inlineCompletionRegistered = false;
 
   private _registerAgentActions(): void {
     if (this._agentActionsRegistered) return;
     const m = (window as any).monaco; if (!m) return;
     this._agentActionsRegistered = true;
+    const register = (descriptor: Record<string, unknown>): void => {
+      const disposable = m.editor.addEditorAction(descriptor);
+      if (disposable?.dispose) this._agentActionDisposables.push(disposable);
+    };
 
     // "Ask Agent about selection" — with selection
-    m.editor.addEditorAction({
+    register({
       id: 'anoclaw-ask-agent',
-      label: 'Ask Agent',
+      label: t('workspace.editor.action.askAgent'),
       contextMenuGroupId: 'anoclaw-agent',
       contextMenuOrder: 1,
       run: (ed: any) => { const sel = ed.getSelection(); const text = sel && !sel.isEmpty() ? ed.getModel()?.getValueInRange(sel) || '' : ''; this._dispatchAskAgent(text, 'Ask'); },
     });
 
     // "Agent: Explain This" — with or without selection
-    m.editor.addEditorAction({
+    register({
       id: 'anoclaw-explain-code',
-      label: 'Agent: Explain This',
+      label: t('workspace.editor.action.explain'),
       contextMenuGroupId: 'anoclaw-agent',
       contextMenuOrder: 2,
       run: (ed: any) => { const sel = ed.getSelection(); const text = sel && !sel.isEmpty() ? ed.getModel()?.getValueInRange(sel) || '' : ''; this._dispatchAskAgent(text, 'Explain'); },
     });
 
     // "Agent: Find Bugs" — with or without selection
-    m.editor.addEditorAction({
+    register({
       id: 'anoclaw-find-bugs',
-      label: 'Agent: Find Bugs',
+      label: t('workspace.editor.action.findBugs'),
       contextMenuGroupId: 'anoclaw-agent',
       contextMenuOrder: 3,
       run: (ed: any) => { const sel = ed.getSelection(); const text = sel && !sel.isEmpty() ? ed.getModel()?.getValueInRange(sel) || '' : ''; this._dispatchAskAgent(text, 'FindBugs'); },
     });
 
     const aiKeybindings = m.KeyCode?.Backslash ? [m.KeyMod.Alt | m.KeyCode.Backslash] : undefined;
-    m.editor.addEditorAction({
+    register({
       id: 'anoclaw-ai-complete',
-      label: 'AI: Complete at Cursor',
+      label: t('workspace.editor.action.complete'),
       keybindings: aiKeybindings,
       contextMenuGroupId: 'anoclaw-agent',
       contextMenuOrder: 0,
@@ -2483,9 +2551,9 @@ export class WorkspaceTabGroup {
     });
 
     const goToDefinitionKey = m.KeyCode?.F12 ? [m.KeyCode.F12] : undefined;
-    m.editor.addEditorAction({
+    register({
       id: 'anoclaw-ls-definition',
-      label: 'IDE: Go to Definition',
+      label: t('workspace.editor.action.goToDefinition'),
       keybindings: goToDefinitionKey,
       contextMenuGroupId: 'navigation',
       contextMenuOrder: 1,
@@ -2493,14 +2561,21 @@ export class WorkspaceTabGroup {
     });
 
     const organizeKey = m.KeyCode?.KeyO ? [m.KeyMod.Shift | m.KeyMod.Alt | m.KeyCode.KeyO] : undefined;
-    m.editor.addEditorAction({
+    register({
       id: 'anoclaw-ls-organize-imports',
-      label: 'IDE: Organize Imports',
+      label: t('workspace.editor.action.organizeImports'),
       keybindings: organizeKey,
       contextMenuGroupId: 'anoclaw-agent',
       contextMenuOrder: 4,
       run: () => { void this._organizeImports(); },
     });
+  }
+
+  private _refreshAgentActions(): void {
+    if (!this._agentActionsRegistered) return;
+    for (const disposable of this._agentActionDisposables.splice(0)) disposable.dispose();
+    this._agentActionsRegistered = false;
+    this._registerAgentActions();
   }
 
   private _registerLanguageFeatures(): void {
@@ -2550,7 +2625,7 @@ export class WorkspaceTabGroup {
     const tab = this._tabForModel(model);
     if (!tab) return { suggestions: [] };
     try {
-      this._setLanguageStatus('working', 'LS Completing');
+      this._setLanguageStatus('working', 'workspace.editor.ls.completing');
       const word = model.getWordUntilPosition(position);
       const fallbackRange = new m.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn);
       const data = await this._languageFetch('completions', model, position);
@@ -2566,10 +2641,14 @@ export class WorkspaceTabGroup {
           .filter((edit: any) => edit.path === tab.path)
           .map((edit: any) => ({ range: this._monacoRange(edit.range), text: edit.text })),
       }));
-      this._setLanguageStatus('ready', suggestions.length ? `LS ${suggestions.length}` : 'LS Ready');
+      this._setLanguageStatus(
+        'ready',
+        suggestions.length ? 'workspace.editor.ls.suggestions' : 'workspace.editor.ls.ready',
+        suggestions.length ? { count: suggestions.length } : {},
+      );
       return { suggestions };
     } catch {
-      this._setLanguageStatus('error', 'LS Error');
+      this._setLanguageStatus('error', 'workspace.editor.ls.error');
       return { suggestions: [] };
     }
   }
@@ -2584,7 +2663,7 @@ export class WorkspaceTabGroup {
         range: hover.range ? this._monacoRange(hover.range) : undefined,
       };
     } catch {
-      this._setLanguageStatus('error', 'LS Error');
+      this._setLanguageStatus('error', 'workspace.editor.ls.error');
       return null;
     }
   }
@@ -2599,7 +2678,7 @@ export class WorkspaceTabGroup {
         range: this._monacoRange(loc.range),
       }));
     } catch {
-      this._setLanguageStatus('error', 'LS Error');
+      this._setLanguageStatus('error', 'workspace.editor.ls.error');
       return [];
     }
   }
@@ -2618,7 +2697,7 @@ export class WorkspaceTabGroup {
     const tab = this._tabForModel(model);
     if (!m || !tab) return;
     try {
-      this._setLanguageStatus('working', 'LS Checking');
+      this._setLanguageStatus('working', 'workspace.editor.ls.checking');
       const data = await this._languageFetch('diagnostics', model);
       const markers = (data.diagnostics || []).map((d: any) => ({
         severity: this._monacoMarkerSeverity(d.severity),
@@ -2631,9 +2710,17 @@ export class WorkspaceTabGroup {
         endColumn: d.range?.endColumn || d.range?.startColumn || 2,
       }));
       m.editor.setModelMarkers(model, 'anoclaw-language', markers);
-      this._setLanguageStatus('ready', markers.length ? `LS ${markers.length} issue${markers.length === 1 ? '' : 's'}` : 'LS Ready');
+      this._setLanguageStatus(
+        'ready',
+        markers.length === 1
+          ? 'workspace.editor.ls.issue'
+          : markers.length > 1
+            ? 'workspace.editor.ls.issues'
+            : 'workspace.editor.ls.ready',
+        markers.length > 1 ? { count: markers.length } : {},
+      );
     } catch {
-      this._setLanguageStatus('error', 'LS Error');
+      this._setLanguageStatus('error', 'workspace.editor.ls.error');
     }
   }
 
@@ -2643,20 +2730,20 @@ export class WorkspaceTabGroup {
     const position = this._editor.getPosition();
     if (!model || !position) return;
     try {
-      this._setLanguageStatus('working', 'LS Definition');
+      this._setLanguageStatus('working', 'workspace.editor.ls.definition');
       const data = await this._languageFetch('definition', model, position);
       const target = (data.locations || []).find((loc: any) => !loc.external) || (data.locations || [])[0];
-      if (!target) { this._setLanguageStatus('ready', 'LS No definition'); return; }
-      if (target.external) { this._setLanguageStatus('ready', 'LS External'); return; }
+      if (!target) { this._setLanguageStatus('ready', 'workspace.editor.ls.noDefinition'); return; }
+      if (target.external) { this._setLanguageStatus('ready', 'workspace.editor.ls.external'); return; }
       await this.openFile(target.path, _baseName(target.path));
       if (this._editor && target.range) {
         this._editor.setSelection(this._monacoRange(target.range));
         this._editor.revealLineInCenter(target.range.startLineNumber);
         this._editor.focus();
       }
-      this._setLanguageStatus('ready', 'LS Definition');
+      this._setLanguageStatus('ready', 'workspace.editor.ls.definition');
     } catch {
-      this._setLanguageStatus('error', 'LS Error');
+      this._setLanguageStatus('error', 'workspace.editor.ls.error');
     }
   }
 
@@ -2665,7 +2752,7 @@ export class WorkspaceTabGroup {
     const model = this._editor.getModel();
     if (!model || !this._tabForModel(model)) return;
     try {
-      this._setLanguageStatus('working', 'LS Imports');
+      this._setLanguageStatus('working', 'workspace.editor.ls.imports');
       const data = await this._languageFetch('organize-imports', model);
       const edits = (data.edits || [])
         .filter((edit: any) => edit.path === this._tabForModel(model)?.path)
@@ -2675,10 +2762,13 @@ export class WorkspaceTabGroup {
         })
         .map((edit: any) => ({ range: this._monacoRange(edit.range), text: edit.text, forceMoveMarkers: true }));
       if (edits.length) this._editor.executeEdits('anoclaw-organize-imports', edits);
-      this._setLanguageStatus('ready', edits.length ? 'LS Imports done' : 'LS Imports clean');
+      this._setLanguageStatus(
+        'ready',
+        edits.length ? 'workspace.editor.ls.importsDone' : 'workspace.editor.ls.importsClean',
+      );
       this._editor.focus();
     } catch {
-      this._setLanguageStatus('error', 'LS Error');
+      this._setLanguageStatus('error', 'workspace.editor.ls.error');
     }
   }
 
@@ -2686,7 +2776,9 @@ export class WorkspaceTabGroup {
     const tab = this._tabForModel(model);
     if (!tab) throw new Error('No workspace tab for model');
     const endpoint = LANGUAGE_ENDPOINTS[operation];
-    if (!endpoint) throw new Error(`Unsupported language operation: ${operation}`);
+    if (!endpoint) {
+      throw new Error(t('workspace.editor.ls.unsupportedOperation', { operation }));
+    }
     const body = {
       sessionId: this._sessionId,
       path: tab.path,
@@ -2701,7 +2793,11 @@ export class WorkspaceTabGroup {
       body: JSON.stringify(body),
     });
     const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data.message || data.error || `Language service failed (${resp.status})`);
+    if (!resp.ok) {
+      throw new Error(
+        data.message || data.error || t('workspace.editor.ls.requestFailed', { status: resp.status }),
+      );
+    }
     return data;
   }
 
@@ -2746,14 +2842,20 @@ export class WorkspaceTabGroup {
     );
   }
 
-  private _setLanguageStatus(state: typeof this._languageStatusState, message: string): void {
+  private _setLanguageStatus(
+    state: typeof this._languageStatusState,
+    messageKey: TranslationKey,
+    params: Record<string, string | number> = {},
+  ): void {
     this._languageStatusState = state;
-    this._languageStatusMessage = message;
+    this._languageStatusMessageKey = messageKey;
+    this._languageStatusMessageParams = params;
+    const version = ++this._languageStatusVersion;
     this._renderLanguageStatus();
     if (state === 'ready') {
       window.setTimeout(() => {
-        if (this._languageStatusState === state && this._languageStatusMessage === message) {
-          this._setLanguageStatus('idle', 'LS Ready');
+        if (this._languageStatusVersion === version) {
+          this._setLanguageStatus('idle', 'workspace.editor.ls.ready');
         }
       }, 2600);
     }
@@ -2763,7 +2865,7 @@ export class WorkspaceTabGroup {
     const el = this._contentArea.querySelector('[data-role="language-service-status"]') as HTMLElement | null;
     if (!el) return;
     el.className = `ws-editor-ls-status ${this._languageStatusState}`;
-    el.textContent = this._languageStatusMessage;
+    el.textContent = t(this._languageStatusMessageKey, this._languageStatusMessageParams);
   }
 
   private _registerInlineCompletion(): void {
@@ -2781,20 +2883,20 @@ export class WorkspaceTabGroup {
         const key = `${model.uri.path}_${position.lineNumber}_${position.column}`;
         (this as any)._lastInlineKey = key;
         const requestId = ++this._inlineCompletionRequestId;
-        this._setInlineCompletionStatus('waiting', 'AI Waiting');
+        this._setInlineCompletionStatus('waiting', 'workspace.editor.ai.waiting');
         await new Promise(r => setTimeout(r, 750));
         if ((this as any)._lastInlineKey !== key) return { items: [] };
         if (requestId !== this._inlineCompletionRequestId) return { items: [] };
 
         try {
-          this._setInlineCompletionStatus('thinking', 'AI Thinking');
+          this._setInlineCompletionStatus('thinking', 'workspace.editor.ai.thinking');
           const completion = await this._requestInlineCompletion(model, position);
           if (requestId !== this._inlineCompletionRequestId) return { items: [] };
           if (!completion) {
-            this._setInlineCompletionStatus('empty', 'AI No suggestion');
+            this._setInlineCompletionStatus('empty', 'workspace.editor.ai.noSuggestion');
             return { items: [] };
           }
-          this._setInlineCompletionStatus('ready', 'AI Suggested');
+          this._setInlineCompletionStatus('ready', 'workspace.editor.ai.suggested');
 
           return {
             items: [{
@@ -2820,17 +2922,20 @@ export class WorkspaceTabGroup {
     const lineContent = model.getLineContent(position.lineNumber);
     const textBeforeCursor = lineContent.substring(0, position.column - 1);
     if (textBeforeCursor.trim().length < 2) {
-      this._setInlineCompletionStatus('empty', 'AI Type more');
+      this._setInlineCompletionStatus('empty', 'workspace.editor.ai.typeMore');
       return;
     }
 
     const requestId = ++this._inlineCompletionRequestId;
-    this._setInlineCompletionStatus('thinking', manual ? 'AI Completing' : 'AI Thinking');
+    this._setInlineCompletionStatus(
+      'thinking',
+      manual ? 'workspace.editor.ai.completing' : 'workspace.editor.ai.thinking',
+    );
     try {
       const completion = await this._requestInlineCompletion(model, position);
       if (requestId !== this._inlineCompletionRequestId) return;
       if (!completion) {
-        this._setInlineCompletionStatus('empty', 'AI No suggestion');
+        this._setInlineCompletionStatus('empty', 'workspace.editor.ai.noSuggestion');
         return;
       }
       this._editor.executeEdits('anoclaw-ai-complete', [{
@@ -2838,7 +2943,7 @@ export class WorkspaceTabGroup {
         text: completion,
         forceMoveMarkers: true,
       }]);
-      this._setInlineCompletionStatus('ready', 'AI Inserted');
+      this._setInlineCompletionStatus('ready', 'workspace.editor.ai.inserted');
       this._editor.focus();
     } catch (err) {
       if (requestId !== this._inlineCompletionRequestId) return;
@@ -2867,18 +2972,28 @@ export class WorkspaceTabGroup {
       body: JSON.stringify({ prefix, suffix, language: model.getLanguageId(), sessionId: this._sessionId }),
     });
     const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data.message || data.error || `Suggest failed (${resp.status})`);
+    if (!resp.ok) {
+      throw new Error(
+        data.message || data.error || t('workspace.editor.ai.suggestFailed', { status: resp.status }),
+      );
+    }
     return String(data.completion || '').replace(/^\r?\n/, '').replace(/[ \t\r\n]+$/, '');
   }
 
-  private _setInlineCompletionStatus(state: typeof this._inlineCompletionState, message: string): void {
+  private _setInlineCompletionStatus(
+    state: typeof this._inlineCompletionState,
+    messageKey: TranslationKey,
+    params: Record<string, string | number> = {},
+  ): void {
     this._inlineCompletionState = state;
-    this._inlineCompletionMessage = message;
+    this._inlineCompletionMessageKey = messageKey;
+    this._inlineCompletionMessageParams = params;
+    const version = ++this._inlineCompletionStatusVersion;
     this._renderInlineCompletionStatus();
     if (state === 'ready' || state === 'empty') {
       window.setTimeout(() => {
-        if (this._inlineCompletionState === state && this._inlineCompletionMessage === message) {
-          this._setInlineCompletionStatus('idle', 'AI Ready');
+        if (this._inlineCompletionStatusVersion === version) {
+          this._setInlineCompletionStatus('idle', 'workspace.editor.ai.ready');
         }
       }, 2200);
     }
@@ -2888,15 +3003,15 @@ export class WorkspaceTabGroup {
     const el = this._contentArea.querySelector('[data-role="inline-completion-status"]') as HTMLElement | null;
     if (!el) return;
     el.className = `ws-editor-ai-status ${this._inlineCompletionState}`;
-    el.textContent = this._inlineCompletionMessage;
+    el.textContent = t(this._inlineCompletionMessageKey, this._inlineCompletionMessageParams);
   }
 
-  private _inlineCompletionErrorMessage(err: unknown): string {
+  private _inlineCompletionErrorMessage(err: unknown): TranslationKey {
     const raw = err instanceof Error ? err.message : String(err || 'error');
-    if (/api url|configured|missing/i.test(raw)) return 'AI Not configured';
-    if (/401|403|api key|unauthorized/i.test(raw)) return 'AI Auth error';
-    if (/fetch|network|ECONN|ENOTFOUND|timeout/i.test(raw)) return 'AI Offline';
-    return 'AI Error';
+    if (/api url|configured|missing/i.test(raw)) return 'workspace.editor.ai.notConfigured';
+    if (/401|403|api key|unauthorized/i.test(raw)) return 'workspace.editor.ai.authError';
+    if (/fetch|network|ECONN|ENOTFOUND|timeout/i.test(raw)) return 'workspace.editor.ai.offline';
+    return 'workspace.editor.ai.error';
   }
 
   private _dispatchAskAgent(selectedText: string, action: string): void {
@@ -2955,6 +3070,7 @@ export class WorkspaceTabGroup {
         const diskContent = data.content || '';
         const editorContent = tab.model?.getValue() || '';
         if (hasExternalContentChange(diskContent, editorContent)) {
+          tab.pendingExternalSha256 = typeof data.sha256 === 'string' ? data.sha256 : undefined;
           this._showDiffBanner(tab, editorContent, diskContent);
           return; // Only show one banner at a time
         }
@@ -2969,22 +3085,22 @@ export class WorkspaceTabGroup {
     const bar = document.createElement('div');
     bar.className = 'ws-diff-banner';
     bar.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 12px;background:rgba(255,197,51,0.1);border-bottom:1px solid rgba(255,197,51,0.25);font-size:12px;color:#ffc533;flex-shrink:0;';
-    bar.innerHTML = `<span>Agent modified this file</span><span style="flex:1;"></span>`;
+    bar.innerHTML = `<span>${t('workspace.review.modified')}</span><span style="flex:1;"></span>`;
 
     const reviewBtn = document.createElement('button');
-    reviewBtn.textContent = 'Review Changes';
+    reviewBtn.textContent = t('workspace.review.reviewChanges');
     reviewBtn.style.cssText = 'padding:3px 8px;border:1px solid rgba(255,197,51,0.4);border-radius:4px;background:transparent;color:#ffc533;cursor:pointer;font-size:11px;font-family:inherit;';
     reviewBtn.addEventListener('click', () => { this._hideDiffBanner(); this._showInlineDiff(tab, oldContent, newContent); });
     bar.appendChild(reviewBtn);
 
     const acceptBtn = document.createElement('button');
-    acceptBtn.textContent = 'Accept';
+    acceptBtn.textContent = t('workspace.review.accept');
     acceptBtn.style.cssText = 'padding:3px 8px;border:1px solid rgba(74,222,128,0.4);border-radius:4px;background:rgba(74,222,128,0.1);color:#4ade80;cursor:pointer;font-size:11px;font-family:inherit;';
     acceptBtn.addEventListener('click', () => { this._acceptExternalChange(tab, newContent); });
     bar.appendChild(acceptBtn);
 
     const rejectBtn = document.createElement('button');
-    rejectBtn.textContent = 'Revert';
+    rejectBtn.textContent = t('workspace.review.revert');
     rejectBtn.style.cssText = 'padding:3px 8px;border:1px solid rgba(248,113,113,0.4);border-radius:4px;background:rgba(248,113,113,0.1);color:#f87171;cursor:pointer;font-size:11px;font-family:inherit;';
     rejectBtn.addEventListener('click', () => { this._revertExternalChange(tab, oldContent); });
     bar.appendChild(rejectBtn);
@@ -3019,7 +3135,7 @@ export class WorkspaceTabGroup {
     const actionBar = document.createElement('div');
     actionBar.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 12px;border-top:1px solid var(--color-hairline,#242728);flex-shrink:0;background:var(--color-surface,#0d0d0d);';
     const revertBtn = document.createElement('button');
-    revertBtn.textContent = 'Revert to Original';
+    revertBtn.textContent = t('workspace.review.revertOriginal');
     revertBtn.style.cssText = 'padding:4px 10px;border:1px solid rgba(248,113,113,0.3);border-radius:4px;background:transparent;color:#f87171;cursor:pointer;font-size:11px;font-family:inherit;';
     revertBtn.addEventListener('click', () => {
       oldModel.dispose(); newModel.dispose(); diffEditor.dispose();
@@ -3030,7 +3146,7 @@ export class WorkspaceTabGroup {
     const spacer = document.createElement('span'); spacer.style.cssText = 'flex:1;'; actionBar.appendChild(spacer);
 
     const acceptBtn = document.createElement('button');
-    acceptBtn.textContent = 'Accept Changes';
+    acceptBtn.textContent = t('workspace.review.acceptChanges');
     acceptBtn.style.cssText = 'padding:4px 10px;border:1px solid rgba(74,222,128,0.4);border-radius:4px;background:rgba(74,222,128,0.1);color:#4ade80;cursor:pointer;font-size:11px;font-family:inherit;';
     acceptBtn.addEventListener('click', () => {
       oldModel.dispose(); newModel.dispose(); diffEditor.dispose();
@@ -3045,6 +3161,8 @@ export class WorkspaceTabGroup {
     this._hideDiffBanner();
     tab.model.setValue(newContent);
     tab.originalContent = newContent;
+    tab.diskSha256 = tab.pendingExternalSha256 || tab.diskSha256;
+    tab.pendingExternalSha256 = undefined;
     tab.isDirty = false;
     this._updateDirty(tab);
     // Re-render active tab to restore normal editor view
@@ -3053,13 +3171,32 @@ export class WorkspaceTabGroup {
 
   private async _revertExternalChange(tab: OpenTab, originalContent: string): Promise<void> {
     this._hideDiffBanner();
-    // Write original content back to disk
+    // Revert only the exact external revision that was reviewed. If another
+    // writer changed the file again, preserve the editor buffer as dirty.
     try {
-      await fetch('/api/v1/workspace/write', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId:this._sessionId, path: tab.path, content: originalContent }) });
-    } catch { console.debug('WorkspaceTabGroup: undo write failed for', tab.path); }
-    tab.model.setValue(originalContent);
-    tab.originalContent = originalContent;
-    tab.isDirty = false;
+      const resp = await fetch('/api/v1/workspace/write', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId:this._sessionId,
+          path: tab.path,
+          content: originalContent,
+          ...(tab.pendingExternalSha256 ? { expectedSha256: tab.pendingExternalSha256 } : {}),
+        }),
+      });
+      if (!resp.ok) {
+        throw new Error(await _responseError(resp, t('workspace.saveFailedStatus', { status: resp.status })));
+      }
+      const result = await resp.json() as { sha256?: string };
+      tab.model.setValue(originalContent);
+      tab.originalContent = originalContent;
+      tab.diskSha256 = result.sha256 || tab.pendingExternalSha256 || tab.diskSha256;
+      tab.pendingExternalSha256 = undefined;
+      tab.isDirty = false;
+    } catch (err) {
+      tab.isDirty = true;
+      ToastManager.getInstance().error(err instanceof Error ? err.message : String(err));
+    }
     this._updateDirty(tab);
     if (tab.path === this._activePath) this._activate(tab);
   }
@@ -3070,10 +3207,82 @@ export class WorkspaceTabGroup {
       <div class="ws-editor-empty">
         <div class="ws-editor-empty-panel">
           <div class="ws-editor-empty-mark"></div>
-          <div class="ws-editor-empty-title">No file open</div>
-          <div class="ws-editor-empty-meta">Workspace editor idle</div>
+          <div class="ws-editor-empty-title">${t('workspace.noFileOpen')}</div>
+          <div class="ws-editor-empty-meta">${t('workspace.editorIdle')}</div>
         </div>
       </div>`;
+  }
+
+  private _refreshLocale(): void {
+    this._tabBar.setAttribute('aria-label', t('workspace.tabsAria'));
+    this._plusBtn.title = t('workspace.newFileOrBrowser');
+    this._closeAllMenus();
+    this._refreshAgentActions();
+
+    for (const tab of this._tabs) {
+      if (tab.fileType === 'browser' && tab.browserUrl === 'about:blank' && !tab.browserTitle) {
+        tab.name = (tab.agentTrace?.length || 0) > 0 ? t('workspace.agentBrowser') : t('workspace.newTabName');
+        const name = this._tabBar.querySelector(`[data-tab-path="${_escAttr(tab.path)}"] .ws-tab-name`) as HTMLElement | null;
+        if (name) name.textContent = tab.name;
+      }
+      const close = this._tabBar.querySelector(`[data-tab-path="${_escAttr(tab.path)}"] .ws-tab-close`) as HTMLElement | null;
+      close?.setAttribute('aria-label', t('workspace.closeTab', { name: tab.name }));
+    }
+
+    const active = this._tabs.find(tab => tab.path === this._activePath);
+    if (!active) {
+      this._showEmpty();
+      return;
+    }
+
+    if (active.fileType === 'browser') {
+      const input = this._contentArea.querySelector('.ws-browser-url') as HTMLInputElement | null;
+      if (input) input.placeholder = t('workspace.browser.address');
+      this._contentArea.querySelectorAll<HTMLElement>('[data-i18n-title]').forEach((element) => {
+        const key = element.dataset.i18nTitle as TranslationKey;
+        const label = t(key);
+        element.title = label;
+        element.setAttribute('aria-label', label);
+      });
+      const viewport = this._contentArea.querySelector<HTMLButtonElement>('.ws-browser-viewport-btn');
+      if (viewport && active.browserViewport) {
+        const label = _viewportLabel(active.browserViewport);
+        viewport.title = label;
+        viewport.setAttribute('aria-label', label);
+      }
+      this._renderFindBar(active);
+      this._renderDownloads(active);
+      this._renderSecurityPrompts(active);
+      this._renderAgentTrace(active);
+      this._renderBrowserPanel(active);
+      setTimeout(() => this._syncWvBounds(), 0);
+      return;
+    }
+
+    const status = this._contentArea.querySelector('.ws-editor-status');
+    if (status) {
+      const position = this._editor?.getPosition?.();
+      const posEl = status.querySelector('[data-role="cursor-pos"]') as HTMLElement | null;
+      if (posEl) posEl.textContent = t('workspace.editor.position', { line: position?.lineNumber || 1, column: position?.column || 1 });
+      const spaces = status.querySelector('[data-i18n-key="workspace.editor.spaces"]') as HTMLElement | null;
+      if (spaces) spaces.textContent = t('workspace.editor.spaces');
+      const languageService = status.querySelector('[data-role="language-service-status"]') as HTMLElement | null;
+      if (languageService) languageService.title = t('workspace.editor.languageServiceTitle');
+      const completion = status.querySelector('[data-role="inline-completion-status"]') as HTMLElement | null;
+      if (completion) completion.title = t('workspace.editor.aiCompletionTitle');
+      this._renderLanguageStatus();
+      this._renderInlineCompletionStatus();
+    }
+
+    const diffBanner = this._contentArea.querySelector('.ws-diff-banner');
+    if (diffBanner) {
+      const texts = diffBanner.querySelectorAll<HTMLElement>('span, button');
+      if (texts[0]) texts[0].textContent = t('workspace.review.modified');
+      const buttons = diffBanner.querySelectorAll<HTMLButtonElement>('button');
+      if (buttons[0]) buttons[0].textContent = t('workspace.review.reviewChanges');
+      if (buttons[1]) buttons[1].textContent = t('workspace.review.accept');
+      if (buttons[2]) buttons[2].textContent = t('workspace.review.revert');
+    }
   }
 
   dispose(): void {
@@ -3091,6 +3300,10 @@ export class WorkspaceTabGroup {
       this._diagnosticsTimer = 0;
     }
     WorkspaceTabGroup._groups.delete(this);
+    for (const disposable of this._agentActionDisposables.splice(0)) disposable.dispose();
+    this._agentActionsRegistered = false;
+    this._stopLocaleListener?.();
+    this._stopLocaleListener = null;
     this._ro?.disconnect();
     this._destroyBrowserView();
     this._wvStateCleanup?.();
@@ -3154,6 +3367,10 @@ function _compactUrl(url: string): string {
 
 function _viewportByName(name?: string): BrowserViewportPreset {
   return BROWSER_VIEWPORT_PRESETS.find(preset => preset.name === name) || BROWSER_VIEWPORT_PRESETS[0];
+}
+
+function _viewportLabel(preset: BrowserViewportPreset): string {
+  return t(preset.labelKey);
 }
 
 function _viewportPayload(preset: BrowserViewportPreset): { name: string; width?: number; height?: number; mobile?: boolean; deviceScaleFactor?: number; userAgent?: string } {
@@ -3225,11 +3442,11 @@ const _SVG_BROWSER_DEVICE = `<svg width="14" height="14" viewBox="0 0 24 24" fil
 const _SVG_TAB_CLOSE = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`;
 
 const BROWSER_VIEWPORT_PRESETS: BrowserViewportPreset[] = [
-  { name: 'desktop', label: 'Desktop' },
-  { name: 'desktop-small', label: 'Small', width: 1024, height: 768, mobile: false },
+  { name: 'desktop', labelKey: 'workspace.browser.device.desktop' },
+  { name: 'desktop-small', labelKey: 'workspace.browser.device.small', width: 1024, height: 768, mobile: false },
   {
     name: 'iphone',
-    label: 'iPhone',
+    labelKey: 'workspace.browser.device.iphone',
     width: 390,
     height: 844,
     mobile: true,
@@ -3238,7 +3455,7 @@ const BROWSER_VIEWPORT_PRESETS: BrowserViewportPreset[] = [
   },
   {
     name: 'ipad',
-    label: 'iPad',
+    labelKey: 'workspace.browser.device.ipad',
     width: 820,
     height: 1180,
     mobile: true,

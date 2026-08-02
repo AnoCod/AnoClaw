@@ -34,7 +34,7 @@ flowchart TB
     subgraph WS["🔌 WebSocket Layer"]
         WS_SERVER["WsServer (single persistent connection)"]
         WS_ROUTER["WsMessageRouter (pluggable dispatch)"]
-        WS_HANDLERS["WS Handlers: send_message, stop, ping, run_command, quality_score"]
+        WS_HANDLERS["WS Handlers: send_message, stop, ping, run_command, set_session_mode, set_goal, editor_context, tool_confirm_response"]
         WS_FORWARD["WsForwardSubscriber (TypedEventBus → WS bridge)"]
     end
 
@@ -79,7 +79,7 @@ flowchart TB
 
 ## WebSocket Message Protocol
 
-### Client → Server (6 types)
+### Client → Server
 
 | Type | Description |
 |------|-------------|
@@ -87,10 +87,12 @@ flowchart TB
 | `stop` | Interrupt running agent loop |
 | `ping` | Keep-alive |
 | `run_command` | Slash command with args |
-| `set_running_mode` | Toggle normal/infinite |
-| `quality_score` | Rate a message (1-5 stars) |
+| `set_session_mode` | Change the session permission or effort mode |
+| `set_goal` | Manage the root-session goal loop |
+| `editor_context` | Synchronize visible editor context |
+| `tool_confirm_response` | Respond to a tool confirmation request |
 
-### Server → Client (26 types)
+### Server → Client
 
 | Event | Description |
 |-------|-------------|

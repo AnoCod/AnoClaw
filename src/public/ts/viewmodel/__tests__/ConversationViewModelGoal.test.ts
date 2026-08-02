@@ -26,7 +26,7 @@ describe('ConversationViewModel Goal permissions', () => {
     expect(conversation.goal).toEqual(goal);
   });
 
-  it('does not silently promote an active Goal when the user changes the session mode', () => {
+  it('locks an active Goal to Auto Edit without overwriting the stored session mode', () => {
     const sent: Array<Record<string, unknown>> = [];
     const root = {
       id: 'session-1',
@@ -46,8 +46,8 @@ describe('ConversationViewModel Goal permissions', () => {
 
     conversation.setPermissionMode('ask');
 
-    expect(conversation.permissionMode).toBe('ask');
-    expect(root.metadata.permissionMode).toBe('Ask');
-    expect(sent.at(-1)).toMatchObject({ type: 'set_session_mode', mode: 'ask' });
+    expect(conversation.permissionMode).toBe('auto-edit');
+    expect(root.metadata.permissionMode).toBe('Auto');
+    expect(sent).toEqual([]);
   });
 });

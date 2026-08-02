@@ -1,6 +1,6 @@
 # Context Compression System
 
-Manages LLM context window pressure through a 5-layer compression pipeline. Compaction only affects the in-memory message array — the persisted JSONL always retains full history. Integrates with AgentLoop to trigger compaction when token usage exceeds thresholds.
+Manages LLM context window pressure through a 5-layer compression pipeline. Automatic compaction only affects the active AgentLoop's in-memory message array. Manual `/compact` intentionally replaces persisted detailed history with a summary and recent context.
 
 ## Public API
 
@@ -13,7 +13,7 @@ const cc = ContextCompressor.getInstance();
 
 | Method | Parameters | Returns | Description |
 |--------|-----------|---------|-------------|
-| `compact(messages, contextWindow?, threshold?)` | `messages: readonly Message[]`, `contextWindow?: number`, `threshold?: number` | `Promise<CompactionResult>` | Run the full 5-layer compression pipeline |
+| `compact(messages, contextWindow?, threshold?, summarizer?)` | `messages: readonly Message[]`, `contextWindow?: number`, `threshold?: number`, `summarizer?: SummarizerFn` | `Promise<CompactionResult>` | Run the full 5-layer compression pipeline |
 | `setSummarizer(fn)` | `fn: SummarizerFn` | `void` | Set external LLM-based summarizer |
 | `compressToolOutputsWithStrategy(messages)` | `messages: Message[]` | `Message[]` | L2.5: Content-aware tool output compression |
 | `truncateToolOutputs(messages)` | `messages: Message[]` | `Message[]` | L2: Blind tool output truncation |
@@ -95,16 +95,16 @@ L2.5: Content-Aware Compression (NEW — runs BEFORE L2)
       JsonOutput → sample arrays, truncate large objects
 
 L2: Tool Output Truncation
-  └→ Truncate oversized tool results >200 chars to placeholders
+  └→ Truncate oversized tool results >4000 chars to a 200-char preview
 
-L3: Message Pruning
+L3: Old Tool Payload Pruning
   └→ Keep system message (head) + budget-based tail
   └→ Prune tool results >1024 chars in middle section
   └→ Fix orphaned tool_call/tool_result pairs
 
 L4: LLM Summary Compression
   └→ Generate structured summary of middle section
-  └→ Budget: 20% of compressed content, min 2000, max ~32000 tokens
+  └→ Budget: 20% of compressed content, min 2000, max 12000 tokens
   └→ Timeout: 30s → falls back to deterministic summary
 
 L5: Semantic Dedup
@@ -115,9 +115,8 @@ L5: Semantic Dedup
 
 | Usage | Status | Action |
 |-------|--------|--------|
-| < 70% | Normal | No compaction |
-| 70-85% | Warning | L1-L3 (truncation + pruning) |
-| > 85% | Critical | L4 (LLM summary) forced |
+| Below configured threshold | Normal | Cheap tool cleanup may run when independently needed |
+| Above configured threshold (70% default) | Compact | L4 summary takes priority over lower-level cleanup |
 
 ## Summary Format
 
@@ -154,9 +153,9 @@ Uses `gpt-tokenizer` for accurate counting when available (compatible with DeepS
 ## Dependencies
 
 ### Called by
-- `AgentLoopLLM` — calls `compactAndRebuildMessages()` when threshold exceeded
-- `AgentLoopCompaction` — shared compaction + message-rebuild logic
-- `AgentLoop` — calls `shouldCompact()` to check trigger conditions
+- `AgentLoop` — checks the configured threshold and calls `compactAndRebuildMessages()`
+- `AgentLoopLLM` — retries context/timeout failures after compaction
+- `CompactCommand` — runs LLM summarization and permanently rewrites manual compact results
 
 ### Depends on
 - `TokenCounter` — token estimation
@@ -164,12 +163,12 @@ Uses `gpt-tokenizer` for accurate counting when available (compatible with DeepS
 - `CompressionStrategy` — compression level determination
 - `CompactionConstants` — thresholds, summary templates
 - `TypedEventBus` — emits `loop:compaction_triggered` for monitoring
-- External summarizer (LLM) — injected via `setSummarizer()`
+- Per-loop summarizer (LLM) — passed into each compaction call
 
 ## Constraints
 
-- **Compaction only affects in-memory array** — JSONL on disk always keeps full history
-- Never calls `rewriteHistory()` — that would permanently delete messages
+- **Automatic compaction is in-memory only** — normal loop compaction never rewrites JSONL
+- **Manual `/compact` is persistent** — it calls `rewriteHistory()` and replaces detailed turns with the summary and recent context
 - Summarizer timeout: 30 seconds → falls back to deterministic summary
 - Fallback summary max: 8000 chars
 - Summary min valid length: 50 chars (below this, summary is discarded)

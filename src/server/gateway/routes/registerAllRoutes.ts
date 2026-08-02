@@ -4,7 +4,6 @@ import type { ApiServer } from '../ApiServer.js';
 import { HealthRoute } from './HealthRoute.js';
 import { ToolsListRoute, CommandsListRoute, ToolsStatsRoute } from './ToolsRoute.js';
 import { ListCapabilitiesRoute, ResolveTaskRoute } from './CapabilityRoutes.js';
-import { ListArtifactsRoute, CreateArtifactRoute, GetArtifactRoute, UpdateArtifactRoute, DownloadArtifactFileRoute } from './ArtifactRoutes.js';
 import { ToolsGroupRoute } from './ToolsGroupRoute.js';
 import { GetToolDetailRoute, ToolsForAgentRoute } from './ToolsDetailRoute.js';
 import { OpenFileRoute, StatsRoute, GetLogEntriesRoute } from './SystemRoutes.js';
@@ -34,7 +33,6 @@ import {
   RenameWorkspaceFileRoute, MoveWorkspaceFileRoute, WriteWorkspaceFileRoute,
   ConvertOfficeRoute,
 } from './WorkspaceRoutes.js';
-import { EvolutionAnalyzeRoute, EvolutionApplyRoute, EvolutionStatsRoute } from './EvolutionRoute.js';
 import { AgentExecuteRoute, AgentExecuteRedirectRoute } from './AgentExecuteRoute.js';
 import { SessionMessageRoute, SessionMessageRedirectRoute } from './SessionMessageRoute.js';
 import { ToolExecuteRoute, ToolExecuteRedirectRoute } from './ToolExecuteRoute.js';
@@ -60,6 +58,22 @@ import {
   ListAgentsRoute, GetAgentRoute, CreateAgentRoute,
   UpdateAgentRoute, DeleteAgentRoute, AgentStatusRoute, TestAgentConnectionRoute,
 } from './AgentRoutes.js';
+import {
+  AssignCoordinationTaskRoute,
+  ClaimCoordinationTaskRoute,
+  CoordinationEventsRoute,
+  CreateCoordinationTaskRoute,
+  CreateTeamRoute,
+  DeleteTeamRoute,
+  GetCoordinationTaskRoute,
+  GetTeamRoute,
+  ListCoordinationTasksRoute,
+  ListTeamsRoute,
+  PatchCoordinationTaskRoute,
+  PatchTeamRoute,
+  RetryCoordinationTaskRoute,
+  StopCoordinationTaskRoute,
+} from './CoordinationRoutes.js';
 
 export function registerAllRoutes(api: ApiServer): void {
   // System
@@ -80,11 +94,6 @@ export function registerAllRoutes(api: ApiServer): void {
   api.registerRoute(new CommandsListRoute());
   api.registerRoute(new ListCapabilitiesRoute());
   api.registerRoute(new ResolveTaskRoute());
-  api.registerRoute(new ListArtifactsRoute());
-  api.registerRoute(new CreateArtifactRoute());
-  api.registerRoute(new GetArtifactRoute());
-  api.registerRoute(new DownloadArtifactFileRoute());
-  api.registerRoute(new UpdateArtifactRoute());
   api.registerRoute(new ToolsGroupRoute());
   api.registerRoute(new ToolsStatsRoute());
   api.registerRoute(new GetToolDetailRoute());
@@ -134,6 +143,22 @@ export function registerAllRoutes(api: ApiServer): void {
   api.registerRoute(new HardDeleteSessionRoute());
   api.registerRoute(new SessionListFilteredRoute());
   api.registerRoute(new BackgroundTasksRoute());
+
+  // Root-scoped durable Agent Team coordination
+  api.registerRoute(new CoordinationEventsRoute());
+  api.registerRoute(new ListTeamsRoute());
+  api.registerRoute(new CreateTeamRoute());
+  api.registerRoute(new ListCoordinationTasksRoute());
+  api.registerRoute(new CreateCoordinationTaskRoute());
+  api.registerRoute(new AssignCoordinationTaskRoute());
+  api.registerRoute(new ClaimCoordinationTaskRoute());
+  api.registerRoute(new RetryCoordinationTaskRoute());
+  api.registerRoute(new StopCoordinationTaskRoute());
+  api.registerRoute(new GetTeamRoute());
+  api.registerRoute(new PatchTeamRoute());
+  api.registerRoute(new DeleteTeamRoute());
+  api.registerRoute(new GetCoordinationTaskRoute());
+  api.registerRoute(new PatchCoordinationTaskRoute());
 
   // Memory
   api.registerRoute(new MemorySearchRoute());
@@ -194,11 +219,6 @@ export function registerAllRoutes(api: ApiServer): void {
   api.registerRoute(new MoveWorkspaceFileRoute());
   api.registerRoute(new WriteWorkspaceFileRoute());
   api.registerRoute(new ConvertOfficeRoute());
-
-  // Evolution
-  api.registerRoute(new EvolutionStatsRoute());
-  api.registerRoute(new EvolutionAnalyzeRoute());
-  api.registerRoute(new EvolutionApplyRoute());
 
   // Agent — general-purpose agent execution for plugins
   api.registerRoute(new AgentExecuteRoute());

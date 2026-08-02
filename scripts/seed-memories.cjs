@@ -318,8 +318,9 @@ Agent 的核心执行循环：
 - SubAgent (level 3+): 临时生成，有时限
 
 ### 工具权限
-- Manager+: HireEmployee, UpdateOrg, TaskAssign
-- Member+: SubAgentSpawn
+- Manager+: Organization（list/hire）, Team, Task
+- MainAgent: Organization（额外支持 reassign）
+- Member+: Team, Task（含 spawn）
 - SubAgent+: 所有常规工具
 - Delegation timeout: 10 分钟 → InterruptController 触发中断`,
   },
@@ -494,7 +495,6 @@ memory:read / memory:write, settings:read / settings:write。通过 ApiAuth toke
 
 ### 页面特定覆盖
 以下页面可以有独立的品牌：
-- Workflow editor (plugin): 节点画布需要独特的视觉语言
 - Meeting page (plugin): 协作空间，不同的氛围
 - Agents org chart: 可以有自己的外观`,
   },

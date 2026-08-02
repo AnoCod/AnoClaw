@@ -1,344 +1,287 @@
-// AgentMessageTool - send a message to another agent along the org tree
-// Posts a message to the target agent's session via SessionManager.
-// Communication follows the org tree: up to managers, down to subordinates.
-// Now with delivery status feedback: reports whether target is actively processing,
-// processing in background, or message is queued for later.
-
 import { Tool, RiskLevel } from '../Tool.js';
-import type { ToolResult } from '../Tool.js';
-import type { ExecutionContext, Message } from '../../../../shared/types/session.js';
+import type { ExecutionContext, ToolResult } from '../Tool.js';
+import type {
+  CoordinationMessageKind,
+  TeamRecord,
+} from '../../../../shared/types/coordination.js';
+import { AgentRole } from '../../../../shared/types/agent.js';
+import type { Message } from '../../../../shared/types/session.js';
 import { MessageRole } from '../../../../shared/types/session.js';
-import { SessionManager } from '../../session/index.js';
 import { AgentRegistry } from '../../agent/AgentRegistry.js';
 import { AgentRuntime } from '../../agent/AgentRuntime.js';
-import { createLogger } from '../../logger.js';
-import { TypedEventBus } from '../../events/TypedEventBus.js';
-import { AgentChannel } from '../../agent/AgentChannel.js';
+import { CoordinationService } from '../../coordination/CoordinationService.js';
+import {
+  rootSessionIdFor,
+  stringParam,
+  toolFailure,
+} from '../../coordination/CoordinationToolHelpers.js';
+import { CoordinationError } from '../../coordination/CoordinationError.js';
+import { SessionManager } from '../../session/SessionManager.js';
 import { InterruptController } from '../../agent/supervision/InterruptController.js';
-import { BackgroundTaskManager } from '../../agent/supervision/BackgroundTaskManager.js';
-import { bubbleEventToParent } from '../../agent/AgentDelegation.js';
-import { SessionStore } from '../../session/SessionStore.js';
-import { WsServer } from '../../../infra/network/WsServer.js';
-import type { StreamPersister } from '../../../infra/StreamPersister.js';
+import { TokenCounter } from '../../context/TokenCounter.js';
 
-const MAX_TARGET_AGENT_ID_CHARS = 200;
-const MAX_MESSAGE_CONTENT_CHARS = 20000;
-const MAX_MESSAGE_SUMMARY_CHARS = 120;
+const KINDS = new Set<CoordinationMessageKind>(['note', 'steer']);
 
 export class AgentMessageTool extends Tool {
-
-  static category = 'Task Delegation';
-  static toolDescription = 'Sends a coordination update to a direct parent or child agent without creating a new task.';
-  name(): string {
-    return 'AgentMessage';
-  }
-
+  static category = 'Agent Teams';
+  static toolDescription = 'Queues durable mailbox notes or live steers without requesting task work.';
+  name(): string { return 'AgentMessage'; }
   description(): string {
-    return 'Send a coordination message to a directly related agent in the org tree. Use it to clarify, amend, interrupt, or review existing work; it does not create a tracked task.';
+    return 'Send a persistent mailbox-only note or steer a recipient whose AgentLoop is already running.';
   }
-
   prompt(): string {
     return [
-      '## AgentMessage Usage',
-      'Use AgentMessage for coordination inside an existing parent-child relationship.',
-      '',
-      'AgentMessage vs TaskAssign:',
-      '- TaskAssign starts a distinct tracked task with acceptance criteria.',
-      '- AgentMessage updates, clarifies, interrupts, or reviews active work without creating a new task.',
-      '',
-      'Use AgentMessage for:',
-      '- New constraints or requirements for a running task.',
-      '- Feedback after reviewing child output.',
-      '- A focused status request when a task appears stuck.',
-      '- Cancellation guidance before using TaskStop.',
-      '',
-      'Do not expect a synchronous chat reply. The recipient processes the message in its own session and reports through that session or task output.',
+      'kind="note" is a persistent mailbox-only notification. It does not start an idle AgentLoop and does not request a reply.',
+      'If a reply, review, or status response is required, use Task action="create" with targetAgentId and readOnly=true.',
+      'Use kind="steer" only to intervene in a recipient session whose AgentLoop is already running.',
+      'Use to="*" only inside an active session Team.',
+      'The MainAgent may address any employee directly or use to="@organization" to broadcast to every active employee.',
+      'Task work itself belongs in Task action="create" or action="assign".',
     ].join('\n');
   }
-  
+  minRole(): string { return 'Member'; }
+  riskLevel(): RiskLevel { return RiskLevel.Low; }
   parametersSchema(): Record<string, unknown> {
     return {
       type: 'object',
       properties: {
-        targetAgentId: {
-          type: 'string',
-          minLength: 1,
-          maxLength: MAX_TARGET_AGENT_ID_CHARS,
-          pattern: '\\S',
-          description: 'ID of the target agent to send the message to',
+        to: {
+          type: ['string', 'array'],
+          items: { type: 'string', minLength: 1, maxLength: 200 },
+          description: 'Agent ID, list of agent IDs, "*" for the active Team, or "@organization" for a MainAgent broadcast.',
         },
-        content: {
+        kind: {
           type: 'string',
-          minLength: 1,
-          maxLength: MAX_MESSAGE_CONTENT_CHARS,
-          pattern: '\\S',
-          description: 'Message content to send',
+          enum: ['note', 'steer'],
+          description: 'note is persistent mailbox-only delivery; steer requires an already-running recipient session.',
         },
-        summary: {
-          type: 'string',
-          minLength: 1,
-          maxLength: MAX_MESSAGE_SUMMARY_CHARS,
-          pattern: '\\S',
-          description: 'Optional short label for the background task list and UI activity cards.',
-        },
+        content: { type: 'string', minLength: 1, maxLength: 20000 },
+        summary: { type: 'string', maxLength: 120 },
+        taskId: { type: 'string', maxLength: 200 },
       },
-      required: ['targetAgentId', 'content'],
+      required: ['to', 'kind', 'content'],
       additionalProperties: false,
     };
   }
 
-  riskLevel(): RiskLevel {
-    return RiskLevel.Low;
-  }
-
-  async execute(
-    params: Record<string, unknown>,
-    ctx: ExecutionContext,
-  ): Promise<ToolResult> {
-    const targetResult = normalizeString(params.targetAgentId, 'targetAgentId', MAX_TARGET_AGENT_ID_CHARS);
-    if (targetResult.error) return this.makeError(targetResult.error);
-    const targetAgentId = targetResult.value!;
-
-    const contentResult = normalizeString(params.content, 'content', MAX_MESSAGE_CONTENT_CHARS);
-    if (contentResult.error) return this.makeError(contentResult.error);
-    const content = contentResult.value!;
-
-    const summaryResult = normalizeOptionalString(params.summary, 'summary', MAX_MESSAGE_SUMMARY_CHARS);
-    if (summaryResult.error) return this.makeError(summaryResult.error);
-    const summary = summaryResult.value;
-    const activitySummary = summary ?? `Msg to ${targetAgentId}: ${content.slice(0, 60)}`;
-
-    const registry = AgentRegistry.getInstance();
-    const sessionManager = SessionManager.getInstance();
-    const runtime = AgentRuntime.getInstance();
-    const logger = createLogger('anochat.tools');
-
-    // ── Validate org-tree adjacency ──
-    const caller = registry.agent(ctx.agentId);
-    const target = registry.findAgent(targetAgentId);
-    if (!caller || !target) {
-      return this.makeError(
-        `Cannot send message: caller '${ctx.agentId}' or target '${targetAgentId}' not found in registry.`,
-      );
-    }
-
-    if (!target.isActive) {
-      return this.makeError(
-        `Cannot send message: target agent '${targetAgentId}' is destroyed or inactive.`,
-      );
-    }
-
-    const isDirectSuperior = caller.parentAgentId === target.id;
-    const isDirectSubordinate = target.parentAgentId === caller.id;
-    if (!isDirectSuperior && !isDirectSubordinate) {
-      return this.makeError(
-        `Cannot send message to '${targetAgentId}': ` +
-        'AgentMessage only supports communication with direct superiors or direct subordinates along the org tree.',
-      );
-    }
-
-    // ── Find or create target session ──
-    const currentSession = sessionManager.session(ctx.sessionId);
-    if (!currentSession) {
-      return this.makeError(`Cannot send message: current session '${ctx.sessionId}' was not found.`);
-    }
-
-    let targetSession;
-    if (isDirectSubordinate) {
-      targetSession = sessionManager.subsessionsOf(ctx.sessionId).find(
-        (s) => s.agentId === target.id && !s.isArchived(),
-      );
-    } else {
-      const parentSessionId = currentSession.parentSessionId;
-      if (!parentSessionId) {
-        return this.makeError(`Cannot send message to '${targetAgentId}': current session has no parent session.`);
+  async execute(params: Record<string, unknown>, ctx: ExecutionContext): Promise<ToolResult> {
+    try {
+      const rootSessionId = rootSessionIdFor(ctx);
+      const service = CoordinationService.getInstance();
+      const team = service.getActiveTeam(rootSessionId);
+      const registry = AgentRegistry.getInstance();
+      const caller = registry.findAgent(ctx.agentId);
+      const isMainAgent = caller?.isActive === true && caller.role === AgentRole.MainAgent;
+      const kindRaw = stringParam(params.kind, 'kind', 20)! as CoordinationMessageKind;
+      if (!KINDS.has(kindRaw)) throw new CoordinationError('validation', `Invalid message kind: ${kindRaw}`);
+      const content = stringParam(params.content, 'content', 20_000)!;
+      const summary = stringParam(params.summary, 'summary', 120, true);
+      const taskId = stringParam(params.taskId, 'taskId', 200, true);
+      if (taskId && !service.getTask(rootSessionId, taskId)) {
+        throw new CoordinationError('not_found', `Task not found: ${taskId}`);
       }
+      const recipients = resolveRecipients(params.to, team, ctx.agentId, isMainAgent, registry);
+      if (recipients.length === 0) throw new CoordinationError('validation', 'No recipients selected');
 
-      targetSession = sessionManager.session(parentSessionId);
-      if (!targetSession || targetSession.isArchived() || targetSession.agentId !== target.id) {
-        return this.makeError(
-          `Cannot send message to '${targetAgentId}': parent session '${parentSessionId}' does not belong to that agent.`,
+      const delivered: Array<Record<string, unknown>> = [];
+      for (const targetAgentId of recipients) {
+        const target = registry.findAgent(targetAgentId);
+        if (!target?.isActive) throw new CoordinationError('validation', `Active target agent not found: ${targetAgentId}`);
+        const inSameTeam = !!team
+          && team.memberAgentIds.includes(ctx.agentId)
+          && team.memberAgentIds.includes(targetAgentId);
+        if (!inSameTeam && !isMainAgent) assertHierarchyAdjacency(ctx.agentId, targetAgentId);
+
+        const targetSession = await resolveTargetSession(
+          ctx,
+          targetAgentId,
+          team,
+          inSameTeam,
+          isMainAgent,
         );
-      }
-      InterruptController.getInstance().linkChild(targetSession.id, ctx.sessionId);
-    }
-
-    if (!targetSession) {
-      if (!isDirectSubordinate) {
-        return this.makeError(`Cannot send message to '${targetAgentId}': target session was not found in this session tree.`);
-      }
-
-      try {
-        targetSession = await sessionManager.createSubSession(ctx.sessionId, target.id);
-        // Link for interrupt propagation - stop propagates from caller to target
-        InterruptController.getInstance().linkChild(ctx.sessionId, targetSession.id);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return this.makeError(`Failed to create session for '${targetAgentId}': ${msg}`);
-      }
-    }
-
-    // ── Build and deliver the message ──
-    const message: Message = {
-      id: `agent-msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      sessionId: targetSession.id,
-      role: MessageRole.System,
-      content: `[Message from ${caller.name || ctx.agentId} (reply-to: ${ctx.agentId})]: ${content}`,
-      tokenCount: Math.ceil(content.length / 4),
-      compressed: false,
-      timestamp: new Date().toISOString(),
-      agentId: ctx.agentId,
-      agentName: caller.name,
-    };
-
-    try {
-      await sessionManager.appendMessage(targetSession.id, message);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return this.makeError(`Failed to deliver message: ${msg}`);
-    }
-
-    // Fast path: AgentChannel delivers in real-time to active AgentLoop (milliseconds).
-    // The session injection above is the durability path; this is the speed path.
-    try {
-      AgentChannel.getInstance().send(
-        targetAgentId, targetSession.id,
-        ctx.agentId, ctx.sessionId,
-        `[${caller.name} says]: ${content}`,
-        'system',
-      );
-    } catch { /* best-effort - session injection already succeeded */ }
-
-    // ── Notify target's browser session via TypedEventBus ──
-    try {
-      TypedEventBus.emit('delegation:subsession_created', {
-        sessionId: targetSession.id,
-        parentSessionId: targetSession.parentSessionId || ctx.sessionId,
-        agentId: targetAgentId,
-        title: summary ?? `Msg: ${content.slice(0, 40)}`,
-      });
-    } catch { /* non-critical - UI notification is best-effort */ }
-
-    // ── Determine delivery status ──
-    const targetActive = runtime.isSessionActive(targetSession.id);
-
-    if (targetActive) {
-      // Target is already in an AgentLoop - message will be seen on next turn
-      return this.makeResult(
-        `Message delivered to '${targetAgentId}' (session: ${targetSession.id}). ` +
-        `Agent is currently active - the message will be seen on their next turn.`,
-        { structured: { targetAgentId, targetSessionId: targetSession.id, active: true } },
-      );
-    }
-
-    // Target is idle - start a background AgentLoop that persists events.
-    // Uses StreamPersister for JSONL durability + bubbleEventToParent for
-    // the parent session's delegation activity card.
-    // Registered with BackgroundTaskManager so UI panel can track it.
-    logger.debug('AgentMessage starting background processing', { from: ctx.agentId, to: targetAgentId, sid: targetSession.id });
-    const parentSessionId = ctx.sessionId;
-    const bgManager = BackgroundTaskManager.getInstance();
-    const bgTaskId = bgManager.register({
-      type: 'subagent',
-      parentSessionId: ctx.sessionId,
-      parentAgentId: ctx.agentId,
-      summary: activitySummary,
-    });
-    const bgStartMs = Date.now();
-    const targetSessionId = targetSession.id;
-    (async () => {
-      let persister: StreamPersister | null = null;
-      try {
-        const { StreamPersister: StreamPersisterCtor } = await import('../../../infra/StreamPersister.js');
-        const store = SessionStore.getInstance();
-        persister = new StreamPersisterCtor(store, targetSessionId,
-          `msg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-          '00000000-0000-0000-0000-000000000000',
-          targetAgentId);
-        const activePersister = persister;
-
-        for await (const event of runtime.processMessage(targetSessionId, targetAgentId, message)) {
-          // ── Persist to JSONL ──
-          if (event.type === 'text') {
-            await activePersister.persistEvent('text', { content: event.content || '' });
-          } else if (event.type === 'think') {
-            await activePersister.persistEvent('think', { content: event.content || '' });
-          } else if (event.type === 'tool_call') {
-            await activePersister.persistEvent('tool_call', {
-              id: (event.toolCallId || event.toolId || '') as string,
-              name: (event.toolName || event.name || '') as string,
-              input: (event.params || event.args || event.input || event.toolInput || {}) as Record<string, unknown>,
-            });
-          } else if (event.type === 'tool_result') {
-            await activePersister.persistEvent('tool_result', {
-              toolCallId: (event.toolCallId || event.toolId || '') as string,
-              is_error: (event as Record<string, unknown>).success === false,
-              content: (event.result || event.content || '') as string,
-            });
-          }
-          // ── Bubble to parent for live delegation card ──
-          bubbleEventToParent(null as any, parentSessionId, targetSessionId, targetAgentId, event);
-          WsServer.getInstance().send(targetSessionId, event as unknown as Record<string, unknown>);
+        const runtime = AgentRuntime.getInstance();
+        const active = runtime.isSessionActive(targetSession.id);
+        if (kindRaw === 'steer' && !active) {
+          throw new CoordinationError(
+            'conflict',
+            `Cannot steer idle agent ${targetAgentId}. A note is mailbox-only; create a read-only Task when a reply is required.`,
+          );
         }
-        await activePersister.flushDeltas();
-        SessionManager.getInstance().rebuildMessageCache(targetSessionId).catch(() => {});
-        bgManager.complete(bgTaskId, { content: 'Message processed', durationMs: Date.now() - bgStartMs }).catch(() => {});
-        logger.debug('AgentMessage processed by recipient', { from: ctx.agentId, to: targetAgentId, sid: targetSessionId });
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.warn('AgentMessage background processing error', { from: ctx.agentId, to: targetAgentId, error: msg });
-        try {
-          await persister?.flushDeltas();
-        } catch { /* best-effort before failure notification */ }
-        bgManager.fail(bgTaskId, msg, Date.now() - bgStartMs).catch(() => {});
-      }
-    })();
 
-    return this.makeResult(
-      `Message delivered to '${targetAgentId}' (session: ${targetSession.id}). ` +
-      `Agent was idle - processing started in background.\n` +
-      `Task ID: ${bgTaskId}`,
-      { structured: { taskId: bgTaskId, targetAgentId, targetSessionId: targetSession.id, background: true } },
+        const queued = await service.queueMessage({
+          rootSessionId,
+          teamId: inSameTeam ? team?.id : undefined,
+          taskId,
+          fromAgentId: ctx.agentId,
+          toAgentId: targetAgentId,
+          kind: kindRaw,
+          content,
+          summary,
+        });
+        const rendered = [
+          [
+            `<coordination-message id="${queued.id}"`,
+            `root-session-id="${rootSessionId}"`,
+            queued.teamId ? `team-id="${queued.teamId}"` : '',
+            taskId ? `task-id="${taskId}"` : '',
+            `from-agent="${ctx.agentId}"`,
+            `to-agent="${targetAgentId}"`,
+            `session-id="${targetSession.id}"`,
+            `kind="${kindRaw}">`,
+          ].filter(Boolean).join(' '),
+          content,
+          '</coordination-message>',
+        ].join('\n');
+        const message: Message = {
+          id: queued.id,
+          sessionId: targetSession.id,
+          role: MessageRole.User,
+          content: rendered,
+          tokenCount: TokenCounter.estimate(rendered),
+          compressed: false,
+          timestamp: queued.createdAt,
+          agentId: ctx.agentId,
+          agentName: caller?.name || ctx.agentId,
+        };
+        await SessionManager.getInstance().appendMessage(targetSession.id, message);
+        const deliveredMessage = await service.updateMessageStatus(
+          rootSessionId,
+          queued.id,
+          'delivered',
+          ctx.agentId,
+        );
+        if (active) {
+          InterruptController.getInstance().setPendingUserMessage(targetSession.id, rendered);
+          InterruptController.getInstance().wakeOnly(targetSession.id);
+        } else {
+          // A mailbox-only sub-session has no running AgentLoop and must not
+          // remain visible as Active.
+          await SessionManager.getInstance().setRuntimeStatus(targetSession.id, 'Idle');
+        }
+        delivered.push({
+          message: deliveredMessage,
+          targetSessionId: targetSession.id,
+          active,
+          deliveryMode: active ? 'live' : 'mailbox_only',
+        });
+      }
+      const idleCount = delivered.filter((delivery) => delivery.deliveryMode === 'mailbox_only').length;
+      const resultContent = kindRaw === 'note'
+        ? [
+          `Delivered ${delivered.length} persistent mailbox note(s).`,
+          `Idle delivery is mailbox-only: ${idleCount} recipient(s) remained idle and no reply was requested.`,
+          'For a reply, review, or status response, create a Task with targetAgentId and readOnly=true.',
+        ].join(' ')
+        : `Delivered ${delivered.length} live steer message(s) to running AgentLoop(s).`;
+      return this.makeResult(resultContent, {
+        structured: { rootSessionId, deliveries: delivered },
+      });
+    } catch (error) {
+      return toolFailure(this, error);
+    }
+  }
+}
+
+function resolveRecipients(
+  value: unknown,
+  team: TeamRecord | undefined,
+  callerAgentId: string,
+  isMainAgent: boolean,
+  registry: AgentRegistry,
+): string[] {
+  if (value === '@organization') {
+    if (!isMainAgent) {
+      throw new CoordinationError('forbidden', 'Only the active MainAgent may broadcast to the organization');
+    }
+    return registry.activeAgents()
+      .filter((agent) => agent.role !== AgentRole.SubAgent)
+      .map((agent) => agent.id)
+      .filter((agentId) => agentId !== callerAgentId);
+  }
+  if (value === '*') {
+    if (!team || !team.memberAgentIds.includes(callerAgentId)) {
+      throw new CoordinationError('forbidden', 'Broadcast requires membership in the active team');
+    }
+    return team.memberAgentIds.filter((agentId) => agentId !== callerAgentId);
+  }
+  const raw = Array.isArray(value) ? value : [value];
+  const recipients = raw.map((entry) => {
+    if (typeof entry !== 'string' || !entry.trim()) {
+      throw new CoordinationError('validation', 'to must contain non-empty agent IDs');
+    }
+    return entry.trim();
+  });
+  return [...new Set(recipients)].filter((agentId) => agentId !== callerAgentId);
+}
+
+function assertHierarchyAdjacency(callerAgentId: string, targetAgentId: string): void {
+  const registry = AgentRegistry.getInstance();
+  const caller = registry.findAgent(callerAgentId);
+  const target = registry.findAgent(targetAgentId);
+  const adjacent = caller?.parentAgentId === target?.id || target?.parentAgentId === caller?.id;
+  if (!adjacent) {
+    throw new CoordinationError(
+      'forbidden',
+      'Agents outside an active shared team may message only a direct parent or child',
     );
   }
-
-  getToolUseSummary(input?: Record<string, unknown>): string | null {
-    if (typeof input?.summary === 'string' && input.summary.trim()) {
-      return input.summary.trim();
-    }
-    if (typeof input?.content === 'string' && input.content.trim()) {
-      return this.truncate(input.content.trim(), 50);
-    }
-    return null;
-  }
-
-  getActivityDescription(input?: Record<string, unknown>): string | null {
-    const target = typeof input?.targetAgentId === 'string' && input.targetAgentId.trim()
-      ? input.targetAgentId.trim()
-      : 'agent';
-    return `Sending message to ${target}`;
-  }
 }
 
-function normalizeString(
-  value: unknown,
-  field: string,
-  maxLength: number,
-): { value: string; error?: undefined } | { value?: undefined; error: string } {
-  if (typeof value !== 'string') return { error: `${field} must be a string` };
-  const trimmed = value.trim();
-  if (!trimmed) return { error: `${field} must not be empty` };
-  if (trimmed.length > maxLength) {
-    return { error: `${field} must be ${maxLength} characters or less` };
+async function resolveTargetSession(
+  ctx: ExecutionContext,
+  targetAgentId: string,
+  team: TeamRecord | undefined,
+  inSameTeam: boolean,
+  isMainAgent: boolean,
+) {
+  const sessionManager = SessionManager.getInstance();
+  if (inSameTeam && team) {
+    return sessionManager.createSubSession(
+      team.rootSessionId,
+      targetAgentId,
+      `Team ${team.name}: ${targetAgentId}`,
+      {
+        scopeId: `team-${team.id}`,
+        metadata: {
+          coordinationTeamId: team.id,
+          coordinationRootSessionId: team.rootSessionId,
+          coordinationMode: 'swarm',
+        },
+      },
+    );
   }
-  return { value: trimmed };
-}
-
-function normalizeOptionalString(
-  value: unknown,
-  field: string,
-  maxLength: number,
-): { value?: string; error?: undefined } | { value?: undefined; error: string } {
-  if (value === undefined || value === null) return { value: undefined };
-  return normalizeString(value, field, maxLength);
+  if (isMainAgent) {
+    const root = sessionManager.getRootSession(ctx.sessionId);
+    const caller = AgentRegistry.getInstance().findAgent(ctx.agentId)!;
+    const target = AgentRegistry.getInstance().findAgent(targetAgentId)!;
+    if (target.parentAgentId === caller.id) {
+      return sessionManager.createSubSession(root.id, targetAgentId);
+    }
+    return sessionManager.createSubSession(
+      root.id,
+      targetAgentId,
+      `Organization message: ${targetAgentId}`,
+      {
+        scopeId: 'organization',
+        metadata: {
+          coordinationRootSessionId: root.id,
+          coordinationMode: 'hierarchy',
+        },
+      },
+    );
+  }
+  const caller = AgentRegistry.getInstance().findAgent(ctx.agentId)!;
+  const target = AgentRegistry.getInstance().findAgent(targetAgentId)!;
+  if (target.parentAgentId === caller.id) {
+    return sessionManager.createSubSession(ctx.sessionId, targetAgentId);
+  }
+  const current = sessionManager.session(ctx.sessionId);
+  if (!current?.parentSessionId) {
+    throw new CoordinationError('not_found', 'Current session has no parent session for upward messaging');
+  }
+  const parent = sessionManager.session(current.parentSessionId);
+  if (!parent || parent.agentId !== target.id) {
+    throw new CoordinationError('not_found', 'Matching parent agent session was not found');
+  }
+  return parent;
 }

@@ -13,6 +13,7 @@ import { TypedEventBus } from '../../core/events/TypedEventBus.js';
 export class InterruptSessionRoute implements RouteHandler {
   method = 'POST' as const; path = '/api/v1/sessions/:id/interrupt';
   category = 'Sessions'; description = 'Interrupt a running session (body: { reason? })';
+  permission = 'sessions:write';
   async handle(match: RouteMatch, req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): Promise<boolean> {
     try {
       const body = await readBody(req);
@@ -32,6 +33,7 @@ export class InterruptSessionRoute implements RouteHandler {
 export class InterruptStatusRoute implements RouteHandler {
   method = 'GET' as const; path = '/api/v1/sessions/:id/interrupt-status';
   category = 'Sessions'; description = 'Check if a session is interrupted';
+  permission = 'sessions:read';
   handle(match: RouteMatch, _req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): boolean {
     try {
       const ic = InterruptController.getInstance();
@@ -49,14 +51,20 @@ export class InterruptStatusRoute implements RouteHandler {
 export class SessionMetadataRoute implements RouteHandler {
   method = 'PATCH' as const; path = '/api/v1/sessions/:id/metadata';
   category = 'Sessions'; description = 'Set metadata key-value on a session (body: { key, value })';
+  permission = 'sessions:write';
   async handle(match: RouteMatch, req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): Promise<boolean> {
     try {
       const body = await readBody(req);
       const key = body.key as string;
       if (!key) { sendJson(res, 400, { error: 'key is required' }); return true; }
       const mgr = SessionManager.getInstance();
-      mgr.setMetadata(match.params['id'], key, body.value);
-      sendJson(res, 200, { sessionId: match.params['id'], key, value: body.value });
+      const sessionId = match.params['id'];
+      if (!mgr.session(sessionId)) {
+        sendJson(res, 404, { error: 'Session not found', sessionId });
+        return true;
+      }
+      await mgr.setMetadataPersisted(sessionId, key, body.value);
+      sendJson(res, 200, { sessionId, key, value: body.value });
     } catch (err) { sendJson(res, 500, { error: (err as Error).message }); }
     return true;
   }
@@ -65,6 +73,7 @@ export class SessionMetadataRoute implements RouteHandler {
 export class SessionParentRoute implements RouteHandler {
   method = 'GET' as const; path = '/api/v1/sessions/:id/parent';
   category = 'Sessions'; description = 'Get parent session of a session';
+  permission = 'sessions:read';
   handle(match: RouteMatch, _req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): boolean {
     try {
       const mgr = SessionManager.getInstance();
@@ -79,6 +88,7 @@ export class SessionParentRoute implements RouteHandler {
 export class SessionRootRoute implements RouteHandler {
   method = 'GET' as const; path = '/api/v1/sessions/:id/root';
   category = 'Sessions'; description = 'Get root (top-level) session of a session';
+  permission = 'sessions:read';
   handle(match: RouteMatch, _req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): boolean {
     try {
       const mgr = SessionManager.getInstance();
@@ -92,6 +102,7 @@ export class SessionRootRoute implements RouteHandler {
 export class ActiveSessionRoute implements RouteHandler {
   method = 'GET' as const; path = '/api/v1/sessions-active';
   category = 'Sessions'; description = 'Get the currently active main session';
+  permission = 'sessions:read';
   handle(_match: RouteMatch, _req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): boolean {
     try {
       const mgr = SessionManager.getInstance();
@@ -106,6 +117,7 @@ export class ActiveSessionRoute implements RouteHandler {
 export class SetActiveSessionRoute implements RouteHandler {
   method = 'PUT' as const; path = '/api/v1/sessions-active';
   category = 'Sessions'; description = 'Set the active main session (body: { sessionId })';
+  permission = 'sessions:write';
   async handle(_match: RouteMatch, req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): Promise<boolean> {
     try {
       const body = await readBody(req);
@@ -121,6 +133,7 @@ export class SetActiveSessionRoute implements RouteHandler {
 export class SessionGarbageCollectRoute implements RouteHandler {
   method = 'POST' as const; path = '/api/v1/sessions/gc';
   category = 'Sessions'; description = 'Trigger garbage collection (archive idle >90 day sessions)';
+  permission = 'sessions:write';
   async handle(_match: RouteMatch, _req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): Promise<boolean> {
     try {
       const count = await SessionStore.getInstance().garbageCollect();
@@ -133,32 +146,48 @@ export class SessionGarbageCollectRoute implements RouteHandler {
 export class HardDeleteSessionRoute implements RouteHandler {
   method = 'DELETE' as const; path = '/api/v1/sessions/:id/permanent';
   category = 'Sessions'; description = 'Permanently delete a session from disk (no recovery)';
+  permission = 'sessions:write';
   async handle(match: RouteMatch, _req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): Promise<boolean> {
     try {
       const sessionId = match.params['id'];
       const mgr = SessionManager.getInstance();
+      return mgr.withSessionTreeLock(sessionId, async () => {
+        const store = SessionStore.getInstance();
 
-      // Clean up in-memory state before deleting from disk
-      const session = mgr.session(sessionId);
-      if (session) {
-        // Remove from parent's subSessionIds
-        if (session.parentSessionId) {
-          const parent = mgr.session(session.parentSessionId);
-          if (parent) {
-            parent.removeSubSession(sessionId);
-            await SessionStore.getInstance().writeSessionMeta(parent.sessionId, parent.toJSON());
-          }
+        // Re-read topology while holding the same tree lock used by creation.
+        const session = mgr.session(sessionId);
+        const persisted = session ? undefined : await store.readSessionMeta(sessionId);
+        const childSessionIds = session?.subSessionIds ?? persisted?.subSessionIds ?? [];
+        if (childSessionIds.length > 0) {
+          sendJson(res, 409, {
+            error: 'Session has child sessions',
+            message: 'Delete child sessions before permanently deleting this session.',
+            sessionId,
+            childSessionIds,
+          });
+          return true;
         }
-        // Clean up interrupt controller + abort any stuck loop
-        InterruptController.getInstance().requestInterrupt(sessionId, InterruptReason.UserStop);
-        InterruptController.getInstance().removeController(sessionId);
-        AgentRuntime.getInstance().cleanupSession(sessionId);
-      }
+        if (session) {
+          // Remove from parent's subSessionIds
+          if (session.parentSessionId) {
+            const parent = mgr.session(session.parentSessionId);
+            if (parent) {
+              parent.removeSubSession(sessionId);
+              await store.writeSessionMeta(parent.sessionId, parent.toJSON());
+            }
+          }
+          // Clean up interrupt controller + abort any stuck loop
+          InterruptController.getInstance().requestInterrupt(sessionId, InterruptReason.UserStop);
+          InterruptController.getInstance().removeController(sessionId);
+          AgentRuntime.getInstance().cleanupSession(sessionId);
+        }
 
-      await SessionStore.getInstance().deleteSession(sessionId);
-      mgr.releaseSessionResources(sessionId, true);
-      TypedEventBus.emit('session:hard_deleted', { sessionId });
-      sendJson(res, 200, { sessionId, deleted: true });
+        await store.deleteSession(sessionId);
+        mgr.releaseSessionResources(sessionId, true);
+        TypedEventBus.emit('session:hard_deleted', { sessionId });
+        sendJson(res, 200, { sessionId, deleted: true });
+        return true;
+      });
     } catch (err) { sendJson(res, 500, { error: (err as Error).message }); }
     return true;
   }
@@ -167,6 +196,7 @@ export class HardDeleteSessionRoute implements RouteHandler {
 export class SessionListFilteredRoute implements RouteHandler {
   method = 'GET' as const; path = '/api/v1/sessions-filtered';
   category = 'Sessions'; description = 'List sessions with status/type filter (?status=Archived&type=main)';
+  permission = 'sessions:read';
   handle(_match: RouteMatch, req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): boolean {
     try {
       const url = new URL(req.url || '/', 'http://localhost');

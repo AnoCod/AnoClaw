@@ -4,13 +4,15 @@ import type {
 } from 'electron';
 import { WindowManager } from './WindowManager.js';
 import { TrayManager } from './TrayManager.js';
-import { FloatingBallManager } from './FloatingBallManager.js';
 import { BrowserViewManager } from './BrowserViewManager.js';
+import { AppLifecycleController } from './AppLifecycleController.js';
 import { getAutoStart, setAutoStart } from './AutoStart.js';
 import { init as initSetup, needsSetup, runSetupWizard } from './SetupWizard.js';
 import { startServer, shutdown } from '../server/main.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { DEFAULT_PORT } from '../shared/constants.js';
+import { getTrustedUiToken, TRUSTED_UI_HEADER } from '../server/gateway/TrustedUiAuth.js';
 
 function normalizeOpenPathInput(filePath: string): string {
   let normalized = filePath.trim().replace(/^[`'"]+|[`'"]+$/g, '');
@@ -32,57 +34,45 @@ function normalizeOpenPathInput(filePath: string): string {
 }
 
 export async function createApp(electron: typeof import('electron')) {
-  const { app, ipcMain, BrowserWindow: BW, WebContentsView, dialog, Tray, Menu, nativeImage, shell, Notification } = electron;
+  const { app, ipcMain, BrowserWindow: BW, WebContentsView, dialog, Tray, Menu, nativeImage, shell, Notification, session } = electron;
 
   // Init singletons with Electron deps
   WindowManager.init(BW);
   TrayManager.init(Tray, Menu, app, nativeImage);
-  FloatingBallManager.init(BW, ipcMain);
   BrowserViewManager.init(() => WindowManager.getInstance().getMainWindow());
 
-  // Provide recent sessions to the floating ball
-  let sessionManager: any = null;
-  FloatingBallManager.getInstance().setSessionProvider(async () => {
-    try {
-      const { SessionManager } = await import('../server/core/session/SessionManager.js');
-      sessionManager = SessionManager.getInstance();
-      const all = sessionManager.getAllSessions();
-      // Return recent sessions (last 5 active)
-      const recent = all
-        .sort((a: any, b: any) => new Date(b.lastActiveAt || 0).getTime() - new Date(a.lastActiveAt || 0).getTime())
-        .slice(0, 5)
-        .map((s: any) => ({ id: s.id, title: s.title || 'Session' }));
-      return recent;
-    } catch { return []; }
+  const lifecycle = new AppLifecycleController({
+    quit: () => app.quit(),
+    forceExit: (exitCode) => app.exit(exitCode),
+    listWindows: () => BW.getAllWindows(),
+    markQuitting: () => { globalThis._quitting = true; },
+    gracefulShutdown: async () => {
+      try {
+        await shutdown();
+      } catch (error) {
+        console.error('[shutdown] Server drain failed', error);
+      }
+      try {
+        const { LogManager } = await import('../server/infra/logging/LogManager.js');
+        await LogManager.getInstance().shutdown();
+      } catch (error) {
+        console.error('[shutdown] Log flush failed', error);
+      }
+    },
+    reportError: (message, error) => console.error(`[shutdown] ${message}`, error ?? ''),
   });
 
   // ── Window control IPC ──
-  // window-minimize-animate: triggered by TitleBar ─ shrink main window to 56x56, then show floating ball.
-  ipcMain.on('window-minimize-animate', () => {
-    const mainWin = WindowManager.getInstance().getMainWindow();
-    if (mainWin && !globalThis._quitting) {
-      FloatingBallManager.getInstance().animateMinimize(mainWin);
-    }
-  });
-  // window-minimize: direct hide (no animation) + show floating ball.
   ipcMain.on('window-minimize', (e: IpcMainEvent) => {
     const win = BW.fromWebContents(e.sender);
-    if (win && !globalThis._quitting) {
-      const bounds = win.getBounds();
-      FloatingBallManager.getInstance().saveMainWindowBounds(bounds);
-      win.hide();
-      FloatingBallManager.getInstance().show();
-    }
+    if (win && !globalThis._quitting) win.minimize();
   });
   ipcMain.on('window-maximize', (e: IpcMainEvent) => {
     const win = BW.fromWebContents(e.sender);
     if (win) win.isMaximized() ? win.unmaximize() : win.maximize();
   });
   ipcMain.on('window-close', () => {
-    // Close → truly quit the process
-    globalThis._quitting = true;
-    FloatingBallManager.getInstance().hide();
-    app.quit();
+    lifecycle.requestQuit();
   });
   ipcMain.handle('window-is-maximized', (e: IpcMainInvokeEvent) => BW.fromWebContents(e.sender)?.isMaximized() ?? false);
   ipcMain.handle('dialog-open', async (e: IpcMainInvokeEvent, opts: Electron.OpenDialogOptions) => {
@@ -156,18 +146,6 @@ export async function createApp(electron: typeof import('electron')) {
 
   // ── WebContentsView management IPC (delegates to BrowserViewManager) ──
   const bvm = BrowserViewManager.getInstance();
-
-  const wireFloatingBallMinimize = (win: any): void => {
-    if (!win || win.__floatingBallMinimizeWired) return;
-    win.__floatingBallMinimizeWired = true;
-    win.on('minimize', (event: { preventDefault: () => void }) => {
-      if (globalThis._quitting) return;
-      event.preventDefault();
-      FloatingBallManager.getInstance().saveMainWindowBounds(win.getBounds());
-      win.hide();
-      FloatingBallManager.getInstance().show();
-    });
-  };
 
   ipcMain.handle('wv-create', async (_e: IpcMainInvokeEvent, url: string, options?: { sessionId?: string; workspacePath?: string }) => {
     try { return { viewId: bvm.create(url, options || {}) }; }
@@ -288,18 +266,47 @@ export async function createApp(electron: typeof import('electron')) {
   // ── Lifecycle ──
   app.whenReady().then(async () => {
     try {
-      await startServer();
+      const trustedUiToken = getTrustedUiToken();
+      let activeUiPort = DEFAULT_PORT;
+      session.defaultSession.webRequest.onBeforeSendHeaders(
+        {
+          urls: [
+            'http://localhost/*',
+            'http://127.0.0.1/*',
+          ],
+        },
+        (details, callback) => {
+          try {
+            const requestUrl = new URL(details.url);
+            const requestPort = Number(requestUrl.port || '80');
+            if (requestPort === activeUiPort && requestUrl.pathname.startsWith('/api/')) {
+              details.requestHeaders[TRUSTED_UI_HEADER] = trustedUiToken;
+            }
+          } catch { /* leave unrelated requests untouched */ }
+          callback({ requestHeaders: details.requestHeaders });
+        },
+      );
+      const useServerPort = (runningServer: import('node:http').Server): void => {
+        const address = runningServer.address();
+        if (address && typeof address !== 'string') activeUiPort = address.port;
+        WindowManager.getInstance().setServerPort(activeUiPort);
+      };
+      useServerPort(await startServer());
 
       // Check if first-run setup is needed
       initSetup(BW, ipcMain);
       if (needsSetup()) {
+        // Closing the setup window briefly leaves Electron with zero windows.
+        // Suppress window-all-closed until the configured main window exists.
+        lifecycle.setSetupTransitionInProgress(true);
         await runSetupWizard();
         // Setup wizard saved agent config + settings — reload server to pick them up
         await shutdown();
-        await startServer();
+        useServerPort(await startServer());
       }
 
-      wireFloatingBallMinimize(WindowManager.getInstance().createWindow());
+      WindowManager.getInstance().createWindow();
+      lifecycle.setSetupTransitionInProgress(false);
       TrayManager.getInstance().createTray();
 
       // ── Keyboard shortcuts (hidden menu) ──
@@ -320,14 +327,14 @@ export async function createApp(electron: typeof import('electron')) {
     }
   });
 
-  app.on('window-all-closed', () => { app.quit(); });
-  app.on('before-quit', async () => { globalThis._quitting = true; await shutdown(); });
+  app.on('window-all-closed', () => lifecycle.handleAllWindowsClosed());
+  app.on('before-quit', (event) => lifecycle.handleBeforeQuit(event));
   app.on('certificate-error', (event: any, webContents: any, url: string, error: string, _certificate: unknown, callback: (allowed: boolean) => void) => {
     if (!bvm.handleCertificateError(webContents, url, error)) return;
     event.preventDefault();
     callback(false);
   });
   app.on('activate', () => {
-    if (!WindowManager.getInstance().getMainWindow()) wireFloatingBallMinimize(WindowManager.getInstance().createWindow());
+    if (!WindowManager.getInstance().getMainWindow()) WindowManager.getInstance().createWindow();
   });
 }

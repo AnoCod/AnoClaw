@@ -5,6 +5,10 @@ import type { Tool } from '../Tool.js';
 import type { ExecutionContext } from '../../../../shared/types/session.js';
 import { makeResult, makeError } from '../ToolResult.js';
 import { PlanTool } from '../builtin/PlanTool.js';
+import { WorkspaceLeaseService } from '../../coordination/WorkspaceLeaseService.js';
+import * as fsp from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 // ── Helpers ──
 
@@ -378,6 +382,228 @@ describe('ToolPipeline.securityCheck', () => {
     expect(r!.errorMessage).toContain('read_only');
   });
 
+  it('blocks coordination writes outside the declared descendant scope', () => {
+    WorkspaceLeaseService.resetInstance();
+    const workspace = process.platform === 'win32' ? 'C:\\workspace' : '/workspace';
+    WorkspaceLeaseService.getInstance().acquire({
+      rootSessionId: 'root-1',
+      taskId: 'task-1',
+      agentId: 'a1',
+      workspace,
+      scopes: ['src/server/core'],
+      ttlMs: 30_000,
+    });
+    const tool = mockTool({
+      name: 'Write',
+      isReadOnly: false,
+      workspacePathParams: ['file_path'],
+    });
+    const result = ToolPipeline.securityCheck(tool, { file_path: 'src/server/index.ts' }, ctx({
+      workspace,
+      mode: 'auto_edit',
+      coordination: {
+        rootSessionId: 'root-1',
+        taskId: 'task-1',
+        readOnly: false,
+        writeScope: ['src/server/core'],
+      },
+    }));
+    expect(result?.success).toBe(false);
+    expect(result?.errorMessage).toContain('outside the declared or leased write scope');
+    WorkspaceLeaseService.resetInstance();
+  });
+
+  it('allows coordination writes inside the declared descendant scope', () => {
+    WorkspaceLeaseService.resetInstance();
+    const workspace = process.platform === 'win32' ? 'C:\\workspace' : '/workspace';
+    WorkspaceLeaseService.getInstance().acquire({
+      rootSessionId: 'root-1',
+      taskId: 'task-1',
+      agentId: 'a1',
+      workspace,
+      scopes: ['src/server'],
+      ttlMs: 30_000,
+    });
+    const tool = mockTool({
+      name: 'Write',
+      isReadOnly: false,
+      workspacePathParams: ['file_path'],
+    });
+    const result = ToolPipeline.securityCheck(tool, { file_path: 'src/server/core/file.ts' }, ctx({
+      workspace,
+      mode: 'auto_edit',
+      coordination: {
+        rootSessionId: 'root-1',
+        taskId: 'task-1',
+        readOnly: false,
+        writeScope: ['src/server'],
+      },
+    }));
+    expect(result).toBeNull();
+    WorkspaceLeaseService.resetInstance();
+  });
+
+  it('allows ordinary workspace-local Bash builds for a writable coordination task', () => {
+    WorkspaceLeaseService.resetInstance();
+    const workspace = process.platform === 'win32'
+      ? 'D:\\ANOCLAW\\workspace\\root-1'
+      : '/opt/anoclaw/workspace/root-1';
+    WorkspaceLeaseService.getInstance().acquire({
+      rootSessionId: 'root-1',
+      taskId: 'task-bash-local',
+      agentId: 'a1',
+      workspace,
+      scopes: ['.'],
+      ttlMs: 30_000,
+    });
+    const result = ToolPipeline.securityCheck(
+      mockTool({ name: 'Bash', isReadOnly: false, riskLevel: RiskLevel.High }),
+      { command: 'npm run build && git status --short', cwd: workspace },
+      ctx({
+        workspace,
+        mode: 'auto_edit',
+        coordination: {
+          rootSessionId: 'root-1',
+          taskId: 'task-bash-local',
+          readOnly: false,
+          writeScope: ['.'],
+        },
+      }),
+    );
+    expect(result).toBeNull();
+    const localScript = process.platform === 'win32'
+      ? `${workspace}\\scripts\\build all.js`
+      : `${workspace}/scripts/build all.js`;
+    expect(ToolPipeline.securityCheck(
+      mockTool({ name: 'Bash', isReadOnly: false, riskLevel: RiskLevel.High }),
+      { command: `node "${localScript}"`, cwd: workspace },
+      ctx({
+        workspace,
+        mode: 'auto_edit',
+        coordination: {
+          rootSessionId: 'root-1',
+          taskId: 'task-bash-local',
+          readOnly: false,
+          writeScope: ['.'],
+        },
+      }),
+    )).toBeNull();
+    WorkspaceLeaseService.resetInstance();
+  });
+
+  it('blocks Bash references to another session or application data path', () => {
+    WorkspaceLeaseService.resetInstance();
+    const workspace = process.platform === 'win32'
+      ? 'D:\\ANOCLAW\\resources\\app.asar.unpacked\\workspace\\root-1'
+      : '/opt/anoclaw/workspace/root-1';
+    const external = process.platform === 'win32'
+      ? 'D:\\ANOCLAW\\resources\\app.asar.unpacked\\data\\sessions'
+      : '/opt/anoclaw/data/sessions';
+    WorkspaceLeaseService.getInstance().acquire({
+      rootSessionId: 'root-1',
+      taskId: 'task-bash-external',
+      agentId: 'a1',
+      workspace,
+      scopes: ['.'],
+      ttlMs: 30_000,
+    });
+    const result = ToolPipeline.securityCheck(
+      mockTool({ name: 'Bash', isReadOnly: false, riskLevel: RiskLevel.High }),
+      { command: `rg apiKey ${external}`, cwd: workspace },
+      ctx({
+        workspace,
+        mode: 'auto_edit',
+        coordination: {
+          rootSessionId: 'root-1',
+          taskId: 'task-bash-external',
+          readOnly: false,
+          writeScope: ['.'],
+        },
+      }),
+    );
+    expect(result?.errorMessage).toContain('outside the coordination workspace');
+    WorkspaceLeaseService.resetInstance();
+  });
+
+  it('blocks Bash parent traversal and external user-data variables', () => {
+    WorkspaceLeaseService.resetInstance();
+    const workspace = process.platform === 'win32'
+      ? 'D:\\ANOCLAW\\workspace\\root-1'
+      : '/opt/anoclaw/workspace/root-1';
+    WorkspaceLeaseService.getInstance().acquire({
+      rootSessionId: 'root-1',
+      taskId: 'task-bash-traversal',
+      agentId: 'a1',
+      workspace,
+      scopes: ['.'],
+      ttlMs: 30_000,
+    });
+    const context = ctx({
+      workspace,
+      mode: 'auto_edit',
+      coordination: {
+        rootSessionId: 'root-1',
+        taskId: 'task-bash-traversal',
+        readOnly: false,
+        writeScope: ['.'],
+      },
+    });
+    const tool = mockTool({ name: 'Bash', isReadOnly: false, riskLevel: RiskLevel.High });
+
+    expect(ToolPipeline.securityCheck(
+      tool,
+      { command: 'rg apiKey ..\\..\\data' },
+      context,
+    )?.errorMessage).toContain('parent-directory traversal');
+    expect(ToolPipeline.securityCheck(
+      tool,
+      { command: 'rg apiKey $env:APPDATA' },
+      context,
+    )?.errorMessage).toContain('external user/data directory variable');
+    WorkspaceLeaseService.resetInstance();
+  });
+
+  it('allows PATH-based RunProgram inside the workspace but blocks external path arguments', () => {
+    WorkspaceLeaseService.resetInstance();
+    const workspace = process.platform === 'win32'
+      ? 'D:\\ANOCLAW\\workspace\\root-1'
+      : '/opt/anoclaw/workspace/root-1';
+    const external = process.platform === 'win32'
+      ? 'D:\\ANOCLAW\\data\\agents'
+      : '/opt/anoclaw/data/agents';
+    WorkspaceLeaseService.getInstance().acquire({
+      rootSessionId: 'root-1',
+      taskId: 'task-program',
+      agentId: 'a1',
+      workspace,
+      scopes: ['.'],
+      ttlMs: 30_000,
+    });
+    const context = ctx({
+      workspace,
+      mode: 'auto_edit',
+      coordination: {
+        rootSessionId: 'root-1',
+        taskId: 'task-program',
+        readOnly: false,
+        writeScope: ['.'],
+      },
+    });
+    const tool = mockTool({ name: 'RunProgram', isReadOnly: false, riskLevel: RiskLevel.High });
+
+    expect(ToolPipeline.securityCheck(
+      tool,
+      { program: 'node', args: ['scripts/build.js'], cwd: workspace },
+      context,
+    )).toBeNull();
+    expect(ToolPipeline.securityCheck(
+      tool,
+      { program: 'node', args: [external], cwd: workspace },
+      context,
+    )?.errorMessage).toContain('outside the coordination workspace');
+    WorkspaceLeaseService.resetInstance();
+  });
+
   it('allows read-only tools in read_only mode', () => {
     const tool = mockTool({ isReadOnly: true });
     expect(ToolPipeline.securityCheck(tool, {}, ctx({ mode: 'read_only' }))).toBeNull();
@@ -446,6 +672,34 @@ describe('ToolPipeline.securityCheck', () => {
     expect(ToolPipeline.securityCheck(tool, { notebook_path: '/home/user/project/notebook.ipynb', new_source: 'print("hi")' }, ctx({ workspace: '/home/user/project' }))).toBeNull();
   });
 
+  it('blocks paths and lease scopes that escape through a symlink or junction', async () => {
+    const workspace = await fsp.mkdtemp(path.join(os.tmpdir(), 'anoclaw-workspace-'));
+    const external = await fsp.mkdtemp(path.join(os.tmpdir(), 'anoclaw-external-'));
+    const link = path.join(workspace, 'escape');
+    await fsp.symlink(external, link, process.platform === 'win32' ? 'junction' : 'dir');
+    try {
+      const tool = mockTool({ workspacePathParams: ['file_path'] });
+      const result = ToolPipeline.securityCheck(
+        tool,
+        { file_path: path.join(link, 'secret.txt') },
+        ctx({ workspace }),
+      );
+      expect(result?.errorMessage).toContain('Path boundary violation');
+      expect(() => WorkspaceLeaseService.getInstance().acquire({
+        rootSessionId: 'root-link',
+        taskId: 'task-link',
+        agentId: 'agent-link',
+        workspace,
+        scopes: ['escape'],
+        ttlMs: 30_000,
+      })).toThrow(/outside workspace/);
+    } finally {
+      WorkspaceLeaseService.resetInstance();
+      await fsp.rm(workspace, { recursive: true, force: true });
+      await fsp.rm(external, { recursive: true, force: true });
+    }
+  });
+
   it('blocks non-read-only tools in readOnly mode', () => {
     const tool = mockTool({ isReadOnly: false });
     const r = ToolPipeline.securityCheck(tool, {}, ctx({ mode: 'readOnly' }));
@@ -453,10 +707,20 @@ describe('ToolPipeline.securityCheck', () => {
     expect(r!.errorMessage).toContain('readOnly');
   });
 
-  it('allows Ask mode writes (confirmation handled by AgentLoop)', () => {
+  it('blocks unconfirmed Ask mode writes', () => {
     const tool = mockTool({ name: 'Write', isReadOnly: false, riskLevel: RiskLevel.Medium });
     const r = ToolPipeline.securityCheck(tool, {}, ctx({ mode: 'ask' }));
-    expect(r).toBeNull();
+    expect(r).not.toBeNull();
+    expect(r!.errorMessage).toContain('confirmation');
+  });
+
+  it('allows confirmed Ask mode writes', () => {
+    const tool = mockTool({ name: 'Write', isReadOnly: false, riskLevel: RiskLevel.Medium });
+    expect(ToolPipeline.securityCheck(
+      tool,
+      {},
+      ctx({ mode: 'ask', userConfirmed: true }),
+    )).toBeNull();
   });
 
   it('allows low-risk edits in Safe Auto mode (confirmation handled by AgentLoop)', () => {
@@ -504,6 +768,31 @@ describe('ToolPipeline.securityCheck', () => {
       { command: 'npm test' },
       ctx({ mode: 'auto_edit', userConfirmed: false }),
     )).toBeNull();
+  });
+
+  it('passes Auto-Edit pre-authorization into the tool execution context', async () => {
+    const execute = vi.fn().mockResolvedValue(makeResult('ok'));
+    const tool = mockTool({
+      name: 'Bash',
+      isReadOnly: false,
+      riskLevel: RiskLevel.Critical,
+      requiresConfirmation: true,
+      _executeWithEvents: execute,
+    });
+
+    const result = await ToolPipeline.run(
+      tool,
+      { command: 'npm test' },
+      ctx({ mode: 'auto_edit', userConfirmed: false }),
+      'tc-auto-edit-context',
+    );
+
+    expect(result.success).toBe(true);
+    expect(execute).toHaveBeenCalledWith(
+      { command: 'npm test' },
+      expect.objectContaining({ mode: 'auto_edit', userConfirmed: true }),
+      'tc-auto-edit-context',
+    );
   });
 
   it('treats PlanTool as file-changing in read_only mode', () => {

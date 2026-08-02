@@ -47,6 +47,40 @@ npm run test:watch
 
 Always run `npm run build:all` if both changed. Path aliases `@shared/*`, `@server/*`, `@public/*` are configured in root tsconfig — they resolve at compile time only (no runtime module aliasing).
 
+## GitHub Collaboration Rules
+
+GitHub is AnoClaw's durable collaboration and review plane; the local checkout remains the implementation workspace. The canonical upstream is `AnoCod/AnoClaw`, with `main` as the default integration branch. Read [`docs/github-development-workflow.md`](docs/github-development-workflow.md) for the full workflow, review criteria, label model, release policy, and repository-settings baseline.
+
+### Tool and Authority Boundaries
+
+- Prefer the authorized GitHub app for repository, Issue, pull request, review, comment, label, and workflow-run metadata. Use local `git` for files, diffs, branches, staging, commits, and pushes. Use `gh` only for gaps such as Actions logs, current-branch PR discovery, or settings the connector cannot inspect.
+- Before every GitHub write, verify the exact repository, base branch, head branch, Issue or PR number, and intended mutation. Never infer a target from stale conversation context.
+- When a local checkout exists, make source changes locally and publish them through commits. Do not edit the same branch through GitHub's file APIs because that can split the source of truth.
+- Remote inspection is read-only by default. Creating or changing Issues, PRs, reviews, labels, releases, or repository settings must be within the user's requested task. Merging, closing, deleting, releasing, changing protections, or any other hard-to-reverse remote action requires explicit approval.
+
+### Issues, Branches, and Commits
+
+- Non-trivial features, bugs, refactors, migrations, and security work start from a GitHub Issue with context, scope, acceptance criteria, risk, and validation expectations. Tiny typo or comment-only fixes may skip an Issue.
+- Fetch the intended base before branching. Never develop directly on `main`. Use one short-lived branch per logical change.
+- Codex-authored branches use `codex/<issue-number>-<short-slug>` or `codex/<short-slug>` for an approved issue-less maintenance task. Human branches use `feat/`, `fix/`, `docs/`, `refactor/`, `test/`, `chore/`, or `hotfix/` with the same optional Issue prefix.
+- Commit only intentional files. Use an imperative Conventional Commit subject such as `feat(scope): add capability`, `fix(scope): correct behavior`, or `docs(github): define workflow`. Keep generated artifacts, secrets, runtime data, and unrelated user work out of commits.
+- Never force-push, rewrite shared history, delete branches, or bypass `main` protections merely to make synchronization easier. The history-safety rules below always apply.
+
+### Pull Requests, Review, and Merge
+
+- Every change merged into `main` goes through a PR. Open a draft PR for useful early visibility; mark it ready only when its scope is stable, required verification has passed, and the description is complete.
+- Keep one concern per PR. Link the controlling Issue, explain why and what changed, list exact verification, disclose risks and rollback, include UI evidence when relevant, and call out migrations or compatibility impact.
+- Before requesting review, self-review the complete diff. Do not merge with failing checks, unresolved review threads, unaddressed required feedback, or undocumented test gaps.
+- Require at least one independent approval when another maintainer is available. A solo-maintainer exception requires a documented self-review and successful required checks; it is not an excuse to bypass safety or security review.
+- Prefer squash merge for normal work and use the PR title as the final Conventional Commit subject. Preserve multi-commit history only when it materially aids review or rollback. Delete the merged head branch after confirming the merge and release state.
+
+### Public Repository and Automation Safety
+
+- This repository is public. Never commit or paste API keys, tokens, private configuration, user data, session data, private prompts, raw sensitive logs, or local machine identifiers into commits, Issues, PRs, comments, Actions logs, or artifacts.
+- Report vulnerabilities privately through GitHub Security rather than a public Issue. If a secret is exposed, revoke or rotate it first; deleting Git history alone does not neutralize it.
+- GitHub Actions must use least-privilege `permissions`, avoid write-capable workflows for untrusted fork code, pin third-party actions to reviewed immutable commits, and never print secrets. Do not use `pull_request_target` to run untrusted code.
+- Automation may assist triage, tests, dependency updates, and release preparation, but it may not silently merge, publish, close work, or change repository policy without the authorization required above.
+
 ## Completion Workflow
 
 AnoClaw uses Git as the durable completion record. Do not write Obsidian/vault work logs for coding sessions.
@@ -54,10 +88,24 @@ Treat removal of retired guidance files such as `DESIGN.md` as an intentional cl
 
 After verified code, docs, config, or skill changes:
 1. Inspect `git status --short --branch` and review the relevant diff.
-2. Stage only intentional files; never include unrelated user changes, secrets, local data, or build caches.
-3. Create a concise git commit describing the completed work.
-4. Push the current branch to `origin`; if no upstream exists, use `git push -u origin HEAD`.
-5. Report verification, commit hash, branch, and push status to the user.
+2. Run the scope-appropriate checks and record any check that could not run with the reason.
+3. Stage only intentional files; never include unrelated user changes, secrets, local data, or build caches.
+4. Create a concise Conventional Commit describing the completed outcome.
+5. Push the current non-default branch to `origin`; if no upstream exists, use `git push -u origin HEAD`. Do not push directly to `main` except for an explicitly approved emergency procedure.
+6. Create or update the corresponding PR when the work is intended for review or merge. A branch-only checkpoint is allowed only when the work is still intentionally incomplete or the user requested no PR; report that state explicitly.
+7. Report verification, commit hash, branch, push status, and Issue or PR link when one exists.
+
+### Push Failure and History Safety
+
+- A failed `git push` is a remote synchronization failure. By itself it does not alter the local worktree, index, branch, or commits, no matter how many retries fail.
+- After a network-related push failure, preserve the local state, report the failure, and retry later. Do not use `git reset` (especially `--hard`), `git clean`, destructive `git checkout`/`git restore`, branch deletion, rebase, amend, or force-push merely to make a push succeed.
+- Keep verified work committed locally. Committed work remains available while its branch or another backup reference is retained; uncommitted work is easier to overwrite accidentally.
+- A large number of local commits can normally be pushed together. Commit count does not cause merge conflicts; conflicts arise when local and remote history have diverged.
+- Squashing is optional history cleanup, not a network repair. Use it only when the selected commits are local, unpushed, and not shared with or based upon by anyone else.
+- Before any squash or other history rewrite, fetch remote state, inspect the exact base and commit range, create a clearly named backup branch or tag at the current `HEAD`, and obtain explicit user approval. Keep the backup until the rewritten branch is verified and successfully pushed.
+- If the remote branch advanced, stop and report the divergence. Resolve it through an explicitly chosen merge or rebase; never discard local commits or force-push as a shortcut.
+- Before a destructive or history-rewriting Git command, show the current branch/status and a short decorated commit graph, state exactly which refs and commits will change, and verify that no unrelated or uncommitted work is at risk.
+- If a destructive command is run accidentally, stop making further history or cleanup changes and inspect `git reflog` first. Recovery tools are a last resort, not a substitute for preserving a backup reference.
 
 ## Architecture
 
@@ -86,9 +134,11 @@ graph TB
         AL["AgentLoop<br/>(AsyncGenerator)"]
         SM["SessionManager<br/>(CRUD + Locks)"]
         PA["PromptAssembler<br/>(Sections)"]
-        TR["ToolRegistry<br/>(33 tools + plugins)"]
+        TR["ToolRegistry<br/>(built-in tools + plugins)"]
         CC["ContextCompressor"]
         AReg["AgentRegistry<br/>(Org Tree)"]
+        COORD["CoordinationService<br/>(Teams + Tasks + Mailbox + Leases)"]
+        CS["CoordinationScheduler"]
         PHM["PluginHostManager<br/>(Worker + RPC)"]
         EXT["ExtensionPoints<br/>(8 hooks)"]
     end
@@ -112,12 +162,15 @@ graph TB
     AR --> AL
     AR --> SM
     AR --> AReg
+    AR --> COORD
     AL --> PA
     AL --> TR
     AL --> CC
     AL --> LLP
     AL --> APS
     AL --> IC
+    COORD --> CS
+    CS --> AL
     SM --> JSL
     API --> SM
     API --> AReg
@@ -202,9 +255,9 @@ sequenceDiagram
 ### Agent Hierarchy
 
 - **MainAgent** (CEO, level 0): Always exists. Decomposes tasks, delegates to Managers/Members. Can communicate with user.
-- **Manager** (level 1): Manages a team of Members. Can hire/fire Members via `HireEmployeeTool`.
+- **Manager** (level 1): Manages a team of Members. Can hire Members via `Organization` action `hire`.
 - **Member** (level 2): Leaf workers. Execute tasks, cannot manage others. Can create SubAgents.
-- **SubAgent**: Temporary, not persisted. Created/spawned by any agent via `SubAgentSpawnTool`. Destroyed when done.
+- **SubAgent**: Temporary, not persisted. Created by `Task` action `spawn`. Destroyed when done.
 
 ```mermaid
 graph TB
@@ -217,23 +270,29 @@ graph TB
     SA1["SubAgent<br/>(temporary)"]
     SA2["SubAgent<br/>(temporary)"]
 
-    CEO -->|"HireEmployeeTool"| MGR1
-    CEO -->|"HireEmployeeTool"| MGR2
-    MGR1 -->|"HireEmployeeTool"| MEM1
-    MGR1 -->|"HireEmployeeTool"| MEM2
-    MGR2 -->|"HireEmployeeTool"| MEM3
-    MEM1 -->|"SubAgentSpawnTool"| SA1
-    MEM2 -->|"SubAgentSpawnTool"| SA2
+    CEO -->|"Organization: hire"| MGR1
+    CEO -->|"Organization: hire"| MGR2
+    MGR1 -->|"Organization: hire"| MEM1
+    MGR1 -->|"Organization: hire"| MEM2
+    MGR2 -->|"Organization: hire"| MEM3
+    MEM1 -->|"Task: spawn"| SA1
+    MEM2 -->|"Task: spawn"| SA2
 
-    CEO -..->|"delegateTask()"| MGR1
-    MGR1 -..->|"delegateTask()"| MEM1
+    CEO -..->|"Task: create + targetAgentId"| MGR1
+    MGR1 -..->|"Task: create + targetAgentId"| MEM1
 ```
 
 Agents are NOT single-threaded — one agent can serve multiple sessions simultaneously because LLM APIs are stateless. Each session has independent context and its own `AgentLoop` instance.
 
+### Coordination Plane
+
+The organization tree remains durable authority, while each root session may create one temporary active Team that references existing employees without changing their hierarchy. `CoordinationService` stores Team, Task, Message, and Workspace Lease events under `data/coordination/<rootSessionId>/`; JSONL is the source of truth and `projection.json` is only a rebuildable startup cache.
+
+All hierarchy, swarm, and temporary SubAgent work uses the same durable task state machine. `CoordinationScheduler` dispatches ready work after dependencies complete, enforces per-root and per-agent concurrency, acquires workspace leases before execution, and commits completion only after the worker `AgentLoop` reaches `Done`. `BackgroundTaskManager` is reserved for non-Agent process jobs.
+
 ### Plugin Architecture
 
-Plugins run in a Worker Thread, isolated from the main process. Communication via bidirectional MessageChannel RPC.
+Plugins run in a Worker Thread for fault and object isolation from the main thread. This is not a permission sandbox: plugin code retains the current OS user's Node.js filesystem, process, and network privileges. Communication with kernel objects uses bidirectional MessageChannel RPC.
 
 ```mermaid
 graph TB
@@ -295,7 +354,7 @@ graph TB
 
 ### Tool System
 
-33 tools registered in `registerAllTools()` via directory scan of `builtin/`. Every tool extends the abstract `Tool` class (EventEmitter-based). Additional tools registered by plugins at runtime via `anoclaw.tools.register()` (RPC → PluginToolProxy → ToolRegistry). Each agent has an `allowedTools` whitelist. Key categories: File I/O (Read/Write/Edit/Glob/Grep), Bash, Web (Fetch/Search), Agent management (HireEmployee/SubAgentSpawn), Cross-agent communication (TaskAssign/AgentMessage), Plan mode, Memory, Skills, MCP, Gateway.
+Built-in tools are registered in `registerAllTools()` via directory scan of `builtin/`. Every tool extends the abstract `Tool` class (EventEmitter-based). Additional tools are registered by plugins at runtime via `anoclaw.tools.register()` (RPC → PluginToolProxy → ToolRegistry). Each agent has an `allowedTools` whitelist. Coordination uses four public tools: `Organization` (list/hire/reassign), `Team` (create/update/status/delete), `Task` (create/assign/claim/update/list/output/stop/spawn), and `AgentMessage`. Other categories include File I/O, shell/process execution, Web, Plan mode, Memory, Skills, MCP, and Gateway.
 
 ### Storage: JSONL Append-Only
 
@@ -349,7 +408,7 @@ When working with DeepSeek-based LLM providers:
 VSCode-style extension architecture. Plugins live in `plugins/<name>/` with `plugin.json` + `extension.js`.
 
 ```
-Plugins run in a Worker Thread, isolated from the main process.
+Plugins run in a Worker Thread for fault isolation, not as a security sandbox. Treat third-party plugin installation as local code execution with the current user's privileges.
 Main ↔ Worker communication: bidirectional MessageChannel RPC.
 
 Plugin Host lifecycle:
@@ -395,7 +454,7 @@ Factory: `createLLMProvider(config)` in `provider-factory.ts` selects based on `
 - `ts/viewmodel/` — ViewModel layer with EventEmitter
 - `ts/components/` — UI components
 - `ts/ws-client.ts` — WebSocket communication layer
-- Navigation: 9-page PAGES menu — 5 kernel (Sessions, Agents, Skills, Memory, Settings) + divider + plugin pages (Plugins, MCP, Meeting, Workflow, Gateway)
+- Navigation: 9-page PAGES menu — 5 kernel (Sessions, Agents, Skills, Memory, Settings) + divider + plugin pages (Plugins, MCP, Meeting, Gateway)
 - Plugin pages loaded dynamically from plugin manifests via `PluginViewModel` → iframe sandbox + postMessage bridge
 - Streaming: `StreamingMessageDelegate` renders tokens in real-time from WS events
 

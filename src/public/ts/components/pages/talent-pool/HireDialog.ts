@@ -5,6 +5,7 @@ import { Dialog } from '../../ui/Dialog.js';
 import { Button } from '../../ui/Button.js';
 import { Badge } from '../../ui/Badge.js';
 import type { TalentPoolTemplate, AgentConfig } from '../../../types.js';
+import { onLocaleChange, t } from '../../../i18n/index.js';
 
 export interface HireResult {
   templateId: string;
@@ -16,6 +17,14 @@ export interface HireResult {
 /** Shows the hire dialog. Returns null if cancelled, or HireResult on confirm. */
 export function showHireDialog(tpl: TalentPoolTemplate, agents: AgentConfig[]): Promise<HireResult | null> {
   return new Promise((resolve) => {
+    let settled = false;
+    let unsubscribeLocale = () => {};
+    const finish = (result: HireResult | null): void => {
+      if (settled) return;
+      settled = true;
+      unsubscribeLocale();
+      resolve(result);
+    };
     const defaultRole = tpl.role;
     const parentOptions = _getValidParents(agents, defaultRole);
 
@@ -39,7 +48,7 @@ export function showHireDialog(tpl: TalentPoolTemplate, agents: AgentConfig[]): 
     body.appendChild(desc);
 
     // Name
-    const nameLabel = _label('Agent Name');
+    const nameLabel = _label(t('talent.hire.agentName'));
     const nameInput = document.createElement('input');
     nameInput.id = 'tp-hire-name';
     nameInput.value = tpl.name;
@@ -48,19 +57,19 @@ export function showHireDialog(tpl: TalentPoolTemplate, agents: AgentConfig[]): 
     body.appendChild(nameInput);
 
     // Role
-    const roleLabel = _label('Role');
+    const roleLabel = _label(t('agents.field.role'));
     const roleSelect = document.createElement('select');
     roleSelect.id = 'tp-hire-role';
     roleSelect.style.cssText = _inputStyle();
     roleSelect.innerHTML = `
-      <option value="Manager" ${defaultRole === 'Manager' ? 'selected' : ''}>Manager</option>
-      <option value="Member" ${defaultRole === 'Member' ? 'selected' : ''}>Member</option>
+      <option value="Manager" ${defaultRole === 'Manager' ? 'selected' : ''}>${t('agents.role.manager')}</option>
+      <option value="Member" ${defaultRole === 'Member' ? 'selected' : ''}>${t('agents.role.member')}</option>
     `;
     body.appendChild(roleLabel);
     body.appendChild(roleSelect);
 
     // Parent
-    const parentLabel = _label('Parent Agent');
+    const parentLabel = _label(t('talent.hire.parentAgent'));
     const parentSelect = document.createElement('select');
     parentSelect.id = 'tp-hire-parent';
     parentSelect.style.cssText = _inputStyle();
@@ -73,21 +82,21 @@ export function showHireDialog(tpl: TalentPoolTemplate, agents: AgentConfig[]): 
     errorEl.id = 'tp-hire-error';
     errorEl.style.cssText = 'color:var(--color-error);font-size:12px;min-height:18px;';
 
-    const confirmBtn = new Button({ label: 'Hire', variant: 'primary', disabled: true });
-    const cancelBtn = new Button({ label: 'Cancel' });
+    const confirmBtn = new Button({ label: t('talent.hire.confirm'), variant: 'primary', disabled: true });
+    const cancelBtn = new Button({ label: t('common.cancel') });
 
     function validate(): boolean {
       const role = roleSelect.value;
       const parentId = parentSelect.value;
       const parent = agents.find(a => a.id === parentId);
 
-      if (!parent) { errorEl.textContent = 'Select a parent agent.'; confirmBtn.disabled = true; return false; }
+      if (!parent) { errorEl.textContent = t('talent.hire.selectParent'); confirmBtn.disabled = true; return false; }
 
       const err = _validateHierarchy(parent, role);
       if (err) { errorEl.textContent = err; confirmBtn.disabled = true; return false; }
 
       if (role === 'MainAgent' && agents.some(a => a.role === 'MainAgent')) {
-        errorEl.textContent = 'A CEO (MainAgent) already exists. Only one CEO is allowed.';
+        errorEl.textContent = t('talent.hire.ceoExists');
         confirmBtn.disabled = true;
         return false;
       }
@@ -106,11 +115,29 @@ export function showHireDialog(tpl: TalentPoolTemplate, agents: AgentConfig[]): 
     footer.appendChild(confirmBtn.element);
 
     const dialog = new Dialog({
-      title: `Hire: ${tpl.name}`,
+      title: t('talent.hire.title', { name: tpl.name }),
       body,
       footer,
       width: '420px',
+      onClose: () => finish(null),
     });
+
+    const refreshLocale = (): void => {
+      nameLabel.textContent = t('talent.hire.agentName');
+      roleLabel.textContent = t('agents.field.role');
+      parentLabel.textContent = t('talent.hire.parentAgent');
+      const managerOption = roleSelect.querySelector<HTMLOptionElement>('option[value="Manager"]');
+      const memberOption = roleSelect.querySelector<HTMLOptionElement>('option[value="Member"]');
+      if (managerOption) managerOption.textContent = t('agents.role.manager');
+      if (memberOption) memberOption.textContent = t('agents.role.member');
+      _populateParents(parentSelect, agents, roleSelect.value, parentSelect.value);
+      confirmBtn.label = t('talent.hire.confirm');
+      cancelBtn.label = t('common.cancel');
+      const title = body.parentElement?.parentElement?.querySelector<HTMLElement>('.ui-dialog-title');
+      if (title) title.textContent = t('talent.hire.title', { name: tpl.name });
+      validate();
+    };
+    unsubscribeLocale = onLocaleChange(refreshLocale);
 
     roleSelect.addEventListener('change', () => {
       _populateParents(parentSelect, agents, roleSelect.value, parentSelect.value);
@@ -121,7 +148,7 @@ export function showHireDialog(tpl: TalentPoolTemplate, agents: AgentConfig[]): 
 
     confirmBtn.element.addEventListener('click', () => {
       if (!validate()) return;
-      resolve({
+      finish({
         templateId: tpl.id,
         name: nameInput.value.trim() || tpl.name,
         role: roleSelect.value as any,
@@ -129,7 +156,7 @@ export function showHireDialog(tpl: TalentPoolTemplate, agents: AgentConfig[]): 
       });
       dialog.close();
     });
-    cancelBtn.element.addEventListener('click', () => { resolve(null); dialog.close(); });
+    cancelBtn.element.addEventListener('click', () => { finish(null); dialog.close(); });
 
     body.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !confirmBtn.disabled) {
@@ -166,16 +193,16 @@ function _isValidParent(parent: AgentConfig, childRole: string): boolean {
 
 function _validateHierarchy(parent: AgentConfig, childRole: string): string | null {
   if (parent.role === 'Member') {
-    return `"${parent.name}" is a Member (leaf node) and cannot have subordinates. Select a Manager or CEO as parent.`;
+    return t('talent.hire.memberNoChildren', { name: parent.name });
   }
   if (parent.role === 'MainAgent' && childRole !== 'Manager') {
-    return `CEO "${parent.name}" can only have Manager-level subordinates. Change role to Manager or select a different parent.`;
+    return t('talent.hire.ceoManagerOnly', { name: parent.name });
   }
   if (childRole === 'MainAgent') {
-    return 'Cannot assign a CEO as subordinate. CEO is the top-level agent.';
+    return t('talent.hire.ceoSubordinate');
   }
   if (!parent.id) {
-    return 'Select a valid parent agent.';
+    return t('talent.hire.invalidParent');
   }
   return null;
 }
@@ -184,9 +211,16 @@ function _populateParents(select: HTMLSelectElement, agents: AgentConfig[], chil
   const valid = _getValidParents(agents, childRole);
   const hasCurrent = valid.some(p => p.id === currentValue);
   select.innerHTML = valid.map(p =>
-    `<option value="${p.id}" ${p.id === currentValue ? 'selected' : ''}>${p.role === 'MainAgent' ? '◆' : p.role === 'Manager' ? '◇' : '○'} ${p.name} (${p.role})</option>`
+    `<option value="${p.id}" ${p.id === currentValue ? 'selected' : ''}>${p.role === 'MainAgent' ? '◆' : p.role === 'Manager' ? '◇' : '○'} ${p.name} (${_roleLabel(p.role)})</option>`
   ).join('');
   if (!hasCurrent && valid.length > 0) {
     select.value = valid[0].id;
   }
+}
+
+function _roleLabel(role: string): string {
+  if (role === 'MainAgent') return t('agents.role.ceo');
+  if (role === 'Manager') return t('agents.role.manager');
+  if (role === 'Member') return t('agents.role.member');
+  return role;
 }

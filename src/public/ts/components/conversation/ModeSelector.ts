@@ -3,6 +3,7 @@
 import type { GoalState, InputMode } from './types.js';
 import { ClientLogger } from '../../ClientLogger.js';
 import { Toggle } from '../ui/Toggle.js';
+import { onLocaleChange, t } from '../../i18n/index.js';
 
 export class ModeSelector {
   readonly element: HTMLButtonElement;
@@ -25,6 +26,7 @@ export class ModeSelector {
     this.mode = initialMode;
     this.effortEnabled = effortEnabled;
     this.element = this._buildButton();
+    onLocaleChange(() => this._refreshLocale());
   }
 
 
@@ -84,15 +86,15 @@ export class ModeSelector {
   private _updateLabel(btn?: HTMLButtonElement): void {
     const b = btn || this.element;
     const modeLabels: Record<InputMode, string> = {
-      'auto-edit': 'Auto Edit',
-      'auto': 'Safe Auto',
-      'ask': 'Ask',
-      'plan': 'Plan',
+      'auto-edit': t('mode.autoEdit'),
+      'auto': t('mode.safeAuto'),
+      'ask': t('mode.ask'),
+      'plan': t('mode.plan'),
     };
     b.innerHTML = '';
 
     const prefix = this.goal?.status === 'active'
-      ? `Goal${this.goal.runCount ? ` #${this.goal.runCount}` : ''} · `
+      ? `${t('mode.goalPrefix')}${this.goal.runCount ? ` #${this.goal.runCount}` : ''} · `
       : '';
     const label = document.createElement('span');
     label.textContent = prefix + modeLabels[this.mode];
@@ -162,16 +164,18 @@ export class ModeSelector {
     dd.addEventListener('click', (e) => e.stopPropagation());
 
     const modes: { mode: InputMode; label: string; desc: string }[] = [
-      { mode: 'auto-edit', label: 'Auto Edit', desc: 'All tools run freely. No confirmation pop-ups.' },
-      { mode: 'auto', label: 'Safe Auto', desc: 'Auto-approve edits and writes. Pop up only for risky commands.' },
-      { mode: 'ask', label: 'Ask', desc: 'Pop up confirmation for every file change and command.' },
-      { mode: 'plan', label: 'Plan', desc: 'Read and explore only. No changes allowed.' },
+      { mode: 'auto-edit', label: t('mode.autoEdit'), desc: t('mode.autoEditDescription') },
+      { mode: 'auto', label: t('mode.safeAuto'), desc: t('mode.safeAutoDescription') },
+      { mode: 'ask', label: t('mode.ask'), desc: t('mode.askDescription') },
+      { mode: 'plan', label: t('mode.plan'), desc: t('mode.planDescription') },
     ];
 
     for (const m of modes) {
+      const goalLocksMode = this.goal?.status === 'active';
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'mode-dropdown-item' + (m.mode === this.mode ? ' active' : '');
+      item.disabled = goalLocksMode;
       item.setAttribute('role', 'menuitemradio');
       item.setAttribute('aria-checked', String(m.mode === this.mode));
 
@@ -190,7 +194,9 @@ export class ModeSelector {
       title.textContent = m.label;
       const desc = document.createElement('span');
       desc.className = 'mode-dropdown-desc';
-      desc.textContent = m.desc;
+      desc.textContent = goalLocksMode
+        ? t('mode.goalLocked')
+        : m.desc;
       textCol.appendChild(title);
       textCol.appendChild(desc);
 
@@ -200,6 +206,7 @@ export class ModeSelector {
       const chooseMode = (e: Event) => {
         e.preventDefault();
         e.stopPropagation();
+        if (goalLocksMode) return;
         this.setMode(m.mode);
         this._closeDropdown();
         ClientLogger.ui.debug('Input mode changed', { mode: m.mode });
@@ -228,7 +235,7 @@ export class ModeSelector {
     effortRow.className = 'mode-effort-row';
     const effortLabel = document.createElement('span');
     effortLabel.className = 'mode-effort-label';
-    effortLabel.textContent = 'Effort';
+    effortLabel.textContent = t('mode.effort');
 
     const effortToggle = new Toggle({ checked: this.effortEnabled, onChange: (v) => {
       this.effortEnabled = v;
@@ -286,10 +293,10 @@ export class ModeSelector {
     textCol.className = 'mode-dropdown-text';
     const title = document.createElement('span');
     title.className = 'mode-dropdown-title';
-    title.textContent = this.goal ? `Goal · ${this._goalStatusLabel(this.goal.status)}` : 'Goal';
+    title.textContent = this.goal ? `${t('goal.title')} · ${this._goalStatusLabel(this.goal.status)}` : t('goal.title');
     const desc = document.createElement('span');
     desc.className = 'mode-dropdown-desc';
-    desc.textContent = this.goal?.objective || 'Set a bounded, verifiable outcome for this Workspace.';
+    desc.textContent = this.goal?.objective || t('goal.description');
     desc.title = this.goal?.objective || desc.textContent;
     textCol.appendChild(title);
     textCol.appendChild(desc);
@@ -298,7 +305,7 @@ export class ModeSelector {
     badge.className = 'mode-goal-badge';
     badge.textContent = this.goal
       ? `${this.goal.runCount || 0}/${this.goal.maxRuns || 20}`
-      : 'Set up';
+      : t('goal.setUp');
 
     item.appendChild(icon);
     item.appendChild(textCol);
@@ -314,17 +321,26 @@ export class ModeSelector {
 
   private _goalStatusLabel(status: GoalState['status']): string {
     switch (status) {
-      case 'active': return 'Running';
-      case 'paused': return 'Paused';
-      case 'waiting_user': return 'Needs input';
-      case 'waiting_confirmation': return 'Needs approval';
-      case 'waiting_review': return 'Ready for review';
-      case 'blocked': return 'Blocked';
-      case 'failed': return 'Stopped';
-      case 'budget_exhausted': return 'Run limit reached';
-      case 'completed': return 'Completed';
-      default: return 'Unavailable';
+      case 'active': return t('goal.status.running');
+      case 'paused': return t('goal.status.paused');
+      case 'waiting_user': return t('goal.status.needsInput');
+      case 'waiting_confirmation': return t('goal.status.needsApproval');
+      case 'waiting_review': return t('goal.status.readyReview');
+      case 'blocked': return t('goal.status.blocked');
+      case 'failed': return t('goal.status.stopped');
+      case 'budget_exhausted': return t('goal.status.limitReached');
+      case 'completed': return t('goal.status.completed');
+      default: return t('goal.status.unavailable');
     }
+  }
+
+  private _refreshLocale(): void {
+    this._updateLabel();
+    if (!this.dropdown) return;
+    const previous = this.dropdown;
+    this.dropdown = this._buildDropdown();
+    previous.replaceWith(this.dropdown);
+    this._positionDropdown();
   }
 }
 

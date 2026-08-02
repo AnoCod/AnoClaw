@@ -163,7 +163,7 @@ async function main() {
     console.error(`  Delegating to ${mgr.name}...`);
 
     await request("POST", `/api/v1/sessions/${sid}/messages`, {
-      content: `Delegate a task to ${mgr.name}: Create a file called e2e-test-result.txt in the workspace root containing "E2E delegation test passed at ${new Date().toISOString()}". Use TaskAssign. Wait for completion, verify the file exists, then tell me "Delegation: SUCCESS" or "Delegation: FAILED".`,
+      content: `Delegate a task to ${mgr.name}: Create a file called e2e-test-result.txt in the workspace root containing "E2E delegation test passed at ${new Date().toISOString()}". Use Task action="create" with targetAgentId. Wait for completion, verify the file exists, then tell me "Delegation: SUCCESS" or "Delegation: FAILED".`,
       mode: "auto",
       effort: false,
     });

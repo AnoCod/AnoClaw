@@ -3,13 +3,34 @@
  * Noticeable enough for pending questions while matching the workbench skin.
  */
 import type { Message } from '../../types.js';
+import { t } from '../../i18n/index.js';
 
 export class AskUserQuestionCard {
+  static refreshLocale(root: ParentNode): void {
+    root.querySelectorAll<HTMLElement>('.aq-title').forEach((el) => { el.textContent = t('askUser.title'); });
+    root.querySelectorAll<HTMLElement>('.aq-empty').forEach((el) => { el.textContent = t('askUser.none'); });
+    root.querySelectorAll<HTMLButtonElement>('.aq-confirm-btn').forEach((el) => { el.textContent = t('askUser.confirm'); });
+    root.querySelectorAll<HTMLInputElement>('.aq-answer-input').forEach((el) => { el.placeholder = t('askUser.answerPlaceholder'); });
+    root.querySelectorAll<HTMLButtonElement>('.aq-submit-btn').forEach((el) => { el.textContent = t('askUser.submit'); });
+    root.querySelectorAll<HTMLElement>('.aq-badge').forEach((el) => {
+      const answered = Number(el.dataset.answered || 0);
+      const total = Number(el.dataset.total || 0);
+      el.textContent = t(el.dataset.complete === 'true' ? 'askUser.answeredComplete' : 'askUser.answeredPartial', { answered, total });
+    });
+    root.querySelectorAll<HTMLElement>('.aq-error[data-local-error="send-failed"]').forEach((el) => {
+      el.textContent = t('askUser.sendFailed');
+    });
+  }
+
   static build(
     msg: Message,
     answeredIndices: Map<string, Set<number>>,
-    onSendAnswer: (answer: string) => void,
+    onSendAnswer: (answer: string) => Promise<boolean>,
   ): HTMLElement {
+    const questions = (msg.toolInput as any)?.questions || [];
+    if (msg.status !== 'pending' && !answeredIndices.has(msg.id)) {
+      answeredIndices.set(msg.id, new Set(questions.map((_: unknown, index: number) => index)));
+    }
     const indices = answeredIndices.get(msg.id) || new Set();
     const pendingAnswers = new Map<number, string>();
     const wrapper = document.createElement('div');
@@ -47,15 +68,16 @@ export class AskUserQuestionCard {
     header.appendChild(dot);
 
     const title = document.createElement('span');
-    title.textContent = 'Ask User';
+    title.className = 'aq-title';
+    title.textContent = t('askUser.title');
     title.style.cssText = 'flex:1;';
     header.appendChild(title);
 
     const questions = (msg.toolInput as any)?.questions || [];
     if (questions.length > 0 && indices.size >= questions.length) {
-      header.appendChild(AskUserQuestionCard._badge(`Answered (${indices.size}/${questions.length})`, true));
+      header.appendChild(AskUserQuestionCard._badge(indices.size, questions.length, true));
     } else if (indices.size > 0) {
-      header.appendChild(AskUserQuestionCard._badge(`${indices.size}/${questions.length} answered`, false));
+      header.appendChild(AskUserQuestionCard._badge(indices.size, questions.length, false));
     }
     wrapper.appendChild(header);
   }
@@ -65,7 +87,7 @@ export class AskUserQuestionCard {
     msg: Message,
     indices: Set<number>,
     answeredIndices: Map<string, Set<number>>,
-    onSendAnswer: (answer: string) => void,
+    onSendAnswer: (answer: string) => Promise<boolean>,
     pendingAnswers: Map<number, string>,
   ): void {
     const body = document.createElement('div');
@@ -74,7 +96,8 @@ export class AskUserQuestionCard {
     const questions: any[] = (msg.toolInput as any)?.questions || [];
     if (questions.length === 0) {
       const p = document.createElement('p');
-      p.textContent = 'No questions available.';
+      p.className = 'aq-empty';
+      p.textContent = t('askUser.none');
       p.style.cssText = 'color: rgba(255,255,255,0.2); font-size: 12px; margin: 0;';
       body.appendChild(p);
       wrapper.appendChild(body);
@@ -142,7 +165,8 @@ export class AskUserQuestionCard {
             btnGroup.appendChild(btn);
           }
           const confirmBtn = document.createElement('button');
-          confirmBtn.textContent = 'Confirm';
+          confirmBtn.className = 'aq-confirm-btn';
+          confirmBtn.textContent = t('askUser.confirm');
           confirmBtn.style.cssText = `
             padding: 6px 16px; font-size: 12px; cursor: pointer;
             border: 1px solid var(--color-primary, #0b8ce9);
@@ -157,7 +181,7 @@ export class AskUserQuestionCard {
             AskUserQuestionCard._record(answeredIndices, msg.id, qi);
             AskUserQuestionCard._disableBlock(qBlock);
             AskUserQuestionCard._updateBadge(wrapper, msg, answeredIndices);
-            AskUserQuestionCard._maybeSend(questions, pendingAnswers, answeredIndices, msg, onSendAnswer);
+            void AskUserQuestionCard._maybeSend(wrapper, questions, pendingAnswers, answeredIndices, msg, onSendAnswer);
           });
           btnGroup.appendChild(confirmBtn);
         } else {
@@ -167,17 +191,53 @@ export class AskUserQuestionCard {
               AskUserQuestionCard._record(answeredIndices, msg.id, qi);
               AskUserQuestionCard._disableBlock(qBlock);
               AskUserQuestionCard._updateBadge(wrapper, msg, answeredIndices);
-              AskUserQuestionCard._maybeSend(questions, pendingAnswers, answeredIndices, msg, onSendAnswer);
+              void AskUserQuestionCard._maybeSend(wrapper, questions, pendingAnswers, answeredIndices, msg, onSendAnswer);
             });
             btnGroup.appendChild(btn);
           }
         }
         qBlock.appendChild(btnGroup);
       } else {
-        const hint = document.createElement('p');
-        hint.textContent = qAnswered ? 'Answered via input.' : 'Type your answer in the input box below.';
-        hint.style.cssText = 'font-size: 11px; color: rgba(255,255,255,0.2); font-style: italic; margin: 0;';
-        qBlock.appendChild(hint);
+        const inputRow = document.createElement('div');
+        inputRow.style.cssText = 'display:flex;gap:6px;align-items:center;';
+        const input = document.createElement('input');
+        input.className = 'aq-answer-input';
+        input.type = 'text';
+        input.placeholder = t('askUser.answerPlaceholder');
+        input.style.cssText = `
+          flex:1;min-width:0;padding:7px 9px;border-radius:4px;
+          border:1px solid var(--color-hairline, #242728);
+          background:var(--color-surface-elevated, #101111);
+          color:var(--color-text-primary, #fff);font:12px var(--font-sans);
+        `;
+        const submit = document.createElement('button');
+        submit.className = 'aq-submit-btn';
+        submit.textContent = t('askUser.submit');
+        submit.style.cssText = `
+          padding:7px 12px;border-radius:4px;cursor:pointer;
+          border:1px solid var(--color-primary, #0b8ce9);
+          background:var(--color-primary, #0b8ce9);color:var(--color-on-primary, #fff);
+          font:600 12px var(--font-sans);
+        `;
+        const commitText = () => {
+          const answer = input.value.trim();
+          if (!answer) return;
+          pendingAnswers.set(qi, answer);
+          AskUserQuestionCard._record(answeredIndices, msg.id, qi);
+          AskUserQuestionCard._disableBlock(qBlock);
+          AskUserQuestionCard._updateBadge(wrapper, msg, answeredIndices);
+          void AskUserQuestionCard._maybeSend(wrapper, questions, pendingAnswers, answeredIndices, msg, onSendAnswer);
+        };
+        submit.addEventListener('click', commitText);
+        input.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            commitText();
+          }
+        });
+        inputRow.appendChild(input);
+        inputRow.appendChild(submit);
+        qBlock.appendChild(inputRow);
       }
 
       if (qAnswered) AskUserQuestionCard._disableBlock(qBlock);
@@ -186,29 +246,43 @@ export class AskUserQuestionCard {
     wrapper.appendChild(body);
   }
 
-  private static _maybeSend(
+  private static async _maybeSend(
+    wrapper: HTMLElement,
     questions: any[],
     pendingAnswers: Map<number, string>,
     answeredIndices: Map<string, Set<number>>,
     msg: Message,
-    onSendAnswer: (answer: string) => void,
-  ): void {
+    onSendAnswer: (answer: string) => Promise<boolean>,
+  ): Promise<void> {
     const indices = answeredIndices.get(msg.id);
     if (!indices || indices.size < questions.length) return;
+    if (wrapper.dataset.sending === '1') return;
 
+    let answer: string;
     if (questions.length === 1) {
-      onSendAnswer(pendingAnswers.get(0) || '');
-      return;
+      answer = pendingAnswers.get(0) || '';
+    } else {
+      const parts: string[] = [];
+      for (let qi = 0; qi < questions.length; qi++) {
+        const q = questions[qi];
+        const header = q?.header || `Q${qi + 1}`;
+        parts.push(`${header}: ${pendingAnswers.get(qi) || ''}`);
+      }
+      answer = parts.join('\n');
     }
 
-    const parts: string[] = [];
-    for (let qi = 0; qi < questions.length; qi++) {
-      const q = questions[qi];
-      const header = q?.header || `Q${qi + 1}`;
-      const answer = pendingAnswers.get(qi) || '';
-      parts.push(`${header}: ${answer}`);
+    wrapper.dataset.sending = '1';
+    AskUserQuestionCard._setError(wrapper, '');
+    const sent = await onSendAnswer(answer);
+    delete wrapper.dataset.sending;
+    if (sent) return;
+
+    answeredIndices.delete(msg.id);
+    for (const block of Array.from(wrapper.querySelectorAll<HTMLElement>('[data-ask-qi]'))) {
+      AskUserQuestionCard._enableBlock(block);
     }
-    onSendAnswer(parts.join('\n'));
+    AskUserQuestionCard._updateBadge(wrapper, msg, answeredIndices);
+    AskUserQuestionCard._setError(wrapper, t('askUser.sendFailed'), 'send-failed');
   }
 
   private static _record(
@@ -223,6 +297,7 @@ export class AskUserQuestionCard {
 
   private static _optionBtn(text: string, disabled: boolean, onClick: () => void): HTMLButtonElement {
     const btn = document.createElement('button');
+    btn.className = 'aq-option-btn';
     btn.textContent = text;
     btn.style.cssText = `
       padding: 6px 14px; font-size: 12px; cursor: pointer;
@@ -255,8 +330,8 @@ export class AskUserQuestionCard {
   }
 
   private static _disableBlock(qBlock: HTMLElement): void {
-    const buttons = qBlock.querySelectorAll('button');
-    for (const btn of buttons) { (btn as HTMLButtonElement).disabled = true; }
+    const controls = qBlock.querySelectorAll('button, input, textarea');
+    for (const control of controls) { (control as HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement).disabled = true; }
     qBlock.style.opacity = '0.45';
     const headerEl = qBlock.querySelector(':scope > div:first-child') as HTMLElement;
     if (headerEl && !headerEl.querySelector('.aq-check')) {
@@ -268,26 +343,36 @@ export class AskUserQuestionCard {
     }
   }
 
+  private static _enableBlock(qBlock: HTMLElement): void {
+    const controls = qBlock.querySelectorAll('button, input, textarea');
+    for (const control of controls) { (control as HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement).disabled = false; }
+    qBlock.style.opacity = '';
+    qBlock.querySelector('.aq-check')?.remove();
+  }
+
   private static _updateBadge(wrapper: HTMLElement, msg: Message, answeredIndices: Map<string, Set<number>>): void {
     const indices = answeredIndices.get(msg.id);
-    if (!indices) return;
     const questions = (msg.toolInput as any)?.questions || [];
     const header = wrapper.querySelector(':scope > div:first-child') as HTMLElement;
     if (!header) return;
     const existing = header.querySelector('.aq-badge');
     if (existing) existing.remove();
+    if (!indices || indices.size === 0) return;
 
     if (indices.size >= questions.length) {
-      header.appendChild(AskUserQuestionCard._badge(`Answered (${indices.size}/${questions.length})`, true));
+      header.appendChild(AskUserQuestionCard._badge(indices.size, questions.length, true));
     } else {
-      header.appendChild(AskUserQuestionCard._badge(`${indices.size}/${questions.length} answered`, false));
+      header.appendChild(AskUserQuestionCard._badge(indices.size, questions.length, false));
     }
   }
 
-  private static _badge(text: string, complete: boolean): HTMLElement {
+  private static _badge(answered: number, total: number, complete: boolean): HTMLElement {
     const badge = document.createElement('span');
     badge.className = 'aq-badge';
-    badge.textContent = text;
+    badge.dataset.answered = String(answered);
+    badge.dataset.total = String(total);
+    badge.dataset.complete = String(complete);
+    badge.textContent = t(complete ? 'askUser.answeredComplete' : 'askUser.answeredPartial', { answered, total });
     badge.style.cssText = `
       margin-left: auto; font-size: 10px;
       padding: 2px 8px; border-radius: 10px;
@@ -295,5 +380,16 @@ export class AskUserQuestionCard {
       background: ${complete ? 'var(--color-success-soft, rgba(89,212,153,0.15))' : 'var(--color-surface-elevated, #101111)'};
     `;
     return badge;
+  }
+
+  private static _setError(wrapper: HTMLElement, message: string, localError?: string): void {
+    wrapper.querySelector('.aq-error')?.remove();
+    if (!message) return;
+    const error = document.createElement('div');
+    error.className = 'aq-error';
+    if (localError) error.dataset.localError = localError;
+    error.textContent = message;
+    error.style.cssText = 'padding:0 14px 12px;color:var(--color-error, #f87171);font-size:11px;';
+    wrapper.appendChild(error);
   }
 }

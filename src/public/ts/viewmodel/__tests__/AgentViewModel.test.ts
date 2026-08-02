@@ -1,10 +1,14 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { agentRunnableProblem, AgentViewModel } from '../AgentViewModel.js';
 import type { AgentConfig, AgentRole } from '../../types.js';
+import { setLocale } from '../../i18n/index.js';
 
 const originalFetch = globalThis.fetch;
 
+beforeEach(() => setLocale('en-US'));
+
 afterEach(() => {
+  setLocale('zh-CN');
   vi.restoreAllMocks();
   globalThis.fetch = originalFetch;
 });
@@ -68,6 +72,13 @@ describe('AgentViewModel.selectRunnableAgent', () => {
 
     expect(result.ok).toBe(false);
     expect(result.message).toContain('is not active');
+  });
+
+  it('uses the active locale for frontend-generated setup guidance', () => {
+    setLocale('zh-CN');
+    const result = new AgentViewModel().selectRunnableAgent();
+
+    expect(result.message).toContain('尚未配置智能体');
   });
 });
 

@@ -65,6 +65,10 @@ export class WsServer extends EventEmitter implements Transport {
   private constructor() { super(); }
 
   attach(server: HttpServer): void {
+    if (this.wss) {
+      this.resume();
+      return;
+    }
     this.wss = new WebSocketServer({
       server,
       maxPayload: 2 * 1024 * 1024,
@@ -112,7 +116,12 @@ export class WsServer extends EventEmitter implements Transport {
 
     LogManager.getInstance().logger('anochat.core').info('WebSocket server attached');
 
-    this._heartbeatTimer = setInterval(() => {
+    this.resume();
+  }
+
+  /** Restart maintenance timers after an in-process HTTP server restart. */
+  resume(): void {
+    if (!this._heartbeatTimer) this._heartbeatTimer = setInterval(() => {
       let removedAny = false;
       for (const [socket, connection] of this._connections) {
         if (!connection.isAlive) {
@@ -129,7 +138,7 @@ export class WsServer extends EventEmitter implements Transport {
     }, WsServer.HEARTBEAT_INTERVAL_MS);
 
     // Periodic buffer cleanup: drop events older than TTL, remove empty buffers
-    this._bufferCleanupTimer = setInterval(() => {
+    if (!this._bufferCleanupTimer) this._bufferCleanupTimer = setInterval(() => {
       this._sweepStaleBuffers();
     }, WsServer.BUFFER_CLEANUP_INTERVAL_MS);
   }

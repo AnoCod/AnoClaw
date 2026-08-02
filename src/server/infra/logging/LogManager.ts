@@ -140,6 +140,8 @@ export class LogManager extends EventEmitter {
 
   // Separate ring buffer for all entries (for cross-category searching)
   private _allEntries: LogEntry[] = [];
+  private _consoleOutputAvailable = true;
+  private _consoleStreamsGuarded = false;
 
   private constructor() {
     super();
@@ -162,6 +164,7 @@ export class LogManager extends EventEmitter {
     if (this._initialized) return;
 
     this._logDir = logDir;
+    this.guardConsoleStreams();
 
     // Ensure log directory exists
     const absDir = path.resolve(process.cwd(), logDir);
@@ -283,7 +286,10 @@ export class LogManager extends EventEmitter {
 
     const meta = sanitized.sid ? ` [sid=${sanitized.sid}]` : '';
     const agentMeta = sanitized.aid ? ` [aid=${sanitized.aid}]` : '';
-    logFn(`[${sanitized.ts}] ${level.toUpperCase()} ${cat}${meta}${agentMeta} ${sanitized.msg}`);
+    this.writeConsoleSafely(
+      logFn,
+      `[${sanitized.ts}] ${level.toUpperCase()} ${cat}${meta}${agentMeta} ${sanitized.msg}`,
+    );
 
     // Write to pino rotating-file logger (structured JSON output)
     const pinoLogger = this._pinoLoggers.get(cat);
@@ -387,8 +393,29 @@ export class LogManager extends EventEmitter {
       const line = JSON.stringify(entry) + '\n';
       this._apiCallsStream.write(line);
     } catch {
-      // If API call logging fails, emit to stderr but don't crash
-      console.error('[LogManager] Failed to write API call log entry');
+      // If API call logging fails, report when possible but never crash.
+      this.writeConsoleSafely(console.error, '[LogManager] Failed to write API call log entry');
+    }
+  }
+
+  private guardConsoleStreams(): void {
+    if (this._consoleStreamsGuarded) return;
+    this._consoleStreamsGuarded = true;
+    const handleStreamError = (): void => {
+      // A packaged app may outlive the launcher that owned its inherited pipes.
+      // File logging remains authoritative when console output becomes unusable.
+      this._consoleOutputAvailable = false;
+    };
+    process.stdout?.on('error', handleStreamError);
+    process.stderr?.on('error', handleStreamError);
+  }
+
+  private writeConsoleSafely(logFn: (message?: unknown, ...optionalParams: unknown[]) => void, message: string): void {
+    if (!this._consoleOutputAvailable) return;
+    try {
+      logFn(message);
+    } catch {
+      this._consoleOutputAvailable = false;
     }
   }
 
@@ -399,14 +426,29 @@ export class LogManager extends EventEmitter {
   /** Flush and close streams (call during shutdown) */
   async shutdown(): Promise<void> {
     if (this._apiCallsStream) {
-      this._apiCallsStream.end();
+      const stream = this._apiCallsStream;
       this._apiCallsStream = null;
+      await new Promise<void>((resolve, reject) => {
+        const onError = (error: Error): void => {
+          stream.off('finish', onFinish);
+          reject(error);
+        };
+        const onFinish = (): void => {
+          stream.off('error', onError);
+          resolve();
+        };
+        stream.once('error', onError);
+        stream.once('finish', onFinish);
+        stream.end();
+      });
     }
 
     // Flush pino rotating-file loggers
-    this._pinoLoggers.forEach((logger) => {
-      logger.flush();
-    });
+    await Promise.all([...this._pinoLoggers.values()].map((logger) => (
+      new Promise<void>((resolve, reject) => {
+        logger.flush((error?: Error) => error ? reject(error) : resolve());
+      })
+    )));
     this._pinoLoggers.clear();
 
     this._initialized = false;

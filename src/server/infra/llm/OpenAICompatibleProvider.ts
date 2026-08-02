@@ -54,7 +54,7 @@ function stableToolNameHash(value: string): string {
 /**
  * Convert an internal AnoClaw tool name to the portable subset accepted by
  * OpenAI-compatible APIs. Plugin names intentionally use namespaces such as
- * `office.create_pptx`; those names stay unchanged inside AnoClaw and are only
+ * `vendor.create_asset`; those names stay unchanged inside AnoClaw and are only
  * aliased at the provider boundary.
  */
 export function toOpenAIToolName(name: string): string {

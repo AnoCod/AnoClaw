@@ -13,9 +13,126 @@
  * paths that are isolable.
  */
 
-import { describe, it, expect } from 'vitest';
-import { AgentLoop } from '../AgentLoop.js';
+import * as fsp from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { AgentLoop, interruptReasonMessage } from '../AgentLoop.js';
 import { MAX_TURNS_DEFAULT } from '../../../../shared/constants.js';
+import { AgentRegistry } from '../AgentRegistry.js';
+import { Agent } from '../Agent.js';
+import { AgentRole, AgentState } from '../../../../shared/types/agent.js';
+import { ToolRegistry } from '../../tools/ToolRegistry.js';
+import { RiskLevel, Tool, type ExecutionContext } from '../../tools/Tool.js';
+import type { ToolResult } from '../../../../shared/types/tool.js';
+import type { Message } from '../../../../shared/types/session.js';
+import type { LLMStreamEvent } from '../../../../shared/types/llm.js';
+import { SSEEventType } from '../../../../shared/types/events.js';
+import { extensionPoints } from '../../plugin-host/ExtensionPoints.js';
+import { APIScheduler } from '../../../infra/llm/APIScheduler.js';
+import { InterruptReason } from '../supervision/InterruptController.js';
+import { CoordinationService } from '../../coordination/CoordinationService.js';
+import { SessionManager } from '../../session/SessionManager.js';
+import { SessionStore } from '../../session/SessionStore.js';
+
+const LLM_OVERRIDE_OWNER = 'agent-loop-effective-allowlist-test';
+
+class FixtureTool extends Tool {
+  executions = 0;
+
+  constructor(
+    private readonly toolName: string,
+    private readonly risk: RiskLevel = RiskLevel.Safe,
+  ) {
+    super();
+  }
+
+  name(): string {
+    return this.toolName;
+  }
+
+  description(): string {
+    return `${this.toolName} fixture`;
+  }
+
+  parametersSchema(): Record<string, unknown> {
+    return { type: 'object', properties: {}, additionalProperties: false };
+  }
+
+  riskLevel(): RiskLevel {
+    return this.risk;
+  }
+
+  async execute(_params: Record<string, unknown>, _ctx: ExecutionContext): Promise<ToolResult> {
+    this.executions++;
+    return this.makeResult(`${this.toolName} executed`);
+  }
+}
+
+function makeAgent(allowedTools: string[]): Agent {
+  return new Agent({
+    id: 'agent-1',
+    name: 'Allowlist Agent',
+    role: AgentRole.Member,
+    parentAgentId: null,
+    level: 2,
+    teamName: '',
+    provider: 'test',
+    apiUrl: '',
+    apiKey: 'sk-test',
+    model: 'test-model',
+    contextWindow: 128000,
+    maxTurns: 2,
+    temperature: 0,
+    agentPrompt: '',
+    preferredLanguage: 'en',
+    conversationLanguage: 'en',
+    allowedTools,
+    enabledSkills: [],
+    mcpServers: [],
+    state: AgentState.Active,
+    createdAt: new Date().toISOString(),
+  });
+}
+
+function installToolCallSequence(toolName: string): void {
+  let callCount = 0;
+  extensionPoints.register('llmProvider', LLM_OVERRIDE_OWNER, () => ({
+    async *chat(): AsyncGenerator<LLMStreamEvent> {
+      callCount++;
+      if (callCount === 1) {
+        yield { type: 'tool_use', toolId: 'call-1', toolName, toolInput: {} };
+      } else {
+        yield { type: 'text_delta', content: 'finished' };
+      }
+      yield { type: 'done' };
+    },
+    cancel(): void {},
+    providerName(): string {
+      return 'agent-loop-test';
+    },
+  }));
+}
+
+function userMessage(): Message {
+  return {
+    id: 'message-1',
+    sessionId: 'session-1',
+    role: 'user',
+    content: 'Run the requested tool',
+    tokenCount: 0,
+    compressed: false,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+afterEach(() => {
+  extensionPoints.unregisterAll(LLM_OVERRIDE_OWNER);
+  AgentRegistry.resetInstance();
+  ToolRegistry.resetInstance();
+  APIScheduler.resetInstance();
+  vi.restoreAllMocks();
+});
 
 describe('AgentLoop', () => {
   // ── Constructor ──
@@ -114,6 +231,281 @@ describe('AgentLoop', () => {
       });
 
       expect(loop.maxTurns).toBe(-1);
+    });
+  });
+
+  describe('interrupt status text', () => {
+    it.each([
+      [InterruptReason.UserStop, '(User stopped)'],
+      [InterruptReason.ParentStop, '(Parent session stopped)'],
+      [InterruptReason.TaskSelfCancel, '(Agent cancelled its own task)'],
+      [InterruptReason.TaskCreatorCancel, '(Task cancelled by its creator)'],
+      [InterruptReason.TaskCoordinatorCancel, '(Task cancelled by the team coordinator)'],
+    ])('renders %s without collapsing it into a parent stop', (reason, expected) => {
+      expect(interruptReasonMessage(reason)).toBe(expected);
+    });
+  });
+
+  describe('effective tool allowlist enforcement', () => {
+    it('rejects a registered high-risk tool that is absent from agentTools without executing it', async () => {
+      const registry = ToolRegistry.getInstance();
+      const allowedTool = new FixtureTool('AllowedTool');
+      const blockedTool = new FixtureTool('BlockedHighRiskTool', RiskLevel.High);
+      registry.registerTool(allowedTool);
+      registry.registerTool(blockedTool);
+      AgentRegistry.getInstance().registerAgent(makeAgent(['AllowedTool']));
+      installToolCallSequence('BlockedHighRiskTool');
+      const registryExecute = vi.spyOn(registry, 'execute');
+
+      const loop = new AgentLoop({
+        maxTurns: 2,
+        temperature: 0,
+        contextWindow: 128000,
+        agentId: 'agent-1',
+        sessionId: 'session-1',
+        permissionMode: 'AutoEdit',
+        systemPromptOverride: 'Test tool allowlist enforcement.',
+      });
+      const events = [];
+      for await (const event of loop.run(userMessage(), [])) events.push(event);
+
+      expect(registryExecute).not.toHaveBeenCalled();
+      expect(blockedTool.executions).toBe(0);
+      expect(events).toContainEqual(expect.objectContaining({
+        type: SSEEventType.ToolResult,
+        toolName: 'BlockedHighRiskTool',
+        success: false,
+        content: expect.stringContaining('not allowed for this agent'),
+      }));
+    });
+
+    it('continues to execute a registered tool present in agentTools', async () => {
+      const registry = ToolRegistry.getInstance();
+      const allowedTool = new FixtureTool('AllowedTool');
+      registry.registerTool(allowedTool);
+      AgentRegistry.getInstance().registerAgent(makeAgent(['AllowedTool']));
+      installToolCallSequence('AllowedTool');
+      const registryExecute = vi.spyOn(registry, 'execute');
+
+      const loop = new AgentLoop({
+        maxTurns: 2,
+        temperature: 0,
+        contextWindow: 128000,
+        agentId: 'agent-1',
+        sessionId: 'session-1',
+        permissionMode: 'AutoEdit',
+        systemPromptOverride: 'Test tool allowlist enforcement.',
+      });
+      const events = [];
+      for await (const event of loop.run(userMessage(), [])) events.push(event);
+
+      expect(registryExecute).toHaveBeenCalledOnce();
+      expect(registryExecute).toHaveBeenCalledWith(
+        'AllowedTool',
+        {},
+        expect.objectContaining({ agentId: 'agent-1', sessionId: 'session-1' }),
+        'call-1',
+      );
+      expect(allowedTool.executions).toBe(1);
+      expect(events).toContainEqual(expect.objectContaining({
+        type: SSEEventType.ToolResult,
+        toolName: 'AllowedTool',
+        success: true,
+        content: 'AllowedTool executed',
+      }));
+    });
+  });
+
+  describe('durable coordination inbox', () => {
+    it('injects a delivered message into another session before acknowledging it', async () => {
+      const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'anoclaw-loop-inbox-'));
+      SessionManager.resetInstance();
+      SessionStore.resetInstance();
+      CoordinationService.resetInstance();
+      const sessionManager = SessionManager.getInstance();
+      const coordination = CoordinationService.getInstance();
+
+      try {
+        await sessionManager.initialize(path.join(tmpDir, 'sessions'));
+        await coordination.initialize(path.join(tmpDir, 'coordination'));
+        AgentRegistry.getInstance().registerAgent(makeAgent([]));
+        const root = await sessionManager.createMainSession(
+          'agent-1',
+          'Root',
+          path.join(tmpDir, 'workspace'),
+        );
+        const originalTarget = await sessionManager.createSubSession(
+          root.id,
+          'agent-1',
+          'Original target',
+          { scopeId: 'original' },
+        );
+        const activeTarget = await sessionManager.createSubSession(
+          root.id,
+          'agent-1',
+          'Active target',
+          { scopeId: 'active' },
+        );
+        const coordinationMessage = await coordination.queueMessage({
+          rootSessionId: root.id,
+          fromAgentId: 'ceo',
+          toAgentId: 'agent-1',
+          kind: 'note',
+          content: 'Review the latest status.',
+        });
+        await sessionManager.appendMessage(originalTarget.id, {
+          id: coordinationMessage.id,
+          sessionId: originalTarget.id,
+          role: 'user',
+          content: `<coordination-message id="${coordinationMessage.id}">Review the latest status.</coordination-message>`,
+          tokenCount: 0,
+          compressed: false,
+          timestamp: coordinationMessage.createdAt,
+        });
+        await coordination.updateMessageStatus(
+          root.id,
+          coordinationMessage.id,
+          'delivered',
+          'agent-1',
+        );
+
+        let capturedMessages: Array<{ role: string; content: string }> = [];
+        extensionPoints.register('llmProvider', LLM_OVERRIDE_OWNER, () => ({
+          async *chat(messages: Array<{ role: string; content: string }>): AsyncGenerator<LLMStreamEvent> {
+            capturedMessages = messages;
+            yield { type: 'text_delta', content: 'acknowledged' };
+            yield { type: 'done' };
+          },
+          cancel(): void {},
+          providerName(): string { return 'coordination-inbox-test'; },
+        }));
+        const trigger: Message = {
+          id: 'trigger-active-target',
+          sessionId: activeTarget.id,
+          role: 'system',
+          content: 'Process durable coordination messages.',
+          tokenCount: 0,
+          compressed: false,
+          timestamp: new Date().toISOString(),
+        };
+        const loop = new AgentLoop({
+          maxTurns: 1,
+          temperature: 0,
+          contextWindow: 128000,
+          agentId: 'agent-1',
+          sessionId: activeTarget.id,
+          systemPromptOverride: 'Process inbox.',
+        });
+        for await (const _event of loop.run(trigger, [])) {
+          // Drain the loop.
+        }
+
+        expect(capturedMessages.some((message) => (
+          message.content.includes(coordinationMessage.id)
+          && message.content.includes('Review the latest status.')
+        ))).toBe(true);
+        expect((await sessionManager.getHistory(activeTarget.id))
+          .filter((message) => message.id === coordinationMessage.id)).toHaveLength(1);
+        expect(coordination.listMessages(root.id, 'agent-1')
+          .find((message) => message.id === coordinationMessage.id)?.status).toBe('acknowledged');
+      } finally {
+        extensionPoints.unregisterAll(LLM_OVERRIDE_OWNER);
+        CoordinationService.resetInstance();
+        SessionManager.resetInstance();
+        SessionStore.resetInstance();
+        await fsp.rm(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it('injects without a second append when the exact target durable history already has the message', async () => {
+      const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'anoclaw-loop-inbox-'));
+      SessionManager.resetInstance();
+      SessionStore.resetInstance();
+      CoordinationService.resetInstance();
+      const sessionManager = SessionManager.getInstance();
+      const coordination = CoordinationService.getInstance();
+
+      try {
+        await sessionManager.initialize(path.join(tmpDir, 'sessions'));
+        await coordination.initialize(path.join(tmpDir, 'coordination'));
+        AgentRegistry.getInstance().registerAgent(makeAgent([]));
+        const root = await sessionManager.createMainSession(
+          'agent-1',
+          'Root',
+          path.join(tmpDir, 'workspace'),
+        );
+        const target = await sessionManager.createSubSession(
+          root.id,
+          'agent-1',
+          'Exact target',
+          { scopeId: 'exact' },
+        );
+        const coordinationMessage = await coordination.queueMessage({
+          rootSessionId: root.id,
+          fromAgentId: 'ceo',
+          toAgentId: 'agent-1',
+          kind: 'note',
+          content: 'Exact target message.',
+        });
+        const rendered = `<coordination-message id="${coordinationMessage.id}">Exact target message.</coordination-message>`;
+        const persisted: Message = {
+          id: coordinationMessage.id,
+          sessionId: target.id,
+          role: 'user',
+          content: rendered,
+          tokenCount: 0,
+          compressed: false,
+          timestamp: coordinationMessage.createdAt,
+        };
+        await sessionManager.appendMessage(target.id, persisted);
+        await coordination.updateMessageStatus(root.id, coordinationMessage.id, 'delivered', 'agent-1');
+
+        let capturedMessages: Array<{ role: string; content: string }> = [];
+        extensionPoints.register('llmProvider', LLM_OVERRIDE_OWNER, () => ({
+          async *chat(messages: Array<{ role: string; content: string }>): AsyncGenerator<LLMStreamEvent> {
+            capturedMessages = messages;
+            yield { type: 'text_delta', content: 'acknowledged' };
+            yield { type: 'done' };
+          },
+          cancel(): void {},
+          providerName(): string { return 'coordination-inbox-test'; },
+        }));
+        const trigger: Message = {
+          id: 'trigger-exact-target',
+          sessionId: target.id,
+          role: 'system',
+          content: 'Process durable coordination messages.',
+          tokenCount: 0,
+          compressed: false,
+          timestamp: new Date().toISOString(),
+        };
+        const loop = new AgentLoop({
+          maxTurns: 1,
+          temperature: 0,
+          contextWindow: 128000,
+          agentId: 'agent-1',
+          sessionId: target.id,
+          systemPromptOverride: 'Process inbox.',
+        });
+        // Simulate a stale caller snapshot: delivery reached the durable target
+        // after history was loaded but before this AgentLoop began.
+        for await (const _event of loop.run(trigger, [])) {
+          // Drain the loop.
+        }
+
+        expect(capturedMessages.filter((message) => message.content.includes(coordinationMessage.id)))
+          .toHaveLength(1);
+        expect((await sessionManager.getHistory(target.id))
+          .filter((message) => message.id === coordinationMessage.id)).toHaveLength(1);
+        expect(coordination.listMessages(root.id, 'agent-1')
+          .find((message) => message.id === coordinationMessage.id)?.status).toBe('acknowledged');
+      } finally {
+        extensionPoints.unregisterAll(LLM_OVERRIDE_OWNER);
+        CoordinationService.resetInstance();
+        SessionManager.resetInstance();
+        SessionStore.resetInstance();
+        await fsp.rm(tmpDir, { recursive: true, force: true });
+      }
     });
   });
 });

@@ -4,6 +4,7 @@
  */
 
 import type { PlanEvent } from '../types.js';
+import { t } from '../../../i18n/index.js';
 
 export class PlanIndicator {
   element: HTMLElement;
@@ -34,7 +35,9 @@ export class PlanIndicator {
 
     // Label
     const label = document.createElement('span');
-    label.textContent = isEnter ? 'PLAN MODE' : 'PLAN ENDED';
+    const labelKey = isEnter ? 'message.planMode' : 'message.planEnded';
+    label.textContent = t(labelKey);
+    label.setAttribute('data-i18n-key', labelKey);
     label.style.cssText = `color: ${isEnter ? 'var(--cinema-text-edge)' : 'var(--cinema-text-edge)'};`;
     indicator.appendChild(label);
 
@@ -47,8 +50,11 @@ export class PlanIndicator {
     // Description
     const desc = document.createElement('span');
     desc.textContent = isEnter
-      ? (event.description || event.title || 'Exploring before editing')
-      : 'Returning to execution';
+      ? (event.description || event.title || t('message.planExploring'))
+      : t('message.planReturning');
+    if (!(isEnter && (event.description || event.title))) {
+      desc.setAttribute('data-i18n-key', isEnter ? 'message.planExploring' : 'message.planReturning');
+    }
     desc.style.cssText = 'letter-spacing: 0;';
     indicator.appendChild(desc);
 

@@ -2,6 +2,7 @@
 
 import type { FileEntry } from '../../../types.js';
 import { ToastManager } from '../../../ToastManager.js';
+import { onLocaleChange, t, type TranslationKey } from '../../../i18n/index.js';
 
 /** Local alias using isDirectory for convenience; maps from FileEntry type field. */
 type FileNode = FileEntry & { isDirectory?: boolean; modifiedAt?: string };
@@ -16,7 +17,9 @@ export class WorkspaceFileTree {
   private _treeBody: HTMLElement;
   private _searchInput: HTMLInputElement;
   private _treeMeta: HTMLElement;
+  private _treeLabel: HTMLElement;
   private _refreshBtn: HTMLButtonElement;
+  private _clearButton: HTMLButtonElement;
   private _createButtons: HTMLButtonElement[] = [];
   private _filterButtons = new Map<TreeFilter, HTMLButtonElement>();
   private _rootNodes: FileNode[] = [];
@@ -30,6 +33,7 @@ export class WorkspaceFileTree {
   private _lastExpandTime = 0;
   private _lastFileFingerprint = '';
   private _loadGeneration = 0;
+  private _lastEmptyKeys: [TranslationKey, TranslationKey] | null = null;
   beforePathDelete: ((path: string) => Promise<boolean>) | null = null;
   onPathRenamed: ((oldPath: string, newPath: string) => void) | null = null;
   onPathDeleted: ((path: string) => void) | null = null;
@@ -45,15 +49,16 @@ export class WorkspaceFileTree {
     const header = document.createElement('div');
     header.className = 'ws-tree-header';
     const label = document.createElement('span');
-    label.textContent = 'Files';
+    label.textContent = t('workspace.files');
     label.className = 'ws-tree-label';
+    this._treeLabel = label;
     header.appendChild(label);
 
     // New File button
     const newFileBtn = document.createElement('button');
     newFileBtn.className = 'ws-tree-action-btn ws-tree-create-btn';
     newFileBtn.innerHTML = _SVG_FILE_PLUS;
-    newFileBtn.title = 'New File';
+    newFileBtn.title = t('workspace.newFile');
     this._createButtons.push(newFileBtn);
     newFileBtn.addEventListener('click', (e) => { e.stopPropagation(); void this._createFile('/'); });
     header.appendChild(newFileBtn);
@@ -62,7 +67,7 @@ export class WorkspaceFileTree {
     const newFolderBtn = document.createElement('button');
     newFolderBtn.className = 'ws-tree-action-btn ws-tree-create-btn';
     newFolderBtn.innerHTML = _SVG_FOLDER_PLUS;
-    newFolderBtn.title = 'New Folder';
+    newFolderBtn.title = t('workspace.newFolder');
     this._createButtons.push(newFolderBtn);
     newFolderBtn.addEventListener('click', (e) => { e.stopPropagation(); void this._createFolder('/'); });
     header.appendChild(newFolderBtn);
@@ -70,7 +75,7 @@ export class WorkspaceFileTree {
     this._refreshBtn = document.createElement('button');
     this._refreshBtn.className = 'ws-tree-refresh-btn ws-tree-action-btn';
     this._refreshBtn.innerHTML = _SVG_REFRESH;
-    this._refreshBtn.title = 'Refresh file tree';
+    this._refreshBtn.title = t('workspace.refreshTree');
     this._refreshBtn.addEventListener('click', () => { this.refreshAll(); });
     header.appendChild(this._refreshBtn);
     panelHead.appendChild(header);
@@ -85,7 +90,7 @@ export class WorkspaceFileTree {
     this._searchInput = document.createElement('input');
     this._searchInput.className = 'ws-tree-search-input';
     this._searchInput.type = 'search';
-    this._searchInput.placeholder = 'Search files...';
+    this._searchInput.placeholder = t('workspace.searchFiles');
     this._searchInput.spellcheck = false;
     this._searchInput.addEventListener('input', () => {
       this._searchQuery = this._searchInput.value.trim().toLowerCase();
@@ -97,7 +102,8 @@ export class WorkspaceFileTree {
     const clearBtn = document.createElement('button');
     clearBtn.className = 'ws-tree-search-clear';
     clearBtn.type = 'button';
-    clearBtn.title = 'Clear search';
+    clearBtn.title = t('workspace.clearSearch');
+    this._clearButton = clearBtn;
     clearBtn.innerHTML = _SVG_X;
     clearBtn.addEventListener('click', () => {
       if (!this._searchInput.value) return;
@@ -156,6 +162,7 @@ export class WorkspaceFileTree {
         void this._renameByPath(this._selectedPath);
       }
     });
+    onLocaleChange(() => this._refreshLocale());
   }
 
   async loadRoot(sessionId: string): Promise<void> {
@@ -163,13 +170,15 @@ export class WorkspaceFileTree {
     this._stopPolling();
     this._sessionId = sessionId; this._treeBody.innerHTML = ''; this._nodeMap.clear();
     this._rootNodes = [];
+    this._fileCount = 0;
+    this._selectedPath = '';
     this._expandedPaths.clear();
     this._lastFileFingerprint = '';
     this._syncFilterButtons();
     this._updateTreeMeta(0, 0);
     if (!sessionId) {
       this._setUnavailable(true);
-      this._showEmpty('No workspace', 'Bind a workspace to browse files.');
+      this._showEmpty('workspace.noWorkspace', 'workspace.bindToBrowse');
       return;
     }
     this._setUnavailable(false);
@@ -184,7 +193,7 @@ export class WorkspaceFileTree {
       if (!resp.ok) {
         this._setUnavailable(true);
         this._updateTreeMeta(0, 0);
-        this._showEmpty('No workspace', 'Bind a workspace to browse files.');
+        this._showEmpty('workspace.noWorkspace', 'workspace.bindToBrowse');
         return;
       }
       this._setUnavailable(false);
@@ -198,7 +207,7 @@ export class WorkspaceFileTree {
       await this._renderRootNodes(true);
     } catch {
       this._setUnavailable(true);
-      this._showEmpty('Workspace unavailable', 'Refresh after binding a folder.');
+      this._showEmpty('workspace.unavailable', 'workspace.refreshAfterBinding');
       console.debug('WorkspaceFileTree: loadRoot failed');
     }
   }
@@ -287,14 +296,15 @@ export class WorkspaceFileTree {
     this._updateTreeMeta(filtered.length, this._rootNodes.length);
 
     if (this._rootNodes.length === 0) {
-      this._showEmpty('Empty folder', 'No files in this workspace.');
+      this._showEmpty('workspace.emptyFolder', 'workspace.noFiles');
       return;
     }
     if (filtered.length === 0) {
-      this._showEmpty('No matches', 'Try a different search or filter.');
+      this._showEmpty('workspace.noMatches', 'workspace.tryDifferentFilter');
       return;
     }
 
+    this._lastEmptyKeys = null;
     this._renderNodes(filtered, this._treeBody, 0);
     if (restoreExpanded && this._filterMode === 'all' && !this._searchQuery) {
       await this._restoreExpandedState();
@@ -318,9 +328,9 @@ export class WorkspaceFileTree {
       folders: this._rootNodes.filter((node) => node.isDirectory).length,
     };
     const labels: Record<TreeFilter, string> = {
-      all: 'All',
-      files: 'Files',
-      folders: 'Folders',
+      all: t('workspace.filterAll'),
+      files: t('workspace.files'),
+      folders: t('workspace.folders'),
     };
     this._filterButtons.forEach((btn, mode) => {
       btn.classList.toggle('active', this._filterMode === mode);
@@ -331,19 +341,20 @@ export class WorkspaceFileTree {
   private _updateTreeMeta(visible: number, total: number): void {
     if (!this._treeMeta) return;
     if (total === 0) {
-      this._treeMeta.textContent = 'No entries';
+      this._treeMeta.textContent = t('workspace.noEntries');
       return;
     }
     const folders = this._rootNodes.filter((node) => node.isDirectory).length;
     const files = Math.max(0, total - folders);
     const filtered = visible !== total || this._filterMode !== 'all' || !!this._searchQuery;
     this._treeMeta.textContent = filtered
-      ? `${visible} of ${total} shown`
-      : `${folders} folders / ${files} files`;
+      ? t('workspace.shown', { visible, total })
+      : t('workspace.counts', { folders, files });
   }
 
-  private _showEmpty(title: string, subtitle: string): void {
-    this._treeBody.innerHTML = `<div class="ws-tree-empty"><div class="ws-tree-empty-mark">${_SVG_FOLDER}</div><span>${_esc(title)}</span><small>${_esc(subtitle)}</small></div>`;
+  private _showEmpty(titleKey: TranslationKey, subtitleKey: TranslationKey): void {
+    this._lastEmptyKeys = [titleKey, subtitleKey];
+    this._treeBody.innerHTML = `<div class="ws-tree-empty"><div class="ws-tree-empty-mark">${_SVG_FOLDER}</div><span>${_esc(t(titleKey))}</span><small>${_esc(t(subtitleKey))}</small></div>`;
   }
 
   private _setUnavailable(disabled: boolean): void {
@@ -474,14 +485,14 @@ export class WorkspaceFileTree {
     const menu = document.createElement('div'); menu.className = 'ws-tree-context-menu';
     menu.style.left = x+'px'; menu.style.top = y+'px';
     const items: Array<{label:string;cls?:string;action:()=>void}> = [];
-    if (!node.isDirectory) items.push({label:'Open', action:()=>this._onFileOpen(node.path, node.name)});
-    if (node.isDirectory) { items.push({label:'New File', action:()=>this._createFile(node.path)}); items.push({label:'New Folder', action:()=>this._createFolder(node.path)}); }
+    if (!node.isDirectory) items.push({label:t('workspace.open'), action:()=>this._onFileOpen(node.path, node.name)});
+    if (node.isDirectory) { items.push({label:t('workspace.newFile'), action:()=>this._createFile(node.path)}); items.push({label:t('workspace.newFolder'), action:()=>this._createFolder(node.path)}); }
     if (!node.isDirectory) {
-      items.push({label:'Agent: Review File', action:()=>this._askAgent('Review', node)});
-      items.push({label:'Agent: Find Bugs', action:()=>this._askAgent('FindBugs', node)});
-      items.push({label:'Agent: Explain File', action:()=>this._askAgent('Explain', node)});
+      items.push({label:t('workspace.agentReview'), action:()=>this._askAgent('Review', node)});
+      items.push({label:t('workspace.agentFindBugs'), action:()=>this._askAgent('FindBugs', node)});
+      items.push({label:t('workspace.agentExplain'), action:()=>this._askAgent('Explain', node)});
     }
-    items.push({label:'Rename', action:()=>this._rename(node)}, {label:'Delete', cls:'danger', action:()=>this._delete(node)});
+    items.push({label:t('workspace.rename'), action:()=>this._rename(node)}, {label:t('common.delete'), cls:'danger', action:()=>this._delete(node)});
     menu.innerHTML = items.map((it,i) => {
       const divider = i===1 && !node.isDirectory ? '<div class="ws-tree-context-divider"></div>' : '';
       return `${divider}<div class="ws-tree-context-item${it.cls?' '+it.cls:''}" data-action="${i}">${it.label}</div>`;
@@ -502,74 +513,74 @@ export class WorkspaceFileTree {
   }
 
   private async _createFile(parentPath:string): Promise<void> {
-    const name = await this._prompt('File name:', 'new-file.txt'); if (!name) return;
+    const name = await this._prompt(t('workspace.fileNamePrompt'), 'new-file.txt'); if (!name) return;
     try {
       const resp = await fetch('/api/v1/workspace/create-file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,path:parentPath,name})});
-      if (!resp.ok) throw new Error(await this._responseError(resp, 'Create file failed'));
+      if (!resp.ok) throw new Error(await this._responseError(resp, t('workspace.createFileFailed')));
       await this.refreshDirectory(parentPath);
-    } catch (err) { this._showMutationError(err, 'Create file failed'); }
+    } catch (err) { this._showMutationError(err, t('workspace.createFileFailed')); }
   }
   private async _createFolder(parentPath:string): Promise<void> {
-    const name = await this._prompt('Folder name:', 'new-folder'); if (!name) return;
+    const name = await this._prompt(t('workspace.folderNamePrompt'), 'new-folder'); if (!name) return;
     try {
       const resp = await fetch('/api/v1/workspace/create-dir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,path:parentPath,name})});
-      if (!resp.ok) throw new Error(await this._responseError(resp, 'Create folder failed'));
+      if (!resp.ok) throw new Error(await this._responseError(resp, t('workspace.createFolderFailed')));
       await this.refreshDirectory(parentPath);
-    } catch (err) { this._showMutationError(err, 'Create folder failed'); }
+    } catch (err) { this._showMutationError(err, t('workspace.createFolderFailed')); }
   }
   private async _rename(node:FileNode): Promise<void> {
-    const newName = await this._prompt('New name:', node.name); if (!newName||newName===node.name) return;
+    const newName = await this._prompt(t('workspace.newNamePrompt'), node.name); if (!newName||newName===node.name) return;
     try {
       const resp = await fetch('/api/v1/workspace/rename',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,path:node.path,newName})});
-      if (!resp.ok) throw new Error(await this._responseError(resp, 'Rename failed'));
+      if (!resp.ok) throw new Error(await this._responseError(resp, t('workspace.renameFailed')));
       const payload = await resp.json() as { newPath?: string };
       const newPath = payload.newPath || _joinTreePath(node.path.substring(0,node.path.lastIndexOf('/'))||'/', newName);
       this.onPathRenamed?.(node.path, newPath);
       const parentPath = node.path.substring(0,node.path.lastIndexOf('/'))||'/';
       await this.refreshDirectory(parentPath);
-    } catch (err) { this._showMutationError(err, 'Rename failed'); }
+    } catch (err) { this._showMutationError(err, t('workspace.renameFailed')); }
   }
   private async _delete(node:FileNode): Promise<void> {
     await this._deleteByName(node.path, node.name);
   }
 
   private async _deleteByName(filePath: string, name: string): Promise<void> {
-    const confirmed = await this._confirm(`Delete ${name}?`); if (!confirmed) return;
+    const confirmed = await this._confirm(t('workspace.deleteConfirm', { name })); if (!confirmed) return;
     if (this.beforePathDelete && !await this.beforePathDelete(filePath)) return;
     try {
       const resp = await fetch(`/api/v1/workspace/file?path=${encodeURIComponent(filePath)}&sessionId=${encodeURIComponent(this._sessionId)}`,{method:'DELETE'});
-      if (!resp.ok) throw new Error(await this._responseError(resp, 'Delete failed'));
+      if (!resp.ok) throw new Error(await this._responseError(resp, t('workspace.deleteFailed')));
       this.onPathDeleted?.(filePath);
       const parentPath = filePath.substring(0,filePath.lastIndexOf('/'))||'/';
       await this.refreshDirectory(parentPath);
       if (this._selectedPath === filePath) this._selectedPath = '';
-    } catch (err) { this._showMutationError(err, 'Delete failed'); }
+    } catch (err) { this._showMutationError(err, t('workspace.deleteFailed')); }
   }
 
   private async _renameByPath(filePath: string): Promise<void> {
     const name = filePath.split('/').pop() || '';
-    const newName = await this._prompt('New name:', name); if (!newName||newName===name) return;
+    const newName = await this._prompt(t('workspace.newNamePrompt'), name); if (!newName||newName===name) return;
     try {
       const resp = await fetch('/api/v1/workspace/rename',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,path:filePath,newName})});
-      if (!resp.ok) throw new Error(await this._responseError(resp, 'Rename failed'));
+      if (!resp.ok) throw new Error(await this._responseError(resp, t('workspace.renameFailed')));
       const payload = await resp.json() as { newPath?: string };
       const parentPath = filePath.substring(0,filePath.lastIndexOf('/'))||'/';
       const nextPath = payload.newPath || _joinTreePath(parentPath, newName);
       this.onPathRenamed?.(filePath, nextPath);
       if (this._selectedPath === filePath) this._selectedPath = nextPath;
       await this.refreshDirectory(parentPath);
-    } catch (err) { this._showMutationError(err, 'Rename failed'); }
+    } catch (err) { this._showMutationError(err, t('workspace.renameFailed')); }
   }
 
   private async _moveFile(srcPath: string, destDir: string): Promise<void> {
     try {
       const resp = await fetch('/api/v1/workspace/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:this._sessionId,source:srcPath,destDir})});
-      if (!resp.ok) throw new Error(await this._responseError(resp, 'Move failed'));
+      if (!resp.ok) throw new Error(await this._responseError(resp, t('workspace.moveFailed')));
       const payload = await resp.json() as { destPath?: string };
       const nextPath = payload.destPath || _joinTreePath(destDir, srcPath.split('/').pop() || '');
       this.onPathRenamed?.(srcPath, nextPath);
       this.refreshAll();
-    } catch (err) { this._showMutationError(err, 'Move failed'); }
+    } catch (err) { this._showMutationError(err, t('workspace.moveFailed')); }
   }
 
   private async _responseError(resp: Response, fallback: string): Promise<string> {
@@ -588,7 +599,7 @@ export class WorkspaceFileTree {
       overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); resolve(''); } });
       const card = document.createElement('div');
       card.className = 'dialog';
-      card.innerHTML = `<h2 class="dialog-title">${_esc(title)}</h2><input id="ws-ftp" type="text" class="dialog-input" value="${_esc(defaultValue)}" autofocus style="width:100%;padding:6px 10px;background:var(--color-bg);border:1px solid var(--color-hairline);border-radius:6px;color:var(--color-text);font-size:13px;font-family:inherit;outline:none;margin:8px 0;box-sizing:border-box;"><div class="dialog-actions"><button class="btn-dialog-cancel">Cancel</button><button class="btn-dialog-confirm">OK</button></div>`;
+      card.innerHTML = `<h2 class="dialog-title">${_esc(title)}</h2><input id="ws-ftp" type="text" class="dialog-input" value="${_esc(defaultValue)}" autofocus style="width:100%;padding:6px 10px;background:var(--color-bg);border:1px solid var(--color-hairline);border-radius:6px;color:var(--color-text);font-size:13px;font-family:inherit;outline:none;margin:8px 0;box-sizing:border-box;"><div class="dialog-actions"><button class="btn-dialog-cancel">${t('common.cancel')}</button><button class="btn-dialog-confirm">${t('workspace.ok')}</button></div>`;
       overlay.appendChild(card); document.body.appendChild(overlay);
       const field = card.querySelector('#ws-ftp') as HTMLInputElement;
       field.focus(); field.select();
@@ -605,11 +616,24 @@ export class WorkspaceFileTree {
       overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); resolve(false); } });
       const card = document.createElement('div');
       card.className = 'dialog';
-      card.innerHTML = `<h2 class="dialog-title">Confirm</h2><p class="dialog-message">${_esc(message)}</p><div class="dialog-actions"><button class="btn-dialog-cancel">Cancel</button><button class="btn-dialog-confirm">Delete</button></div>`;
+      card.innerHTML = `<h2 class="dialog-title">${t('common.confirmTitle')}</h2><p class="dialog-message">${_esc(message)}</p><div class="dialog-actions"><button class="btn-dialog-cancel">${t('common.cancel')}</button><button class="btn-dialog-confirm">${t('common.delete')}</button></div>`;
       overlay.appendChild(card); document.body.appendChild(overlay);
       card.querySelector('.btn-dialog-confirm')?.addEventListener('click', () => { overlay.remove(); resolve(true); });
       card.querySelector('.btn-dialog-cancel')?.addEventListener('click', () => { overlay.remove(); resolve(false); });
     });
+  }
+
+  private _refreshLocale(): void {
+    this._treeLabel.textContent = t('workspace.files');
+    this._createButtons[0].title = t('workspace.newFile');
+    this._createButtons[1].title = t('workspace.newFolder');
+    this._refreshBtn.title = t('workspace.refreshTree');
+    this._searchInput.placeholder = t('workspace.searchFiles');
+    this._clearButton.title = t('workspace.clearSearch');
+    this._closeContextMenu();
+    this._syncFilterButtons();
+    this._updateTreeMeta(this._filteredRootNodes().length, this._rootNodes.length);
+    if (this._lastEmptyKeys) this._showEmpty(...this._lastEmptyKeys);
   }
 }
 

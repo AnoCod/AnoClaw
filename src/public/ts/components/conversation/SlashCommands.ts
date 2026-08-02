@@ -5,6 +5,7 @@
  */
 
 import type { CommandDefinition } from '../../types.js';
+import { t, type TranslationKey } from '../../i18n/index.js';
 
 /**
  * Protocol prompt for /init — injected as a user message so the agent analyzes
@@ -75,41 +76,54 @@ export const DEFAULT_COMMANDS: CommandDefinition[] = [
   {
     name: 'init',
     displayName: 'Init Project',
-    description: 'Generate an anoclaw.md file for the current project workspace',
+    description: t('commands.description.init'),
     category: 'project',
   },
   {
     name: 'clear',
     displayName: 'Clear Context',
-    description: 'Clear the current conversation context (prompt cache)',
+    description: t('commands.description.clear'),
     category: 'session',
   },
   {
     name: 'compact',
     displayName: 'Compact Context',
-    description: 'Manually compact conversation history to free context space',
+    description: t('commands.description.compact'),
     category: 'session',
   },
   {
     name: 'help',
     displayName: 'Help',
-    description: 'Show all available slash commands',
+    description: t('commands.description.help'),
     category: 'help',
   },
 ];
 
 let _commands: CommandDefinition[] = [...DEFAULT_COMMANDS];
 
+const LOCAL_DESCRIPTION_KEYS: Partial<Record<string, TranslationKey>> = {
+  init: 'commands.description.init',
+  clear: 'commands.description.clear',
+  compact: 'commands.description.compact',
+  help: 'commands.description.help',
+};
+
+function localizeCommand(command: CommandDefinition): CommandDefinition {
+  const descriptionKey = LOCAL_DESCRIPTION_KEYS[command.name];
+  return descriptionKey ? { ...command, description: t(descriptionKey) } : command;
+}
+
 export function setCommands(cmds: CommandDefinition[]): void {
   _commands = cmds;
 }
 
 export function getCommands(): CommandDefinition[] {
-  return _commands;
+  return _commands.map(localizeCommand);
 }
 
 export function getCommand(name: string): CommandDefinition | undefined {
-  return _commands.find((c) => c.name === name);
+  const command = _commands.find((c) => c.name === name);
+  return command ? localizeCommand(command) : undefined;
 }
 
 /**
@@ -118,7 +132,7 @@ export function getCommand(name: string): CommandDefinition | undefined {
  * Returns all commands when query is empty.
  */
 export function filterCommands(query: string, commands?: CommandDefinition[]): CommandDefinition[] {
-  const source = commands || _commands;
+  const source = (commands || _commands).map(localizeCommand);
   if (!query) return source;
   const q = query.toLowerCase();
   return source.filter(
@@ -130,7 +144,7 @@ export function filterCommands(query: string, commands?: CommandDefinition[]): C
 export async function loadCommandsFromApi(): Promise<CommandDefinition[]> {
   try {
     const resp = await fetch('/api/v1/commands');
-    if (!resp.ok) return _commands;
+    if (!resp.ok) return getCommands();
     const data = await resp.json();
     if (data.commands && Array.isArray(data.commands)) {
       _commands = data.commands;
@@ -138,5 +152,5 @@ export async function loadCommandsFromApi(): Promise<CommandDefinition[]> {
   } catch {
     // Keep defaults on network error
   }
-  return _commands;
+  return getCommands();
 }

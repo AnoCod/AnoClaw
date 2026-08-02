@@ -290,12 +290,8 @@ window.addEventListener('message', (e) => {
 | Plugin | Purpose | Key Patterns |
 |--------|---------|--------------|
 | `anoclaw-mcp` | MCP protocol | JSON-RPC engine, multi-transport (stdio/SSE/HTTP), auto-reconnect, health monitoring |
-| `anoclaw-workflow` | Visual workflow editor | Canvas node editor, 14 node types, persistence |
-| `anoclaw-gateway` | Messaging gateway | Multi-adapter (Feishu, WeChat), WebSocket |
-| `anoclaw-comfyui` | ComfyUI integration | Image generation, workflow execution |
-| `anoclaw-meeting` | Meeting management | Calendar, summary generation |
-| `qrcode` | QR code generation | npm deps, TypeScript |
-| `test-plugin` | Test scaffold | Minimal example |
+| `anoclaw-gateway` | Messaging gateway | Multi-adapter (Telegram, Feishu, WeChat), WebSocket |
+| `anoclaw-meeting` | Multi-agent meetings | Round-robin discussion, summaries, action plans |
 
 ---
 

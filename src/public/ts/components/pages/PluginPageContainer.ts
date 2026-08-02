@@ -3,7 +3,7 @@
 
 import type { Page, PluginPageContribution } from '../../types.js';
 import { ConfirmDialog } from '../ConfirmDialog.js';
-import { pageRegistry } from '../../PageRegistry.js';
+import { getLocale } from '../../i18n/index.js';
 
 export class PluginPageContainer implements Page {
   readonly name: string;
@@ -12,6 +12,7 @@ export class PluginPageContainer implements Page {
   private _iframe: HTMLIFrameElement | null = null;
   private _loaded = false;
   private _tokensInjected = false;
+  private _disposed = false;
 
   constructor(contribution: PluginPageContribution) {
     this.name = contribution.id;
@@ -21,69 +22,79 @@ export class PluginPageContainer implements Page {
     this._htmlPath = contribution.htmlPath;
 
     window.addEventListener('theme-changed', this._onThemeChanged);
+    window.addEventListener('locale-changed', this._onLocaleChanged);
     this._installDialogBridge();
     this._installSessionBridge();
   }
 
   private _installDialogBridge(): void {
-    window.addEventListener('message', async (e: MessageEvent) => {
-      if (!e.data || e.data.type !== 'anoclaw:dialog:confirm') return;
-      const iframe = this._iframe;
-      if (!iframe?.contentWindow || e.source !== iframe.contentWindow) return;
-      const result = await ConfirmDialog.show(e.data.message, e.data.title);
-      iframe.contentWindow.postMessage({
-        type: 'anoclaw:dialog:result',
-        id: e.data.id,
-        result,
-      }, '*');
-    });
+    window.addEventListener('message', this._onDialogMessage);
   }
 
   private _installSessionBridge(): void {
-    window.addEventListener('message', async (e: MessageEvent) => {
-      if (!e.data || e.data.type !== 'anoclaw:session:handoff') return;
-      const iframe = this._iframe;
-      if (!iframe?.contentWindow || e.source !== iframe.contentWindow) return;
-
-      const sessionId = String(e.data.sessionId || '');
-      const prompt = String(e.data.prompt || '');
-      if (!sessionId || !prompt) {
-        iframe.contentWindow.postMessage({
-          type: 'anoclaw:session:handoff-result',
-          id: e.data.id,
-          ok: false,
-          error: 'sessionId and prompt are required',
-        }, '*');
-        return;
-      }
-
-      try {
-        const { App } = await import('../../app.js');
-        const app = App.getInstance();
-        app.sessionVM.selectSession(sessionId);
-        app.conversationVM.setActiveSession(sessionId);
-        pageRegistry.navigateTo('sessions');
-        const sessionsPage = pageRegistry.getPage('sessions') as { injectInput?: (text: string) => void } | undefined;
-        sessionsPage?.injectInput?.(prompt);
-        iframe.contentWindow.postMessage({
-          type: 'anoclaw:session:handoff-result',
-          id: e.data.id,
-          ok: true,
-          sessionId,
-        }, '*');
-      } catch (err) {
-        iframe.contentWindow.postMessage({
-          type: 'anoclaw:session:handoff-result',
-          id: e.data.id,
-          ok: false,
-          error: (err as Error).message,
-        }, '*');
-      }
-    });
+    window.addEventListener('message', this._onSessionMessage);
   }
+
+  private _onDialogMessage = async (e: MessageEvent): Promise<void> => {
+    if (!e.data || e.data.type !== 'anoclaw:dialog:confirm') return;
+    const iframe = this._iframe;
+    if (!iframe?.contentWindow || e.source !== iframe.contentWindow) return;
+    const result = await ConfirmDialog.show(e.data.message, e.data.title);
+    if (this._disposed || !iframe.contentWindow) return;
+    iframe.contentWindow.postMessage({
+      type: 'anoclaw:dialog:result',
+      id: e.data.id,
+      result,
+    }, '*');
+  };
+
+  private _onSessionMessage = async (e: MessageEvent): Promise<void> => {
+    if (!e.data || e.data.type !== 'anoclaw:session:handoff') return;
+    const iframe = this._iframe;
+    if (!iframe?.contentWindow || e.source !== iframe.contentWindow) return;
+
+    const sessionId = String(e.data.sessionId || '');
+    const prompt = String(e.data.prompt || '');
+    if (!sessionId || !prompt) {
+      iframe.contentWindow.postMessage({
+        type: 'anoclaw:session:handoff-result',
+        id: e.data.id,
+        ok: false,
+        error: 'sessionId and prompt are required',
+      }, '*');
+      return;
+    }
+
+    try {
+      const { App } = await import('../../app.js');
+      const app = App.getInstance();
+      if (!app.handoffToSession(sessionId, prompt)) {
+        throw new Error('The requested session is not available.');
+      }
+      if (this._disposed || !iframe.contentWindow) return;
+      iframe.contentWindow.postMessage({
+        type: 'anoclaw:session:handoff-result',
+        id: e.data.id,
+        ok: true,
+        sessionId,
+      }, '*');
+    } catch (err) {
+      if (this._disposed || !iframe.contentWindow) return;
+      iframe.contentWindow.postMessage({
+        type: 'anoclaw:session:handoff-result',
+        id: e.data.id,
+        ok: false,
+        error: (err as Error).message,
+      }, '*');
+    }
+  };
 
   private _onThemeChanged = (): void => {
     this._syncTheme();
+  };
+
+  private _onLocaleChanged = (): void => {
+    this._syncLocale();
   };
 
   onEnter(): void {
@@ -95,6 +106,7 @@ export class PluginPageContainer implements Page {
     if (this._iframe) {
       this._iframe.style.display = '';
       this._syncTheme();
+      this._syncLocale();
     }
   }
 
@@ -112,12 +124,40 @@ export class PluginPageContainer implements Page {
     this._updateIframeThemeAttrs();
   }
 
+  private _syncLocale(): void {
+    if (!this._iframe?.contentWindow) return;
+    const locale = getLocale();
+    this._iframe.contentWindow.postMessage({
+      type: 'anoclaw:locale',
+      locale,
+    }, '*');
+    this._updateIframeLocaleAttrs();
+  }
+
   onExit(): void {
     if (this._iframe) this._iframe.style.display = 'none';
   }
 
+  dispose(): void {
+    if (this._disposed) return;
+    this._disposed = true;
+    window.removeEventListener('theme-changed', this._onThemeChanged);
+    window.removeEventListener('locale-changed', this._onLocaleChanged);
+    window.removeEventListener('message', this._onDialogMessage);
+    window.removeEventListener('message', this._onSessionMessage);
+    if (this._iframe) {
+      this._iframe.srcdoc = '';
+      this._iframe.src = 'about:blank';
+      this._iframe.remove();
+      this._iframe = null;
+    }
+    this.container.remove();
+    this._loaded = false;
+    this._tokensInjected = false;
+  }
+
   private _createIframe(): void {
-    if (!this._htmlPath) return;
+    if (!this._htmlPath || this._disposed) return;
     this._iframe = document.createElement('iframe');
     this._iframe.className = 'plugin-iframe';
     this._iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-same-origin');
@@ -142,7 +182,7 @@ export class PluginPageContainer implements Page {
           }
         );
         // Inject shared plugin chrome before the plugin bundle runs.
-        const pluginBoot = `<script>window.__ANOCLAW_PLUGIN_NAME__=${JSON.stringify(this.container.getAttribute('data-plugin') || '')};</script>`;
+        const pluginBoot = `<script>window.__ANOCLAW_PLUGIN_NAME__=${JSON.stringify(this.container.getAttribute('data-plugin') || '')};window.__ANOCLAW_LOCALE__=${JSON.stringify(getLocale())};</script>`;
         const uiTag = [
           pluginBoot,
           `<link rel=\"stylesheet\" href=\"${mainBase}css/tokens.css\">`,
@@ -168,6 +208,7 @@ export class PluginPageContainer implements Page {
           this._iframe.addEventListener('load', () => {
             this._injectAssets();
             this._syncTheme();
+            this._syncLocale();
           }, { once: true });
         }
       });
@@ -175,6 +216,7 @@ export class PluginPageContainer implements Page {
     this._iframe.addEventListener('load', () => {
       console.log(`[Plugin] iframe ready: ${this._htmlPath}`);
       this._syncTheme();
+      this._syncLocale();
     });
 
     this.container.appendChild(this._iframe);
@@ -190,7 +232,7 @@ export class PluginPageContainer implements Page {
     const mainBase = window.location.href.substring(0, window.location.href.lastIndexOf('/') + 1);
 
     const pluginBoot = doc.createElement('script');
-    pluginBoot.textContent = `window.__ANOCLAW_PLUGIN_NAME__=${JSON.stringify(this.container.getAttribute('data-plugin') || '')};`;
+    pluginBoot.textContent = `window.__ANOCLAW_PLUGIN_NAME__=${JSON.stringify(this.container.getAttribute('data-plugin') || '')};window.__ANOCLAW_LOCALE__=${JSON.stringify(getLocale())};`;
     head.appendChild(pluginBoot);
 
     const link = doc.createElement('link');
@@ -204,6 +246,7 @@ export class PluginPageContainer implements Page {
     head.appendChild(pluginSkinLink);
 
     this._updateIframeThemeAttrs();
+    this._updateIframeLocaleAttrs();
 
     const script = doc.createElement('script');
     script.src = mainBase + 'anoclaw-ui.js';
@@ -225,5 +268,10 @@ export class PluginPageContainer implements Page {
     const docEl = this._iframe.contentDocument.documentElement;
     docEl.setAttribute('data-theme', theme);
     docEl.setAttribute('data-accent', accent); // always set, 'white' is harmless in tokens.css
+  }
+
+  private _updateIframeLocaleAttrs(): void {
+    if (!this._iframe?.contentDocument) return;
+    this._iframe.contentDocument.documentElement.lang = getLocale();
   }
 }

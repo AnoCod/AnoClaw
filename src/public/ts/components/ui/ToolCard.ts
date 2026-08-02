@@ -1,6 +1,9 @@
 // Shared UI: ToolCard — default tool execution card.
 // Status dot + tool name + action phrase + duration + collapsible output.
 
+import { onLocaleChange, refreshLocalizedElements, t, type TranslationKey } from '../../i18n/index.js';
+import { TOOL_REGISTRY } from '../conversation/delegates/ToolRegistry.js';
+
 export interface ToolCardState {
   toolName: string;
   toolInput: Record<string, unknown>;
@@ -9,38 +12,23 @@ export interface ToolCardState {
   durationMs?: number;
 }
 
-// Action phrase registry: verb + result-summary extractor per tool.
-const TOOL_META: Record<string, { verb: string; result: (t: ToolCardState) => string | null }> = {
-  Read:   { verb: 'read',   result: t => { const c = t.result || ''; if (c.length > 80) return `${c.split('\n').length} lines`; return c; } },
-  Write:  { verb: 'wrote',  result: () => null },
-  Edit:   { verb: 'edited', result: () => null },
-  Grep:   { verb: 'searched', result: t => { const c = t.result || ''; return `${c.split('\n').filter(Boolean).length} matches`; } },
-  Glob:   { verb: 'found',  result: t => `${(t.result || '').split('\n').filter(Boolean).length} files` },
-  Bash:   { verb: 'ran',    result: t => { const c = (t.result || '').trim(); return c.length > 80 ? `${c.split('\n').length} lines` : c; } },
-  WebSearch: { verb: 'searched', result: t => `${((t.result || '').match(/\[.+\]\(https?:\/\//g) || []).length} results` },
-  WebFetch:  { verb: 'fetched',  result: t => `${(t.result || '').length} chars` },
-  ApiCall:   { verb: 'called',   result: () => 'Done' },
-  Skill:     { verb: 'used',   result: () => 'Done' },
-  SkillList: { verb: 'listed', result: () => 'Done' },
-  SkillInspect: { verb: 'inspected', result: () => 'Done' },
-  memory_save:   { verb: 'saved',    result: () => 'Memory saved' },
-  memory_search: { verb: 'searched', result: t => `${(t.result || '').split('\n').filter(Boolean).length} entries` },
-  memory_delete: { verb: 'deleted',  result: () => 'Memory deleted' },
-};
-
 export class ToolCard {
   readonly element: HTMLElement;
   protected _expanded: boolean;
   protected _bodyEl: HTMLElement | null = null;
   protected _fullResult: string;
   protected _showMoreBtn: HTMLButtonElement | null = null;
+  protected _state: ToolCardState;
+  private _stopLocaleListener: (() => void) | null = null;
 
   constructor(state: ToolCardState) {
+    this._state = state;
     this._fullResult = state.result || '';
     this._expanded = state.status === 'running';
     this.element = this.render(state);
     if (!this._expanded) this.collapse();
     this._injectKeyframes();
+    this._stopLocaleListener = onLocaleChange(() => refreshLocalizedElements(this.element));
   }
 
   protected render(s: ToolCardState): HTMLElement {
@@ -80,7 +68,11 @@ export class ToolCard {
 
     const action = document.createElement('span');
     action.className = 'ui-toolcard-action';
-    action.textContent = this._actionText(s);
+    const actionKey = this._actionKey(s);
+    const params = { subject: this._subject(s) };
+    action.textContent = t(actionKey, params).trim();
+    action.dataset.i18nKey = actionKey;
+    action.dataset.i18nParams = JSON.stringify(params);
     indicator.appendChild(action);
 
     if (typeof s.durationMs === 'number' && s.durationMs > 0) {
@@ -108,11 +100,11 @@ export class ToolCard {
     if (isLong) {
       const btn = document.createElement('button');
       btn.className = 'ui-toolcard-more';
-      btn.textContent = this._expanded ? 'Show less' : 'Show details';
+      this._setMoreButtonLabel(btn);
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         this._toggle();
-        btn.textContent = this._expanded ? 'Show less' : 'Show details';
+        this._setMoreButtonLabel(btn);
       });
       this._showMoreBtn = btn;
       const wrap = document.createElement('div');
@@ -124,16 +116,42 @@ export class ToolCard {
     return body;
   }
 
-  protected _actionText(s: ToolCardState): string {
-    const meta = TOOL_META[s.toolName] || { verb: s.toolName.toLowerCase().replace(/([A-Z])/g, ' $1').trim(), result: () => null as string | null };
-    const subj = this._subject(s);
-    return subj ? `${meta.verb} ${subj}` : meta.verb;
+  protected _actionKey(state: ToolCardState): TranslationKey {
+    const action = String(state.toolInput.action || '');
+    if (state.toolName === 'Organization') {
+      return ({
+        list: 'message.tool.action.list',
+        hire: 'message.tool.action.create',
+        reassign: 'message.tool.action.assign',
+      } as Record<string, TranslationKey>)[action] || 'message.tool.action.manage';
+    }
+    if (state.toolName === 'Team') {
+      return ({
+        create: 'message.tool.action.create',
+        update: 'message.tool.action.update',
+        status: 'message.tool.action.inspect',
+        delete: 'message.tool.action.disband',
+      } as Record<string, TranslationKey>)[action] || 'message.tool.action.manage';
+    }
+    if (state.toolName === 'Task') {
+      return ({
+        create: 'message.tool.action.create',
+        assign: 'message.tool.action.assign',
+        claim: 'message.tool.action.claim',
+        update: 'message.tool.action.update',
+        list: 'message.tool.action.list',
+        output: 'message.tool.action.read',
+        stop: 'message.tool.action.stop',
+        spawn: 'message.tool.action.spawn',
+      } as Record<string, TranslationKey>)[action] || 'message.tool.action.manage';
+    }
+    return TOOL_REGISTRY[state.toolName]?.actionKey || 'message.tool.action.use';
   }
 
   protected _subject(s: ToolCardState): string {
     const inp = s.toolInput;
     switch (s.toolName) {
-      case 'Read': case 'Write': case 'Edit': return ((inp.file_path || inp.path || '') as string).replace(/\\/g, '/').split('/').pop() || 'file';
+      case 'Read': case 'Write': case 'Edit': return ((inp.file_path || inp.path || '') as string).replace(/\\/g, '/').split('/').pop() || '';
       case 'Grep': return ((inp.pattern || inp.query || '') as string).slice(0, 40);
       case 'Glob': return ((inp.pattern || '') as string).slice(0, 30);
       case 'Bash': return ((inp.command || '') as string).slice(0, 50);
@@ -157,7 +175,7 @@ export class ToolCard {
     }
     if (this._bodyEl) this._bodyEl.hidden = true;
     if (this._showMoreBtn) {
-      this._showMoreBtn.textContent = 'Show details';
+      this._setMoreButtonLabel(this._showMoreBtn);
       this._showMoreBtn.hidden = true;
     }
   }
@@ -173,9 +191,20 @@ export class ToolCard {
       this._bodyEl.style.overflow = 'visible';
     }
     if (this._showMoreBtn) {
-      this._showMoreBtn.textContent = 'Show less';
+      this._setMoreButtonLabel(this._showMoreBtn);
       this._showMoreBtn.hidden = false;
     }
+  }
+
+  dispose(): void {
+    this._stopLocaleListener?.();
+    this._stopLocaleListener = null;
+  }
+
+  private _setMoreButtonLabel(button: HTMLButtonElement): void {
+    const key = this._expanded ? 'message.showLess' : 'message.showDetails';
+    button.textContent = t(key);
+    button.dataset.i18nKey = key;
   }
 
   private _injectKeyframes(): void {

@@ -1,16 +1,13 @@
-// AnoClaw Cinema — RightEdgeBar: 48px info bar with overfly panels
-// Files, Overview, Plan, Context ring icons. Click opens overfly panel or dispatches event.
+// AnoClaw Cinema — RightEdgeBar: 48px info bar with lightweight utilities.
+// Overview and Plan open compact panels. Context shows token usage.
 // Context button: hover shows token breakdown tooltip, click triggers compact.
 
 import type { TokenBreakdown } from '../../types.js';
 import { App } from '../../app.js';
-import { pageRegistry } from '../../PageRegistry.js';
+import { onLocaleChange, t } from '../../i18n/index.js';
 
-const SVG_FILES = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
-const SVG_ARTIFACTS = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 13h6"/><path d="M9 17h4"/></svg>`;
 const SVG_OVERVIEW = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>`;
 const SVG_PLAN = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`;
-const SVG_TASKS = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="6" width="8" height="8" rx="1"/><path d="M12 6V3h0.5"/><circle cx="14" cy="3" r="1.5"/><path d="M3 10h2"/><path d="M3 14h2"/></svg>`;
 
 interface RightBarCallbacks {
   onCompactRequest: () => void;
@@ -26,30 +23,21 @@ export class RightEdgeBar {
   constructor(callbacks: RightBarCallbacks) {
     this._callbacks = callbacks;
     this.element = this._build();
+    onLocaleChange(() => this._refreshLocale());
   }
 
   private _build(): HTMLElement {
     const el = document.createElement('div');
     el.className = 'cinema-edge-right';
 
-    // Files icon with badge — navigates to Workspace page
-    const filesBtn = this._makeIcon(SVG_FILES, 'Files', 'files', false);
-    filesBtn.addEventListener('click', (e) => { e.stopPropagation(); pageRegistry.navigateTo('workspace'); });
-    el.appendChild(filesBtn);
-
-    el.appendChild(this._makeIcon(SVG_ARTIFACTS, 'Artifacts', 'artifacts'));
-
     // Overview icon
-    el.appendChild(this._makeIcon(SVG_OVERVIEW, 'Overview', 'overview'));
+    el.appendChild(this._makeIcon(SVG_OVERVIEW, t('right.overview'), 'overview'));
 
     // Plan icon
-    el.appendChild(this._makeIcon(SVG_PLAN, 'Plan', 'plan'));
-
-    // Tasks icon
-    el.appendChild(this._makeIcon(SVG_TASKS, 'Tasks', 'tasks'));
+    el.appendChild(this._makeIcon(SVG_PLAN, t('right.plan'), 'plan'));
 
     // Context ring icon
-    const ctxBtn = this._makeIcon('', 'Context', 'context', false);
+    const ctxBtn = this._makeIcon('', t('right.context'), 'context', false);
     this._contextText = document.createElement('span');
     this._contextText.className = 'cinema-edge-ctx-text';
     this._contextText.style.cssText = `
@@ -84,6 +72,7 @@ export class RightEdgeBar {
     const btn = document.createElement('button');
     btn.className = 'cinema-edge-icon';
     btn.title = title;
+    btn.setAttribute('aria-label', title);
     btn.setAttribute('data-panel', name);
     btn.innerHTML = svg;
     if (dispatchPanel) {
@@ -94,12 +83,14 @@ export class RightEdgeBar {
     return btn;
   }
 
-  setFileCount(n: number): void {
-    void n;
-  }
-
-  setContextPct(pct: number): void {
+  setContextPct(pct: number | null): void {
     if (this._contextText) {
+      if (pct === null || !Number.isFinite(pct)) {
+        this._contextText.textContent = '--';
+        this._contextText.style.borderColor = 'var(--cinema-text-muted)';
+        this._contextText.style.color = 'var(--cinema-text-muted)';
+        return;
+      }
       this._contextText.textContent = String(Math.round(pct));
       if (pct > 80) {
         this._contextText.style.borderColor = 'var(--color-warning, #ffc533)';
@@ -193,7 +184,7 @@ export class RightEdgeBar {
     const tip = document.createElement('div');
     tip.className = 'context-tooltip-popover';
 
-    const pct = breakdown.total > 0
+    const pct = breakdown.total > 0 && breakdown.contextWindow > 0
       ? Math.round((breakdown.total / breakdown.contextWindow) * 100) : 0;
 
     const fmt = (n: number): string => {
@@ -204,23 +195,23 @@ export class RightEdgeBar {
     const freeTokens = Math.max(0, breakdown.contextWindow - breakdown.total);
 
     tip.innerHTML = `
-      <div style="font-weight:600;margin-bottom:8px;color:var(--color-text-primary);font-size:13px;">Context Usage</div>
-      <div style="color:var(--color-text-secondary);margin-bottom:10px;font-size:12px;">${fmt(breakdown.total)} / ${fmt(breakdown.contextWindow)} tokens (${pct}%)</div>
+      <div style="font-weight:600;margin-bottom:8px;color:var(--color-text-primary);font-size:13px;">${t('context.usage')}</div>
+      <div style="color:var(--color-text-secondary);margin-bottom:10px;font-size:12px;">${t('context.tokens', { used: fmt(breakdown.total), total: fmt(breakdown.contextWindow), percent: pct })}</div>
       <div style="display:flex;gap:1px;height:6px;border-radius:3px;overflow:hidden;margin-bottom:10px;">
-        <div style="flex:${Math.max(breakdown.systemPrompt, 1)};background:var(--color-token-system-prompt);min-width:2px;" title="System Prompt"></div>
-        <div style="flex:${Math.max(breakdown.systemTools, 1)};background:var(--color-token-system-tools);min-width:2px;" title="System Tools"></div>
-        <div style="flex:${Math.max(breakdown.skills, 1)};background:var(--color-token-skills);min-width:2px;" title="Skills"></div>
-        <div style="flex:${Math.max(breakdown.messages, 1)};background:var(--color-token-messages);min-width:2px;" title="Messages"></div>
-        <div style="flex:${Math.max(freeTokens, 1)};background:var(--color-token-free-space);min-width:2px;" title="Free space"></div>
+        <div style="flex:${Math.max(breakdown.systemPrompt, 1)};background:var(--color-token-system-prompt);min-width:2px;" title="${t('context.systemPrompt')}"></div>
+        <div style="flex:${Math.max(breakdown.systemTools, 1)};background:var(--color-token-system-tools);min-width:2px;" title="${t('context.systemTools')}"></div>
+        <div style="flex:${Math.max(breakdown.skills, 1)};background:var(--color-token-skills);min-width:2px;" title="${t('context.skills')}"></div>
+        <div style="flex:${Math.max(breakdown.messages, 1)};background:var(--color-token-messages);min-width:2px;" title="${t('context.messages')}"></div>
+        <div style="flex:${Math.max(freeTokens, 1)};background:var(--color-token-free-space);min-width:2px;" title="${t('context.freeSpace')}"></div>
       </div>
       <table style="width:100%;border-collapse:collapse;margin-bottom:8px;">
-        ${this._tipRow('System Prompt', 'var(--color-token-system-prompt)', fmt(breakdown.systemPrompt))}
-        ${this._tipRow('System Tools', 'var(--color-token-system-tools)', fmt(breakdown.systemTools))}
-        ${this._tipRow('Skills', 'var(--color-token-skills)', fmt(breakdown.skills))}
-        ${this._tipRow('Messages', 'var(--color-token-messages)', fmt(breakdown.messages))}
-        ${this._tipRow('Free Space', 'var(--color-token-free-space)', fmt(freeTokens))}
+        ${this._tipRow(t('context.systemPrompt'), 'var(--color-token-system-prompt)', fmt(breakdown.systemPrompt))}
+        ${this._tipRow(t('context.systemTools'), 'var(--color-token-system-tools)', fmt(breakdown.systemTools))}
+        ${this._tipRow(t('context.skills'), 'var(--color-token-skills)', fmt(breakdown.skills))}
+        ${this._tipRow(t('context.messages'), 'var(--color-token-messages)', fmt(breakdown.messages))}
+        ${this._tipRow(t('context.freeSpace'), 'var(--color-token-free-space)', fmt(freeTokens))}
       </table>
-      <button class="context-compact-btn" style="width:100%;padding:6px;background:var(--color-surface-elevated);border:1px solid var(--color-hairline);border-radius:6px;color:var(--color-text-primary);cursor:pointer;font-family:var(--font-sans);font-size:12px;">Manual Compact</button>
+      <button class="context-compact-btn" style="width:100%;padding:6px;background:var(--color-surface-elevated);border:1px solid var(--color-hairline);border-radius:6px;color:var(--color-text-primary);cursor:pointer;font-family:var(--font-sans);font-size:12px;">${t('context.manualCompact')}</button>
     `;
 
     const compactBtn = tip.querySelector('.context-compact-btn');
@@ -236,5 +227,24 @@ export class RightEdgeBar {
 
   private _tipRow(label: string, color: string, value: string): string {
     return `<tr><td style="padding:3px 4px;display:flex;align-items:center;gap:6px;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;"></span>${label}</td><td style="text-align:right;padding:3px 4px;color:var(--color-text-primary);">${value}</td></tr>`;
+  }
+
+  private _refreshLocale(): void {
+    const titles: Record<string, string> = {
+      overview: t('right.overview'),
+      plan: t('right.plan'),
+      context: t('right.context'),
+    };
+    this.element.querySelectorAll<HTMLElement>('[data-panel]').forEach((button) => {
+      const panel = button.dataset.panel;
+      if (panel && titles[panel]) {
+        button.title = titles[panel];
+        button.setAttribute('aria-label', titles[panel]);
+      }
+    });
+    if (this._tooltip) {
+      this.hideTooltip();
+      this._showTooltip();
+    }
   }
 }

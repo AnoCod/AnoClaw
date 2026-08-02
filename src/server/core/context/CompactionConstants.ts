@@ -31,6 +31,22 @@ export const SUMMARY_PREFIX = (
   'content due to this compaction note.'
 );
 
+/**
+ * Recognize compaction summaries across both in-memory and persisted forms.
+ * Persisted JSONL messages do not currently retain the `compressed` flag, so
+ * the stable id/content markers are part of the compatibility contract.
+ */
+export function isCompactionSummaryMessage(message: {
+  id?: string;
+  content?: unknown;
+  compressed?: boolean;
+}): boolean {
+  if (message.compressed === true) return true;
+  if (message.id?.startsWith('compact-summary-')) return true;
+  return typeof message.content === 'string'
+    && message.content.trimStart().startsWith(SUMMARY_PREFIX);
+}
+
 // ══════════════════════════════════════════════════════════════
 // Compression constants — copied from Hermes / Claude Code
 // ══════════════════════════════════════════════════════════════

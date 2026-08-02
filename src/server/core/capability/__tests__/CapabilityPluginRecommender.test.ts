@@ -7,23 +7,23 @@ describe('CapabilityPluginRecommender', () => {
     const recommendations = buildPluginRecommendations(
       {
         capability: capabilityRecord({
-          id: 'presentation.create',
-          recommendedPlugins: ['anoclaw-office'],
-          missingTools: ['office.create_pptx'],
+          id: 'report.create',
+          recommendedPlugins: ['report-provider'],
+          missingTools: ['report.render'],
         }),
-        recommendedPlugins: ['anoclaw-office'],
-        missingTools: ['office.create_pptx'],
+        recommendedPlugins: ['report-provider'],
+        missingTools: ['report.render'],
       },
       [
         {
-          name: 'anoclaw-office',
-          displayName: 'Office',
+          name: 'report-provider',
+          displayName: 'Report Provider',
           version: '0.1.0',
           publisher: 'anoclaw',
           status: 'loaded',
           contributes: {
-            tools: [{ name: 'office.create_pptx' }],
-            capabilities: [capabilityDefinition('presentation.create')],
+            tools: [{ name: 'report.render' }],
+            capabilities: [capabilityDefinition('report.create')],
           },
         },
       ],
@@ -32,8 +32,8 @@ describe('CapabilityPluginRecommender', () => {
 
     expect(recommendations).toHaveLength(1);
     expect(recommendations[0]).toMatchObject({
-      pluginName: 'anoclaw-office',
-      displayName: 'Office',
+      pluginName: 'report-provider',
+      displayName: 'Report Provider',
       status: 'installed',
       action: 'activate',
       reason: 'plugin_not_active',
@@ -46,32 +46,32 @@ describe('CapabilityPluginRecommender', () => {
     const recommendations = buildPluginRecommendations(
       {
         capability: capabilityRecord({
-          id: 'pdf.summarize',
-          recommendedPlugins: ['pdf'],
-          missingTools: ['pdf.summarize'],
+          id: 'archive.extract',
+          recommendedPlugins: ['archive-provider'],
+          missingTools: ['archive.extract'],
         }),
-        recommendedPlugins: ['pdf'],
-        missingTools: ['pdf.summarize'],
+        recommendedPlugins: ['archive-provider'],
+        missingTools: ['archive.extract'],
       },
       [],
       [
         {
-          name: 'pdf',
-          displayName: 'PDF',
+          name: 'archive-provider',
+          displayName: 'Archive Provider',
           version: '1.0.0',
           publisher: 'anoclaw',
           tags: ['official'],
-          installUrl: 'https://example.com/pdf-plugin.json',
-          capabilities: ['pdf.summarize'],
-          tools: ['pdf.summarize'],
+          installUrl: 'https://example.com/archive-plugin.json',
+          capabilities: ['archive.extract'],
+          tools: ['archive.extract'],
         },
       ],
     );
 
     expect(recommendations).toHaveLength(1);
     expect(recommendations[0]).toMatchObject({
-      pluginName: 'pdf',
-      displayName: 'PDF',
+      pluginName: 'archive-provider',
+      displayName: 'Archive Provider',
       status: 'missing',
       action: 'install',
       reason: 'capability_provider',

@@ -13,6 +13,8 @@ import { validateToken, hasPermission } from './ApiAuth.js';
 import type { ApiToken } from './ApiAuth.js';
 import { ApiPermission } from '../../shared/types/gateway.js';
 import { LogManager } from '../infra/logging/LogManager.js';
+import { isTrustedUiRequest } from './TrustedUiAuth.js';
+import { SettingsManager } from '../infra/storage/SettingsManager.js';
 
 // Route handler interface
 import type { RouteHandler, RouteMatch } from './RouteHandler.js';
@@ -56,11 +58,7 @@ const LOCAL_UI_TOKEN: ApiToken = {
   lastUsedAt: null,
 };
 
-function isLoopbackAddress(addr: string): boolean {
-  return addr.startsWith('127.') || addr === '::1' || addr === '::ffff:127.0.0.1';
-}
-
-function isAllowedLocalOrigin(origin: string | undefined, host: string, port: number): boolean {
+function isAllowedLocalOrigin(origin: string | undefined, host: string, port: number, uiPort = 3456): boolean {
   if (!origin) return true;
   if (origin === 'null') return false;
   try {
@@ -68,7 +66,7 @@ function isAllowedLocalOrigin(origin: string | undefined, host: string, port: nu
     const hostname = parsed.hostname.toLowerCase();
     const originPort = parsed.port ? Number(parsed.port) : (parsed.protocol === 'https:' ? 443 : 80);
     const allowedHosts = new Set(['localhost', '127.0.0.1', '::1', host.toLowerCase()]);
-    const allowedPorts = new Set([port, 3456]);
+    const allowedPorts = new Set([port, uiPort]);
     return (parsed.protocol === 'http:' || parsed.protocol === 'https:')
       && allowedHosts.has(hostname)
       && allowedPorts.has(originPort);
@@ -126,7 +124,13 @@ export class ApiServer extends EventEmitter {
   private _endpointRegistry: EndpointEntry[] = [];
 
   // Plugin HTTP routes
-  private _pluginRoutes: Array<{ pluginName: string; method: string; path: string; handler: string; permission?: string }> = [];
+  private _pluginRoutes: Array<{
+    pluginName: string;
+    method: string;
+    path: string;
+    handler: string;
+    permission: string | null;
+  }> = [];
 
   private constructor() {
     super();
@@ -142,7 +146,11 @@ export class ApiServer extends EventEmitter {
   // ── Route Registration ──
 
   registerRoute(handler: RouteHandler): void {
-    this._routeTable.push(handler);
+    const existingIndex = this._routeTable.findIndex((candidate) =>
+      candidate.method === handler.method && candidate.path === handler.path
+    );
+    if (existingIndex >= 0) this._routeTable[existingIndex] = handler;
+    else this._routeTable.push(handler);
     this._upsertEndpoint({
       method: handler.method,
       path: handler.path,
@@ -176,19 +184,31 @@ export class ApiServer extends EventEmitter {
 
   // ── Lifecycle ──
 
-  start(port?: number, host?: string): void {
+  async start(port?: number, host?: string): Promise<void> {
     if (this.server) throw new Error('ApiServer is already running');
     if (port !== undefined) this.port = port;
     if (host !== undefined) this.host = host;
 
-    this.server = http.createServer((req, res) => { this.handleApiRequest(req, res); });
-
-    this.server.listen(this.port, this.host, () => {
-      LogManager.getInstance().logger('anochat.api').info('API server started', { host: this.host, port: this.port });
-      this.emit('started', this.port);
+    const server = http.createServer((req, res) => { void this.handleApiRequest(req, res); });
+    this.server = server;
+    await new Promise<void>((resolve, reject) => {
+      const onError = (err: Error) => {
+        server.off('listening', onListening);
+        if (this.server === server) this.server = null;
+        reject(err);
+      };
+      const onListening = () => {
+        server.off('error', onError);
+        LogManager.getInstance().logger('anochat.api').info('API server started', { host: this.host, port: this.port });
+        this.emit('started', this.port);
+        resolve();
+      };
+      server.once('error', onError);
+      server.once('listening', onListening);
+      server.listen(this.port, this.host);
     });
 
-    this.server.on('error', (err: Error) => {
+    server.on('error', (err: Error) => {
       LogManager.getInstance().logger('anochat.api').error('API server error', { error: err.message });
       this.emit('error', err);
     });
@@ -211,12 +231,29 @@ export class ApiServer extends EventEmitter {
   // ── Request handler ──
 
   async handleApiRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    await this._handleApiRequest(req, res, false);
+  }
+
+  /**
+   * Handle a request forwarded by the same-process UI server.
+   * Only Electron requests carrying the ephemeral UI capability are trusted.
+   */
+  async handleTrustedUiRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    await this._handleApiRequest(req, res, isTrustedUiRequest(req));
+  }
+
+  private async _handleApiRequest(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    trustedUi: boolean,
+  ): Promise<void> {
     const method = req.method || 'GET';
     const url = new URL(req.url || '/', `http://${this.host}:${this.port}`);
     const pathname = url.pathname;
     this.emit('requestReceived', method, pathname);
 
-    if (!isAllowedLocalOrigin(req.headers.origin, this.host, this.port)) {
+    const uiPort = SettingsManager.getInstance().get<number>('port', 3456);
+    if (!isAllowedLocalOrigin(req.headers.origin, this.host, this.port, uiPort)) {
       this.sendCorsHeaders(req, res);
       this.sendJson(res, 403, { error: 'Forbidden', message: 'Cross-origin localhost API requests are not allowed' });
       return;
@@ -226,13 +263,12 @@ export class ApiServer extends EventEmitter {
     this.sendCorsHeaders(req, res);
 
     let token: ApiToken | null = null;
-    if (pathname !== '/api/v1/health') {
-      const remoteAddress = req.socket.remoteAddress || '';
-      const isLocalhost = isLoopbackAddress(remoteAddress);
-      token = this._authenticate(req);
+    const publicPluginRoute = this._isPublicPluginRoute(method, pathname);
+    if (pathname !== '/api/v1/health' && !publicPluginRoute) {
+      token = trustedUi ? LOCAL_UI_TOKEN : this._authenticate(req);
       if (!token) {
-        if (isLocalhost) token = LOCAL_UI_TOKEN;
-        else { this.sendJson(res, 401, { error: 'Unauthorized', message: 'Invalid or missing Bearer token' }); return; }
+        this.sendJson(res, 401, { error: 'Unauthorized', message: 'Invalid or missing Bearer token' });
+        return;
       }
     }
 
@@ -280,8 +316,10 @@ export class ApiServer extends EventEmitter {
       const match = matchRoute(handler.path, pathname);
       if (!match) continue;
       match.query = new URL(req.url || '/', `http://${this.host}:${this.port}`).searchParams;
-      if (handler.permission && (!token || !hasPermission(token, handler.permission as ApiPermission))) {
-        this.sendJson(res, 403, { error: 'Forbidden', message: `Missing permission: ${handler.permission}` });
+      const permission = handler.permission
+        ?? (handler.method === 'GET' && handler.path === '/api/v1/health' ? null : ApiPermission.Admin);
+      if (permission && (!token || !hasPermission(token, permission as ApiPermission))) {
+        this.sendJson(res, 403, { error: 'Forbidden', message: `Missing permission: ${permission}` });
         return true;
       }
       try {
@@ -307,8 +345,27 @@ export class ApiServer extends EventEmitter {
 
   // ── Plugin HTTP route dispatch ──
 
-  registerPluginRoutes(pluginName: string, routes: Array<{ method: string; path: string; handler: string; permission?: string }>): void {
-    for (const r of routes) this._pluginRoutes.push({ pluginName, ...r });
+  registerPluginRoutes(pluginName: string, routes: Array<{
+    method: string;
+    path: string;
+    handler: string;
+    permission?: string;
+    auth?: 'admin' | 'public';
+  }>): void {
+    for (const route of routes) {
+      const method = route.method.toUpperCase();
+      const permission = route.auth === 'public'
+        ? null
+        : (route.permission ?? ApiPermission.Admin);
+      const normalized = { pluginName, method, path: route.path, handler: route.handler, permission };
+      const existingIndex = this._pluginRoutes.findIndex((candidate) =>
+        candidate.pluginName === pluginName
+          && candidate.method === method
+          && candidate.path === route.path
+      );
+      if (existingIndex >= 0) this._pluginRoutes[existingIndex] = normalized;
+      else this._pluginRoutes.push(normalized);
+    }
     LogManager.getInstance().logger('anochat.api').info(`Plugin ${pluginName} registered ${routes.length} route(s)`);
   }
 
@@ -320,6 +377,14 @@ export class ApiServer extends EventEmitter {
       LogManager.getInstance().logger('anochat.api').info(`Plugin ${pluginName} unregistered ${removed} route(s)`);
     }
     return removed;
+  }
+
+  private _isPublicPluginRoute(method: string, pathname: string): boolean {
+    return this._pluginRoutes.some((route) =>
+      route.permission === null
+        && route.method === method
+        && this._matchPluginPath(route.path, pathname) !== null
+    );
   }
 
   private _discoverEndpoints(req: http.IncomingMessage): {
@@ -369,8 +434,9 @@ export class ApiServer extends EventEmitter {
       if (method !== route.method) continue;
       const params = this._matchPluginPath(route.path, pathname);
       if (params === null) continue;
-      if (route.permission && (!token || !hasPermission(token, route.permission as ApiPermission))) {
-        this.sendJson(res, 403, { error: 'Forbidden', message: `Missing permission: ${route.permission}` });
+      const permission = route.permission;
+      if (permission && (!token || !hasPermission(token, permission as ApiPermission))) {
+        this.sendJson(res, 403, { error: 'Forbidden', message: `Missing permission: ${permission}` });
         return true;
       }
       this._executePluginHandler(route.pluginName, route.handler, req, params).then(result => {
@@ -378,7 +444,11 @@ export class ApiServer extends EventEmitter {
         if (r && typeof r === 'object' && 'status' in r) this.sendJson(res, r.status, r.body || {});
         else this.sendJson(res, 500, { error: 'Plugin handler returned invalid result' });
       }).catch(err => {
-        this.sendJson(res, 500, { error: 'Plugin handler error', message: (err as Error).message });
+        const statusCode = Number((err as { statusCode?: unknown }).statusCode);
+        this.sendJson(res, Number.isInteger(statusCode) && statusCode >= 400 && statusCode <= 599 ? statusCode : 500, {
+          error: 'Plugin handler error',
+          message: (err as Error).message,
+        });
       });
       return true;
     }
@@ -398,9 +468,24 @@ export class ApiServer extends EventEmitter {
   }
 
   private async _executePluginHandler(pluginName: string, handler: string, req: http.IncomingMessage, params: Record<string, string>): Promise<unknown> {
-    const body = await this.readBody(req).catch(() => ({}));
+    const body = await this.readBody(req);
     const { PluginHostManager } = await import('../core/plugin-host/PluginHostManager.js');
-    return PluginHostManager.getInstance().executeHandler(pluginName, handler, { body, params, query: req.url?.split('?')[1] || '' });
+    const allowedHeaderNames = ['authorization', 'content-type', 'user-agent', 'x-telegram-bot-api-secret-token'];
+    const headers: Record<string, string> = {};
+    for (const name of allowedHeaderNames) {
+      const value = req.headers[name];
+      if (typeof value === 'string') headers[name] = value;
+      else if (Array.isArray(value)) headers[name] = value.join(', ');
+    }
+    const requestUrl = new URL(req.url || '/', `http://${this.host}:${this.port}`);
+    return PluginHostManager.getInstance().executeHandler(pluginName, handler, {
+      body,
+      params,
+      query: requestUrl.searchParams.toString(),
+      headers,
+      method: req.method || 'GET',
+      path: requestUrl.pathname,
+    });
   }
 
   // ── Internal API dispatch ──
@@ -469,7 +554,8 @@ export class ApiServer extends EventEmitter {
 
   public sendCorsHeaders(req: http.IncomingMessage, res: http.ServerResponse): void {
     const origin = req.headers.origin;
-    if (isAllowedLocalOrigin(origin, this.host, this.port) && origin) {
+    const uiPort = SettingsManager.getInstance().get<number>('port', 3456);
+    if (isAllowedLocalOrigin(origin, this.host, this.port, uiPort) && origin) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
     }
@@ -490,13 +576,22 @@ export class ApiServer extends EventEmitter {
     const MAX_BODY = 5 * 1024 * 1024;
     return new Promise((resolve, reject) => {
       let bodySize = 0;
+      let tooLarge = false;
       const chunks: Buffer[] = [];
       req.on('data', (chunk: Buffer) => {
         bodySize += chunk.length;
-        if (bodySize > MAX_BODY) { req.destroy(); reject(Object.assign(new Error('Request body too large'), { statusCode: 413 })); return; }
-        chunks.push(chunk);
+        if (bodySize > MAX_BODY) {
+          tooLarge = true;
+          chunks.length = 0;
+          return;
+        }
+        if (!tooLarge) chunks.push(chunk);
       });
       req.on('end', () => {
+        if (tooLarge) {
+          reject(Object.assign(new Error('Request body too large'), { statusCode: 413 }));
+          return;
+        }
         const raw = Buffer.concat(chunks).toString('utf8');
         if (!raw.trim()) { resolve({}); return; }
         try { resolve(JSON.parse(raw)); }

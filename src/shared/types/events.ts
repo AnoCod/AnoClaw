@@ -7,7 +7,12 @@
  * constants are retained for backward compat during migration.
  */
 
-import type { ArtifactPreview, ArtifactRecord } from './artifact.js';
+import type {
+  CoordinationMessage,
+  CoordinationTask,
+  TeamRecord,
+  WorkspaceLease,
+} from './coordination.js';
 
 /** Events emitted by individual Agent instances. */
 export const AgentEvents = {
@@ -107,7 +112,6 @@ export interface CoreEventMap {
 
   // loop
   'loop:completed': { sessionId: string; agentId: string; turnCount: number; totalTokens: number };
-  'loop:keyword_turn': { sessionId: string; agentId: string; turnNumber: number; userMessages: string[]; assistantMessages: string[] };
   'loop:compaction_triggered': { sessionId: string; beforeTokens: number; afterTokens: number };
 
   // llm
@@ -120,10 +124,6 @@ export interface CoreEventMap {
   // skill
   'skill:loaded': { agentId: string; skillNames: string[] };
   'skill:changed': { action: 'created' | 'updated' | 'deleted' | 'reloaded'; name: string };
-
-  // evolution
-  'evolution:score_saved': { score: { id: string; sessionId: string; agentId: string; messageId: string; score: number } };
-  'evolution:analysis_complete': { reportId: string; mode: string; totalFindings: number; criticalFindings: number };
 
   // talent pool
   'talent_pool:changed': { action: 'group_created' | 'group_updated' | 'group_deleted' | 'template_created' | 'template_deleted' | 'hired'; entityId: string };
@@ -150,14 +150,21 @@ export interface CoreEventMap {
   'task:failed': { taskId: string; parentSessionId: string; parentAgentId: string; type: string; summary: string; durationMs: number; error: string };
   'task:registry_update': { task: { id: string; type: string; parentSessionId: string; parentAgentId: string; summary: string; status: string; startedAt: number; turnCount?: number; currentTool?: string; durationMs?: number; error?: string; pid?: number; command?: string } };
 
+  // durable multi-agent coordination
+  'coordination:team_changed': { rootSessionId: string; revision: number; team: TeamRecord };
+  'coordination:task_changed': { rootSessionId: string; revision: number; task: CoordinationTask };
+  'coordination:message': { rootSessionId: string; revision: number; message: CoordinationMessage };
+  'coordination:workspace_conflict': {
+    rootSessionId: string;
+    revision: number;
+    taskId: string;
+    requestedScopes: string[];
+    holder: WorkspaceLease;
+  };
+  'coordination:snapshot_required': { rootSessionId: string; revision: number; reason: string };
+
   // subscription
   'subscription:delivered': { sessionId: string; agentId: string; topic: string; subscriberCount: number }; // @internal — emitted by EventSubscriptionManager.publish() for observability
-
-  // artifacts
-  'artifact:created': { sessionId: string; artifactId: string; artifact: ArtifactRecord };
-  'artifact:updated': { sessionId: string; artifactId: string; artifact: ArtifactRecord };
-  'artifact:preview': { sessionId: string; artifactId: string; artifact: ArtifactRecord; preview: ArtifactPreview };
-  'artifact:done': { sessionId: string; artifactId: string; artifact: ArtifactRecord };
 
   // plugin
   'plugin:load_failed': { pluginName: string; error: string };
@@ -195,7 +202,6 @@ export enum WsMessageType {
   RunCommand    = 'run_command',
   SetSessionMode = 'set_session_mode',
   SetGoal       = 'set_goal',
-  QualityScore  = 'quality_score',
   EditorContext = 'editor_context',
   ToolConfirmResponse = 'tool_confirm_response',
   // Server → Client (delegation / commands)
@@ -232,12 +238,12 @@ export enum WsMessageType {
   AgentConfigUpdated = 'agent_config_updated',
   PluginLoadFailed = 'plugin_load_failed',
   TaskListUpdate = 'task_list_update',
-  QualityScoreAck = 'quality_score_ack',
-  QualityScoreError = 'quality_score_error',
-  ArtifactCreated = 'artifact_created',
-  ArtifactUpdated = 'artifact_updated',
-  ArtifactPreview = 'artifact_preview',
-  ArtifactDone = 'artifact_done',
+  TeamChanged = 'team_changed',
+  CoordinationTaskChanged = 'task_changed',
+  CoordinationTaskProgress = 'task_progress',
+  CoordinationMessage = 'coordination_message',
+  WorkspaceConflict = 'workspace_conflict',
+  CoordinationSnapshotRequired = 'coordination_snapshot_required',
 }
 
 /** Generic WebSocket message shape for event dispatch (backward compat). */
@@ -269,8 +275,7 @@ export type WsTypedMessage =
   | { type: WsMessageType.Ping; [key: string]: unknown }
   | { type: WsMessageType.RunCommand; command?: string; args?: Record<string, string>; [key: string]: unknown }
   | { type: WsMessageType.SetSessionMode; mode?: string; effort?: boolean; [key: string]: unknown }
-  | { type: WsMessageType.SetGoal; action?: string; objective?: string; acceptanceCriteria?: string; workspace?: string; permissionMode?: string; maxRuns?: number; maxConsecutiveFailures?: number; wakeIntervalMs?: number; completionMode?: 'review' | 'automatic'; [key: string]: unknown }
-  | { type: WsMessageType.QualityScore; score?: number; [key: string]: unknown }
+  | { type: WsMessageType.SetGoal; action?: string; objective?: string; acceptanceCriteria?: string; workspace?: string; /** @deprecated Goal always uses AutoEdit. */ permissionMode?: string; maxRuns?: number; maxConsecutiveFailures?: number; wakeIntervalMs?: number; completionMode?: 'review' | 'automatic'; [key: string]: unknown }
   | { type: WsMessageType.EditorContext; openFiles?: string[]; [key: string]: unknown }
   | { type: WsMessageType.ToolConfirmResponse; toolCallId: string; approved: boolean; [key: string]: unknown }
   | { type: WsMessageType.DelegationProgress; content?: string; [key: string]: unknown }
@@ -285,7 +290,7 @@ export type WsTypedMessage =
   | { type: WsMessageType.SessionCreated; sessionId?: string; [key: string]: unknown }
   | { type: WsMessageType.MessageAppended; sessionId?: string; [key: string]: unknown }
   | { type: WsMessageType.WorkspaceChanged; [key: string]: unknown }
-  | { type: WsMessageType.SessionModeChanged; sessionId?: string; mode?: string; effort?: boolean; locked?: boolean; [key: string]: unknown }
+  | { type: WsMessageType.SessionModeChanged; sessionId?: string; mode?: string; storedMode?: string; effort?: boolean; locked?: boolean; [key: string]: unknown }
   | { type: WsMessageType.GoalChanged; sessionId?: string; action?: string; goal?: unknown; [key: string]: unknown }
   | { type: WsMessageType.ToolExecutionStarted; toolName?: string; [key: string]: unknown }
   | { type: WsMessageType.ToolExecutionCompleted; toolName?: string; success?: boolean; durationMs?: number; tokensUsed?: number; [key: string]: unknown }
@@ -297,10 +302,6 @@ export type WsTypedMessage =
   | { type: WsMessageType.TalentPoolChanged; action?: string; [key: string]: unknown }
   | { type: WsMessageType.SessionTitleChanged; sessionId?: string; title?: string; [key: string]: unknown }
   | { type: WsMessageType.SessionHardDeleted; sessionId?: string; [key: string]: unknown }
-  | { type: WsMessageType.ArtifactCreated; sessionId: string; artifactId: string; artifact?: ArtifactRecord; [key: string]: unknown }
-  | { type: WsMessageType.ArtifactUpdated; sessionId: string; artifactId: string; artifact?: ArtifactRecord; [key: string]: unknown }
-  | { type: WsMessageType.ArtifactPreview; sessionId: string; artifactId: string; preview?: ArtifactPreview; artifact?: ArtifactRecord; [key: string]: unknown }
-  | { type: WsMessageType.ArtifactDone; sessionId: string; artifactId: string; artifact?: ArtifactRecord; [key: string]: unknown }
   // Catch-all for forward compat
   | { type: string; [key: string]: unknown };
 

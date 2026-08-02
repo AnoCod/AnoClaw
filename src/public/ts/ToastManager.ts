@@ -1,6 +1,8 @@
 // AnoClaw — ToastManager: global toast notification system
 // Provides show(type, msg, duration?) for success/error/info feedback.
 
+import { t } from './i18n/index.js';
+
 type ToastType = 'success' | 'error' | 'info';
 
 interface ToastItem {
@@ -61,7 +63,7 @@ export class ToastManager {
     const closeBtn = document.createElement('button');
     closeBtn.className = 'toast-close';
     closeBtn.innerHTML = '&times;';
-    closeBtn.setAttribute('aria-label', 'Dismiss');
+    closeBtn.setAttribute('aria-label', t('common.dismiss'));
     closeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this.dismiss(id);

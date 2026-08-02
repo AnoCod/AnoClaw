@@ -8,6 +8,7 @@ import type { SessionViewModel } from './SessionViewModel.js';
 import type { GoalContractDraft, GoalState } from '../components/conversation/types.js';
 import { ClientLogger } from '../ClientLogger.js';
 import type { SessionNode } from '../types.js';
+import { t } from '../i18n/index.js';
 
 type PermissionModeUi = 'ask' | 'auto-edit' | 'plan' | 'auto';
 
@@ -58,6 +59,7 @@ export class ConversationViewModel extends EventEmitter {
         this.emit('goalPendingChanged', false);
       }
       if (this._activeSessionId) this._syncGoalFromActiveSession();
+      if (this._activeSessionId) this._syncModeFromActiveSession();
       if (d.goal?.status === 'active' && (data as { action?: string }).action && node) {
         this._kickGoalIfIdle(node).catch((err) => {
           ClientLogger.vm.error('Failed to kick acknowledged Goal', { error: (err as Error).message });
@@ -65,19 +67,20 @@ export class ConversationViewModel extends EventEmitter {
       }
     });
     vm.getWSClient().on('session_mode_changed', (data: unknown) => {
-      const d = data as { sessionId?: string; mode?: string; effort?: boolean; locked?: boolean };
+      const d = data as { sessionId?: string; mode?: string; storedMode?: string; effort?: boolean; locked?: boolean };
       if (!d.sessionId) return;
       const node = vm.sessions.getById(d.sessionId);
       if (node) {
         node.metadata = {
           ...(node.metadata || {}),
-          permissionMode: this._toCanonicalMode(this._fromCanonicalMode(d.mode)),
+          permissionMode: this._toCanonicalMode(this._fromCanonicalMode(d.storedMode ?? d.mode)),
           effortMode: d.effort !== false,
         };
         vm.sessions.updateSession({ id: node.id, metadata: node.metadata });
       }
       if (d.sessionId === this._activeSessionId || node?.id === this._activeRootSession()?.id) {
-        this.permissionMode = d.locked ? 'auto' : this._fromCanonicalMode(d.mode);
+        const goalIsActive = this._hasActiveGoal(this._rootForSession(node));
+        this.permissionMode = d.locked || goalIsActive ? 'auto-edit' : this._fromCanonicalMode(d.mode);
         this.effortMode = d.locked ? true : d.effort !== false;
         this.emit('permissionModeChanged', this.permissionMode);
         this.emit('effortModeChanged', this.effortMode);
@@ -91,7 +94,7 @@ export class ConversationViewModel extends EventEmitter {
       this._goalRequestTimer = null;
       this._pendingGoalMessageId = null;
       this.goalPending = false;
-      this.goalError = d.errorMessage || 'Goal update failed';
+      this.goalError = d.errorMessage || t('runtime.goal.updateFailed');
       this.emit('goalPendingChanged', false);
       this.emit('goalError', this.goalError);
     });
@@ -103,7 +106,7 @@ export class ConversationViewModel extends EventEmitter {
   /** Get or create a SessionAgent for the given session. Auto-subscribes streaming tracking. */
   getAgent(sessionId: string): SessionAgent {
     if (!this._sessionVM) {
-      throw new Error('ConversationViewModel: _sessionVM is null. Call setSessionVM() before getAgent().');
+      throw new Error(t('runtime.conversation.notInitialized'));
     }
     let agent = this._agents.get(sessionId);
     if (!agent) {
@@ -150,7 +153,7 @@ export class ConversationViewModel extends EventEmitter {
   // ── Active session ──
 
   /** Switch the active session. No-ops if already active. Fires activeSessionChanged. */
-  setActiveSession(sessionId: string): void {
+  setActiveSession(sessionId: string | null): void {
     if (this._activeSessionId === sessionId) return;
     console.log('[ConvVM] Active session changed', { from: this._activeSessionId, to: sessionId });
     this._activeSessionId = sessionId;
@@ -185,7 +188,12 @@ export class ConversationViewModel extends EventEmitter {
   setPermissionMode(mode: PermissionModeUi): void {
     const active = this._sessionVM?.activeSession;
     if (active && !this._isRootSession(active)) {
-      mode = 'auto';
+      mode = 'auto-edit';
+    }
+    if (active && this._hasActiveGoal(this._rootForSession(active))) {
+      this.permissionMode = 'auto-edit';
+      this.emit('permissionModeChanged', this.permissionMode);
+      return;
     }
     console.log('[ConvVM] Permission mode changed', { mode });
     this.permissionMode = mode;
@@ -241,7 +249,7 @@ export class ConversationViewModel extends EventEmitter {
       this._pendingGoalMessageId = null;
       this._goalRequestTimer = null;
       this.goalPending = false;
-      this.goalError = 'Goal update timed out. Check the connection and try again.';
+      this.goalError = t('runtime.goal.updateTimedOut');
       this.emit('goalPendingChanged', false);
       this.emit('goalError', this.goalError);
     }, 15_000);
@@ -254,7 +262,6 @@ export class ConversationViewModel extends EventEmitter {
         objective: contract.objective.trim(),
         acceptanceCriteria: contract.acceptanceCriteria?.trim(),
         workspace: contract.workspace,
-        permissionMode: contract.permissionMode,
         maxRuns: contract.maxRuns,
         maxConsecutiveFailures: contract.maxConsecutiveFailures,
         wakeIntervalMs: contract.wakeIntervalMs,
@@ -265,8 +272,15 @@ export class ConversationViewModel extends EventEmitter {
 
   private _syncModeFromActiveSession(): void {
     const active = this._sessionVM?.activeSession;
-    if (!active || !this._isRootSession(active)) {
+    if (!active) {
       this.permissionMode = 'auto';
+      this.effortMode = true;
+      this.emit('permissionModeChanged', this.permissionMode);
+      this.emit('effortModeChanged', this.effortMode);
+      return;
+    }
+    if (!this._isRootSession(active)) {
+      this.permissionMode = 'auto-edit';
       this.effortMode = true;
       this.emit('permissionModeChanged', this.permissionMode);
       this.emit('effortModeChanged', this.effortMode);
@@ -274,7 +288,9 @@ export class ConversationViewModel extends EventEmitter {
     }
 
     const nextEffort = active.metadata?.effortMode === false ? false : true;
-    const nextMode = this._fromCanonicalMode(active.metadata?.permissionMode);
+    const nextMode = this._hasActiveGoal(active)
+      ? 'auto-edit'
+      : this._fromCanonicalMode(active.metadata?.permissionMode);
     this.permissionMode = nextMode;
     this.effortMode = nextEffort;
     this.emit('permissionModeChanged', nextMode);
@@ -332,21 +348,23 @@ export class ConversationViewModel extends EventEmitter {
       agent.on('streamingStopped', onStopped);
       return;
     }
-    const mode = this._fromCanonicalMode(goal.permissionMode || root.metadata?.permissionMode);
+    const mode: PermissionModeUi = 'auto-edit';
     const effort = root.metadata?.effortMode === false ? false : true;
     const content = [
-      'Start or continue working toward this active session goal.',
+      t('runtime.goal.prompt.start'),
       '',
-      '# Active Goal',
-      `Objective: ${goal.objective}`,
-      `Run count: ${goal.runCount || 0}`,
+      t('runtime.goal.prompt.heading'),
+      t('runtime.goal.prompt.objective', { objective: goal.objective }),
+      t('runtime.goal.prompt.runCount', { count: goal.runCount || 0 }),
       '',
-      '# Current Execution Context',
-      `Workspace: ${root.workspace || '(default workspace)'}`,
-      `Permission mode: ${this._toCanonicalMode(mode)}`,
-      `Effort: ${effort ? 'HIGH' : 'NORMAL'}`,
+      t('runtime.goal.prompt.contextHeading'),
+      t('runtime.goal.prompt.workspace', { workspace: root.workspace || t('runtime.goal.prompt.defaultWorkspace') }),
+      t('runtime.goal.prompt.permission', { mode: this._toCanonicalMode(mode) }),
+      t('runtime.goal.prompt.effort', {
+        effort: effort ? t('runtime.goal.prompt.high') : t('runtime.goal.prompt.normal'),
+      }),
       '',
-      'Use the current workspace as the primary context. Advance the next useful step; if the goal is already complete or blocked, say so clearly.',
+      t('runtime.goal.prompt.instruction'),
     ].join('\n');
     await agent.sendMessage(content, mode, effort, [], { internalGoal: true });
   }
@@ -381,12 +399,14 @@ export class ConversationViewModel extends EventEmitter {
   // ── Commands ──
 
   /** Dispatch a slash command to the backend via WS for the active session. */
-  runCommand(command: string, args?: Record<string, string>): void {
+  runCommand(command: string, args?: Record<string, string>): boolean {
     console.log('[ConvVM] Command run', { command, args });
     const sid = this._sessionVM?.activeSessionId;
-    if (!sid || !this._sessionVM) return;
-    this._sessionVM.getWSClient().runCommand(sid, command, args);
+    if (!sid || !this._sessionVM) return false;
+    const sent = this._sessionVM.getWSClient().runCommand(sid, command, args);
+    if (!sent) return false;
     ClientLogger.vm.debug('Command sent via WS', { command });
+    return true;
   }
 
   // ── Connection ──

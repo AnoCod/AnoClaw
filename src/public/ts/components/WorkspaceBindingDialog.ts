@@ -2,6 +2,8 @@
 // Folder picker for binding (or switching) a workspace directory for a session.
 // Browse uses Electron's native dialog.showOpenDialog for full paths.
 
+import { onLocaleChange, t } from '../i18n/index.js';
+
 /** Normalize a user-entered path: d:G22 → D:\G22, forward slashes → backslashes. */
 function normalizePath(raw: string): string {
   let p = raw.trim();
@@ -22,6 +24,9 @@ export class WorkspaceBindingDialog {
   private _overlay: HTMLElement;
   private _dialog: HTMLElement;
   private _resolve: ((value: WorkspaceBindingResult | null) => void) | null = null;
+  private _stopLocaleListener: (() => void) | null = null;
+  private _isSwitch = false;
+  private _currentPath = '';
 
   constructor() {
     this._overlay = document.createElement('div');
@@ -46,13 +51,20 @@ export class WorkspaceBindingDialog {
     console.log('[Workspace] show currentPath:', currentPath);
     return new Promise((resolve) => {
       this._resolve = resolve;
-      this._build(currentPath);
+      this._isSwitch = !!currentPath;
+      this._currentPath = currentPath || '';
+      this._build(currentPath || '');
       document.body.appendChild(this._overlay);
+      this._stopLocaleListener?.();
+      this._stopLocaleListener = onLocaleChange(() => {
+        const currentInput = this._dialog.querySelector('#ws-path-input') as HTMLInputElement | null;
+        this._build(currentInput?.value ?? this._currentPath);
+      });
     });
   }
 
-  private _build(currentPath?: string): void {
-    const isSwitch = !!currentPath;
+  private _build(pathValue: string): void {
+    const isSwitch = this._isSwitch;
     const primary = 'var(--color-primary, #ffffff)';
     const onPrimary = 'var(--color-on-primary, #000000)';
     const text = 'var(--color-text-primary)';
@@ -62,37 +74,35 @@ export class WorkspaceBindingDialog {
 
     this._dialog.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-        <h2 style="font-size:18px;font-weight:600;color:${text};margin:0;">${isSwitch ? 'Switch Workspace' : 'Bind Workspace'}</h2>
+        <h2 style="font-size:18px;font-weight:600;color:${text};margin:0;">${isSwitch ? t('workspace.switchTitle') : t('workspace.bindTitle')}</h2>
         <button class="dialog-close" style="background:none;border:none;color:${textSec};cursor:pointer;font-size:20px;line-height:1;">&times;</button>
       </div>
       <form id="workspace-dialog-form" style="display:flex;flex-direction:column;gap:12px;">
         ${isSwitch ? `
         <div style="font-size:11px;color:${textSec};margin-bottom:-4px;">
-          Current: <span style="color:${text};font-family:var(--font-mono,monospace);font-size:10px;">${esc(currentPath!)}</span>
+          ${t('workspace.current')} <span style="color:${text};font-family:var(--font-mono,monospace);font-size:10px;">${esc(this._currentPath)}</span>
         </div>` : ''}
         <div>
-          <label style="font-size:12px;color:${textSec};display:block;margin-bottom:4px;">${isSwitch ? 'New Workspace Path' : 'Workspace Path'}</label>
+          <label style="font-size:12px;color:${textSec};display:block;margin-bottom:4px;">${isSwitch ? t('workspace.newPath') : t('workspace.path')}</label>
           <div style="display:flex;gap:8px;">
-            <input name="path" id="ws-path-input" value="${esc(currentPath || '')}" placeholder="D:\\projects or /home/user/project"
+            <input name="path" id="ws-path-input" value="${esc(pathValue)}" placeholder="${esc(t('workspace.pathPlaceholder'))}"
               style="flex:1;padding:8px 10px;background:${bg};border:1px solid ${border};border-radius:6px;color:${text};font-size:13px;">
             <button type="button" id="ws-browse-btn"
               style="padding:8px 14px;background:${bg};border:1px solid ${border};border-radius:6px;color:${text};cursor:pointer;font-size:13px;white-space:nowrap;">
-              Browse…
+              ${t('workspace.browse')}
             </button>
           </div>
         </div>
         <p style="font-size:11px;color:${textSec};margin:8px 0 0;">
-          ${isSwitch
-            ? 'Switching workspace will point the agent to a new directory.'
-            : 'Bind a folder so the agent can read and write files within it.'}
+          ${isSwitch ? t('workspace.switchHint') : t('workspace.bindHint')}
         </p>
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
           <button type="button" id="ws-cancel-btn"
             style="padding:8px 20px;background:transparent;border:1px solid ${border};border-radius:6px;color:${text};cursor:pointer;font-size:13px;">
-            Cancel</button>
+            ${t('common.cancel')}</button>
           <button type="submit"
             style="padding:8px 20px;background:${primary};border:1px solid ${primary};border-radius:8px;color:${onPrimary};cursor:pointer;font-size:13px;font-weight:500;">
-            ${isSwitch ? 'Switch' : 'Bind'}</button>
+            ${isSwitch ? t('workspace.switch') : t('workspace.bind')}</button>
         </div>
       </form>
     `;
@@ -111,7 +121,7 @@ export class WorkspaceBindingDialog {
           if (api?.showOpenDialog) {
             const pickResult = await api.showOpenDialog({
               properties: ['openDirectory'],
-              title: isSwitch ? 'Select New Workspace Folder' : 'Select Workspace Folder',
+              title: isSwitch ? t('workspace.selectNewFolder') : t('workspace.selectFolder'),
             });
             if (!pickResult.canceled && pickResult.filePaths?.length > 0) {
               pathInput.value = normalizePath(pickResult.filePaths[0]);
@@ -150,6 +160,8 @@ export class WorkspaceBindingDialog {
   }
 
   private _close(result: WorkspaceBindingResult | null): void {
+    this._stopLocaleListener?.();
+    this._stopLocaleListener = null;
     this._overlay.remove();
     if (this._resolve) {
       this._resolve(result);

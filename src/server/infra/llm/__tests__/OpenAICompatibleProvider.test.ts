@@ -11,13 +11,13 @@ describe('OpenAICompatibleProvider tool names', () => {
 
   it('keeps portable names and deterministically aliases namespaced plugin tools', () => {
     expect(toOpenAIToolName('Read')).toBe('Read');
-    expect(toOpenAIToolName('office.create_pptx')).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
-    expect(toOpenAIToolName('office.create_pptx')).toBe(toOpenAIToolName('office.create_pptx'));
-    expect(toOpenAIToolName('office.create_pptx')).not.toContain('.');
+    expect(toOpenAIToolName('vendor.create_asset')).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
+    expect(toOpenAIToolName('vendor.create_asset')).toBe(toOpenAIToolName('vendor.create_asset'));
+    expect(toOpenAIToolName('vendor.create_asset')).not.toContain('.');
   });
 
   it('aliases request definitions and history, then restores the original streamed tool name', async () => {
-    const alias = toOpenAIToolName('web.research');
+    const alias = toOpenAIToolName('research.collect');
     let requestBody: any;
     globalThis.fetch = vi.fn(async (_url, init) => {
       requestBody = JSON.parse(String(init?.body || '{}'));
@@ -37,12 +37,12 @@ describe('OpenAICompatibleProvider tool names', () => {
           tool_calls: [{
             id: 'old-call',
             type: 'function',
-            function: { name: 'web.research', arguments: '{"query":"old"}' },
+            function: { name: 'research.collect', arguments: '{"query":"old"}' },
           }],
         },
         { role: 'tool', content: 'old result', tool_call_id: 'old-call' },
       ],
-      [{ name: 'web.research', description: 'Research the web', input_schema: { type: 'object' } }],
+      [{ name: 'research.collect', description: 'Collect research', input_schema: { type: 'object' } }],
       'Test prompt',
       {
         model: 'test-model',
@@ -60,7 +60,7 @@ describe('OpenAICompatibleProvider tool names', () => {
     expect(requestBody.messages[1].tool_calls[0].function.name).toBe(alias);
     expect(events).toContainEqual(expect.objectContaining({
       type: 'tool_use',
-      toolName: 'web.research',
+      toolName: 'research.collect',
       toolId: 'call-1',
       toolInput: { query: 'AnoClaw' },
     }));

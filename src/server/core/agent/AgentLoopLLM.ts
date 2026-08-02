@@ -29,9 +29,11 @@ export interface LLMCallResult {
 }
 
 interface SanitizableMsg {
+  id?: string;
   role: string;
-  content?: string;
+  content?: string | null;
   tool_call_id?: string;
+  tool_success?: boolean;
   tool_calls?: Array<{ id?: string; function?: { name?: string; arguments?: string } }>;
 }
 
@@ -82,6 +84,37 @@ function sanitizeOrphanedMessages(messages: SanitizableMsg[]): SanitizableMsg[] 
   }
 
   return cleaned;
+}
+
+/**
+ * Build the provider-visible conversation.
+ *
+ * The primary system prompt is supplied separately to provider.chat(). Other
+ * The primary system prompt is removed because it is supplied separately.
+ * Later internal notices (compaction, recovery, stall hints, AgentChannel)
+ * are mapped to user messages so providers actually receive them.
+ */
+export function prepareMessagesForLLM(
+  messages: readonly ApiMessage[],
+  primarySystemPrompt?: string,
+): ApiMessage[] {
+  const visible: ApiMessage[] = [];
+  let skippedPrimary = false;
+  for (const message of messages) {
+    if (message.role !== 'system') {
+      visible.push(message);
+      continue;
+    }
+    if (
+      !skippedPrimary
+      && (primarySystemPrompt === undefined || message.content === primarySystemPrompt)
+    ) {
+      skippedPrimary = true;
+      continue;
+    }
+    visible.push({ ...message, role: 'user' });
+  }
+  return sanitizeOrphanedMessages(visible) as ApiMessage[];
 }
 
 export interface LLMCallConfig {
@@ -166,9 +199,12 @@ export async function* callLLMWithRetry(
       const estimatedTotalTokens = estimatedInputTokens + tools.length * 50 + llmOptions.maxTokens;
       await APIScheduler.getInstance().acquireSlot(config.apiKey || '', estimatedTotalTokens);
 
-      const chatMessages = sanitizeOrphanedMessages(
-        messages.filter((m) => m.role !== 'system') as SanitizableMsg[],
-      ) as Array<{ role: string; content: string; tool_calls?: unknown[]; tool_call_id?: string }>;
+      const chatMessages = prepareMessagesForLLM(messages, systemPrompt) as Array<{
+        role: string;
+        content: string;
+        tool_calls?: unknown[];
+        tool_call_id?: string;
+      }>;
 
       const stream = provider.chat(
         chatMessages,

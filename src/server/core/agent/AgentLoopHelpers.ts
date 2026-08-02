@@ -11,6 +11,7 @@ import type { Message } from '../../../shared/types/session.js';
 import { DEFAULT_CONTEXT_WINDOW } from '../../../shared/constants.js';
 import { AgentRegistry } from './AgentRegistry.js';
 import { TokenCounter } from '../context/TokenCounter.js';
+import { isCompactionSummaryMessage } from '../context/CompactionConstants.js';
 
 const DEFAULT_HISTORY_CONTEXT_RATIO = 0.58;
 const DEFAULT_RESPONSE_RESERVE_RATIO = 0.18;
@@ -18,6 +19,8 @@ const COMPRESSED_SUMMARY_BUDGET_RATIO = 0.25;
 
 /** Internal API message format (provider-neutral), for LLM calls */
 export interface ApiMessage {
+  /** Runtime-only identity used by compaction. Provider adapters omit it. */
+  id?: string;
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string | null;
   tool_calls?: Array<{
@@ -26,6 +29,8 @@ export interface ApiMessage {
     function: { name: string; arguments: string };
   }>;
   tool_call_id?: string;
+  /** Runtime-only tool result status used by compaction. */
+  tool_success?: boolean;
   reasoning_content?: string;
 }
 
@@ -36,6 +41,7 @@ export interface ApiMessage {
  */
 export function messageToApiMessage(msg: Message): ApiMessage {
   const result: ApiMessage = {
+    id: msg.id,
     role: msg.role as ApiMessage['role'],
     content: msg.content || '',
   };
@@ -165,7 +171,7 @@ export function selectHistoryForContext(
 
   const summaryBudget = Math.floor(historyBudget * COMPRESSED_SUMMARY_BUDGET_RATIO);
   for (const entry of entries) {
-    if (!entry.message.compressed) continue;
+    if (!isCompactionSummaryMessage(entry.message)) continue;
     trySelect(entry, Math.min(historyBudget, Math.max(summaryBudget, entry.tokens)));
   }
 

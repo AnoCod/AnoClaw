@@ -5,30 +5,11 @@ import type {
   TaskResolveRequest,
   TaskResolveResult,
   TaskResolveToolCallSuggestion,
-  UserMode,
 } from '../../../shared/types/capability.js';
 import { CapabilityRegistry } from './CapabilityRegistry.js';
 import { CapabilityPluginRecommender } from './CapabilityPluginRecommender.js';
 
 const MIN_CAPABILITY_SCORE = 6;
-
-const CREATE_INTENT_TERMS = [
-  'create',
-  'make',
-  'generate',
-  'build',
-  'write',
-  'produce',
-  '制作',
-  '生成',
-  '创建',
-  '做',
-  '写',
-  '整理',
-  '分析',
-  '总结',
-  '规划',
-];
 
 const CODE_FILE_EXTENSIONS = [
   '.ts',
@@ -68,15 +49,14 @@ export class TaskResolver {
 
   async resolve(request: TaskResolveRequest): Promise<TaskResolveResult> {
     const query = (request.message || '').trim();
-    const userMode = normalizeUserMode(request.userMode);
-    if (!query) return emptyResult(query, 'Empty message', userMode, request.locale);
+    if (!query) return emptyResult(query, 'Empty message', request.locale);
 
     const { capabilities } = await this._capabilities.allCapabilities({
       includeUnavailable: request.includeUnavailable !== false,
       limit: 500,
     });
     const candidates = capabilities
-      .map((capability) => scoreCapability(capability, query, userMode))
+      .map((capability) => scoreCapability(capability, query))
       .filter((candidate) => candidate.score > 0)
       .sort(compareCandidates)
       .slice(0, 8);
@@ -86,7 +66,6 @@ export class TaskResolver {
       return {
         intent: 'chat',
         query,
-        userMode,
         locale: request.locale,
         confidence: 0.2,
         nextAction: 'chat',
@@ -120,7 +99,6 @@ export class TaskResolver {
     return {
       intent: 'capability',
       query,
-      userMode,
       locale: request.locale,
       confidence: best.confidence,
       nextAction,
@@ -139,7 +117,7 @@ export class TaskResolver {
   }
 }
 
-function scoreCapability(capability: CapabilityRecord, query: string, userMode: UserMode): TaskResolveCandidate {
+function scoreCapability(capability: CapabilityRecord, query: string): TaskResolveCandidate {
   const normalizedQuery = normalize(query);
   const matchedTerms = new Set<string>();
   let score = 0;
@@ -163,22 +141,15 @@ function scoreCapability(capability: CapabilityRecord, query: string, userMode: 
 
   for (const output of capability.outputs || []) {
     const extension = normalize(output.extension || '');
-    const artifactType = normalize(output.artifactType || '');
     if (extension && normalizedQuery.includes(extension)) {
       matchedTerms.add(extension);
       score += 6;
-    }
-    if (artifactType && normalizedQuery.includes(artifactType)) {
-      matchedTerms.add(artifactType);
-      score += 3;
     }
   }
 
   const fileTypeBoost = explicitFileTypeBoost(capability, normalizedQuery);
   if (fileTypeBoost > 0) score += fileTypeBoost;
 
-  if (hasCreateIntent(normalizedQuery) && capability.kind === 'artifact') score += 2;
-  score += userModeScoreBoost(capability, userMode);
   if (capability.status === 'available') score += 2;
   if (capability.status === 'error') score -= 3;
 
@@ -201,7 +172,6 @@ function keywordTerms(capability: CapabilityRecord): string[] {
     capability.domain,
     capability.description || '',
     ...(capability.examples || []),
-    ...(capability.artifactTypes || []),
   ]
     .join(' ')
     .toLowerCase()
@@ -210,24 +180,22 @@ function keywordTerms(capability: CapabilityRecord): string[] {
 }
 
 function explicitFileTypeBoost(capability: CapabilityRecord, normalizedQuery: string): number {
-  const artifactTypes = new Set((capability.artifactTypes || [])
-    .map(normalize)
-    .filter(Boolean));
+  const outputTypes = new Set<string>();
   for (const output of capability.outputs || []) {
-    if (output.artifactType) artifactTypes.add(normalize(output.artifactType));
-    if (output.extension) artifactTypes.add(normalize(output.extension));
+    if (output.type) outputTypes.add(normalize(output.type));
+    if (output.extension) outputTypes.add(normalize(output.extension));
   }
-  artifactTypes.add(normalize(capability.domain));
+  outputTypes.add(normalize(capability.domain));
 
   let score = 0;
-  for (const type of artifactTypes) {
+  for (const type of outputTypes) {
     if (!type) continue;
     if (normalizedQuery.includes(`.${type}`)) score += 10;
   }
-  if (artifactTypes.has('pdf') && /\bpdf\b|\.pdf\b/.test(normalizedQuery)) score += 6;
-  if (artifactTypes.has('spreadsheet') && /\.(xlsx|xls|csv|tsv)\b/.test(normalizedQuery)) score += 8;
-  if (artifactTypes.has('presentation') && /\.(pptx|ppt)\b/.test(normalizedQuery)) score += 8;
-  if (artifactTypes.has('document') && /\.(docx|doc)\b/.test(normalizedQuery)) score += 8;
+  if (outputTypes.has('pdf') && /\bpdf\b|\.pdf\b/.test(normalizedQuery)) score += 6;
+  if (outputTypes.has('spreadsheet') && /\.(xlsx|xls|csv|tsv)\b/.test(normalizedQuery)) score += 8;
+  if (outputTypes.has('presentation') && /\.(pptx|ppt)\b/.test(normalizedQuery)) score += 8;
+  if (outputTypes.has('document') && /\.(docx|doc)\b/.test(normalizedQuery)) score += 8;
   return score;
 }
 
@@ -387,119 +355,11 @@ function buildCodingSuggestedToolCall(
 }
 
 function suggestParametersForCapability(
-  capabilityId: string,
-  query: string,
-  notes: string[],
+  _capabilityId: string,
+  _query: string,
+  _notes: string[],
 ): Record<string, unknown> {
-  const title = inferTaskTitle(query);
-  switch (capabilityId) {
-    case 'presentation.create':
-      return compactObject({
-        topic: title,
-        slideCount: inferSlideCount(query) || 8,
-        style: inferStyle(query),
-      });
-    case 'document.create':
-      return compactObject({
-        title,
-        documentType: inferDocumentType(query),
-        style: inferStyle(query),
-      });
-    case 'spreadsheet.analyze': {
-      const filePath = inferFilePath(query, ['.csv', '.tsv', '.xlsx', '.xls']);
-      if (!filePath) notes.push('No spreadsheet path was explicit; use an attached/current spreadsheet if available, otherwise ask for the file.');
-      return compactObject({
-        title,
-        filePath,
-      });
-    }
-    case 'pdf.summarize': {
-      const filePath = inferFilePath(query, ['.pdf']);
-      if (!filePath) notes.push('No PDF path was explicit; use an attached/current PDF if available, otherwise ask for the file.');
-      return compactObject({
-        title,
-        filePath,
-        pages: inferPageRange(query),
-      });
-    }
-    case 'files.organize': {
-      const folderPath = inferFolderPath(query);
-      if (!folderPath) notes.push('No folder path was explicit; use the current workspace folder as the default target.');
-      return compactObject({
-        folderPath,
-        recursive: /recursive|recursively|子文件夹|递归/.test(query.toLowerCase()),
-        apply: /apply|execute|move now|直接整理|直接移动|执行整理/.test(query.toLowerCase()),
-      });
-    }
-    case 'web.research': {
-      notes.push('Create a cited research artifact with source links; fetch top sources when possible.');
-      return compactObject({
-        query: inferResearchQuery(query),
-        title,
-        maxSources: inferSourceCount(query) || 5,
-        fetchPages: true,
-      });
-    }
-    default:
-      return {};
-  }
-}
-
-function inferTaskTitle(query: string): string {
-  return query
-    .replace(/^\s*(帮我|请|麻烦|please)\s*/i, '')
-    .replace(/\s*(做一个|做一份|制作|创建|生成|写一份|写一个|总结|分析|整理|create|make|generate|write|summarize|analyze|organize)\s*/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 120) || query.trim().slice(0, 120);
-}
-
-function inferSlideCount(query: string): number | undefined {
-  const arabic = query.match(/(\d{1,2})\s*(页|张|slides?|slide deck)/i)?.[1];
-  if (arabic) return clampNumber(Number(arabic), 1, 60, undefined);
-  const chineseNumber = query.match(/([一二三四五六七八九十]{1,3})\s*(页|张)/)?.[1];
-  return chineseNumber ? chineseNumeralToNumber(chineseNumber) : undefined;
-}
-
-function inferStyle(query: string): string | undefined {
-  const styles = [
-    ['商务', '简洁商务'],
-    ['简洁', '简洁'],
-    ['正式', '正式'],
-    ['专业', '专业'],
-    ['可爱', '轻松友好'],
-    ['business', 'clean business'],
-    ['professional', 'professional'],
-    ['concise', 'concise'],
-  ];
-  const normalized = query.toLowerCase();
-  return styles.find(([term]) => normalized.includes(term))?.[1];
-}
-
-function inferDocumentType(query: string): string | undefined {
-  const normalized = query.toLowerCase();
-  if (/合同|contract/.test(normalized)) return 'contract draft';
-  if (/报告|report/.test(normalized)) return 'report';
-  if (/方案|proposal/.test(normalized)) return 'proposal';
-  if (/简历|resume|cv/.test(normalized)) return 'resume';
-  if (/申请书|application/.test(normalized)) return 'application';
-  return undefined;
-}
-
-function inferResearchQuery(query: string): string {
-  return query
-    .replace(/^\s*(帮我|请|麻烦|please)\s*/i, '')
-    .replace(/\s*(查一下|搜索|调研|研究一下|找资料|整理资料|search for|search|research|look up|find sources for)\s*/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 200) || query.trim().slice(0, 200);
-}
-
-function inferSourceCount(query: string): number | undefined {
-  const arabic = query.match(/(\d{1,2})\s*(sources?|results?|links?|websites?|来源|资料|链接|网站)/i)?.[1];
-  if (arabic) return clampNumber(Number(arabic), 1, 10, undefined);
-  const chineseNumber = query.match(/([一二三四五六七八九十]{1,3})\s*(个)?\s*(来源|资料|链接|网站)/)?.[1];
-  return chineseNumber ? clampNumber(chineseNumeralToNumber(chineseNumber) || 0, 1, 10, undefined) : undefined;
+  return {};
 }
 
 function inferFilePath(query: string, extensions: string[]): string | undefined {
@@ -536,42 +396,8 @@ function inferCodeSearchPattern(query: string): string | undefined {
   return dottedSymbol ? escapeRegExp(dottedSymbol) : undefined;
 }
 
-function inferFolderPath(query: string): string | undefined {
-  const quoted = query.match(/["“']([^"”']+)["”']/)?.[1];
-  if (quoted && !/\.[A-Za-z0-9]{1,8}$/.test(quoted)) return quoted;
-  const windowsPath = query.match(/([A-Za-z]:[^\s"'“”，。]+)/)?.[1];
-  if (windowsPath) return windowsPath;
-  const relativePath = query.match(/((?:\.{1,2}[\\/])?[^\s"'“”，。]+[\\/][^\s"'“”，。]+)/)?.[1];
-  return relativePath;
-}
-
-function inferPageRange(query: string): string | undefined {
-  return query.match(/(?:pages?|第)\s*(\d+\s*(?:-|到|至)\s*\d+|\d+)/i)?.[1]?.replace(/[到至]/g, '-');
-}
-
-function compactObject(value: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined && entry !== ''));
-}
-
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function clampNumber(value: number, min: number, max: number, fallback: number | undefined): number | undefined {
-  if (!Number.isFinite(value)) return fallback;
-  return Math.max(min, Math.min(max, Math.round(value)));
-}
-
-function chineseNumeralToNumber(value: string): number | undefined {
-  const digits: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
-  if (value === '十') return 10;
-  const tenParts = value.split('十');
-  if (tenParts.length === 2) {
-    const tens = tenParts[0] ? digits[tenParts[0]] || 0 : 1;
-    const ones = tenParts[1] ? digits[tenParts[1]] || 0 : 0;
-    return tens * 10 + ones;
-  }
-  return digits[value];
 }
 
 function compareCandidates(a: TaskResolveCandidate, b: TaskResolveCandidate): number {
@@ -582,11 +408,10 @@ function compareCandidates(a: TaskResolveCandidate, b: TaskResolveCandidate): nu
   return (b.capability.priority || 0) - (a.capability.priority || 0);
 }
 
-function emptyResult(query: string, reason: string, userMode: UserMode, locale?: string): TaskResolveResult {
+function emptyResult(query: string, reason: string, locale?: string): TaskResolveResult {
   return {
     intent: 'unknown',
     query,
-    userMode,
     locale,
     confidence: 0,
     nextAction: 'chat',
@@ -600,42 +425,6 @@ function emptyResult(query: string, reason: string, userMode: UserMode, locale?:
     reason,
     suggestedResponse: 'Tell me what you want AnoClaw to create, analyze, organize, research, or automate.',
   };
-}
-
-function normalizeUserMode(value: unknown): UserMode {
-  const raw = String(value || '').trim().toLowerCase();
-  if (raw === 'office' || raw === 'work') return 'office';
-  if (raw === 'coding' || raw === 'programming' || raw === 'developer' || raw === 'dev') return 'coding';
-  if (raw === 'child' || raw === 'kids' || raw === 'education') return 'child';
-  if (raw === 'professional' || raw === 'pro' || raw === 'expert') return 'professional';
-  return 'simple';
-}
-
-function userModeScoreBoost(capability: CapabilityRecord, userMode: UserMode): number {
-  if (userMode === 'office') {
-    if (['office', 'pdf', 'data'].includes(capability.domain)) return 4;
-    if (capability.artifactTypes?.some((type) => ['presentation', 'document', 'spreadsheet', 'report'].includes(type))) return 2;
-  }
-  if (userMode === 'child') {
-    if (capability.domain === 'education') return 5;
-    if (capability.id.startsWith('education.')) return 5;
-    if (capability.kind === 'knowledge') return 1;
-  }
-  if (userMode === 'coding') {
-    if (capability.domain === 'coding') return 6;
-    if (capability.kind === 'automation' || capability.domain === 'files') return 1;
-  }
-  if (userMode === 'professional') {
-    if (capability.domain === 'coding') return 5;
-    if (['automation', 'memory', 'files'].includes(capability.domain)) return 2;
-    if (capability.kind === 'automation' || capability.kind === 'utility') return 2;
-  }
-  if (userMode === 'simple' && capability.kind === 'artifact') return 1;
-  return 0;
-}
-
-function hasCreateIntent(query: string): boolean {
-  return CREATE_INTENT_TERMS.some((term) => query.includes(normalize(term)));
 }
 
 function normalize(value: string): string {

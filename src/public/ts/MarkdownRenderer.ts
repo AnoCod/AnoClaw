@@ -17,6 +17,7 @@
  */
 
 import { highlightCode } from './components/tabs/FilePreview.js';
+import { onLocaleChange, t } from './i18n/index.js';
 import {
   linkifyFilePathsInHtml,
   markdownLinkHtml,
@@ -65,7 +66,19 @@ function safeAttr(name: string, value: string): string {
     const clean = value.replace(/expression\s*\(/gi, '').replace(/-moz-binding/gi, '');
     return ` style="${esc(clean)}"`;
   }
-  if ((lower === 'src' || lower === 'href') && /^\s*javascript:/i.test(value)) return '';
+  if (lower === 'src' || lower === 'href') {
+    // URL parsers ignore embedded ASCII control characters in schemes, so
+    // `java\nscript:` must be checked in its compact form as well.
+    const compact = value.replace(/[\u0000-\u0020\u007f]/g, '');
+    const scheme = compact.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase();
+    if (scheme) {
+      const safeNetworkScheme = scheme === 'http' || scheme === 'https';
+      const safeHrefScheme = lower === 'href' && scheme === 'mailto';
+      const safeImageData = lower === 'src'
+        && /^data:image\/(?:png|jpe?g|gif|webp|bmp|avif);base64,/i.test(compact);
+      if (!safeNetworkScheme && !safeHrefScheme && !safeImageData) return '';
+    }
+  }
   // Allow class, id, title, alt, src, href, target, rel, type, lang, dir, etc.
   if (/^(class|id|title|alt|src|href|target|rel|type|lang|dir|width|height|loading|open|start|reversed|colspan|rowspan|scope|align)$/i.test(lower)) {
     return ` ${lower}="${esc(value)}"`;
@@ -217,15 +230,22 @@ function renderImage(escapedAlt: string, escapedTarget: string, options: Markdow
 
   const fallbackLabel = alt || (fileRef?.path ?? target) || 'image';
   if (!src) {
-    return `<span class="md-image-wrapper md-image-error"${fileAttr}><span class="md-image-fallback">Image unavailable: ${esc(fallbackLabel)}</span></span>`;
+    return `<span class="md-image-wrapper md-image-error"${fileAttr}><span class="md-image-fallback">${esc(t('image.unavailable', { label: fallbackLabel }))}</span></span>`;
   }
 
   return `<span class="md-image-wrapper"${fileAttr}>`
-    + `<img src="${esc(src)}" alt="${esc(alt)}" class="md-inline-image" loading="lazy" tabindex="0" title="Click to preview" `
+    + `<img src="${esc(src)}" alt="${esc(alt)}" class="md-inline-image" loading="lazy" tabindex="0" data-image-preview-title="true" title="${esc(t('image.clickToPreview'))}" `
     + `onerror="this.style.display='none';this.nextElementSibling.style.display='block'">`
-    + `<span class="md-image-fallback" style="display:none">Image unavailable: ${esc(fallbackLabel)}</span>`
+    + `<span class="md-image-fallback" style="display:none">${esc(t('image.unavailable', { label: fallbackLabel }))}</span>`
     + `</span>`;
 }
+
+onLocaleChange(() => {
+  if (typeof document === 'undefined') return;
+  document.querySelectorAll<HTMLElement>('[data-image-preview-title]').forEach((element) => {
+    element.title = t('image.clickToPreview');
+  });
+});
 
 function processText(text: string, options: MarkdownRenderOptions = {}): string {
   // If the text contains raw HTML, run our sanitizer first

@@ -12,11 +12,16 @@
 export { WsMessageType } from './events.js';
 import type { WsMessageType } from './events.js';
 import type { TokenBreakdown } from './session.js';
-import type { ArtifactPreview, ArtifactRecord } from './artifact.js';
+import type {
+  CoordinationMessage,
+  CoordinationTask,
+  TeamRecord,
+  WorkspaceLease,
+} from './coordination.js';
 
 /** Message sent from the browser client to the server. */
 export interface WsClientMessage {
-  type: 'send_message' | 'stop' | 'ping' | 'run_command' | 'set_session_mode' | 'set_goal' | 'quality_score' | 'editor_context' | 'tool_confirm_response';
+  type: 'send_message' | 'stop' | 'ping' | 'run_command' | 'set_session_mode' | 'set_goal' | 'editor_context' | 'tool_confirm_response';
   messageId?: string;     // for correlation
   content?: string;       // send_message
   mode?: string;          // send_message / set_session_mode: ask / auto-edit / plan / auto
@@ -31,7 +36,6 @@ export interface WsClientMessage {
   completionMode?: 'review' | 'automatic';
   internal?: 'goal';      // send_message: transient Goal runner kick, never shown or persisted as user text
   effort?: boolean;       // send_message
-  score?: number;         // quality_score
   attachments?: Array<{ name: string; path: string; type?: string; size?: number; content?: string }>; // send_message
   parentSessionId?: string; // send_message: parent session for sub-session creation
   command?: string;       // run_command: command name e.g. "init", "clear"
@@ -82,7 +86,11 @@ export interface WsServerMessage {
   taskStatus?: 'completed' | 'failed';
   taskSummary?: string;
   taskResult?: string;
-  artifactId?: string;
-  artifact?: ArtifactRecord;
-  preview?: ArtifactPreview;
+  rootSessionId?: string;
+  revision?: number;
+  team?: TeamRecord;
+  task?: CoordinationTask;
+  coordinationMessage?: CoordinationMessage;
+  lease?: WorkspaceLease;
+  requestedScopes?: string[];
 }

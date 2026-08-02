@@ -1,42 +1,182 @@
+import { t, type TranslationKey } from '../../../i18n/index.js';
 import type { ToolActivityState } from './ToolActivityDelegate.js';
 
+export interface ToolActivityMeta {
+  actionKey: TranslationKey;
+  result: (state: ToolActivityState) => string | null;
+}
+
+const countLines = (content: string): number => content.split('\n').filter(Boolean).length;
+
 /**
- * Tool metadata registry: verb phrase + result-summary extractor for every known tool.
- * Unknown tools get a generated verb from their camelCase name.
+ * Localized metadata for known tools. Tool names, paths, commands, and returned
+ * content remain verbatim; only frontend-authored verbs, summaries, and units
+ * are translated.
  */
-export const TOOL_REGISTRY: Record<string, { verb: string; result: (t: ToolActivityState) => string | null }> = {
-  // ── File tools ──
-  Read:   { verb: 'read',   result: t => { const c = t.result || ''; if (c.startsWith('[Image')) return 'Image file'; return `${c.split('\n').length} lines`; } },
-  Write:  { verb: 'wrote',  result: t => { const c = t.result || ''; const m = c.match(/Successfully wrote (\d+) chars to (.+)/); const path = m?.[2]?.replace(/\\/g, '/').split('/').pop(); return `Wrote ${m?.[1] || '?'} chars` + (path ? ` → ${path}` : ''); } },
-  Edit:   { verb: 'edited', result: () => null },
-  Grep:   { verb: 'searched', result: t => { const c = t.result || ''; if (!c || c === '(no matches)') return 'No matches'; return `${c.split('\n').filter(Boolean).length} matches`; } },
-  Glob:   { verb: 'found',  result: t => { const c = t.result || ''; if (!c || c === '(no matches)') return 'Nothing found'; return `${c.split('\n').filter(Boolean).length} files`; } },
-  Bash:   { verb: 'ran',    result: t => { const c = (t.result || '').trim(); if (!c) return 'Done'; return c.length > 80 ? `${c.split('\n').length} lines output` : c; } },
-  // ── Web tools ──
-  WebSearch: { verb: 'searched', result: t => { const n = ((t.result || '').match(/\[.+\]\(https?:\/\//g) || []).length; return n ? `${n} results` : 'Done'; } },
-  WebFetch:  { verb: 'fetched',  result: t => `Read ${(t.result || '').length} chars` },
-  ApiCall:   { verb: 'called',   result: t => { const c = (t.result || '').trim(); return c ? `${c.length} chars response` : 'Done'; } },
-  // ── Task/Agent tools ──
-  Skill:         { verb: 'used',      result: t => { const c = (t.result || '').trim(); return c ? c.slice(0, 120) : 'Done'; } },
-  SkillList:     { verb: 'listed',    result: t => { const n = (t.result || '').split('\n').filter(Boolean).length; return n ? `${n} skills` : 'Done'; } },
-  SkillInspect:  { verb: 'inspected', result: t => { const c = (t.result || '').trim(); return c ? `${c.split('\n').length} lines` : 'Done'; } },
-  TaskAssign:    { verb: 'assigned',  result: () => 'Task dispatched' },
-  TaskList:      { verb: 'listed',    result: () => 'Tasks listed' },
-  TaskStop:      { verb: 'stopped',   result: () => 'Task stopped' },
-  TaskOutput:    { verb: 'read',      result: t => { const c = (t.result || '').trim(); return c ? `${c.split('\n').length} lines` : 'Done'; } },
-  SubAgentSpawn: { verb: 'delegated', result: () => 'Sub-agent running' },
-  SubAgentDelete:{ verb: 'removed',   result: () => 'Agent removed' },
-  AgentMessage:  { verb: 'messaged',  result: t => { const c = (t.result || '').trim(); return c ? c.slice(0, 80) : 'Sent'; } },
-  HireEmployee:  { verb: 'hired',     result: () => 'Employee created' },
-  ListEmployees: { verb: 'listed',    result: () => 'Employees listed' },
-  UpdateOrg:     { verb: 'updated',   result: () => 'Org chart updated' },
-  // ── Memory tools ──
-  memory_save:   { verb: 'saved',    result: () => 'Memory saved' },
-  memory_search: { verb: 'searched', result: t => { const n = (t.result || '').split('\n').filter(Boolean).length; return n ? `${n} entries` : 'None found'; } },
-  memory_delete: { verb: 'deleted',  result: () => 'Memory deleted' },
-  // ── Misc tools ──
-  NotebookEdit:  { verb: 'edited',   result: () => 'Cell edited' },
-  RestartServer: { verb: 'restarted',result: () => 'Server restarted' },
-  Sleep:         { verb: 'waited',   result: t => { const d = t.toolInput?.seconds || t.toolInput?.duration; return d ? `${d}s` : 'Done'; } },
-  TodoWrite:     { verb: 'updated',  result: () => 'Todo updated' },
+export const TOOL_REGISTRY: Record<string, ToolActivityMeta> = {
+  Read: {
+    actionKey: 'message.tool.action.read',
+    result: state => {
+      const content = state.result || '';
+      if (content.startsWith('[Image')) return t('message.tool.result.imageFile');
+      return t('message.tool.result.lines', { count: content.split('\n').length });
+    },
+  },
+  Write: {
+    actionKey: 'message.tool.action.write',
+    result: state => {
+      const match = (state.result || '').match(/Successfully wrote (\d+) chars to (.+)/);
+      const path = match?.[2]?.replace(/\\/g, '/').split('/').pop();
+      const summary = t('message.tool.result.wroteChars', { count: match?.[1] || '?' });
+      return path ? `${summary} → ${path}` : summary;
+    },
+  },
+  Edit: { actionKey: 'message.tool.action.edit', result: () => null },
+  Grep: {
+    actionKey: 'message.tool.action.search',
+    result: state => {
+      const content = state.result || '';
+      if (!content || content === '(no matches)') return t('message.tool.result.noMatches');
+      return t('message.tool.result.matches', { count: countLines(content) });
+    },
+  },
+  Glob: {
+    actionKey: 'message.tool.action.find',
+    result: state => {
+      const content = state.result || '';
+      if (!content || content === '(no matches)') return t('message.tool.result.nothingFound');
+      return t('message.tool.result.files', { count: countLines(content) });
+    },
+  },
+  Bash: {
+    actionKey: 'message.tool.action.run',
+    result: state => {
+      const content = (state.result || '').trim();
+      if (!content) return t('message.tool.result.done');
+      return content.length > 80
+        ? t('message.tool.result.lines', { count: content.split('\n').length })
+        : content;
+    },
+  },
+  WebSearch: {
+    actionKey: 'message.tool.action.search',
+    result: state => t('message.tool.result.results', {
+      count: ((state.result || '').match(/\[.+\]\(https?:\/\//g) || []).length,
+    }),
+  },
+  WebFetch: {
+    actionKey: 'message.tool.action.fetch',
+    result: state => t('message.tool.result.readChars', { count: (state.result || '').length }),
+  },
+  ApiCall: {
+    actionKey: 'message.tool.action.call',
+    result: state => {
+      const content = (state.result || '').trim();
+      return content
+        ? t('message.tool.result.charsResponse', { count: content.length })
+        : t('message.tool.result.done');
+    },
+  },
+  Skill: {
+    actionKey: 'message.tool.action.use',
+    result: state => (state.result || '').trim().slice(0, 120) || t('message.tool.result.done'),
+  },
+  SkillList: {
+    actionKey: 'message.tool.action.list',
+    result: state => {
+      const count = countLines(state.result || '');
+      return count
+        ? t('message.tool.result.skills', { count })
+        : t('message.tool.result.done');
+    },
+  },
+  SkillInspect: {
+    actionKey: 'message.tool.action.inspect',
+    result: state => {
+      const content = (state.result || '').trim();
+      return content
+        ? t('message.tool.result.lines', { count: content.split('\n').length })
+        : t('message.tool.result.done');
+    },
+  },
+  Organization: {
+    actionKey: 'message.tool.action.manage',
+    result: state => state.toolInput?.action
+      ? t('message.tool.result.operationComplete', { action: String(state.toolInput.action) })
+      : t('message.tool.result.operationCompleteGeneric'),
+  },
+  Team: {
+    actionKey: 'message.tool.action.manage',
+    result: state => state.toolInput?.action
+      ? t('message.tool.result.operationComplete', { action: String(state.toolInput.action) })
+      : t('message.tool.result.operationCompleteGeneric'),
+  },
+  Task: {
+    actionKey: 'message.tool.action.manage',
+    result: state => {
+      const action = String(state.toolInput?.action || '');
+      if (action === 'spawn') return t('message.tool.result.subAgentStarted');
+      if (action === 'output') {
+        const content = (state.result || '').trim();
+        return content
+          ? t('message.tool.result.lines', { count: content.split('\n').length })
+          : t('message.tool.result.done');
+      }
+      return action
+        ? t('message.tool.result.operationComplete', { action })
+        : t('message.tool.result.operationCompleteGeneric');
+    },
+  },
+  JobList: {
+    actionKey: 'message.tool.action.list',
+    result: () => t('message.tool.result.jobsListed'),
+  },
+  JobOutput: {
+    actionKey: 'message.tool.action.read',
+    result: () => t('message.tool.result.jobOutputLoaded'),
+  },
+  JobStop: {
+    actionKey: 'message.tool.action.stop',
+    result: () => t('message.tool.result.jobStopped'),
+  },
+  AgentMessage: {
+    actionKey: 'message.tool.action.message',
+    result: state => (state.result || '').trim().slice(0, 80) || t('message.tool.result.sent'),
+  },
+  memory_save: {
+    actionKey: 'message.tool.action.save',
+    result: () => t('message.tool.result.memorySaved'),
+  },
+  memory_search: {
+    actionKey: 'message.tool.action.search',
+    result: state => {
+      const count = countLines(state.result || '');
+      return count
+        ? t('message.tool.result.entries', { count })
+        : t('message.tool.result.noneFound');
+    },
+  },
+  memory_delete: {
+    actionKey: 'message.tool.action.delete',
+    result: () => t('message.tool.result.memoryDeleted'),
+  },
+  NotebookEdit: {
+    actionKey: 'message.tool.action.edit',
+    result: () => t('message.tool.result.cellEdited'),
+  },
+  RestartServer: {
+    actionKey: 'message.tool.action.restart',
+    result: () => t('message.tool.result.serverRestarted'),
+  },
+  Sleep: {
+    actionKey: 'message.tool.action.wait',
+    result: state => {
+      const duration = state.toolInput?.seconds || state.toolInput?.duration;
+      return duration ? `${duration}s` : t('message.tool.result.done');
+    },
+  },
+  TodoWrite: {
+    actionKey: 'message.tool.action.update',
+    result: () => t('message.tool.result.todoUpdated'),
+  },
 };

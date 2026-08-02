@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-07-07",
+  "updated": "2026-08-01",
   "purpose": "AnoClaw agent-readable knowledge base. Supplements skills and memory with durable product, plugin, API, architecture, design, and troubleshooting references.",
   "entries": [
     {
@@ -51,6 +51,13 @@
       "audience": ["designer", "developer", "agent"],
       "tags": ["ui", "design", "tokens", "iframe", "brand"],
       "summary": "How to build plugin frontends with tokens, shared UI, and design presets."
+    },
+    {
+      "path": "docs/github-development-workflow.md",
+      "title": "GitHub 协作开发规范",
+      "audience": ["developer", "maintainer", "agent"],
+      "tags": ["github", "issue", "branch", "commit", "pull-request", "review", "release"],
+      "summary": "Project rules for Issue-driven development, branches, commits, pull requests, reviews, automation, releases, and repository protection."
     },
     {
       "path": "docs/troubleshooting.md",

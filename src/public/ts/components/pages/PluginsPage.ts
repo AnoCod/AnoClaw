@@ -3,6 +3,7 @@
 
 import { PluginViewModel } from '../../viewmodel/PluginViewModel.js';
 import type { Page, PluginInfo } from '../../types.js';
+import { onLocaleChange, t } from '../../i18n/index.js';
 
 const SVG_PLUGIN = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2l9 4.5v11L12 22l-9-4.5v-11L12 2z"/><rect x="8" y="10" width="8" height="8" rx="1.5"/></svg>`;
 const SVG_TOGGLE_ON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a11 11 0 110 22 11 11 0 010-22z"/><circle cx="12" cy="12" r="5"/></svg>`;
@@ -14,6 +15,7 @@ export class PluginsPage implements Page {
   readonly name = 'plugins';
   readonly container: HTMLElement;
   private _vm: PluginViewModel;
+  private _active = false;
 
   constructor(vm: PluginViewModel) {
     this._vm = vm;
@@ -21,9 +23,13 @@ export class PluginsPage implements Page {
     this.container.className = 'cinema-static-page';
     this.container.setAttribute('data-page', 'plugins');
     this.container.style.display = 'none';
+    onLocaleChange(() => {
+      if (this._active) this._render();
+    });
   }
 
   onEnter(): void {
+    this._active = true;
     console.log('[Plugins] onEnter — loading plugins');
     this._render();
     this._vm.load().then(() => this._render());
@@ -31,6 +37,7 @@ export class PluginsPage implements Page {
   }
 
   onExit(): void {
+    this._active = false;
     this._vm.off('pluginsChanged', this._onChange);
   }
 
@@ -41,26 +48,30 @@ export class PluginsPage implements Page {
     const plugins = this._vm.plugins;
     const activatedCount = plugins.filter(p => p.status === 'activated').length;
     const errorCount = plugins.filter(p => p.status === 'error').length;
+    const errors = errorCount > 0 ? t('plugins.summaryErrors', { count: errorCount }) : '';
 
     this.container.innerHTML = `
       <div class="cinema-static-inner">
         <div class="plugins-workbench-head">
           <div class="plugins-workbench-title">
-            <div class="plugins-kicker">Extensions</div>
+            <div class="plugins-kicker">${t('plugins.title')}</div>
             <div class="plugins-summary">
-              ${plugins.length} installed &middot; ${activatedCount} active${errorCount > 0 ? ` &middot; ${errorCount} error` : ''}
+              ${t('plugins.summary', { installed: plugins.length, active: activatedCount, errors })}
             </div>
           </div>
-          <div class="plugins-status-strip" aria-label="Plugin status summary">
-            <span class="plugins-status-pill plugins-status-pill-active">${activatedCount} active</span>
-            ${errorCount > 0 ? `<span class="plugins-status-pill plugins-status-pill-error">${errorCount} error</span>` : ''}
+          <div class="plugins-status-strip" aria-label="${t('plugins.statusSummary')}">
+            <span class="plugins-status-pill plugins-status-pill-active">${t('plugins.activeCount', { count: activatedCount })}</span>
+            ${errorCount > 0 ? `<span class="plugins-status-pill plugins-status-pill-error">${t('plugins.errorCount', { count: errorCount })}</span>` : ''}
           </div>
+        </div>
+        <div role="note" style="margin:0 0 14px;padding:10px 12px;border:1px solid rgba(255,197,51,.28);border-radius:6px;color:var(--color-text-secondary,#cdcdcd);font-size:11px;line-height:1.5;background:rgba(255,197,51,.05);">
+          ${t('plugins.securityNotice')}
         </div>
         ${plugins.length === 0 ? `
           <div class="plugins-empty-state">
             <span class="plugins-empty-icon">${SVG_PLUGIN}</span>
-            <span class="plugins-empty-text">No plugins installed</span>
-            <span class="plugins-empty-hint">Place plugins in the <code>plugins/</code> directory</span>
+            <span class="plugins-empty-text">${t('plugins.emptyTitle')}</span>
+            <span class="plugins-empty-hint">${t('plugins.emptyHint')}</span>
           </div>
         ` : `
           <div class="plugins-grid">
@@ -82,13 +93,13 @@ export class PluginsPage implements Page {
         ? '<span class="plg-status-dot error"></span>'
         : '<span class="plg-status-dot"></span>';
 
-    const desc = p.description || `Plugin: ${p.name}`;
+    const desc = p.description || t('plugins.fallbackDescription', { name: p.name });
     const toolCount = p.contributes?.tools?.length || 0;
     const pageCount = p.contributes?.pages?.length || 0;
 
     let meta = `v${this._esc(p.version)}`;
-    if (toolCount > 0) meta += ` &middot; ${toolCount} tool${toolCount > 1 ? 's' : ''}`;
-    if (pageCount > 0) meta += ` &middot; ${pageCount} page${pageCount > 1 ? 's' : ''}`;
+    if (toolCount > 0) meta += ` &middot; ${t(toolCount === 1 ? 'plugins.tools.one' : 'plugins.tools.many', { count: toolCount })}`;
+    if (pageCount > 0) meta += ` &middot; ${t(pageCount === 1 ? 'plugins.pages.one' : 'plugins.pages.many', { count: pageCount })}`;
 
     return `
       <div class="plg-card plg-row-card" data-plugin="${this._esc(p.name)}" data-plugin-status="${this._esc(p.status)}">
@@ -103,13 +114,13 @@ export class PluginsPage implements Page {
             <div class="plg-card-meta">${meta}</div>
           </div>
           <div class="plg-card-actions">
-            <button class="plg-btn plg-btn-toggle" data-action="toggle" data-plugin="${this._esc(p.name)}" title="${isActive ? 'Deactivate' : 'Activate'}">
+            <button class="plg-btn plg-btn-toggle" data-action="toggle" data-plugin="${this._esc(p.name)}" title="${isActive ? t('plugins.deactivate') : t('plugins.activate')}">
               ${isActive ? SVG_TOGGLE_ON : SVG_TOGGLE_OFF}
             </button>
-            <button class="plg-btn plg-btn-reload" data-action="reload" data-plugin="${this._esc(p.name)}" title="Reload">
+            <button class="plg-btn plg-btn-reload" data-action="reload" data-plugin="${this._esc(p.name)}" title="${t('plugins.reload')}">
               ${SVG_RELOAD}
             </button>
-            <button class="plg-btn plg-btn-delete" data-action="uninstall" data-plugin="${this._esc(p.name)}" title="Uninstall">
+            <button class="plg-btn plg-btn-delete" data-action="uninstall" data-plugin="${this._esc(p.name)}" title="${t('plugins.uninstall')}">
               ${SVG_TRASH}
             </button>
           </div>
@@ -139,7 +150,7 @@ export class PluginsPage implements Page {
               await this._vm.reloadPlugin(name);
               break;
             case 'uninstall':
-              if (confirm(`Uninstall plugin "${name}"? This moves it to a .disabled directory.`)) {
+              if (confirm(t('plugins.uninstallConfirm', { name }))) {
                 await this._vm.uninstallPlugin(name);
               }
               break;

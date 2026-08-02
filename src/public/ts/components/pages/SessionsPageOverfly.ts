@@ -4,10 +4,9 @@
 
 import { App } from '../../app.js';
 import { handlePathClick } from '../../utils/ClickablePathHandler.js';
-import { BackgroundTasksTab } from '../tabs/BackgroundTasksTab.js';
 import { ToastManager } from '../../ToastManager.js';
 import { slotRegistry } from '../../SlotRegistry.js';
-import { ArtifactPanel } from './ArtifactPanel.js';
+import { onLocaleChange, t } from '../../i18n/index.js';
 
 export class SessionsPageOverfly {
   private _panel: HTMLElement | null = null;
@@ -15,13 +14,22 @@ export class SessionsPageOverfly {
   private _activeSessionId: string | null = null;
   private _workspacePath: string = '';
   private _clickHandler: ((e: MouseEvent) => void) | null = null;
-  private _artifactPanel: ArtifactPanel | null = null;
+  private _outsideClickHandler: ((e: MouseEvent) => void) | null = null;
+  private _outsideClickTimer: ReturnType<typeof setTimeout> | null = null;
+  private _onClose: (() => void) | null;
+
+  constructor(onClose?: () => void) {
+    this._onClose = onClose || null;
+    onLocaleChange(() => {
+      if (this._currentPanel) this.show(this._currentPanel, this._activeSessionId, this._workspacePath);
+    });
+  }
 
   get isOpen(): boolean { return this._panel !== null; }
 
   show(panel: string, activeSessionId: string | null, workspacePath?: string): void {
     console.log('[Overfly] show panel:', panel, 'session:', activeSessionId);
-    this.close();
+    this.close(false);
 
     this._currentPanel = panel;
     this._activeSessionId = activeSessionId;
@@ -50,9 +58,7 @@ export class SessionsPageOverfly {
 
     switch (panel) {
       case 'overview': this._renderOverviewPanel(overfly, activeSessionId); break;
-      case 'artifacts': this._renderArtifactsPanel(overfly, activeSessionId); break;
       case 'plan': this._renderPlanPanel(overfly); break;
-      case 'tasks': this._renderTasksPanel(overfly, activeSessionId); break;
       default:
         this.close();
         return;
@@ -60,10 +66,11 @@ export class SessionsPageOverfly {
 
 
     // and streaming DOM updates don't spuriously trigger close.
-    setTimeout(() => {
-      const onOutsideClick = (e: MouseEvent) => {
+    this._outsideClickTimer = setTimeout(() => {
+      this._outsideClickTimer = null;
+      this._outsideClickHandler = (e: MouseEvent) => {
         if (!this._panel) {
-          document.removeEventListener('click', onOutsideClick);
+          this._removeOutsideClickHandler();
           return;
         }
         // Grace period: ignore clicks in the first 300ms (panel still rendering)
@@ -75,24 +82,41 @@ export class SessionsPageOverfly {
           this.close();
         }
       };
-      document.addEventListener('click', onOutsideClick);
+      document.addEventListener('click', this._outsideClickHandler);
     }, 0);
   }
 
-  close(): void {
+  close(notify = true): void {
     console.log('[Overfly] close');
-    if (this._artifactPanel) { this._artifactPanel.dispose(); this._artifactPanel = null; }
-    if (this._panel) { this._panel.remove(); this._panel = null; }
+    const wasOpen = this._panel !== null;
+    this._removeOutsideClickHandler();
+    if (this._panel) {
+      if (this._clickHandler) this._panel.removeEventListener('click', this._clickHandler);
+      this._panel.remove();
+      this._panel = null;
+    }
+    this._clickHandler = null;
     this._currentPanel = null;
     this._activeSessionId = null;
+    if (wasOpen && notify) this._onClose?.();
   }
 
+  private _removeOutsideClickHandler(): void {
+    if (this._outsideClickTimer) {
+      clearTimeout(this._outsideClickTimer);
+      this._outsideClickTimer = null;
+    }
+    if (this._outsideClickHandler) {
+      document.removeEventListener('click', this._outsideClickHandler);
+      this._outsideClickHandler = null;
+    }
+  }
 
 
   private _renderOverviewPanel(overfly: HTMLElement, activeSessionId: string | null): void {
     const title = document.createElement('div');
     title.className = 'cinema-overfly-title';
-    title.textContent = 'Session Overview';
+    title.textContent = t('overview.title');
     overfly.appendChild(title);
 
     const convVM = App.getInstance().conversationVM;
@@ -106,11 +130,11 @@ export class SessionsPageOverfly {
     };
 
     const items = [
-      { label: 'Messages', value: stats.messages },
-      { label: 'User Messages', value: stats.users },
-      { label: 'Tool Calls', value: stats.tools },
-      { label: 'Thinking Steps', value: stats.thinks },
-      { label: 'Session ID', value: activeSessionId?.slice(0, 8) || '-', mono: true },
+      { label: t('overview.messages'), value: stats.messages },
+      { label: t('overview.userMessages'), value: stats.users },
+      { label: t('overview.toolCalls'), value: stats.tools },
+      { label: t('overview.thinkingSteps'), value: stats.thinks },
+      { label: t('overview.sessionId'), value: activeSessionId?.slice(0, 8) || '-', mono: true },
     ];
 
     for (const item of items) {
@@ -125,18 +149,10 @@ export class SessionsPageOverfly {
     }
   }
 
-  private _renderArtifactsPanel(overfly: HTMLElement, activeSessionId: string | null): void {
-    const host = document.createElement('div');
-    overfly.appendChild(host);
-    this._artifactPanel = new ArtifactPanel(host, activeSessionId);
-  }
-
-
-
   private _renderPlanPanel(overfly: HTMLElement): void {
     const title = document.createElement('div');
     title.className = 'cinema-overfly-title';
-    title.textContent = 'Plan';
+    title.textContent = t('plan.title');
     overfly.appendChild(title);
 
     const convVM = App.getInstance().conversationVM;
@@ -149,7 +165,7 @@ export class SessionsPageOverfly {
     if (!todos.length && !latestPlanBoundary) {
       const empty = document.createElement('div');
       empty.style.cssText = 'color:var(--cinema-text-welcome-desc);font-size:11px;padding:12px;text-align:center;';
-      empty.textContent = 'No active plan';
+      empty.textContent = t('plan.none');
       overfly.appendChild(empty);
       return;
     }
@@ -159,8 +175,8 @@ export class SessionsPageOverfly {
       row.style.cssText = 'display:flex;gap:8px;align-items:flex-start;padding:4px 0;font-size:11px;';
       const isExit = latestPlanBoundary.type === 'plan_exit';
       row.innerHTML = `
-        <span style="color:${isExit ? 'var(--cinema-text-muted)' : 'var(--color-success)'}">${isExit ? '[done]' : '[active]'}</span>
-        <span style="color:var(--cinema-text-overlay)">${_esc(isExit ? 'Plan mode exited' : (latestPlanBoundary.planTitle || latestPlanBoundary.content || 'Plan mode active'))}</span>
+        <span style="color:${isExit ? 'var(--cinema-text-muted)' : 'var(--color-success)'}">${isExit ? t('plan.done') : t('plan.active')}</span>
+        <span style="color:var(--cinema-text-overlay)">${_esc(isExit ? t('plan.exited') : (latestPlanBoundary.planTitle || latestPlanBoundary.content || t('plan.modeActive')))}</span>
       `;
       overfly.appendChild(row);
     }
@@ -176,20 +192,6 @@ export class SessionsPageOverfly {
       `;
       overfly.appendChild(row);
     }
-  }
-
-
-
-  private _renderTasksPanel(overfly: HTMLElement, activeSessionId: string | null): void {
-    const title = document.createElement('div');
-    title.className = 'cinema-overfly-title';
-    title.textContent = 'Background Tasks';
-    overfly.appendChild(title);
-
-    const container = document.createElement('div');
-    overfly.appendChild(container);
-
-    new BackgroundTasksTab(container, activeSessionId || '');
   }
 }
 

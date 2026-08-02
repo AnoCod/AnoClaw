@@ -1,0 +1,105 @@
+.ag-team-badge {
+  font-size: 7px;
+  font-weight: 700;
+  fill: #4ade80;
+  pointer-events: none;
+}
+
+.ag-team-badge-running { fill: #60a5fa; }
+.ag-team-badge-blocked,
+.ag-team-badge-failed { fill: #f87171; }
+.ag-team-badge-pending,
+.ag-team-badge-claimed { fill: #fbbf24; }
+
+.coordination-transcript-card {
+  --coordination-accent: var(--cinema-text-muted);
+  margin: 8px 0 14px;
+  padding: 11px 13px;
+  border: 1px solid var(--hairline-cinema);
+  border-left: 3px solid var(--coordination-accent);
+  border-radius: 6px;
+  background: var(--cinema-bg-card);
+  color: var(--cinema-text-overlay);
+}
+
+.coordination-transcript-card--info { --coordination-accent: #60a5fa; }
+.coordination-transcript-card--pending { --coordination-accent: #fbbf24; }
+.coordination-transcript-card--success { --coordination-accent: #4ade80; }
+.coordination-transcript-card--warning { --coordination-accent: #fb923c; }
+.coordination-transcript-card--error { --coordination-accent: #f87171; }
+
+.coordination-transcript-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.coordination-transcript-heading {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.coordination-transcript-heading strong {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.coordination-transcript-category,
+.coordination-transcript-status,
+.coordination-transcript-route,
+.coordination-transcript-footer {
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: var(--cinema-text-muted);
+}
+
+.coordination-transcript-category {
+  text-transform: uppercase;
+}
+
+.coordination-transcript-status {
+  flex: 0 0 auto;
+  max-width: 45%;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--coordination-accent) 42%, transparent);
+  border-radius: 999px;
+  color: var(--coordination-accent);
+  text-align: right;
+}
+
+.coordination-transcript-route {
+  margin-top: 7px;
+  overflow-wrap: anywhere;
+}
+
+.coordination-transcript-body {
+  margin-top: 9px;
+  color: var(--cinema-text-welcome-desc);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.coordination-transcript-body > :first-child { margin-top: 0; }
+.coordination-transcript-body > :last-child { margin-bottom: 0; }
+
+.coordination-transcript-footer {
+  margin-top: 9px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 620px) {
+  .coordination-transcript-header {
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .coordination-transcript-status {
+    max-width: 100%;
+    text-align: left;
+  }
+}

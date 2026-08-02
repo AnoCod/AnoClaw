@@ -12,6 +12,7 @@ src/public/css/bundle.css
 # Electron packaging output
 release*/
 out/
+/.artifacts/
 
 # Runtime state and local user data
 /data/

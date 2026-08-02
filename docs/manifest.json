@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-08-01",
+  "updated": "2026-08-02",
   "purpose": "AnoClaw agent-readable knowledge base. Supplements skills and memory with durable product, plugin, API, architecture, design, and troubleshooting references.",
   "entries": [
     {
@@ -58,6 +58,13 @@
       "audience": ["developer", "maintainer", "agent"],
       "tags": ["github", "issue", "branch", "commit", "pull-request", "review", "release"],
       "summary": "Project rules for Issue-driven development, branches, commits, pull requests, reviews, automation, releases, and repository protection."
+    },
+    {
+      "path": "docs/release-qualification.md",
+      "title": "Windows 发布验收",
+      "audience": ["developer", "maintainer", "agent"],
+      "tags": ["release", "windows", "electron", "installer", "e2e", "artifact"],
+      "summary": "Release artifact contract, packaged and installed app E2E coverage, CI evidence, and publication gates."
     },
     {
       "path": "docs/troubleshooting.md",

@@ -23,6 +23,7 @@ declare global {
     saveSetup: (data: Record<string, unknown>) => Promise<{ ok: boolean; error?: string }>;
     setupDone: () => void;
     quitSetup: () => void;
+    wvRegisterWindowSession: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
     wvCreate: (url: string, options?: { sessionId?: string; workspacePath?: string }) => Promise<{ viewId: string | null; error?: string }>;
     wvSetMetadata: (viewId: string, options?: { sessionId?: string; workspacePath?: string }) => Promise<{ ok: boolean; error?: string }>;
     wvNavigate: (viewId: string, url: string) => Promise<{ ok: boolean; error?: string }>;

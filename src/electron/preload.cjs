@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   quitSetup: () => ipcRenderer.send('quit-setup'),
 
   // ── WebContentsView management ──
+  wvRegisterWindowSession: (sessionId) => ipcRenderer.invoke('wv-register-window-session', sessionId),
   wvCreate: (url, options) => ipcRenderer.invoke('wv-create', url, options),
   wvSetMetadata: (viewId, options) => ipcRenderer.invoke('wv-set-metadata', viewId, options),
   wvNavigate: (viewId, url) => ipcRenderer.invoke('wv-navigate', viewId, url),

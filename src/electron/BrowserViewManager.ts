@@ -5,13 +5,15 @@
 // Dependencies (WindowManager getter + BrowserWindow ref) are injected via init()
 // rather than lazy-required, so this module has no hidden coupling to WindowManager.
 
-import { WebContentsView, BrowserWindow } from 'electron';
-import type { WebContents } from 'electron';
+import { WebContentsView } from 'electron';
+import type { BrowserWindow, WebContents } from 'electron';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 interface ViewEntry {
   view: WebContentsView;
+  ownerWindow: BrowserWindow | null;
+  ownerKind: 'user' | 'agent';
   bounds: { x: number; y: number; w: number; h: number };
   createdAt: number;
   sessionId?: string;
@@ -36,6 +38,7 @@ interface BrowserViewState {
 interface BrowserViewOptions {
   sessionId?: string;
   workspacePath?: string;
+  ownerKind?: 'user' | 'agent';
 }
 
 interface BrowserNetworkStart {
@@ -133,6 +136,7 @@ export class BrowserViewManager {
   private _pendingPermissions = new Map<string, { callback: (allowed: boolean) => void; timer: NodeJS.Timeout; viewId: string; permission: string; url?: string }>();
   private _maxViews = 20;
   private _getMainWindow: (() => BrowserWindow | null) | null = null;
+  private _windowSessions = new Map<number, { window: BrowserWindow; sessionId: string }>();
 
   static getInstance(): BrowserViewManager {
     if (!_instance) _instance = new BrowserViewManager();
@@ -148,13 +152,22 @@ export class BrowserViewManager {
 
 
 
-  create(url: string, options: BrowserViewOptions = {}): string {
+  create(url: string, options: BrowserViewOptions = {}, requestedOwner?: BrowserWindow | null): string {
     if (this._views.size >= this._maxViews) {
       throw new Error(`BrowserView limit reached (max ${this._maxViews})`);
     }
     const viewId = `wv_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    const ownerWindow = requestedOwner
+      ?? this._windowForSession(options.sessionId)
+      ?? this._getMainWindow?.()
+      ?? null;
     const view = new WebContentsView({
-      webPreferences: { sandbox: false, nodeIntegration: false, contextIsolation: true },
+      webPreferences: {
+        sandbox: true,
+        nodeIntegration: false,
+        contextIsolation: true,
+        partition: browserPartitionForSession(options.sessionId),
+      },
     });
     const webContents = view.webContents;
     const webContentsId = webContents.id;
@@ -163,13 +176,14 @@ export class BrowserViewManager {
       return { action: 'deny' };
     });
 
-    const mainWin = this._getMainWindow?.() ?? null;
-    if (mainWin?.contentView) mainWin.contentView.addChildView(view);
+    if (ownerWindow?.contentView) ownerWindow.contentView.addChildView(view);
     view.setVisible(false);
     view.setBounds({ x: 0, y: 0, width: 1, height: 1 }); // hidden until positioned
 
     this._views.set(viewId, {
       view,
+      ownerWindow,
+      ownerKind: options.ownerKind || 'user',
       bounds: { x: 0, y: 0, w: 0, h: 0 },
       createdAt: Date.now(),
       sessionId: options.sessionId,
@@ -231,9 +245,8 @@ export class BrowserViewManager {
     this._dropPendingPermissionsForView(viewId);
     this._views.delete(viewId);
     if (typeof webContentsId === 'number') this._webContentsToViewId.delete(webContentsId);
-    const mainWin = this._getMainWindow?.() ?? null;
-    if (mainWin?.contentView) {
-      try { mainWin.contentView.removeChildView(entry.view); } catch {}
+    if (entry.ownerWindow?.contentView) {
+      try { entry.ownerWindow.contentView.removeChildView(entry.view); } catch {}
     }
     try {
       if (webContents && !webContents.isDestroyed?.()) webContents.close();
@@ -243,9 +256,45 @@ export class BrowserViewManager {
 
   setMetadata(viewId: string, options: BrowserViewOptions): void {
     const entry = this._views.get(viewId);
-    if (!entry) return;
-    if (options.sessionId !== undefined) entry.sessionId = options.sessionId;
+    if (!entry) throw new Error(`View ${viewId} not found`);
+    if (options.sessionId !== undefined) {
+      if (entry.sessionId && options.sessionId !== entry.sessionId) {
+        throw new Error(`View ${viewId} belongs to another session`);
+      }
+      entry.sessionId = options.sessionId;
+    }
     if (options.workspacePath !== undefined) entry.workspacePath = options.workspacePath;
+  }
+
+  registerWindowSession(window: BrowserWindow, sessionId: string): void {
+    const windowId = Number(window.webContents?.id);
+    if (!Number.isFinite(windowId)) return;
+    this._windowSessions.delete(windowId);
+    if (!sessionId) {
+      return;
+    }
+    for (const [registeredWindowId, registration] of this._windowSessions.entries()) {
+      if (registration.sessionId === sessionId) this._windowSessions.delete(registeredWindowId);
+    }
+    this._windowSessions.set(windowId, { window, sessionId });
+  }
+
+  isOwnedByWindow(viewId: string, window: BrowserWindow | null): boolean {
+    if (!window) return false;
+    return this._views.get(viewId)?.ownerWindow === window;
+  }
+
+  isOwnedBySession(viewId: string, sessionId: string, ownerKind?: 'user' | 'agent'): boolean {
+    const entry = this._views.get(viewId);
+    return Boolean(sessionId)
+      && entry?.sessionId === sessionId
+      && (ownerKind === undefined || entry.ownerKind === ownerKind);
+  }
+
+  isPermissionOwnedByWindow(eventId: string, window: BrowserWindow | null): boolean {
+    const pending = this._pendingPermissions.get(eventId);
+    if (!pending) return false;
+    return this.isOwnedByWindow(pending.viewId, window);
   }
 
   get(viewId: string): WebContentsView | null {
@@ -266,15 +315,17 @@ export class BrowserViewManager {
   }
 
   /** Return all view IDs, newest first. */
-  allIds(): string[] {
+  allIds(sessionId?: string, ownerKind?: 'user' | 'agent'): string[] {
     return [...this._views.entries()]
+      .filter(([, entry]) => (sessionId === undefined || entry.sessionId === sessionId)
+        && (ownerKind === undefined || entry.ownerKind === ownerKind))
       .sort((a, b) => b[1].createdAt - a[1].createdAt)
       .map(([id]) => id);
   }
 
   /** Return all view info entries for listing. */
-  allEntries(): Array<{ id: string; url: string; title: string }> {
-    return this.allIds().map(id => ({
+  allEntries(sessionId?: string, ownerKind?: 'user' | 'agent'): Array<{ id: string; url: string; title: string }> {
+    return this.allIds(sessionId, ownerKind).map(id => ({
       id,
       url: this.getUrl(id),
       title: this.getTitle(id),
@@ -361,9 +412,8 @@ export class BrowserViewManager {
   devTools(viewId: string): void { this.get(viewId)?.webContents.openDevTools(); }
 
   emitAgentBrowserEvent(event: AgentBrowserEvent): void {
-    const mainWin = this._getMainWindow?.() ?? null;
-    if (!mainWin || mainWin.isDestroyed()) return;
-    mainWin.webContents.send('agent-browser-event', event);
+    const ownerWindow = this._views.get(event.viewId)?.ownerWindow ?? this._windowForSession(event.sessionId);
+    this._sendToWindow(ownerWindow, 'agent-browser-event', event);
   }
 
 
@@ -494,9 +544,7 @@ export class BrowserViewManager {
 
   private _emit(viewId: string, type: string, extra?: Record<string, unknown>): void {
     if (!this._views.has(viewId)) return;
-    const mainWin = this._getMainWindow?.() ?? null;
-    if (!mainWin || mainWin.isDestroyed()) return;
-    mainWin.webContents.send('wv-state-change', { viewId, type, ...(this.getState(viewId) || {}), ...(extra || {}) });
+    this._sendToOwner(viewId, 'wv-state-change', { viewId, type, ...(this.getState(viewId) || {}), ...(extra || {}) });
   }
 
   private _recordConsoleMessage(viewId: string, args: any[]): void {
@@ -549,9 +597,7 @@ export class BrowserViewManager {
       finalUpdate: Boolean(result?.finalUpdate),
       selectionArea: result?.selectionArea,
     };
-    const mainWin = this._getMainWindow?.() ?? null;
-    if (!mainWin || mainWin.isDestroyed()) return;
-    mainWin.webContents.send('wv-find-result', event);
+    this._sendToOwner(viewId, 'wv-find-result', event);
   }
 
   private _ensureNetworkHook(session: object): void {
@@ -705,16 +751,12 @@ export class BrowserViewManager {
 
   private _emitNetwork(event: BrowserNetworkEvent): void {
     if (!this._views.has(event.viewId)) return;
-    const mainWin = this._getMainWindow?.() ?? null;
-    if (!mainWin || mainWin.isDestroyed()) return;
-    mainWin.webContents.send('wv-network', event);
+    this._sendToOwner(event.viewId, 'wv-network', event);
   }
 
   private _emitSecurity(event: BrowserSecurityEvent): void {
     if (!this._views.has(event.viewId)) return;
-    const mainWin = this._getMainWindow?.() ?? null;
-    if (!mainWin || mainWin.isDestroyed()) return;
-    mainWin.webContents.send('wv-security', event);
+    this._sendToOwner(event.viewId, 'wv-security', event);
   }
 
   private _handlePopup(viewId: string, popupUrl: string, view: WebContentsView): void {
@@ -743,9 +785,28 @@ export class BrowserViewManager {
 
   private _emitDownload(event: BrowserDownloadEvent): void {
     if (!this._views.has(event.viewId)) return;
-    const mainWin = this._getMainWindow?.() ?? null;
-    if (!mainWin || mainWin.isDestroyed()) return;
-    mainWin.webContents.send('wv-download', event);
+    this._sendToOwner(event.viewId, 'wv-download', event);
+  }
+
+  private _windowForSession(sessionId?: string): BrowserWindow | null {
+    if (!sessionId) return null;
+    for (const [windowId, registration] of [...this._windowSessions.entries()]) {
+      if (registration.window.isDestroyed()) {
+        this._windowSessions.delete(windowId);
+        continue;
+      }
+      if (registration.sessionId === sessionId) return registration.window;
+    }
+    return null;
+  }
+
+  private _sendToOwner(viewId: string, channel: string, payload: unknown): void {
+    this._sendToWindow(this._views.get(viewId)?.ownerWindow ?? null, channel, payload);
+  }
+
+  private _sendToWindow(window: BrowserWindow | null | undefined, channel: string, payload: unknown): void {
+    if (!window || window.isDestroyed()) return;
+    window.webContents.send(channel, payload);
   }
 
   private _safeWebContents(entry: ViewEntry): WebContents | null {
@@ -769,6 +830,16 @@ export class BrowserViewManager {
     if (!url) return false;
     return !/^(https?:|file:|about:|data:|blob:|view-source:)/i.test(url);
   }
+}
+
+function browserPartitionForSession(sessionId?: string): string {
+  const identity = sessionId || 'default';
+  let hash = 2166136261;
+  for (let i = 0; i < identity.length; i++) {
+    hash ^= identity.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `persist:anoclaw-browser-${(hash >>> 0).toString(16)}`;
 }
 
 function sanitizeDownloadFilename(filename: string): string {

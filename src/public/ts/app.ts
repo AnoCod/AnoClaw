@@ -117,9 +117,11 @@ class App {
     this._sessionVM.on('sessionSelected', (node: unknown) => {
       const n = node as { id: string };
       this._conversationVM.setActiveSession(n.id);
+      void (window as any).electronAPI?.wvRegisterWindowSession?.(n.id);
     });
     this._sessionVM.on('sessionDeselected', () => {
       this._conversationVM.setActiveSession(null);
+      void (window as any).electronAPI?.wvRegisterWindowSession?.('');
     });
     this._sessionVM.on('sessionsRemoved', (removed: unknown) => {
       for (const sessionId of removed as string[]) {

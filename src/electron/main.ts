@@ -146,101 +146,131 @@ export async function createApp(electron: typeof import('electron')) {
 
   // ── WebContentsView management IPC (delegates to BrowserViewManager) ──
   const bvm = BrowserViewManager.getInstance();
+  const rendererOwnsView = (event: IpcMainInvokeEvent, viewId: string): boolean =>
+    bvm.isOwnedByWindow(viewId, BW.fromWebContents(event.sender));
+  const viewOwnershipError = { ok: false, error: 'Browser view belongs to another window' } as const;
 
-  ipcMain.handle('wv-create', async (_e: IpcMainInvokeEvent, url: string, options?: { sessionId?: string; workspacePath?: string }) => {
-    try { return { viewId: bvm.create(url, options || {}) }; }
+  ipcMain.handle('wv-register-window-session', (event: IpcMainInvokeEvent, sessionId: string) => {
+    const ownerWindow = BW.fromWebContents(event.sender);
+    if (!ownerWindow) return { ok: false, error: 'Renderer window not found' };
+    bvm.registerWindowSession(ownerWindow, String(sessionId || ''));
+    return { ok: true };
+  });
+
+  ipcMain.handle('wv-create', async (event: IpcMainInvokeEvent, url: string, options?: { sessionId?: string; workspacePath?: string }) => {
+    try { return { viewId: bvm.create(url, options || {}, BW.fromWebContents(event.sender)) }; }
     catch (err) { return { viewId: null, error: String(err) }; }
   });
 
-  ipcMain.handle('wv-set-metadata', async (_e: IpcMainInvokeEvent, viewId: string, options?: { sessionId?: string; workspacePath?: string }) => {
+  ipcMain.handle('wv-set-metadata', async (event: IpcMainInvokeEvent, viewId: string, options?: { sessionId?: string; workspacePath?: string }) => {
+    if (!rendererOwnsView(event, viewId)) return viewOwnershipError;
     try { bvm.setMetadata(viewId, options || {}); return { ok: true }; }
     catch (err) { return { ok: false, error: String(err) }; }
   });
 
-  ipcMain.handle('wv-navigate', async (_e: IpcMainInvokeEvent, viewId: string, url: string) => {
+  ipcMain.handle('wv-navigate', async (event: IpcMainInvokeEvent, viewId: string, url: string) => {
+    if (!rendererOwnsView(event, viewId)) return viewOwnershipError;
     try { bvm.navigate(viewId, url); return { ok: true }; }
     catch (err) { return { ok: false, error: String(err) }; }
   });
 
-  ipcMain.handle('wv-set-bounds', (_e: IpcMainInvokeEvent, viewId: string, x: number, y: number, w: number, h: number) => {
+  ipcMain.handle('wv-set-bounds', (event: IpcMainInvokeEvent, viewId: string, x: number, y: number, w: number, h: number) => {
+    if (!rendererOwnsView(event, viewId)) return viewOwnershipError;
     bvm.setBounds(viewId, x, y, w, h);
     return { ok: true };
   });
 
-  ipcMain.handle('wv-destroy', (_e: IpcMainInvokeEvent, viewId: string) => {
+  ipcMain.handle('wv-destroy', (event: IpcMainInvokeEvent, viewId: string) => {
+    if (!rendererOwnsView(event, viewId)) return viewOwnershipError;
     return { ok: bvm.destroy(viewId) };
   });
 
-  ipcMain.handle('wv-go-back', (_e: IpcMainInvokeEvent, viewId: string) => {
+  ipcMain.handle('wv-go-back', (event: IpcMainInvokeEvent, viewId: string) => {
+    if (!rendererOwnsView(event, viewId)) return viewOwnershipError;
     try { bvm.goBack(viewId); return { ok: true }; }
     catch { return { ok: false }; }
   });
 
-  ipcMain.handle('wv-go-forward', (_e: IpcMainInvokeEvent, viewId: string) => {
+  ipcMain.handle('wv-go-forward', (event: IpcMainInvokeEvent, viewId: string) => {
+    if (!rendererOwnsView(event, viewId)) return viewOwnershipError;
     try { bvm.goForward(viewId); return { ok: true }; }
     catch { return { ok: false }; }
   });
 
-  ipcMain.handle('wv-reload', (_e: IpcMainInvokeEvent, viewId: string) => {
+  ipcMain.handle('wv-reload', (event: IpcMainInvokeEvent, viewId: string) => {
+    if (!rendererOwnsView(event, viewId)) return viewOwnershipError;
     try { bvm.reload(viewId); return { ok: true }; }
     catch { return { ok: false }; }
   });
 
-  ipcMain.handle('wv-set-zoom', (_e: IpcMainInvokeEvent, viewId: string, zoomFactor: number) => {
+  ipcMain.handle('wv-set-zoom', (event: IpcMainInvokeEvent, viewId: string, zoomFactor: number) => {
+    if (!rendererOwnsView(event, viewId)) return viewOwnershipError;
     try { bvm.setZoomFactor(viewId, zoomFactor); return { ok: true }; }
     catch (err) { return { ok: false, error: String(err) }; }
   });
 
-  ipcMain.handle('wv-set-viewport', (_e: IpcMainInvokeEvent, viewId: string, viewport: { name: string; width?: number; height?: number; mobile?: boolean; deviceScaleFactor?: number; userAgent?: string }) => {
+  ipcMain.handle('wv-set-viewport', (event: IpcMainInvokeEvent, viewId: string, viewport: { name: string; width?: number; height?: number; mobile?: boolean; deviceScaleFactor?: number; userAgent?: string }) => {
+    if (!rendererOwnsView(event, viewId)) return viewOwnershipError;
     try { bvm.setViewport(viewId, viewport); return { ok: true }; }
     catch (err) { return { ok: false, error: String(err) }; }
   });
 
-  ipcMain.handle('wv-dev-tools', (_e: IpcMainInvokeEvent, viewId: string) => {
+  ipcMain.handle('wv-dev-tools', (event: IpcMainInvokeEvent, viewId: string) => {
+    if (!rendererOwnsView(event, viewId)) return viewOwnershipError;
     bvm.devTools(viewId);
     return { ok: true };
   });
 
-  ipcMain.handle('wv-capture-screenshot', async (_e: IpcMainInvokeEvent, viewId: string, _rect?: any) => {
+  ipcMain.handle('wv-capture-screenshot', async (event: IpcMainInvokeEvent, viewId: string, _rect?: any) => {
+    if (!rendererOwnsView(event, viewId)) return viewOwnershipError;
     try {
       const dataUrl = await bvm.screenshot(viewId);
       return { ok: true, dataUrl };
     } catch (err) { return { ok: false, error: String(err) }; }
   });
 
-  ipcMain.handle('wv-exec-js', async (_e: IpcMainInvokeEvent, viewId: string, code: string) => {
+  ipcMain.handle('wv-exec-js', async (event: IpcMainInvokeEvent, viewId: string, code: string) => {
+    if (!rendererOwnsView(event, viewId)) return viewOwnershipError;
     try {
       const result = await bvm.execJs(viewId, code);
       return { ok: true, result };
     } catch (err) { return { ok: false, error: String(err) }; }
   });
 
-  ipcMain.handle('wv-get-console', (_e: IpcMainInvokeEvent, viewId: string, limit?: number) => {
+  ipcMain.handle('wv-get-console', (event: IpcMainInvokeEvent, viewId: string, limit?: number) => {
+    if (!rendererOwnsView(event, viewId)) return { ...viewOwnershipError, logs: [] };
     try { return { ok: true, logs: bvm.getConsoleLogs(viewId, limit) }; }
     catch (err) { return { ok: false, error: String(err), logs: [] }; }
   });
 
-  ipcMain.handle('wv-get-network', (_e: IpcMainInvokeEvent, viewId: string, limit?: number) => {
+  ipcMain.handle('wv-get-network', (event: IpcMainInvokeEvent, viewId: string, limit?: number) => {
+    if (!rendererOwnsView(event, viewId)) return { ...viewOwnershipError, events: [] };
     try { return { ok: true, events: bvm.getNetworkEvents(viewId, limit) }; }
     catch (err) { return { ok: false, error: String(err), events: [] }; }
   });
 
-  ipcMain.handle('wv-get-security', (_e: IpcMainInvokeEvent, viewId: string, limit?: number) => {
+  ipcMain.handle('wv-get-security', (event: IpcMainInvokeEvent, viewId: string, limit?: number) => {
+    if (!rendererOwnsView(event, viewId)) return { ...viewOwnershipError, events: [] };
     try { return { ok: true, events: bvm.getSecurityEvents(viewId, limit) }; }
     catch (err) { return { ok: false, error: String(err), events: [] }; }
   });
 
-  ipcMain.handle('wv-find-in-page', (_e: IpcMainInvokeEvent, viewId: string, text: string, options?: { forward?: boolean; findNext?: boolean; matchCase?: boolean }) => {
+  ipcMain.handle('wv-find-in-page', (event: IpcMainInvokeEvent, viewId: string, text: string, options?: { forward?: boolean; findNext?: boolean; matchCase?: boolean }) => {
+    if (!rendererOwnsView(event, viewId)) return { ...viewOwnershipError, requestId: 0 };
     try { return { ok: true, requestId: bvm.findInPage(viewId, text, options || {}) }; }
     catch (err) { return { ok: false, error: String(err), requestId: 0 }; }
   });
 
-  ipcMain.handle('wv-stop-find', (_e: IpcMainInvokeEvent, viewId: string, action?: 'clearSelection' | 'keepSelection' | 'activateSelection') => {
+  ipcMain.handle('wv-stop-find', (event: IpcMainInvokeEvent, viewId: string, action?: 'clearSelection' | 'keepSelection' | 'activateSelection') => {
+    if (!rendererOwnsView(event, viewId)) return viewOwnershipError;
     try { bvm.stopFindInPage(viewId, action || 'clearSelection'); return { ok: true }; }
     catch (err) { return { ok: false, error: String(err) }; }
   });
 
-  ipcMain.handle('wv-resolve-permission', (_e: IpcMainInvokeEvent, eventId: string, allowed: boolean) => {
+  ipcMain.handle('wv-resolve-permission', (event: IpcMainInvokeEvent, eventId: string, allowed: boolean) => {
+    if (!bvm.isPermissionOwnedByWindow(eventId, BW.fromWebContents(event.sender))) {
+      return { ok: false, error: 'Browser permission belongs to another window' };
+    }
     try { return { ok: bvm.resolvePermission(eventId, allowed) }; }
     catch (err) { return { ok: false, error: String(err) }; }
   });
@@ -257,7 +287,8 @@ export async function createApp(electron: typeof import('electron')) {
     return _ctxCaptureCode;
   };
 
-  ipcMain.handle('wv-enable-context-capture', (_e: IpcMainInvokeEvent, viewId: string) => {
+  ipcMain.handle('wv-enable-context-capture', (event: IpcMainInvokeEvent, viewId: string) => {
+    if (!rendererOwnsView(event, viewId)) return viewOwnershipError;
     const code = getCtxCaptureCode();
     if (code) bvm.execJs(viewId, code);
     return { ok: true };

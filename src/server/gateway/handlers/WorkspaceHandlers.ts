@@ -145,6 +145,16 @@ function resolveToAbs(filePath: string, sessionId = ''): string {
   return resolveWorkspacePath(workspaceRootForSession(sessionId), filePath);
 }
 
+function isWorkspaceRootPath(absPath: string, sessionId: string): boolean {
+  return path.relative(workspaceRootForSession(sessionId), absPath) === '';
+}
+
+function validateWorkspaceMutationTarget(absPath: string, sessionId: string): void {
+  if (isWorkspaceRootPath(absPath, sessionId)) {
+    throw new Error('Workspace root cannot be modified');
+  }
+}
+
 function sendWorkspaceError(err: unknown, res: ServerResponse, sendJson: SendJson, fallback: string): void {
   if (err instanceof Error && err.message === 'Path escapes workspace root') {
     sendJson(res, 403, { error: 'Forbidden', message: err.message });
@@ -152,6 +162,10 @@ function sendWorkspaceError(err: unknown, res: ServerResponse, sendJson: SendJso
   }
   if (err instanceof Error && /^Session '.+' not found$/.test(err.message)) {
     sendJson(res, 404, { error: 'Not Found', message: err.message });
+    return;
+  }
+  if (err instanceof Error && err.message === 'Workspace root cannot be modified') {
+    sendJson(res, 400, { error: 'Bad Request', message: err.message });
     return;
   }
   const message = err instanceof Error ? err.message : String(err);
@@ -647,6 +661,7 @@ export async function handleDeleteWorkspaceFile(
     }
 
     const absPath = resolveToAbs(filePath, sessionId);
+    validateWorkspaceMutationTarget(absPath, sessionId);
 
     if (!fs.existsSync(absPath)) {
       sendJson(res, 404, { error: 'Not Found', message: `Path '${filePath}' not found` });
@@ -691,6 +706,7 @@ export async function handleRenameWorkspaceFile(
     }
 
     const absPath = resolveToAbs(oldPath, sessionId);
+    validateWorkspaceMutationTarget(absPath, sessionId);
 
     if (!fs.existsSync(absPath)) {
       sendJson(res, 404, { error: 'Not Found', message: `Path '${oldPath}' not found` });
@@ -698,7 +714,7 @@ export async function handleRenameWorkspaceFile(
     }
 
     const dir = path.dirname(absPath);
-    const newAbsPath = path.join(dir, newName);
+    const newAbsPath = resolveWorkspacePath(workspaceRootForSession(sessionId), path.join(dir, newName));
 
     if (fs.existsSync(newAbsPath)) {
       sendJson(res, 409, { error: 'Conflict', message: `'${newName}' already exists` });
@@ -792,6 +808,7 @@ export async function handleMoveWorkspaceFile(
 
     const srcAbsPath = resolveToAbs(sourcePath, sessionId);
     const dstAbsDir = resolveToAbs(destDir, sessionId);
+    validateWorkspaceMutationTarget(srcAbsPath, sessionId);
 
     if (!fs.existsSync(srcAbsPath)) {
       sendJson(res, 404, { error: 'Not Found', message: `Source '${sourcePath}' not found` });
@@ -804,7 +821,7 @@ export async function handleMoveWorkspaceFile(
     }
 
     const name = path.basename(srcAbsPath);
-    const destAbsPath = path.join(dstAbsDir, name);
+    const destAbsPath = resolveWorkspacePath(workspaceRootForSession(sessionId), path.join(dstAbsDir, name));
 
     if (fs.existsSync(destAbsPath)) {
       sendJson(res, 409, { error: 'Conflict', message: `'${name}' already exists in destination` });

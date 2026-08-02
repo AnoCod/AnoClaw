@@ -201,6 +201,7 @@ interface ElectronAPI {
   quitSetup: () => void;
 
   // ── WebContentsView management ──
+  wvRegisterWindowSession: (sessionId: string) => Promise<ApiResult>;
   wvCreate: (url: string, options?: WVCreateOptions) => Promise<WVCreateResult>;
   wvSetMetadata: (viewId: string, options?: WVCreateOptions) => Promise<ApiResult>;
   wvNavigate: (viewId: string, url: string) => Promise<ApiResult>;

@@ -31,15 +31,21 @@ interface WorkspaceFileLinkEvent {
 }
 
 function openAgentBrowserInWorkspace(detail: Partial<AgentBrowserEvent>): void {
-  const { url, viewId } = detail;
+  const { viewId } = detail;
+  const sessionId = String(detail.sessionId || '');
   if (!viewId) return;
+
+  const app = App.getInstance();
+  if (sessionId && app.sessionVM?.activeSessionId !== sessionId) {
+    app.sessionVM?.selectSession(sessionId);
+  }
 
   if (pageRegistry.currentPage !== 'workspace') { pageRegistry.navigateTo('workspace'); }
 
   let tries = 0;
   const cb = () => {
     const page = pageRegistry.getPage('workspace') as WorkspacePage | undefined;
-    const g = page?._browserGroup();
+    const g = page?._browserGroup(sessionId || undefined);
     if (g) { g.handleAgentBrowserEvent(detail as AgentBrowserEvent); return; }
     if (++tries < 30) setTimeout(cb, 200);
   };
@@ -105,7 +111,10 @@ export class WorkspacePage implements Page {
   private _tabCache = new Map<string, WorkspaceSplitContainer>();
 
   /** Exposed for the global agent browser handler. */
-  _browserGroup(): WorkspaceTabGroup | null { return this._currentGroup?.primaryGroup ?? null; }
+  _browserGroup(sessionId?: string): WorkspaceTabGroup | null {
+    if (sessionId && this._sessionId !== sessionId) return null;
+    return this._currentGroup?.primaryGroup ?? null;
+  }
 
   constructor() {
     this.container = document.createElement('div');
@@ -270,18 +279,18 @@ export class WorkspacePage implements Page {
     this._loadAbortController?.abort();
     const controller = new AbortController();
     this._loadAbortController = controller;
+    this._prepareWorkspaceLoad();
     try {
       const resp = await fetch(`/api/v1/sessions/${encodeURIComponent(sid)}/workspace`, { signal: controller.signal });
       if (!resp.ok) return;
       const newPath = (await resp.json()).workspace || '';
       if (generation !== this._loadGeneration || App.getInstance().sessionVM?.activeSessionId !== sid) return;
-      if (this._sessionId && this._currentGroup?.hasTabs) { this._tabCache.set(this._sessionId, this._currentGroup); }
-      this._sessionId = sid; this._workspacePath = newPath;
-      App.getInstance().sessionVM?.updateSessionWorkspace(sid, newPath);
-      this._toolbarPath.textContent = newPath || t('workspace.defaultWorkspace');
       await this._fileTree.loadRoot(sid);
       if (generation !== this._loadGeneration || App.getInstance().sessionVM?.activeSessionId !== sid) return;
-      if (this._currentGroup) { this._currentGroup.element.remove(); }
+      this._sessionId = sid;
+      this._workspacePath = newPath;
+      App.getInstance().sessionVM?.updateSessionWorkspace(sid, newPath);
+      this._toolbarPath.textContent = newPath || t('workspace.defaultWorkspace');
       const cached = this._tabCache.get(sid);
       if (cached) { cached.setSessionId(sid); cached.setWorkspacePath(newPath); this._currentGroup = cached; }
       else {
@@ -309,6 +318,18 @@ export class WorkspacePage implements Page {
     }
   }
 
+  private _prepareWorkspaceLoad(): void {
+    if (this._extChangeTimer) { clearInterval(this._extChangeTimer); this._extChangeTimer = 0; }
+    this._currentGroup?.suspend();
+    this._currentGroup?.element.remove();
+    this._currentGroup = null;
+    this._sessionId = '';
+    this._workspacePath = '';
+    this._toolbarPath.textContent = t('workspace.noWorkspace');
+    void this._fileTree.loadRoot('');
+    this._showWorkspaceIdle();
+  }
+
   private _extChangeTimer = 0;
 
   private _startExternalChangePolling(): void {
@@ -328,27 +349,32 @@ export class WorkspacePage implements Page {
   }
 
   private async _switchWorkspace(): Promise<void> {
+    const sessionId = this._sessionId;
+    const workspacePath = this._workspacePath;
     const dlg = new WorkspaceBindingDialog();
-    const result = await dlg.show(this._workspacePath);
-    if (!result || !this._sessionId) return;
+    const result = await dlg.show(workspacePath);
+    if (!result || !sessionId || this._sessionId !== sessionId || App.getInstance().sessionVM?.activeSessionId !== sessionId) return;
     if (this._currentGroup && !await this._currentGroup.prepareToDiscardAll(t('workspace.action.switching'))) return;
+    if (this._sessionId !== sessionId || App.getInstance().sessionVM?.activeSessionId !== sessionId) return;
     try {
-      const resp = await fetch(`/api/v1/sessions/${encodeURIComponent(this._sessionId)}/bind-workspace`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: result.path }) });
+      const resp = await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/bind-workspace`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: result.path }) });
       if (!resp.ok) throw new Error(t('workspace.bindingFailed', { status: resp.status }));
       const payload = await resp.json() as { workspace?: string };
+      if (this._sessionId !== sessionId || App.getInstance().sessionVM?.activeSessionId !== sessionId) return;
       const boundPath = payload.workspace || result.path;
       this._workspacePath = boundPath;
-      App.getInstance().sessionVM?.updateSessionWorkspace(this._sessionId, boundPath);
+      App.getInstance().sessionVM?.updateSessionWorkspace(sessionId, boundPath);
       this._toolbarPath.textContent = boundPath || t('workspace.defaultWorkspace');
-      this._tabCache.get(this._sessionId)?.dispose(); this._tabCache.delete(this._sessionId); this._currentGroup = null;
+      this._tabCache.get(sessionId)?.dispose(); this._tabCache.delete(sessionId); this._currentGroup = null;
       this._tabMount.innerHTML = '';
-      const fresh = new WorkspaceSplitContainer(); fresh.setSessionId(this._sessionId);
+      const fresh = new WorkspaceSplitContainer(); fresh.setSessionId(sessionId);
       fresh.setWorkspacePath(boundPath);
       fresh.onOpenFile = (path, name) => this._openFile(path, name);
       fresh.onEditorContextChange = () => this._pushEditorContext();
-      this._tabCache.set(this._sessionId, fresh); this._currentGroup = fresh;
+      this._tabCache.set(sessionId, fresh); this._currentGroup = fresh;
       this._tabMount.appendChild(fresh.element);
-      await this._fileTree.loadRoot(this._sessionId);
+      await this._fileTree.loadRoot(sessionId);
+      if (this._sessionId !== sessionId || App.getInstance().sessionVM?.activeSessionId !== sessionId) return;
       this._startExternalChangePolling();
     } catch (err) {
       const message = err instanceof Error ? err.message : t('workspace.switchFailed');

@@ -364,6 +364,7 @@ interface OpenTab {
 export class WorkspaceTabGroup {
   private static _groups = new Set<WorkspaceTabGroup>();
   private static _languageFeaturesRegistered = false;
+  private static _inlineCompletionDisposable: { dispose: () => void } | null = null;
   readonly element: HTMLElement;
   private _tabBar: HTMLElement; private _plusBtn: HTMLElement; private _contentArea: HTMLElement;
   private _tabs: OpenTab[] = []; private _activePath: string|null = null;
@@ -383,6 +384,8 @@ export class WorkspaceTabGroup {
   private _workspacePathReady = false;
   private _persistenceScope = 'primary';
   private _inlineCompletionRequestId = 0;
+  private _lastInlineKey = '';
+  private _renderGeneration = 0;
   private _modelSequence = 0;
   private _inlineCompletionState: 'idle' | 'waiting' | 'thinking' | 'ready' | 'empty' | 'error' = 'idle';
   private _inlineCompletionMessageKey: TranslationKey = 'workspace.editor.ai.ready';
@@ -701,6 +704,7 @@ export class WorkspaceTabGroup {
   }
 
   handleAgentBrowserEvent(event: AgentBrowserEvent): void {
+    if (!event.sessionId || event.sessionId !== this._sessionId) return;
     let tab = this._tabs.find(t => t.wvId === event.viewId);
     if (!tab) {
       const url = event.url || 'about:blank';
@@ -937,6 +941,7 @@ export class WorkspaceTabGroup {
   }
 
   private _activate(tab: OpenTab): void {
+    const renderGeneration = ++this._renderGeneration;
     if (this._editor) { const cur = this._tabs.find(t => t.path===this._activePath); if (cur) cur.viewState = this._editor.saveViewState(); }
     this._activePath = tab.path;
     this._tabBar.querySelectorAll('.ws-tab').forEach(el => {
@@ -953,10 +958,10 @@ export class WorkspaceTabGroup {
       case 'audio': this._showMedia(tab, 'audio'); break;
       case 'video': this._showMedia(tab, 'video'); break;
       case 'pdf': this._showPdf(tab); break;
-      case 'markdown': this._showMarkdown(tab); break;
+      case 'markdown': void this._showMarkdown(tab, renderGeneration); break;
       case 'csv': this._showTablePreview(tab.tableRows || [], tab.name); break;
       case 'browser': this._showBrowser(tab); break;
-      case 'docx': case 'xlsx': case 'pptx': this._showOffice(tab); break;
+      case 'docx': case 'xlsx': case 'pptx': void this._showOffice(tab, renderGeneration); break;
       default: this._showBinaryNotice(tab);
     }
     this._notifyContextChange();
@@ -1230,13 +1235,14 @@ export class WorkspaceTabGroup {
     this._contentArea.appendChild(wrapper);
   }
 
-  private async _showMarkdown(tab: OpenTab): Promise<void> {
+  private async _showMarkdown(tab: OpenTab, renderGeneration: number): Promise<void> {
     this._destroyContent();
     try {
       const resp = await fetch(`/api/v1/workspace/read?path=${encodeURIComponent(tab.path)}&sessionId=${encodeURIComponent(this._sessionId)}`);
       if (!resp.ok) return;
       const data = await resp.json();
       const { renderMarkdown } = await import('../../../MarkdownRenderer.js');
+      if (!this._isRenderCurrent(tab, renderGeneration)) return;
       const md = document.createElement('div'); md.className = 'ws-preview-markdown'; md.innerHTML = renderMarkdown(data.content||''); md.style.cssText = 'padding:16px 24px;overflow-y:auto;height:100%;';
       this._contentArea.appendChild(md);
     } catch { /* ignore */ }
@@ -1998,7 +2004,7 @@ export class WorkspaceTabGroup {
   private _sendToAgent(content: string, attachments: { name: string; path: string; type: string; size: number; content?: string }[] = []): void {
     const app = (window as any).__anoclawApp;
     if (!app) return;
-    const sid = app.sessionVM?.activeSessionId;
+    const sid = this._sessionId;
     if (!sid) return;
     const agent = app.conversationVM?.getAgent(sid);
     if (agent) {
@@ -2028,6 +2034,46 @@ export class WorkspaceTabGroup {
           const cls = String(el.className || '').trim().split(/\\s+/).filter(Boolean).slice(0, 3).join('.');
           return el.tagName.toLowerCase() + (cls ? '.' + cls : '');
         };
+        const isSensitiveControl = (el) => {
+          if (!el || !el.tagName) return false;
+          const type = String(el.getAttribute?.('type') || '').toLowerCase();
+          if (type === 'password' || type === 'hidden') return true;
+          const identity = [el.id, el.getAttribute?.('name'), el.getAttribute?.('autocomplete'), el.getAttribute?.('aria-label'), el.getAttribute?.('placeholder')]
+            .filter(Boolean).join(' ').toLowerCase();
+          return /(pass(word|code)?|secret|token|api[ _-]?key|access[ _-]?key|auth|credential|private[ _-]?key)/i.test(identity);
+        };
+        const scrubClone = (root) => {
+          if (!root || !root.cloneNode) return null;
+          if (isSensitiveControl(root)) return null;
+          const clone = root.cloneNode(true);
+          const controls = [];
+          if (clone.matches && clone.matches('input,textarea,select')) controls.push(clone);
+          if (clone.querySelectorAll) controls.push(...clone.querySelectorAll('input,textarea,select'));
+          for (const control of controls) {
+            if (isSensitiveControl(control)) {
+              control.remove?.();
+              continue;
+            }
+            control.removeAttribute?.('value');
+            control.removeAttribute?.('checked');
+            if (String(control.tagName || '').toLowerCase() === 'textarea') control.textContent = '';
+          }
+          if (clone.querySelectorAll) {
+            for (const option of clone.querySelectorAll('option')) {
+              option.removeAttribute?.('value');
+              option.removeAttribute?.('selected');
+            }
+          }
+          return clone;
+        };
+        const safeText = (root, max) => {
+          const clone = scrubClone(root);
+          return clone ? textLimit(clone.innerText || clone.textContent || '', max) : '';
+        };
+        const safeOuterHtml = (root, max) => {
+          const clone = scrubClone(root);
+          return clone ? String(clone.outerHTML || '').slice(0, max) : '';
+        };
         const main = document.querySelector('main,[role="main"],article') || document.body || document.documentElement;
         const active = document.activeElement && document.activeElement !== document.body ? document.activeElement : null;
         const selectedText = String(window.getSelection ? window.getSelection() : '').trim();
@@ -2041,12 +2087,12 @@ export class WorkspaceTabGroup {
           description: limit(document.querySelector('meta[name="description"]')?.getAttribute('content'), 500),
           selectedText: textLimit(selectedText, 1500),
           headings,
-          bodyText: textLimit((document.body && document.body.innerText) || '', 4500),
-          domSnippet: String((main && main.outerHTML) || document.documentElement.outerHTML || '').slice(0, 2500),
+          bodyText: safeText(document.body, 4500),
+          domSnippet: safeOuterHtml(main || document.documentElement, 2500),
           activeElement: active ? {
             selector: selectorFor(active),
-            text: textLimit(active.innerText || active.value || active.textContent || '', 1000),
-            html: String(active.outerHTML || '').slice(0, 1800),
+            text: isSensitiveControl(active) ? '' : safeText(active, 1000),
+            html: safeOuterHtml(active, 1800),
           } : null,
           counts: {
             links: document.links.length,
@@ -2318,7 +2364,7 @@ export class WorkspaceTabGroup {
    *
    * @param tab - The OpenTab with fileType 'docx' / 'xlsx' / 'pptx'.
    */
-  private async _showOffice(tab: OpenTab): Promise<void> {
+  private async _showOffice(tab: OpenTab, renderGeneration: number): Promise<void> {
     this._destroyContent();
     this._contentArea.style.cssText = 'display:flex;align-items:center;justify-content:center;';
     this._contentArea.innerHTML = `<div style="color:var(--color-text-secondary,#9c9c9d);font-size:13px;">${t('workspace.preview.loading')}</div>`;
@@ -2327,6 +2373,7 @@ export class WorkspaceTabGroup {
       const resp = await fetch(`/api/v1/workspace/convert-office?path=${encodeURIComponent(tab.path)}&sessionId=${encodeURIComponent(this._sessionId)}`);
       if (!resp.ok) throw new Error('Conversion failed');
       const data = await resp.json();
+      if (!this._isRenderCurrent(tab, renderGeneration)) return;
 
       this._contentArea.innerHTML = '';
       this._contentArea.style.cssText = 'overflow-y:auto;';
@@ -2335,6 +2382,7 @@ export class WorkspaceTabGroup {
         this._showTablePreview(data.rows, tab.name);
       } else if (data.type === 'html') {
         const { sanitizeHtml } = await import('../../../MarkdownRenderer.js');
+        if (!this._isRenderCurrent(tab, renderGeneration)) return;
         const wrapper = document.createElement('div');
         wrapper.className = 'ws-preview-office';
         wrapper.style.cssText = 'padding:20px 28px;font-size:13px;line-height:1.7;color:var(--color-text,#f4f4f6);max-width:860px;margin:0 auto;';
@@ -2370,6 +2418,7 @@ export class WorkspaceTabGroup {
         this._contentArea.appendChild(img);
       }
     } catch {
+      if (!this._isRenderCurrent(tab, renderGeneration)) return;
       this._contentArea.innerHTML = `<div style="color:var(--color-text-secondary,#9c9c9d);font-size:13px;">${_escHtml(tab.name)}</div><div style="font-size:11px;opacity:0.5;margin-top:8px;">${t('workspace.preview.unavailable')}</div>`;
       this._contentArea.style.cssText = 'display:flex;align-items:center;justify-content:center;flex-direction:column;';
     }
@@ -2506,10 +2555,10 @@ export class WorkspaceTabGroup {
 
   private _registerAgentActions(): void {
     if (this._agentActionsRegistered) return;
-    const m = (window as any).monaco; if (!m) return;
+    const m = (window as any).monaco; if (!m || !this._editor) return;
     this._agentActionsRegistered = true;
     const register = (descriptor: Record<string, unknown>): void => {
-      const disposable = m.editor.addEditorAction(descriptor);
+      const disposable = this._editor.addAction(descriptor);
       if (disposable?.dispose) this._agentActionDisposables.push(disposable);
     };
 
@@ -2749,11 +2798,13 @@ export class WorkspaceTabGroup {
 
   private async _organizeImports(): Promise<void> {
     if (!this._editor) return;
-    const model = this._editor.getModel();
+    const editor = this._editor;
+    const model = editor.getModel();
     if (!model || !this._tabForModel(model)) return;
     try {
       this._setLanguageStatus('working', 'workspace.editor.ls.imports');
       const data = await this._languageFetch('organize-imports', model);
+      if (this._editor !== editor || editor.getModel() !== model || !this._tabForModel(model)) return;
       const edits = (data.edits || [])
         .filter((edit: any) => edit.path === this._tabForModel(model)?.path)
         .sort((a: any, b: any) => {
@@ -2761,12 +2812,12 @@ export class WorkspaceTabGroup {
           return b.range.startColumn - a.range.startColumn;
         })
         .map((edit: any) => ({ range: this._monacoRange(edit.range), text: edit.text, forceMoveMarkers: true }));
-      if (edits.length) this._editor.executeEdits('anoclaw-organize-imports', edits);
+      if (edits.length) editor.executeEdits('anoclaw-organize-imports', edits);
       this._setLanguageStatus(
         'ready',
         edits.length ? 'workspace.editor.ls.importsDone' : 'workspace.editor.ls.importsClean',
       );
-      this._editor.focus();
+      editor.focus();
     } catch {
       this._setLanguageStatus('error', 'workspace.editor.ls.error');
     }
@@ -2872,51 +2923,59 @@ export class WorkspaceTabGroup {
     if (this._inlineCompletionRegistered) return;
     const m = (window as any).monaco; if (!m) return;
     this._inlineCompletionRegistered = true;
+    if (WorkspaceTabGroup._inlineCompletionDisposable) return;
 
-    m.languages.registerInlineCompletionsProvider('*', {
-      provideInlineCompletions: async (model: any, position: any, _context: any, _token: any) => {
-        const lineContent = model.getLineContent(position.lineNumber);
-        const textBeforeCursor = lineContent.substring(0, position.column - 1);
-        if (textBeforeCursor.trim().length < 2) return { items: [] };
-
-        // Debounce after typing; manual completion uses _triggerInlineCompletion().
-        const key = `${model.uri.path}_${position.lineNumber}_${position.column}`;
-        (this as any)._lastInlineKey = key;
-        const requestId = ++this._inlineCompletionRequestId;
-        this._setInlineCompletionStatus('waiting', 'workspace.editor.ai.waiting');
-        await new Promise(r => setTimeout(r, 750));
-        if ((this as any)._lastInlineKey !== key) return { items: [] };
-        if (requestId !== this._inlineCompletionRequestId) return { items: [] };
-
-        try {
-          this._setInlineCompletionStatus('thinking', 'workspace.editor.ai.thinking');
-          const completion = await this._requestInlineCompletion(model, position);
-          if (requestId !== this._inlineCompletionRequestId) return { items: [] };
-          if (!completion) {
-            this._setInlineCompletionStatus('empty', 'workspace.editor.ai.noSuggestion');
-            return { items: [] };
-          }
-          this._setInlineCompletionStatus('ready', 'workspace.editor.ai.suggested');
-
-          return {
-            items: [{
-              insertText: completion,
-              range: { startLineNumber: position.lineNumber, startColumn: position.column, endLineNumber: position.lineNumber, endColumn: position.column },
-            }],
-          };
-        } catch (err) {
-          this._setInlineCompletionStatus('error', this._inlineCompletionErrorMessage(err));
-          return { items: [] };
-        }
+    WorkspaceTabGroup._inlineCompletionDisposable = m.languages.registerInlineCompletionsProvider('*', {
+      provideInlineCompletions: async (model: any, position: any, _context: any, token: any) => {
+        const group = WorkspaceTabGroup._groupForModel(model);
+        if (!group) return { items: [] };
+        return group._provideInlineCompletion(model, position, token);
       },
       freeInlineCompletions: () => {},
     } as any);
   }
 
+  private async _provideInlineCompletion(model: any, position: any, token: any): Promise<{ items: any[] }> {
+    if (!this._tabForModel(model) || token?.isCancellationRequested) return { items: [] };
+    const lineContent = model.getLineContent(position.lineNumber);
+    const textBeforeCursor = lineContent.substring(0, position.column - 1);
+    if (textBeforeCursor.trim().length < 2) return { items: [] };
+
+    const key = `${model.uri.path}_${position.lineNumber}_${position.column}`;
+    this._lastInlineKey = key;
+    const requestId = ++this._inlineCompletionRequestId;
+    this._setInlineCompletionStatus('waiting', 'workspace.editor.ai.waiting');
+    await new Promise(r => setTimeout(r, 750));
+    if (this._lastInlineKey !== key || requestId !== this._inlineCompletionRequestId) return { items: [] };
+    if (!this._tabForModel(model) || token?.isCancellationRequested) return { items: [] };
+
+    try {
+      this._setInlineCompletionStatus('thinking', 'workspace.editor.ai.thinking');
+      const completion = await this._requestInlineCompletion(model, position);
+      if (requestId !== this._inlineCompletionRequestId || !this._tabForModel(model) || token?.isCancellationRequested) return { items: [] };
+      if (!completion) {
+        this._setInlineCompletionStatus('empty', 'workspace.editor.ai.noSuggestion');
+        return { items: [] };
+      }
+      this._setInlineCompletionStatus('ready', 'workspace.editor.ai.suggested');
+
+      return {
+        items: [{
+          insertText: completion,
+          range: { startLineNumber: position.lineNumber, startColumn: position.column, endLineNumber: position.lineNumber, endColumn: position.column },
+        }],
+      };
+    } catch (err) {
+      this._setInlineCompletionStatus('error', this._inlineCompletionErrorMessage(err));
+      return { items: [] };
+    }
+  }
+
   private async _triggerInlineCompletion(manual: boolean): Promise<void> {
     if (!this._editor) return;
-    const model = this._editor.getModel();
-    const position = this._editor.getPosition();
+    const editor = this._editor;
+    const model = editor.getModel();
+    const position = editor.getPosition();
     if (!model || !position) return;
 
     const lineContent = model.getLineContent(position.lineNumber);
@@ -2934,17 +2993,18 @@ export class WorkspaceTabGroup {
     try {
       const completion = await this._requestInlineCompletion(model, position);
       if (requestId !== this._inlineCompletionRequestId) return;
+      if (this._editor !== editor || editor.getModel() !== model || !this._tabForModel(model)) return;
       if (!completion) {
         this._setInlineCompletionStatus('empty', 'workspace.editor.ai.noSuggestion');
         return;
       }
-      this._editor.executeEdits('anoclaw-ai-complete', [{
+      editor.executeEdits('anoclaw-ai-complete', [{
         range: { startLineNumber: position.lineNumber, startColumn: position.column, endLineNumber: position.lineNumber, endColumn: position.column },
         text: completion,
         forceMoveMarkers: true,
       }]);
       this._setInlineCompletionStatus('ready', 'workspace.editor.ai.inserted');
-      this._editor.focus();
+      editor.focus();
     } catch (err) {
       if (requestId !== this._inlineCompletionRequestId) return;
       this._setInlineCompletionStatus('error', this._inlineCompletionErrorMessage(err));
@@ -3070,6 +3130,17 @@ export class WorkspaceTabGroup {
         const diskContent = data.content || '';
         const editorContent = tab.model?.getValue() || '';
         if (hasExternalContentChange(diskContent, editorContent)) {
+          if (data.truncated) {
+            tab.readOnlyReason = workspaceReadOnlyReason(data);
+            tab.model?.setValue(diskContent);
+            tab.originalContent = diskContent;
+            tab.diskSha256 = typeof data.sha256 === 'string' ? data.sha256 : tab.diskSha256;
+            tab.pendingExternalSha256 = undefined;
+            tab.isDirty = false;
+            this._updateDirty(tab);
+            if (tab.path === this._activePath) this._activate(tab);
+            return;
+          }
           tab.pendingExternalSha256 = typeof data.sha256 === 'string' ? data.sha256 : undefined;
           this._showDiffBanner(tab, editorContent, diskContent);
           return; // Only show one banner at a time
@@ -3202,6 +3273,10 @@ export class WorkspaceTabGroup {
   }
 
   private _destroyContent(): void { this._destroyBrowserView(); if (this._editorHost && this._editorHost.parentElement) this._editorHost.remove(); this._contentArea.innerHTML = ''; this._contentArea.style.cssText = ''; this._contentArea.classList.remove('ws-preview-surface'); }
+
+  private _isRenderCurrent(tab: OpenTab, renderGeneration: number): boolean {
+    return this._renderGeneration === renderGeneration && this._activePath === tab.path;
+  }
   private _showEmpty(): void {
     this._contentArea.innerHTML = `
       <div class="ws-editor-empty">
@@ -3286,6 +3361,7 @@ export class WorkspaceTabGroup {
   }
 
   dispose(): void {
+    this._renderGeneration++;
     this._saveBrowserStateNow();
     if (this._browserStateSaveTimer) {
       window.clearTimeout(this._browserStateSaveTimer);
@@ -3300,6 +3376,10 @@ export class WorkspaceTabGroup {
       this._diagnosticsTimer = 0;
     }
     WorkspaceTabGroup._groups.delete(this);
+    if (WorkspaceTabGroup._groups.size === 0) {
+      WorkspaceTabGroup._inlineCompletionDisposable?.dispose();
+      WorkspaceTabGroup._inlineCompletionDisposable = null;
+    }
     for (const disposable of this._agentActionDisposables.splice(0)) disposable.dispose();
     this._agentActionsRegistered = false;
     this._stopLocaleListener?.();

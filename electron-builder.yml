@@ -13,6 +13,7 @@ files:
   - src/electron/setup-wizard.html
   - docs/**/*
   - "!docs/design-md/**"
+  - "!docs/待修复问题点"
   - plugins/**/*
   - plugins/**/node_modules/**/*
   - "!**/AGENTS.md"

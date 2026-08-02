@@ -151,6 +151,22 @@
     });
   }
 
+  // plugins/anoclaw-mcp/frontend/src/websocket-url.ts
+  function resolvePluginWebSocketUrl(...baseCandidates) {
+    for (const candidate of baseCandidates) {
+      if (!candidate) continue;
+      try {
+        const base = new URL(candidate);
+        if (base.protocol !== "http:" && base.protocol !== "https:") continue;
+        const websocketUrl = new URL("/ws", base);
+        websocketUrl.protocol = base.protocol === "https:" ? "wss:" : "ws:";
+        return websocketUrl.href;
+      } catch {
+      }
+    }
+    throw new Error("Unable to resolve the AnoClaw WebSocket URL");
+  }
+
   // plugins/anoclaw-mcp/frontend/src/main.ts
   var ui = window.anoclaw?.ui;
   if (!ui) throw new Error("anoclaw-ui.js not loaded - check iframe sandbox permissions");
@@ -717,8 +733,12 @@
     _connectWebSocket() {
       if (this._ws) return;
       try {
-        const proto = location.protocol === "https:" ? "wss:" : "ws:";
-        this._ws = new WebSocket(proto + "//" + location.host + "/ws");
+        const bundleUrl = Array.from(document.scripts).map((script) => script.src).find((src) => /\/bundle\.js(?:\?|$)/.test(src));
+        this._ws = new WebSocket(resolvePluginWebSocketUrl(
+          bundleUrl,
+          document.referrer,
+          document.baseURI
+        ));
         this._ws.onmessage = (ev) => {
           try {
             this._handleWSMessage(JSON.parse(ev.data));

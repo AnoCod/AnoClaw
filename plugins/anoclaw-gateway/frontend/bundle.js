@@ -274,6 +274,22 @@
     return currentLocale;
   }
 
+  // plugins/anoclaw-gateway/frontend/src/websocket-url.ts
+  function resolvePluginWebSocketUrl(...baseCandidates) {
+    for (const candidate of baseCandidates) {
+      if (!candidate) continue;
+      try {
+        const base = new URL(candidate);
+        if (base.protocol !== "http:" && base.protocol !== "https:") continue;
+        const websocketUrl = new URL("/ws", base);
+        websocketUrl.protocol = base.protocol === "https:" ? "wss:" : "ws:";
+        return websocketUrl.href;
+      } catch {
+      }
+    }
+    throw new Error("Unable to resolve the AnoClaw WebSocket URL");
+  }
+
   // plugins/anoclaw-gateway/frontend/src/main.ts
   function platformDefinitions() {
     return [
@@ -835,8 +851,12 @@
     _connectWebSocket() {
       if (this._ws) return;
       try {
-        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        this._ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+        const bundleUrl = Array.from(document.scripts).map((script) => script.src).find((src) => /\/bundle\.js(?:\?|$)/.test(src));
+        this._ws = new WebSocket(resolvePluginWebSocketUrl(
+          bundleUrl,
+          document.referrer,
+          document.baseURI
+        ));
         this._ws.onopen = () => {
           this._wsConnected = true;
           this._updateWsStatus();

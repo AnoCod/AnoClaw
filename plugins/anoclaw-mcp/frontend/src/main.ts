@@ -6,6 +6,7 @@
 // window.anoclaw.ui exposes 25+ components plus mount/slot APIs.
 
 import { getMcpLocale, setMcpLocale, t as tr } from './i18n.js';
+import { resolvePluginWebSocketUrl } from './websocket-url.js';
 
 declare const window: Window & { anoclaw?: { ui: Record<string, any> } };
 
@@ -675,8 +676,14 @@ class MCPPage {
   private _connectWebSocket(): void {
     if (this._ws) return;
     try {
-      const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      this._ws = new WebSocket(proto + "//" + location.host + "/ws");
+      const bundleUrl = Array.from(document.scripts)
+        .map((script) => script.src)
+        .find((src) => /\/bundle\.js(?:\?|$)/.test(src));
+      this._ws = new WebSocket(resolvePluginWebSocketUrl(
+        bundleUrl,
+        document.referrer,
+        document.baseURI,
+      ));
       this._ws.onmessage = (ev) => {
         try { this._handleWSMessage(JSON.parse(ev.data)); } catch {}
       };

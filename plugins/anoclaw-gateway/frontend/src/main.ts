@@ -6,6 +6,7 @@
 
 import { dateLocale, setPluginLocale, t } from './i18n.js';
 import type { PluginTranslationKey } from './i18n.js';
+import { resolvePluginWebSocketUrl } from './websocket-url.js';
 
 interface GatewayConnection { id: string; platform: string; name: string; connected: boolean; config: Record<string,string>; createdAt?: string; }
 
@@ -633,8 +634,14 @@ class GatewayPage {
   private _connectWebSocket(): void {
     if (this._ws) return;
     try {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      this._ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+      const bundleUrl = Array.from(document.scripts)
+        .map((script) => script.src)
+        .find((src) => /\/bundle\.js(?:\?|$)/.test(src));
+      this._ws = new WebSocket(resolvePluginWebSocketUrl(
+        bundleUrl,
+        document.referrer,
+        document.baseURI,
+      ));
       this._ws.onopen = () => { this._wsConnected = true; this._updateWsStatus(); };
       this._ws.onmessage = (event) => {
         try {

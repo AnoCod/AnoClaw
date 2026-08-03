@@ -11,6 +11,7 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import { SessionManager } from '../../core/session/SessionManager.js';
 import { requireWs } from '../WsRequired.js';
 import type { SendJson, ReadBody } from '../RouteHelpers.js';
+import { createPsdPreview, PsdPreviewError } from './WorkspacePsdPreview.js';
 
 async function fileSha256(filePath: string): Promise<string> {
   const hash = createHash('sha256');
@@ -194,6 +195,8 @@ const RAW_MIME_TYPES: Record<string, string> = {
   '.ppt': 'application/vnd.ms-powerpoint',
   '.pptm': 'application/vnd.ms-powerpoint.presentation.macroEnabled.12',
   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.psb': 'image/vnd.adobe.photoshop',
+  '.psd': 'image/vnd.adobe.photoshop',
   '.srt': 'application/x-subrip; charset=utf-8',
   '.svg': 'image/svg+xml; charset=utf-8',
   '.tif': 'image/tiff',
@@ -880,6 +883,63 @@ export function validateOfficeArchiveBuffer(buf: Buffer): Map<string, ZipEntry> 
 }
 
 const BROWSABLE_ARCHIVE_EXTENSIONS = new Set(['.zip', '.jar', '.war', '.ear', '.epub', '.apk', '.vsix', '.nupkg']);
+
+const PSD_PREVIEW_EXTENSIONS = new Set(['.psd', '.psb']);
+
+/** GET /api/v1/workspace/preview-psd — Render only a saved merged PSD/PSB preview. */
+export async function handlePreviewWorkspacePsd(
+  req: IncomingMessage,
+  res: ServerResponse,
+  sendJson: SendJson,
+  host: string,
+  port: number,
+): Promise<void> {
+  try {
+    const url = new URL(req.url || '/', `http://${host}:${port}`);
+    const sessionId = url.searchParams.get('sessionId') || '';
+    const filePath = url.searchParams.get('path') || '';
+    if (!filePath) {
+      sendJson(res, 400, { error: 'Bad Request', message: 'Missing "path" query param' });
+      return;
+    }
+
+    const extension = path.extname(filePath).toLowerCase();
+    if (!PSD_PREVIEW_EXTENSIONS.has(extension)) {
+      sendJson(res, 400, { error: 'Bad Request', message: `Unsupported Photoshop format: ${extension || '(none)'}` });
+      return;
+    }
+
+    const absPath = resolveWorkspacePath(workspaceRootForSession(sessionId), filePath);
+    const stat = await fsp.stat(absPath);
+    if (!stat.isFile()) {
+      sendJson(res, 400, { error: 'Bad Request', message: 'Photoshop preview path is not a file' });
+      return;
+    }
+
+    const preview = await createPsdPreview(absPath, stat.size);
+    res.writeHead(200, {
+      'Cache-Control': 'no-store',
+      'Content-Type': preview.mimeType,
+      'Content-Length': preview.data.length,
+      'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(`${path.basename(filePath, extension)}-preview${preview.mimeType === 'image/png' ? '.png' : '.jpg'}`)}`,
+      'X-Content-Type-Options': 'nosniff',
+      'X-AnoClaw-Psd-Source': preview.source,
+      'X-AnoClaw-Image-Width': preview.width,
+      'X-AnoClaw-Image-Height': preview.height,
+    });
+    res.end(preview.data);
+  } catch (err) {
+    if (err instanceof PsdPreviewError) {
+      sendJson(res, err.statusCode, { error: 'Photoshop preview failed', message: err.message });
+      return;
+    }
+    if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      sendJson(res, 404, { error: 'Not Found', message: 'Photoshop document not found' });
+      return;
+    }
+    sendWorkspaceError(err, res, sendJson, 'Photoshop preview failed');
+  }
+}
 
 /** GET /api/v1/workspace/inspect-archive — Safely list a ZIP-family archive. */
 export async function handleInspectWorkspaceArchive(

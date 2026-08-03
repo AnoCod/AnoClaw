@@ -19,6 +19,7 @@ import {
   handleWriteWorkspaceFile,
   handleConvertOffice,
   handleInspectWorkspaceArchive,
+  handlePreviewWorkspacePsd,
 } from '../handlers/WorkspaceHandlers.js';
 
 // ── Session-scoped workspace ──
@@ -193,6 +194,20 @@ export class InspectWorkspaceArchiveRoute implements RouteHandler {
 
   async handle(_match: RouteMatch, req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): Promise<boolean> {
     await handleInspectWorkspaceArchive(req, res, sendJson, DEFAULT_HOST, API_PORT);
+    return true;
+  }
+}
+
+/** GET /api/v1/workspace/preview-psd — Render a flattened PSD/PSB preview. */
+export class PreviewWorkspacePsdRoute implements RouteHandler {
+  readonly method = 'GET';
+  readonly path = '/api/v1/workspace/preview-psd';
+  readonly category = 'Workspace';
+  readonly description = 'Render a read-only merged PSD or PSB preview';
+  readonly permission = 'workspace:read';
+
+  async handle(_match: RouteMatch, req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): Promise<boolean> {
+    await handlePreviewWorkspacePsd(req, res, sendJson, DEFAULT_HOST, API_PORT);
     return true;
   }
 }

@@ -12,6 +12,10 @@ import {
   type WorkspaceFileType,
   type WorkspaceViewMode,
 } from './WorkspaceFileCapabilities.js';
+import {
+  detectWorkspaceBinarySignature,
+  parseWorkspaceConfig,
+} from './WorkspacePreviewParsers.js';
 
 const LANG_MAP: Record<string, string> = {
   // TypeScript / JavaScript
@@ -861,10 +865,12 @@ export class WorkspaceTabGroup {
       case 'markdown': void this._showMarkdown(tab, renderGeneration); break;
       case 'csv': this._showTablePreview(tab, tab.tableRows || [], tab.name); break;
       case 'html': this._showHtmlPreview(tab); break;
+      case 'config': this._showConfigPreview(tab); break;
       case 'structured': this._showStructuredPreview(tab); break;
       case 'notebook': void this._showNotebookPreview(tab, renderGeneration); break;
       case 'archive': void this._showArchivePreview(tab, renderGeneration); break;
       case 'font': void this._showFontPreview(tab, renderGeneration); break;
+      case 'psd': this._showPsdPreview(tab); break;
       case 'browser': this._showBrowser(tab); break;
       case 'docx': case 'xlsx': case 'pptx': void this._showOffice(tab, renderGeneration); break;
       default: void this._showHexPreview(tab, renderGeneration);
@@ -1202,6 +1208,84 @@ export class WorkspaceTabGroup {
     }
   }
 
+  private _showConfigPreview(tab: OpenTab): void {
+    const body = this._createPreviewBody(tab, 'ws-preview-scroll ws-config-preview');
+    const parsed = parseWorkspaceConfig(tab.content || '');
+    const summary = document.createElement('div');
+    summary.className = 'ws-preview-summary';
+    summary.textContent = t('workspace.preview.configEntries', { count: parsed.entries.length });
+    body.appendChild(summary);
+
+    if (!parsed.entries.length) {
+      const empty = document.createElement('div');
+      empty.className = 'ws-preview-empty';
+      empty.textContent = t('workspace.preview.configEmpty');
+      body.appendChild(empty);
+      return;
+    }
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'ws-preview-table-wrap';
+    const table = document.createElement('table');
+    table.className = 'ws-preview-table ws-config-table';
+    const heading = document.createElement('tr');
+    for (const label of [
+      t('workspace.preview.configSection'),
+      t('workspace.preview.configKey'),
+      t('workspace.preview.configValue'),
+      t('workspace.preview.line'),
+    ]) {
+      const th = document.createElement('th');
+      th.textContent = label;
+      heading.appendChild(th);
+    }
+    const thead = document.createElement('thead');
+    thead.appendChild(heading);
+    table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    for (const entry of parsed.entries) {
+      const row = document.createElement('tr');
+      const section = document.createElement('td');
+      section.textContent = entry.section || t('workspace.preview.configRoot');
+      const key = document.createElement('td');
+      key.textContent = entry.key;
+      const value = document.createElement('td');
+      value.textContent = entry.value;
+      const line = document.createElement('td');
+      line.textContent = String(entry.line);
+      row.append(section, key, value, line);
+      tbody.appendChild(row);
+    }
+    table.appendChild(tbody);
+    wrapper.appendChild(table);
+    body.appendChild(wrapper);
+    if (parsed.truncated) {
+      const limited = document.createElement('div');
+      limited.className = 'ws-preview-limit';
+      limited.textContent = t('workspace.preview.configLimit');
+      body.appendChild(limited);
+    }
+  }
+
+  private _showPsdPreview(tab: OpenTab): void {
+    const body = this._createPreviewBody(tab, 'ws-preview-surface ws-psd-preview');
+    const note = document.createElement('div');
+    note.className = 'ws-psd-note';
+    note.textContent = t('workspace.preview.psdFlattened');
+    const image = document.createElement('img');
+    image.className = 'ws-preview-image';
+    image.src = `/api/v1/workspace/preview-psd?path=${encodeURIComponent(tab.path)}&sessionId=${encodeURIComponent(this._sessionId)}`;
+    image.alt = tab.name;
+    image.addEventListener('error', () => {
+      image.remove();
+      const message = document.createElement('div');
+      message.className = 'ws-preview-empty';
+      message.textContent = t('workspace.preview.psdUnavailable');
+      body.appendChild(message);
+    }, { once: true });
+    body.append(note, image);
+  }
+
   private async _showNotebookPreview(tab: OpenTab, renderGeneration: number): Promise<void> {
     const body = this._createPreviewBody(tab, 'ws-preview-scroll ws-notebook-preview');
     try {
@@ -1333,7 +1417,10 @@ export class WorkspaceTabGroup {
       body.innerHTML = '';
       const summary = document.createElement('div');
       summary.className = 'ws-preview-summary';
-      summary.textContent = t('workspace.preview.hexLimit', { size: _formatBytes(bytes.byteLength) });
+      summary.textContent = t('workspace.preview.binarySummary', {
+        kind: detectWorkspaceBinarySignature(bytes, workspaceFileExtension(tab.name)),
+        size: _formatBytes(bytes.byteLength),
+      });
       const pre = document.createElement('pre');
       pre.className = 'ws-hex-dump';
       pre.textContent = _hexDump(bytes);

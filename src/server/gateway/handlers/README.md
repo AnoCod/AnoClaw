@@ -4,7 +4,7 @@
 
 Imperative handler functions for HTTP API endpoints. These are called from `ApiServer`'s legacy if-else routing chain (the declarative routes in `routes/` are the newer approach). Handles sessions, agents, tools, system utilities, inline code suggestions, and read-only Workspace browsing/previews.
 
-## Handler Catalog (23 endpoints)
+## Handler Catalog (24 endpoints)
 
 ### SessionHandlers
 
@@ -76,6 +76,7 @@ Imperative handler functions for HTTP API endpoints. These are called from `ApiS
 | `handleGetWorkspace` | GET | `/api/v1/sessions/:id/workspace` | No | Get session workspace path |
 | `handleConvertOffice` | GET | `/api/v1/workspace/convert-office` | No | Read-only DOCX/workbook/slides/OpenDocument conversion |
 | `handleInspectWorkspaceArchive` | GET | `/api/v1/workspace/inspect-archive` | No | Safely list ZIP-family entries without extracting to disk |
+| `handlePreviewWorkspacePsd` | GET | `/api/v1/workspace/preview-psd` | No | Return an embedded thumbnail or safely decoded flattened PSD/PSB composite; skips layer data without parsing it |
 
 ---
 
@@ -105,7 +106,7 @@ AgentHandlers    → AgentRegistry, AgentConfig, TypedEventBus, WsRequired
 ToolHandlers     → ToolRegistry, CommandRegistry, SessionManager
 SystemHandlers   → AgentRuntime, AgentRegistry, SessionManager, LogManager
 InlineSuggestHandler → createLLMProvider, AgentRegistry, SessionManager
-WorkspaceHandlers → SessionManager, WsRequired, fs/promises, zlib
+WorkspaceHandlers → SessionManager, WsRequired, fs/promises, zlib, WorkspacePsdPreview
 ```
 
 ## Usage

@@ -31,7 +31,7 @@ import {
   GetWorkspaceRoute, BindWorkspaceRoute, BrowseWorkspaceRoute, ReadWorkspaceFileRoute,
   CreateWorkspaceDirRoute, CreateWorkspaceFileRoute, DeleteWorkspaceFileRoute,
   RenameWorkspaceFileRoute, MoveWorkspaceFileRoute, WriteWorkspaceFileRoute,
-  ConvertOfficeRoute, InspectWorkspaceArchiveRoute,
+  ConvertOfficeRoute, InspectWorkspaceArchiveRoute, PreviewWorkspacePsdRoute,
 } from './WorkspaceRoutes.js';
 import { AgentExecuteRoute, AgentExecuteRedirectRoute } from './AgentExecuteRoute.js';
 import { SessionMessageRoute, SessionMessageRedirectRoute } from './SessionMessageRoute.js';
@@ -220,6 +220,7 @@ export function registerAllRoutes(api: ApiServer): void {
   api.registerRoute(new WriteWorkspaceFileRoute());
   api.registerRoute(new ConvertOfficeRoute());
   api.registerRoute(new InspectWorkspaceArchiveRoute());
+  api.registerRoute(new PreviewWorkspacePsdRoute());
 
   // Agent — general-purpose agent execution for plugins
   api.registerRoute(new AgentExecuteRoute());

@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   handleInspectWorkspaceArchive,
+  handlePreviewWorkspacePsd,
   handleReadWorkspaceFile,
 } from '../WorkspaceHandlers.js';
 import { SessionManager } from '../../../core/session/SessionManager.js';
@@ -74,5 +75,56 @@ describe('Workspace read-only preview handlers', () => {
       'README.md',
     ]);
     await expect(fsp.stat(path.join(root, 'assets'))).rejects.toThrow();
+  });
+
+  it('returns a flattened PSD preview without modifying the source document', async () => {
+    const header = Buffer.alloc(26);
+    header.write('8BPS', 0, 'ascii');
+    header.writeUInt16BE(1, 4);
+    header.writeUInt16BE(3, 12);
+    header.writeUInt32BE(1, 14);
+    header.writeUInt32BE(1, 18);
+    header.writeUInt16BE(8, 22);
+    header.writeUInt16BE(3, 24);
+    const layerData = Buffer.from('layer-data-must-be-skipped', 'ascii');
+    const layerLength = Buffer.alloc(4);
+    layerLength.writeUInt32BE(layerData.length, 0);
+    const original = Buffer.concat([
+      header,
+      Buffer.alloc(4),
+      Buffer.alloc(4),
+      layerLength,
+      layerData,
+      Buffer.alloc(2),
+      Buffer.from([40, 80, 120]),
+    ]);
+    const filePath = path.join(root, 'design.psd');
+    await fsp.writeFile(filePath, original);
+    const capture: { status?: number; headers?: Record<string, string | number>; data?: Buffer } = {};
+    const response = {
+      writeHead: (status: number, headers: Record<string, string | number>) => {
+        capture.status = status;
+        capture.headers = headers;
+      },
+      end: (data?: Buffer) => { capture.data = data; },
+    } as unknown as ServerResponse;
+
+    await handlePreviewWorkspacePsd(
+      { url: `/api/v1/workspace/preview-psd?sessionId=${encodeURIComponent(sessionId)}&path=design.psd` } as IncomingMessage,
+      response,
+      () => { throw new Error('Expected an image response'); },
+      '127.0.0.1',
+      15730,
+    );
+
+    expect(capture.status).toBe(200);
+    expect(capture.headers).toMatchObject({
+      'Content-Type': 'image/png',
+      'X-AnoClaw-Psd-Source': 'composite',
+      'X-AnoClaw-Image-Width': 1,
+      'X-AnoClaw-Image-Height': 1,
+    });
+    expect(capture.data?.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    expect(await fsp.readFile(filePath)).toEqual(original);
   });
 });

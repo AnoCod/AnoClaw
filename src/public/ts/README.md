@@ -357,6 +357,7 @@ One TS file per message type in `components/conversation/delegates/`:
 - `components/conversation/delegates/` — One file per message type
 - `components/pages/` — Full-page views (Sessions, Workspace, Agents, Settings, Skills, Memory, Plugins)
 - `components/pages/workspace/` — Read-only Workspace file tree, rich previews, source viewer, tabs, and split view
+  - Preview routing covers source/text, config tables, media/documents/archives, binary signatures plus hex, and flattened PSD/PSB images; none of these paths can write to the Workspace.
 - `components/tabs/` — Shared tab helpers (FilePreview, Overview, Plan)
 - `components/ui/` — Reusable UI kit (Button, Card, Dialog, Toggle, Input, Select, Badge, Toast, etc.)
 - `handlers/` — WS event → SessionAgent dispatch

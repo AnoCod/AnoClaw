@@ -134,6 +134,9 @@ describe('workspace and conversation runtime i18n', () => {
     expect(t('workspace.viewerIdle')).toBe('只读文件浏览器空闲');
     expect(t('workspace.readOnly')).toBe('只读');
     expect(t('workspace.preview.archiveEntries', { count: 3 })).toBe('3 个归档条目');
+    expect(t('workspace.preview.configEntries', { count: 4 })).toBe('4 个配置项');
+    expect(t('workspace.preview.binarySummary', { kind: 'WebAssembly module', size: '64KB' })).toBe('类型：WebAssembly module · 显示前 64KB');
+    expect(t('workspace.preview.psdFlattened')).toContain('不解析或展示图层');
     expect(t('workspace.editor.ls.checking')).toBe('语言服务检查中');
     expect(t('workspace.editor.ls.requestFailed', { status: 503 })).toBe('语言服务请求失败（HTTP 503）');
     expect(t('path.desktopRequired')).toBe('需要桌面应用才能打开文件。');

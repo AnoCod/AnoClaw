@@ -468,7 +468,7 @@ export class WorkspaceFileTree {
 function _fileIcon(name: string): string {
   const ext = name.split('.').pop()?.toLowerCase()||'';
   const fileType = workspaceFileCapability(name).type;
-  if (fileType === 'image' || fileType === 'svg') return _SVG_IMAGE;
+  if (fileType === 'image' || fileType === 'svg' || fileType === 'psd') return _SVG_IMAGE;
   if (fileType === 'structured' || fileType === 'notebook') return _SVG_JSON;
   if (fileType === 'markdown') return _SVG_MD;
   if (fileType === 'html') return _SVG_HTML;

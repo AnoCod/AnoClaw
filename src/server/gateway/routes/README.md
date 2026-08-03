@@ -84,7 +84,7 @@
 
 **Legacy:** `MemoryRoutes.ts` — class-style handler (not `RouteHandler`), registered directly in `ApiServer`.
 
-### Workspace (13 routes)
+### Workspace (14 routes)
 | File | Route(s) | Path |
 |------|----------|------|
 | `WorkspaceRoute.ts` | `WorkspaceInfoRoute` | `GET /api/v1/workspace` |
@@ -100,6 +100,7 @@
 | | `WriteWorkspaceFileRoute` | `PUT /api/v1/workspace/write` (disabled: 405) |
 | | `ConvertOfficeRoute` | `GET /api/v1/workspace/convert-office` |
 | | `InspectWorkspaceArchiveRoute` | `GET /api/v1/workspace/inspect-archive` |
+| | `PreviewWorkspacePsdRoute` | `GET /api/v1/workspace/preview-psd` |
 
 ### Settings (2 routes — separate from SettingsRoutes)
 | File | Route(s) | Path |

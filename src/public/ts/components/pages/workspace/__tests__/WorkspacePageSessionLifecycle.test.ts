@@ -119,7 +119,7 @@ describe('WorkspacePage session lifecycle', () => {
     expect(internal._toolbarPath.textContent).toBe('No workspace');
     expect(staleGroup.suspend).toHaveBeenCalledTimes(1);
     expect(loadRoot).toHaveBeenCalledWith('');
-    expect(internal._tabMount.innerHTML).toContain('Workspace editor idle');
+    expect(internal._tabMount.innerHTML).toContain('Read-only file browser idle');
 
     sessionVM.emit('sessionsRemoved', ['deleted-session']);
 
@@ -199,7 +199,7 @@ describe('WorkspacePage session lifecycle', () => {
     expect(oldGroup.suspend).toHaveBeenCalledTimes(1);
     expect(internal._currentGroup).toBeNull();
     expect(internal._sessionId).toBe('');
-    expect(internal._tabMount.innerHTML).toContain('Workspace editor idle');
+    expect(internal._tabMount.innerHTML).toContain('Read-only file browser idle');
 
     treeLoad.resolve();
     await pending;

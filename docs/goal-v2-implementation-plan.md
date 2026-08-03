@@ -105,7 +105,7 @@ Agent 不能直接把 Goal 标记为最终 completed；默认只能提交 `waiti
 
 - Goal kick 和 continuation 是内部控制消息，不写成普通用户聊天记录。
 - 聊天只展示运行摘要、工具活动、证据和终态。
-- evidence 中的 Workspace 文件沿用现有富内容链接能力：点击文件在 Workspace IDE 打开，图片可预览。
+- evidence 中的 Workspace 文件沿用现有富内容链接能力：点击文件在 Workspace 只读浏览器打开，图片可预览。
 - Goal 绑定创建时 Workspace；Workspace 变化必须通过编辑合约明确更新。
 
 ## 4. 数据模型
@@ -196,7 +196,7 @@ Agent 不能直接把 Goal 标记为最终 completed；默认只能提交 `waiti
 
 - 创建执行合约后只启动一个 Goal runner。
 - 目标完成后进入“待验收”且停止继续调用。
-- 点击证据文件在 Workspace IDE 打开。
+- 点击证据文件在 Workspace 只读浏览器打开。
 - 图片证据在会话中正常预览。
 - 暂停后当前动作停止；恢复后从最后状态继续。
 - 达到预算或连续失败阈值后停止并给出清楚原因。

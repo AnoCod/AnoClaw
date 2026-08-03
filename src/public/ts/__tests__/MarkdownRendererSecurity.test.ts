@@ -64,4 +64,14 @@ describe('MarkdownRenderer HTML sanitization', () => {
     expect(rendered).toContain('href="mailto:test@example.com"');
     expect(rendered).toContain('href="#section"');
   });
+
+  it('resolves local images relative to the Markdown file directory', () => {
+    const rendered = renderMarkdown('![chart](../assets/chart.png)', {
+      sessionId: 'session-a',
+      basePath: 'docs/guides',
+    });
+
+    expect(rendered).toContain('path=docs%2Fassets%2Fchart.png');
+    expect(rendered).toContain('sessionId=session-a');
+  });
 });

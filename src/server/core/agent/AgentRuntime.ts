@@ -1389,7 +1389,7 @@ export function buildGoalContinuationContent(ctx: GoalContinuationContext): stri
   const routedDomain = ctx.taskResolution?.bestCapability?.domain;
   if (routedDomain === 'coding') {
     lines.push(
-      '- Coding task: start from the current IDE/workspace context, inspect relevant files before edits, and run focused build/test checks after changes.',
+      '- Coding task: start from the current read-only Workspace viewer context, inspect relevant files before edits through authorized tools, and run focused build/test checks after changes.',
     );
   } else if (routedDomain && ['office', 'pdf', 'data'].includes(routedDomain)) {
     lines.push(
@@ -1494,7 +1494,7 @@ function buildTaskResolutionContext(taskResolution: UserTaskResolution): string 
   }
   if (capability.domain === 'coding') {
     lines.push(
-      'Coding route: use the existing workspace/IDE context as the first signal. If the Editor Context section shows an active file, open files, or selected text, inspect that before broad repository search.',
+      'Coding route: use the existing read-only Workspace viewer context as the first signal. If Workspace Viewer Context shows an active file, open files, or selected text, inspect that before broad repository search. Viewing a file does not authorize modifying it.',
       'For implementation tasks, prefer Read/Grep/Glob/Edit/Write for code changes and Bash only for git inspection, tests, builds, or package commands.',
       'For review tasks, inspect changed lines first and return findings first with file and line references when possible.',
     );

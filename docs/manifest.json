@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-08-01",
+  "updated": "2026-08-03",
   "purpose": "AnoClaw agent-readable knowledge base. Supplements skills and memory with durable product, plugin, API, architecture, design, and troubleshooting references.",
   "entries": [
     {
@@ -30,6 +30,13 @@
       "audience": ["developer", "agent"],
       "tags": ["architecture", "electron", "websocket", "jsonl", "plugin-host"],
       "summary": "High-level runtime architecture and data flow for code and debugging tasks."
+    },
+    {
+      "path": "docs/workspace-read-only-browser.md",
+      "title": "Workspace 只读文件浏览器",
+      "audience": ["user", "developer", "agent"],
+      "tags": ["workspace", "read-only", "preview", "security", "file-browser"],
+      "summary": "Defines the permanent read-only Workspace contract, supported preview formats, safety limits, and extension workflow."
     },
     {
       "path": "docs/plugin-dev.md",

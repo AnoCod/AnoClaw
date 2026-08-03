@@ -1,4 +1,4 @@
-// EditorContextSection — injects workspace editor state into the system prompt
+// EditorContextSection — injects legacy-wire Workspace viewer state into the system prompt.
 // Priority 83: between UserAwareness (82) and ActiveTask (84)
 import { SystemPromptSection, PromptContext } from '../PromptSection.js';
 import { SessionManager } from '../../session/index.js';
@@ -18,8 +18,8 @@ export function createEditorContextSection(): SystemPromptSection {
       const ec = (session?.metadata?.editorContext as Record<string, unknown>) || null;
       if (!ec) return '';
 
-      const lines: string[] = ['# Editor Context'];
-      lines.push('The user has the Workspace page open. Below is their current editor state.');
+      const lines: string[] = ['# Workspace Viewer Context'];
+      lines.push('The user has the read-only Workspace browser open. Below is their current viewing state.');
 
       const openFiles = ec.openFiles as string[] | undefined;
       if (openFiles && openFiles.length > 0) {
@@ -48,10 +48,11 @@ export function createEditorContextSection(): SystemPromptSection {
       }
 
       lines.push('\n## Instructions');
-      lines.push('- When the user asks about code, check Editor Context first — they are likely referring to the active file or selection.');
+      lines.push('- When the user asks about code, check Workspace Viewer Context first — they are likely referring to the active file or selection.');
       lines.push('- If the user says "this" or "here", it means the active file or selection.');
       lines.push('- User selection takes precedence — treat it as the primary target when present.');
-      lines.push('- When using Edit/Write tools on workspace files, the active file is the default target.');
+      lines.push('- This context is observational and read-only. An open or selected file does not authorize modifying it.');
+      lines.push('- If the user separately requests a file change, follow the agent tool permission and confirmation rules; use the active file only as targeting context.');
       lines.push('');
 
       return lines.join('\n');

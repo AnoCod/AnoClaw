@@ -7,8 +7,6 @@
 
 import { WebContentsView } from 'electron';
 import type { BrowserWindow, WebContents } from 'electron';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
 
 interface ViewEntry {
   view: WebContentsView;
@@ -681,18 +679,11 @@ export class BrowserViewManager {
   private _handleDownload(viewId: string, item: any): void {
     const entry = this._views.get(viewId);
     if (!entry) return;
-    const workspacePath = entry.workspacePath ? path.resolve(entry.workspacePath) : '';
     const filename = sanitizeDownloadFilename(item.getFilename?.() || 'download');
-    let savePath = item.getSavePath?.() || '';
-    let relativePath = '';
-
-    if (workspacePath) {
-      const targetDir = path.join(workspacePath, 'downloads');
-      fs.mkdirSync(targetDir, { recursive: true });
-      savePath = uniqueDownloadPath(targetDir, filename);
-      relativePath = path.relative(workspacePath, savePath).replace(/\\/g, '/');
-      item.setSavePath?.(savePath);
-    }
+    // Workspace is a read-only browser. Never redirect downloads into the
+    // bound workspace; Electron keeps its normal external download location.
+    const savePath = item.getSavePath?.() || '';
+    const relativePath = '';
 
     const downloadId = `dl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
     const emitDownload = (state: BrowserDownloadEvent['state']) => {
@@ -845,15 +836,4 @@ function browserPartitionForSession(sessionId?: string): string {
 function sanitizeDownloadFilename(filename: string): string {
   const cleaned = filename.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim();
   return cleaned && cleaned !== '.' && cleaned !== '..' ? cleaned : 'download';
-}
-
-function uniqueDownloadPath(dir: string, filename: string): string {
-  const parsed = path.parse(filename);
-  let candidate = path.join(dir, filename);
-  let i = 1;
-  while (fs.existsSync(candidate)) {
-    candidate = path.join(dir, `${parsed.name} (${i})${parsed.ext}`);
-    i++;
-  }
-  return candidate;
 }

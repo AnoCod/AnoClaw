@@ -1,14 +1,21 @@
-// WorkspaceTabGroup.ts — Tab group for Workspace page.
-// Code, image, PDF, markdown via local handling. Browser tabs via Electron WebContentsView.
+// WorkspaceTabGroup.ts — Read-only file preview tabs plus Electron WebContentsView browser tabs.
 
-import { ToastManager } from '../../../ToastManager.js';
 import { onLocaleChange, t, type TranslationKey } from '../../../i18n/index.js';
 import {
-  hasExternalContentChange,
-  isSaveSnapshotCurrent,
   workspaceModelUri,
   workspaceReadOnlyReason,
-} from './WorkspaceIdeUtils.js';
+} from './WorkspaceViewerUtils.js';
+import {
+  workspaceFileCapability,
+  workspaceFileExtension,
+  workspaceSupportsSource,
+  type WorkspaceFileType,
+  type WorkspaceViewMode,
+} from './WorkspaceFileCapabilities.js';
+import {
+  detectWorkspaceBinarySignature,
+  parseWorkspaceConfig,
+} from './WorkspacePreviewParsers.js';
 
 const LANG_MAP: Record<string, string> = {
   // TypeScript / JavaScript
@@ -97,12 +104,6 @@ const NAME_LANG_MAP: Record<string, string> = {
   'robots.txt':'plaintext','humans.txt':'plaintext','manifest.json':'json','manifest.webapp':'json',
 };
 
-const IMG_EXTS = new Set(['png','jpg','jpeg','gif','webp','svg','bmp','ico','tiff','tif','avif','heic','heif','jfif','pjpeg','pjp','apng','jxl','jpe']);
-const AUDIO_EXTS = new Set(['mp3','wav','ogg','oga','m4a','aac','flac','opus']);
-const VIDEO_EXTS = new Set(['mp4','webm','ogv','mov','m4v']);
-const OFFICE_EXTS = new Set(['docx','xlsx','pptx','xls','xlsm','ppt','pptm','odt','ods','odp']);
-const TABLE_EXTS = new Set(['csv','tsv']);
-type FileType = 'code'|'image'|'audio'|'video'|'pdf'|'markdown'|'csv'|'binary'|'browser'|'docx'|'xlsx'|'pptx';
 interface AgentBrowserEvent {
   sessionId: string;
   viewId: string;
@@ -339,9 +340,15 @@ function _detectLanguage(name: string, content: string): string {
 }
 
 interface OpenTab {
-  path:string; name:string; fileType:FileType; isDirty:boolean; language:string;
+  path:string; name:string; fileType:WorkspaceFileType; language:string;
   model:any; viewState:any; browserUrl?:string; wvId?:string;
   readOnlyReason?:string;
+  viewMode?:WorkspaceViewMode;
+  viewModes?:readonly WorkspaceViewMode[];
+  content?:string;
+  size?:number;
+  encoding?:string;
+  truncated?:boolean;
   browserLoading?:boolean; browserTitle?:string; browserFavicon?:string;
   browserCanGoBack?:boolean; browserCanGoForward?:boolean;
   browserZoomFactor?:number; browserRecentUrls?:string[];
@@ -354,17 +361,12 @@ interface OpenTab {
   browserViewport?:BrowserViewportPreset;
   agentTrace?: AgentBrowserEvent[];
   tableRows?:string[][];
-  originalContent?:string; // snapshot at open — for diff detection
   diskSha256?:string;
-  pendingExternalSha256?:string;
-  editRevision?:number;
-  savePromise?:Promise<boolean>;
 }
 
 export class WorkspaceTabGroup {
   private static _groups = new Set<WorkspaceTabGroup>();
   private static _languageFeaturesRegistered = false;
-  private static _inlineCompletionDisposable: { dispose: () => void } | null = null;
   readonly element: HTMLElement;
   private _tabBar: HTMLElement; private _plusBtn: HTMLElement; private _contentArea: HTMLElement;
   private _tabs: OpenTab[] = []; private _activePath: string|null = null;
@@ -383,14 +385,8 @@ export class WorkspaceTabGroup {
   private _restoringBrowserState = false;
   private _workspacePathReady = false;
   private _persistenceScope = 'primary';
-  private _inlineCompletionRequestId = 0;
-  private _lastInlineKey = '';
   private _renderGeneration = 0;
   private _modelSequence = 0;
-  private _inlineCompletionState: 'idle' | 'waiting' | 'thinking' | 'ready' | 'empty' | 'error' = 'idle';
-  private _inlineCompletionMessageKey: TranslationKey = 'workspace.editor.ai.ready';
-  private _inlineCompletionMessageParams: Record<string, string | number> = {};
-  private _inlineCompletionStatusVersion = 0;
   private _diagnosticsTimer = 0;
   private _languageStatusState: 'idle' | 'working' | 'ready' | 'error' = 'idle';
   private _languageStatusMessageKey: TranslationKey = 'workspace.editor.ls.ready';
@@ -398,7 +394,7 @@ export class WorkspaceTabGroup {
   private _languageStatusVersion = 0;
   private _stopLocaleListener: (() => void) | null = null;
   onOpenFile: ((path:string, name:string)=>void)|null = null;
-  /** Called (throttled) whenever editor state changes — cursor, selection, tab switch. */
+  /** Called (throttled) whenever viewer context changes — cursor, selection, tab switch. */
   onEditorContextChange: (()=>void)|null = null;
 
   constructor() {
@@ -411,23 +407,15 @@ export class WorkspaceTabGroup {
 
     this._plusBtn = document.createElement('button'); this._plusBtn.className = 'ws-tab-plus';
     this._plusBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`;
-    this._plusBtn.title = t('workspace.newFileOrBrowser');
-    this._plusBtn.addEventListener('click', (e) => { e.stopPropagation(); this._showPlusDialog(); });
+    this._plusBtn.title = t('workspace.newBrowser');
+    this._plusBtn.addEventListener('click', (e) => { e.stopPropagation(); void this.newBrowserTab(); });
     this._tabBar.appendChild(this._plusBtn);
 
     this._contentArea = document.createElement('div'); this._contentArea.className = 'ws-tab-content';
     this._showEmpty(); this.element.appendChild(this._contentArea);
     this._ro = new ResizeObserver(() => { this._editor?.layout(); this._syncWvBounds(); });
     this._ro.observe(this._contentArea);
-    // Ctrl+S / Cmd+S — document-level so it works regardless of which element has focus.
-    // Only saves if this tab group is mounted on the visible workspace page.
     this._globalKeyHandler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        // Guard: only handle when the workspace page is visible
-        if (!this.element.isConnected || !this.element.offsetParent) return;
-        e.preventDefault();
-        void this.saveActiveFile();
-      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
         if (!this.element.isConnected || !this.element.offsetParent) return;
         const tab = this._tabs.find(t => t.path === this._activePath);
@@ -614,43 +602,6 @@ export class WorkspaceTabGroup {
 
   private _api(): any { return (window as any).electronAPI; }
 
-  // ── Plus dialog ──
-
-  private _showPlusDialog(): void {
-    const overlay = document.createElement('div');
-    overlay.className = 'dialog-overlay';
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); } });
-
-    const card = document.createElement('div');
-    card.className = 'dialog';
-    card.innerHTML = `
-      <h2 class="dialog-title">${t('workspace.newTab')}</h2>
-      <div class="dialog-actions" style="flex-direction:column;gap:8px;align-items:stretch;">
-        <button id="ws-plus-new-file" class="btn-dialog-confirm">${t('workspace.newFile')}</button>
-        <button id="ws-plus-new-browser" class="btn-dialog-confirm">${t('workspace.newBrowser')}</button>
-      </div>`;
-    overlay.appendChild(card);
-    document.body.appendChild(overlay);
-
-    card.querySelector('#ws-plus-new-file')?.addEventListener('click', () => { overlay.remove(); this._promptNewFile(); });
-    card.querySelector('#ws-plus-new-browser')?.addEventListener('click', () => { overlay.remove(); this.newBrowserTab(); });
-
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKey); } };
-    document.addEventListener('keydown', onKey);
-  }
-
-  private _promptNewFile(): void {
-    this._showInputDialog(t('workspace.newFile'), t('workspace.fileNameExample'), (name) => {
-      if (!name) return;
-      fetch('/api/v1/workspace/create-file', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({sessionId:this._sessionId, path:'/', name}) })
-        .then(async resp => {
-          if (!resp.ok) throw new Error(await _responseError(resp, t('workspace.createFileFailed')));
-          await this.openFile(name, name);
-        })
-        .catch(err => ToastManager.getInstance().error(err instanceof Error ? err.message : t('workspace.createFileFailed')));
-    });
-  }
-
   /** Create a new browser tab by spawning a new WebContentsView. */
   async newBrowserTab(initialUrl?: string, restore?: PersistedBrowserTab): Promise<void> {
     const url = initialUrl || 'about:blank';
@@ -660,7 +611,7 @@ export class WorkspaceTabGroup {
     const tabId = 'browser:' + Date.now();
     const tab: OpenTab = {
       path: tabId, name: restore?.title || (url === 'about:blank' ? t('workspace.newTabName') : url.replace(/^https?:\/\//,'').substring(0, 30)),
-      fileType: 'browser', isDirty: false, language: '', model: null, viewState: null,
+      fileType: 'browser', language: '', model: null, viewState: null,
       browserUrl: url, wvId: result?.viewId || undefined, agentTrace: [],
       browserTitle: restore?.title, browserFavicon: restore?.favicon,
       browserZoomFactor: restore?.zoomFactor || 1,
@@ -692,7 +643,7 @@ export class WorkspaceTabGroup {
     const tab: OpenTab = {
       path: 'browser:' + Date.now(),
       name: url === 'about:blank' ? t('workspace.newTabName') : url.replace(/^https?:\/\//,'').substring(0, 30),
-      fileType: 'browser', isDirty: false, language: '', model: null, viewState: null,
+      fileType: 'browser', language: '', model: null, viewState: null,
       browserUrl: url, wvId: viewId, agentTrace: [], browserZoomFactor: 1, browserRecentUrls: url !== 'about:blank' ? [url] : [], downloads: [],
       networkEvents: [], consoleLogs: [], securityEvents: [], browserPanel: null,
       findVisible: false, findQuery: '', findMatches: 0, findActiveMatch: 0, findMatchCase: false,
@@ -711,7 +662,7 @@ export class WorkspaceTabGroup {
       tab = {
         path: 'browser:' + Date.now(),
         name: url === 'about:blank' ? t('workspace.agentBrowser') : url.replace(/^https?:\/\//,'').substring(0, 30),
-        fileType: 'browser', isDirty: false, language: '', model: null, viewState: null,
+        fileType: 'browser', language: '', model: null, viewState: null,
         browserUrl: url, wvId: event.viewId, agentTrace: [], browserZoomFactor: 1, browserRecentUrls: url !== 'about:blank' ? [url] : [], downloads: [],
         networkEvents: [], consoleLogs: [], securityEvents: [], browserPanel: null,
         findVisible: false, findQuery: '', findMatches: 0, findActiveMatch: 0, findMatchCase: false,
@@ -741,33 +692,6 @@ export class WorkspaceTabGroup {
     this._scheduleBrowserStateSave();
   }
 
-  // ── Input dialog helper (for New File) ──
-
-  private _showInputDialog(title: string, placeholder: string, onOk: (value: string) => void): void {
-    const overlay = document.createElement('div');
-    overlay.className = 'dialog-overlay';
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-
-    const card = document.createElement('div');
-    card.className = 'dialog';
-    card.innerHTML = `
-      <h2 class="dialog-title">${_escHtml(title)}</h2>
-      <input id="ws-input-dlg-field" type="text" class="dialog-input" placeholder="${_escHtml(placeholder)}" autofocus style="width:100%;padding:6px 10px;background:var(--color-bg);border:1px solid var(--color-hairline);border-radius:6px;color:var(--color-text);font-size:13px;font-family:inherit;outline:none;margin:8px 0;box-sizing:border-box;">
-      <div class="dialog-actions">
-        <button class="btn-dialog-cancel" id="ws-input-dlg-cancel">${t('common.cancel')}</button>
-        <button class="btn-dialog-confirm" id="ws-input-dlg-ok">${t('workspace.ok')}</button>
-      </div>`;
-    overlay.appendChild(card);
-    document.body.appendChild(overlay);
-
-    const field = card.querySelector('#ws-input-dlg-field') as HTMLInputElement;
-    field.focus();
-    field.addEventListener('keydown', (e) => { if (e.key === 'Enter') { overlay.remove(); onOk(field.value); } });
-    card.querySelector('#ws-input-dlg-ok')?.addEventListener('click', () => { overlay.remove(); onOk(field.value); });
-    card.querySelector('#ws-input-dlg-cancel')?.addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') overlay.remove(); });
-  }
-
   // ── Monaco init ──
 
   private _initMonaco(): Promise<void> {
@@ -791,74 +715,41 @@ export class WorkspaceTabGroup {
   async openFile(path: string, name: string, line?: number, column?: number): Promise<void> {
     const existing = this._tabs.find(t => t.path === path);
     if (existing) {
+      if (line && existing.model) existing.viewMode = 'source';
       this._activate(existing);
-      if (existing.fileType === 'code') this._revealEditorLocation(line, column);
+      if (existing.model) this._revealEditorLocation(line, column);
       return;
     }
-    const ext = name.split('.').pop()?.toLowerCase() || '';
-    const nameLower = name.toLowerCase();
+    const capability = workspaceFileCapability(name);
+    const ext = workspaceFileExtension(name);
 
-    // ── Images ──
-    if (IMG_EXTS.has(ext)) {
-      const tab: OpenTab = { path, name, fileType:'image', isDirty:false, language:'', model:null, viewState:null };
+    // Binary-native formats are streamed or converted without decoding them as text.
+    if (!workspaceSupportsSource(capability.type)) {
+      const tab: OpenTab = {
+        path, name, fileType: capability.type, language: '', model: null, viewState: null,
+        viewMode: capability.defaultMode, viewModes: capability.modes,
+      };
       this._tabs.push(tab); this._renderTabBtn(tab); this._activate(tab);
       return;
     }
 
-    // ── Audio / video ──
-    if (AUDIO_EXTS.has(ext)) {
-      const tab: OpenTab = { path, name, fileType:'audio', isDirty:false, language:'', model:null, viewState:null };
-      this._tabs.push(tab); this._renderTabBtn(tab); this._activate(tab);
-      return;
-    }
-    if (VIDEO_EXTS.has(ext)) {
-      const tab: OpenTab = { path, name, fileType:'video', isDirty:false, language:'', model:null, viewState:null };
-      this._tabs.push(tab); this._renderTabBtn(tab); this._activate(tab);
-      return;
-    }
-
-    // ── PDF ──
-    if (ext === 'pdf') {
-      const tab: OpenTab = { path, name, fileType:'pdf', isDirty:false, language:'', model:null, viewState:null };
-      this._tabs.push(tab); this._renderTabBtn(tab); this._activate(tab);
-      return;
-    }
-
-    // ── Office documents ──
-    if (OFFICE_EXTS.has(ext)) {
-      const ft: FileType = ext === 'docx' || ext === 'doc' || ext === 'odt' ? 'docx'
-        : ext === 'xlsx' || ext === 'xls' || ext === 'xlsm' || ext === 'ods' ? 'xlsx'
-        : 'pptx';
-      const tab: OpenTab = { path, name, fileType:ft, isDirty:false, language:'', model:null, viewState:null };
-      this._tabs.push(tab); this._renderTabBtn(tab); this._activate(tab);
-      return;
-    }
-
-    // ── Everything else: fetch content, detect language ──
+    // Source-capable formats share one immutable Monaco model and optional rich preview.
     try {
       const resp = await fetch(`/api/v1/workspace/read?path=${encodeURIComponent(path)}&sessionId=${encodeURIComponent(this._sessionId)}`);
       if (!resp.ok) throw new Error('Read failed');
       const data = await resp.json();
-      const content = data.content || '';
+      const content = String(data.content || '');
 
       if (_isBinaryContent(content)) {
-        const tab: OpenTab = { path, name, fileType:'binary', isDirty:false, language:'', model:null, viewState:null };
-        this._tabs.push(tab); this._renderTabBtn(tab); this._activate(tab);
-        return;
-      }
-
-      if (TABLE_EXTS.has(ext)) {
         const tab: OpenTab = {
-          path, name, fileType:'csv', isDirty:false, language:'csv', model:null, viewState:null,
-          tableRows: _parseDelimitedRows(content, ext === 'tsv' ? '\t' : ','),
-          originalContent: content,
+          path, name, fileType:'binary', language:'', model:null, viewState:null,
+          viewMode:'preview', viewModes:['preview'], size:Number(data.size || 0),
         };
         this._tabs.push(tab); this._renderTabBtn(tab); this._activate(tab);
         return;
       }
 
       const language = _detectLanguage(name, content);
-      const fileType: FileType = language === 'markdown' ? 'markdown' : 'code';
 
       await this._initMonaco(); if (!this._monacoReady) return;
       const m = (window as any).monaco;
@@ -869,20 +760,24 @@ export class WorkspaceTabGroup {
       const tab: OpenTab = {
         path,
         name,
-        fileType,
-        isDirty:false,
+        fileType: capability.type,
         language,
         model,
         viewState:null,
-        originalContent: content,
+        content,
+        size:Number(data.size || 0),
+        encoding:String(data.encoding || 'UTF-8'),
+        truncated:Boolean(data.truncated),
+        viewMode: line ? 'source' : capability.defaultMode,
+        viewModes: capability.modes,
+        tableRows: capability.type === 'csv' ? _parseDelimitedRows(content, ext === 'tsv' ? '\t' : ',') : undefined,
         readOnlyReason: workspaceReadOnlyReason(data),
         diskSha256: typeof data.sha256 === 'string' ? data.sha256 : undefined,
-        editRevision: 0,
       };
       this._tabs.push(tab); this._renderTabBtn(tab); this._activate(tab);
-      if (fileType === 'code') this._revealEditorLocation(line, column);
+      if (line) this._revealEditorLocation(line, column);
     } catch {
-      const tab: OpenTab = { path, name, fileType:'binary', isDirty:false, language:'', model:null, viewState:null };
+      const tab: OpenTab = { path, name, fileType:'binary', language:'', model:null, viewState:null, viewMode:'preview', viewModes:['preview'] };
       this._tabs.push(tab); this._renderTabBtn(tab); this._activate(tab);
     }
   }
@@ -942,7 +837,10 @@ export class WorkspaceTabGroup {
 
   private _activate(tab: OpenTab): void {
     const renderGeneration = ++this._renderGeneration;
-    if (this._editor) { const cur = this._tabs.find(t => t.path===this._activePath); if (cur) cur.viewState = this._editor.saveViewState(); }
+    if (this._editor) {
+      const cur = this._tabs.find(item => item.path === this._activePath);
+      if (cur?.model && this._editor.getModel?.() === cur.model) cur.viewState = this._editor.saveViewState();
+    }
     this._activePath = tab.path;
     this._tabBar.querySelectorAll('.ws-tab').forEach(el => {
       const active = el.getAttribute('data-tab-path') === tab.path;
@@ -952,17 +850,30 @@ export class WorkspaceTabGroup {
     });
     // Destroy any existing browser view before switching
     this._destroyBrowserView();
+    if (tab.viewMode === 'source' && tab.model) {
+      this._showTextViewer(tab);
+      this._notifyContextChange();
+      return;
+    }
     switch (tab.fileType) {
-      case 'code': this._showCodeEditor(tab); break;
+      case 'text': this._showTextViewer(tab); break;
       case 'image': this._showImage(tab); break;
+      case 'svg': this._showImage(tab); break;
       case 'audio': this._showMedia(tab, 'audio'); break;
       case 'video': this._showMedia(tab, 'video'); break;
       case 'pdf': this._showPdf(tab); break;
       case 'markdown': void this._showMarkdown(tab, renderGeneration); break;
-      case 'csv': this._showTablePreview(tab.tableRows || [], tab.name); break;
+      case 'csv': this._showTablePreview(tab, tab.tableRows || [], tab.name); break;
+      case 'html': this._showHtmlPreview(tab); break;
+      case 'config': this._showConfigPreview(tab); break;
+      case 'structured': this._showStructuredPreview(tab); break;
+      case 'notebook': void this._showNotebookPreview(tab, renderGeneration); break;
+      case 'archive': void this._showArchivePreview(tab, renderGeneration); break;
+      case 'font': void this._showFontPreview(tab, renderGeneration); break;
+      case 'psd': this._showPsdPreview(tab); break;
       case 'browser': this._showBrowser(tab); break;
       case 'docx': case 'xlsx': case 'pptx': void this._showOffice(tab, renderGeneration); break;
-      default: this._showBinaryNotice(tab);
+      default: void this._showHexPreview(tab, renderGeneration);
     }
     this._notifyContextChange();
     if (tab.fileType === 'browser') this._scheduleBrowserStateSave();
@@ -971,48 +882,7 @@ export class WorkspaceTabGroup {
   closeTab(path: string): void {
     const idx = this._tabs.findIndex(t => t.path===path); if (idx===-1) return;
     const tab = this._tabs[idx];
-    if (tab.isDirty) { this._confirmCloseDirty(tab, idx); return; }
     this._doCloseTab(tab, idx);
-  }
-
-  private async _confirmCloseDirty(tab: OpenTab, idx: number): Promise<void> {
-    const action = await this._promptDirtyAction(tab, t('workspace.action.closing'));
-    if (action === 'cancel') return;
-    if (action === 'save' && !await this.saveFile(tab)) return;
-    this._doCloseTab(tab, idx);
-  }
-
-  private _promptDirtyAction(tab: OpenTab, actionLabel: string): Promise<'save'|'discard'|'cancel'> {
-    return new Promise((resolve) => {
-      const overlay = document.createElement('div');
-      overlay.className = 'dialog-overlay';
-      let settled = false;
-      const finish = (action: 'save'|'discard'|'cancel') => {
-        if (settled) return;
-        settled = true;
-        overlay.remove();
-        document.removeEventListener('keydown', onKey);
-        resolve(action);
-      };
-      overlay.addEventListener('click', (e) => { if (e.target === overlay) finish('cancel'); });
-      const card = document.createElement('div');
-      card.className = 'dialog';
-      card.innerHTML = `
-        <h2 class="dialog-title">${t('workspace.unsavedTitle')}</h2>
-        <p class="dialog-message">${t('workspace.unsavedMessage', { name: _escHtml(tab.name), action: _escHtml(actionLabel) })}</p>
-        <div class="dialog-actions">
-          <button class="btn-dialog-cancel" data-action="cancel">${t('common.cancel')}</button>
-          <button class="btn-dialog-cancel" data-action="discard">${t('workspace.discard')}</button>
-          <button class="btn-dialog-confirm" data-action="save">${t('common.save')}</button>
-        </div>`;
-      overlay.appendChild(card);
-      document.body.appendChild(overlay);
-      card.querySelector('[data-action="cancel"]')?.addEventListener('click', () => finish('cancel'));
-      card.querySelector('[data-action="discard"]')?.addEventListener('click', () => finish('discard'));
-      card.querySelector('[data-action="save"]')?.addEventListener('click', () => finish('save'));
-      const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') finish('cancel'); };
-      document.addEventListener('keydown', onKey);
-    });
   }
 
   private _doCloseTab(tab: OpenTab, idx: number): void {
@@ -1031,39 +901,78 @@ export class WorkspaceTabGroup {
 
   // ── Content renderers ──
 
-  private _showCodeEditor(tab: OpenTab): void {
-    const m = (window as any).monaco; this._destroyContent();
+  private _createPreviewBody(tab: OpenTab, className = ''): HTMLElement {
+    this._destroyContent();
     this._contentArea.style.cssText = 'display:flex;flex-direction:column;';
 
-    // Persist editor host across tab switches so Monaco isn't destroyed/recreated
+    const toolbar = document.createElement('div');
+    toolbar.className = 'ws-viewer-toolbar';
+    const identity = document.createElement('div');
+    identity.className = 'ws-viewer-identity';
+    const type = document.createElement('span');
+    type.className = 'ws-viewer-type';
+    type.textContent = tab.fileType.toUpperCase();
+    const path = document.createElement('span');
+    path.className = 'ws-viewer-path';
+    path.textContent = tab.path;
+    path.title = tab.path;
+    identity.append(type, path);
+    toolbar.appendChild(identity);
+
+    const modes = tab.viewModes || [];
+    if (modes.length > 1) {
+      const switcher = document.createElement('div');
+      switcher.className = 'ws-viewer-modes';
+      for (const mode of modes) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `ws-viewer-mode${tab.viewMode === mode ? ' active' : ''}`;
+        button.textContent = mode === 'source' ? t('workspace.preview.source') : t('workspace.preview.rich');
+        button.addEventListener('click', () => {
+          if (tab.viewMode === mode) return;
+          tab.viewMode = mode;
+          this._activate(tab);
+        });
+        switcher.appendChild(button);
+      }
+      toolbar.appendChild(switcher);
+    }
+
+    const badge = document.createElement('span');
+    badge.className = 'ws-viewer-readonly';
+    badge.textContent = t('workspace.readOnly');
+    badge.title = t('workspace.readOnlyMessage');
+    toolbar.appendChild(badge);
+    this._contentArea.appendChild(toolbar);
+
+    const body = document.createElement('div');
+    body.className = `ws-viewer-body${className ? ` ${className}` : ''}`;
+    this._contentArea.appendChild(body);
+    return body;
+  }
+
+  private _showTextViewer(tab: OpenTab): void {
+    const m = (window as any).monaco;
+    const body = this._createPreviewBody(tab, 'ws-source-viewer');
+
+    // Persist the Monaco source viewer across tab switches.
     if (!this._editorHost) {
       this._editorHost = document.createElement('div');
       this._editorHost.style.cssText = 'flex:1;min-height:0;overflow:hidden;';
     }
-    this._contentArea.appendChild(this._editorHost);
+    body.appendChild(this._editorHost);
 
     if (!this._editor) {
       this._editor = m.editor.create(this._editorHost, {
         theme:'anoclaw-dark', fontSize:13, fontFamily:"'Cascadia Code','Fira Code',Consolas,'SF Mono',Monaco,monospace",
         minimap:{enabled:true,scale:1}, automaticLayout:false, scrollBeyondLastLine:false, wordWrap:'off',
         lineNumbers:'on', renderWhitespace:'selection', tabSize:2, bracketPairColorization:{enabled:true}, folding:true, glyphMargin:true,
-        quickSuggestions:{ other:true, comments:false, strings:false },
-        suggestOnTriggerCharacters:true,
-        acceptSuggestionOnEnter:'on',
-        tabCompletion:'on',
-        wordBasedSuggestions:'allDocuments',
-        parameterHints:{ enabled:true },
-        inlineSuggest:{ enabled:true, showToolbar:'onHover', mode:'prefix' },
+        readOnly:true, domReadOnly:true,
+        quickSuggestions:false, suggestOnTriggerCharacters:false, acceptSuggestionOnEnter:'off',
+        tabCompletion:'off', wordBasedSuggestions:'off', parameterHints:{ enabled:false },
+        inlineSuggest:{ enabled:false },
       });
-      this._editor.onDidChangeModelContent(() => {
-        const active = this._tabs.find(t => t.path===this._activePath);
-        if (active && !active.readOnlyReason) {
-          active.editRevision = (active.editRevision || 0) + 1;
-          if (!active.isDirty) { active.isDirty = true; this._updateDirty(active); }
-        }
-        this._scheduleDiagnostics(this._editor.getModel());
-      });
-      // Update status bar on cursor change
+      // Cursor and selection remain useful for navigation and agent context.
       this._editor.onDidChangeCursorPosition((e: { position: { lineNumber: number; column: number } }) => {
         const status = this._contentArea.querySelector('.ws-editor-status') as HTMLElement;
         if (status) {
@@ -1074,22 +983,21 @@ export class WorkspaceTabGroup {
       });
       this._editor.onDidChangeCursorSelection(() => { this._notifyContextChange(); });
 
-      // Register Agent context menu actions (once)
+      // Register read-only Agent/context navigation actions (once).
       this._registerAgentActions();
-      // Register inline completion provider (once)
-      this._registerInlineCompletion();
       this._registerLanguageFeatures();
     }
     this._editor.setModel(tab.model);
     this._editor.updateOptions({
-      readOnly: Boolean(tab.readOnlyReason),
-      readOnlyMessage: tab.readOnlyReason ? { value: tab.readOnlyReason } : undefined,
+      readOnly: true,
+      domReadOnly: true,
+      readOnlyMessage: { value: t('workspace.readOnlyMessage') },
     });
     if (tab.viewState) this._editor.restoreViewState(tab.viewState);
     this._editor.focus();
     this._scheduleDiagnostics(tab.model, 80);
 
-    // Add editor status bar
+    // Add source-viewer status bar.
     const statusBar = document.createElement('div');
     statusBar.className = 'ws-editor-status';
     statusBar.style.cssText = 'display:flex;align-items:center;gap:12px;padding:2px 10px;height:22px;flex-shrink:0;background:var(--color-surface,#0d0d0d);border-top:1px solid var(--color-hairline,#242728);font-size:11px;color:var(--color-text-secondary,#9c9c9d);font-family:var(--font-mono);';
@@ -1100,13 +1008,11 @@ export class WorkspaceTabGroup {
     langEl.style.cssText = 'text-transform:uppercase;font-size:10px;font-weight:500;';
     statusBar.appendChild(langEl);
 
-    if (tab.readOnlyReason) {
-      const readOnlyEl = document.createElement('span');
-      readOnlyEl.textContent = tab.readOnlyReason;
-      readOnlyEl.title = tab.readOnlyReason;
-      readOnlyEl.style.cssText = 'color:#ffc533;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:42%;';
-      statusBar.appendChild(readOnlyEl);
-    }
+    const readOnlyEl = document.createElement('span');
+    readOnlyEl.textContent = tab.readOnlyReason || t('workspace.readOnly');
+    readOnlyEl.title = tab.readOnlyReason || t('workspace.readOnlyMessage');
+    readOnlyEl.style.cssText = 'color:#8fb8ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:42%;';
+    statusBar.appendChild(readOnlyEl);
 
     // Spacer
     const spacer = document.createElement('span');
@@ -1120,16 +1026,9 @@ export class WorkspaceTabGroup {
     posEl.setAttribute('data-role', 'cursor-pos');
     statusBar.appendChild(posEl);
 
-    // Tab size
-    const tabSizeEl = document.createElement('span');
-    tabSizeEl.textContent = t('workspace.editor.spaces');
-    tabSizeEl.setAttribute('data-i18n-key', 'workspace.editor.spaces');
-    tabSizeEl.style.cssText = 'opacity:0.5;';
-    statusBar.appendChild(tabSizeEl);
-
     // Encoding
     const encEl = document.createElement('span');
-    encEl.textContent = 'UTF-8';
+    encEl.textContent = tab.encoding || 'UTF-8';
     encEl.style.cssText = 'opacity:0.5;';
     statusBar.appendChild(encEl);
 
@@ -1142,18 +1041,8 @@ export class WorkspaceTabGroup {
     lsEl.addEventListener('click', () => { void this._goToDefinitionFromEditor(); });
     statusBar.appendChild(lsEl);
 
-    const aiEl = document.createElement('button');
-    aiEl.type = 'button';
-    aiEl.className = `ws-editor-ai-status ${this._inlineCompletionState}`;
-    aiEl.setAttribute('data-role', 'inline-completion-status');
-    aiEl.title = t('workspace.editor.aiCompletionTitle');
-    aiEl.textContent = t(this._inlineCompletionMessageKey, this._inlineCompletionMessageParams);
-    aiEl.addEventListener('click', () => { void this._triggerInlineCompletion(true); });
-    statusBar.appendChild(aiEl);
-
-    this._contentArea.appendChild(statusBar);
+    body.appendChild(statusBar);
     this._renderLanguageStatus();
-    this._renderInlineCompletionStatus();
   }
 
   private _rawFileUrl(filePath: string): string {
@@ -1161,49 +1050,52 @@ export class WorkspaceTabGroup {
   }
 
   private _showImage(tab: OpenTab): void {
-    this._destroyContent();
-    this._contentArea.classList.add('ws-preview-surface');
-    this._contentArea.style.cssText = 'display:flex;align-items:center;justify-content:center;background:#0a0a0a;';
+    const body = this._createPreviewBody(tab, 'ws-preview-surface');
     const img = document.createElement('img');
     img.className = 'ws-preview-image';
     img.src = this._rawFileUrl(tab.path);
-    img.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;';
-    this._contentArea.appendChild(img);
+    img.alt = tab.name;
+    body.appendChild(img);
   }
 
   private _showMedia(tab: OpenTab, kind: 'audio' | 'video'): void {
-    this._destroyContent();
-    this._contentArea.classList.add('ws-preview-surface');
-    this._contentArea.style.cssText = 'display:flex;align-items:center;justify-content:center;background:#0a0a0a;padding:24px;box-sizing:border-box;';
+    const body = this._createPreviewBody(tab, 'ws-preview-surface ws-preview-media-surface');
     const media = document.createElement(kind);
     media.controls = true;
     media.preload = 'metadata';
     media.src = this._rawFileUrl(tab.path);
     media.className = `ws-preview-${kind}`;
-    if (kind === 'video') {
-      media.style.cssText = 'max-width:100%;max-height:100%;background:#000;border-radius:6px;';
-    } else {
-      media.style.cssText = 'width:min(620px,100%);';
-    }
-    this._contentArea.appendChild(media);
+    body.appendChild(media);
   }
 
   private _showPdf(tab: OpenTab): void {
-    this._destroyContent();
+    const body = this._createPreviewBody(tab, 'ws-preview-frame-surface');
     const iframe = document.createElement('iframe');
     iframe.src = this._rawFileUrl(tab.path);
-    iframe.style.cssText = 'width:100%;height:100%;border:none;';
-    this._contentArea.appendChild(iframe);
+    iframe.className = 'ws-preview-frame';
+    iframe.title = tab.name;
+    body.appendChild(iframe);
   }
 
-  private _showTablePreview(rows: string[][], title: string): void {
-    this._destroyContent();
-    this._contentArea.style.cssText = 'overflow:auto;background:var(--color-bg,#07080a);';
+  private _showTablePreview(tab: OpenTab, rows: string[][], title: string): void {
+    const body = this._createPreviewBody(tab, 'ws-preview-scroll');
+    this._renderTableInto(body, rows, title);
+  }
+
+  private _renderTableInto(container: HTMLElement, rows: string[][], title: string): void {
+    container.innerHTML = '';
     const wrapper = document.createElement('div');
     wrapper.className = 'ws-preview-table-wrap';
     if (!rows.length) {
-      wrapper.innerHTML = `<div class="ws-preview-empty">${_escHtml(title)}<span>${t('workspace.preview.noRows')}</span></div>`;
-      this._contentArea.appendChild(wrapper);
+      const empty = document.createElement('div');
+      empty.className = 'ws-preview-empty';
+      const name = document.createElement('strong');
+      name.textContent = title;
+      const message = document.createElement('span');
+      message.textContent = t('workspace.preview.noRows');
+      empty.append(name, message);
+      wrapper.appendChild(empty);
+      container.appendChild(wrapper);
       return;
     }
 
@@ -1232,20 +1124,310 @@ export class WorkspaceTabGroup {
     }
     table.appendChild(body);
     wrapper.appendChild(table);
-    this._contentArea.appendChild(wrapper);
+    container.appendChild(wrapper);
   }
 
   private async _showMarkdown(tab: OpenTab, renderGeneration: number): Promise<void> {
-    this._destroyContent();
+    const body = this._createPreviewBody(tab, 'ws-preview-scroll');
     try {
-      const resp = await fetch(`/api/v1/workspace/read?path=${encodeURIComponent(tab.path)}&sessionId=${encodeURIComponent(this._sessionId)}`);
-      if (!resp.ok) return;
-      const data = await resp.json();
       const { renderMarkdown } = await import('../../../MarkdownRenderer.js');
       if (!this._isRenderCurrent(tab, renderGeneration)) return;
-      const md = document.createElement('div'); md.className = 'ws-preview-markdown'; md.innerHTML = renderMarkdown(data.content||''); md.style.cssText = 'padding:16px 24px;overflow-y:auto;height:100%;';
-      this._contentArea.appendChild(md);
+      const md = document.createElement('div');
+      md.className = 'ws-preview-markdown';
+      md.innerHTML = renderMarkdown(tab.content || '', {
+        sessionId: this._sessionId,
+        basePath: _directoryName(tab.path),
+      });
+      body.appendChild(md);
     } catch { /* ignore */ }
+  }
+
+  private _showHtmlPreview(tab: OpenTab): void {
+    const body = this._createPreviewBody(tab, 'ws-preview-frame-surface');
+    const iframe = document.createElement('iframe');
+    iframe.className = 'ws-preview-frame ws-preview-html-frame';
+    iframe.title = tab.name;
+    iframe.setAttribute('sandbox', 'allow-same-origin');
+    iframe.referrerPolicy = 'no-referrer';
+    iframe.srcdoc = this._sanitizeHtmlDocument(tab.content || '', tab.path);
+    body.appendChild(iframe);
+  }
+
+  private _sanitizeHtmlDocument(content: string, filePath: string): string {
+    const doc = new DOMParser().parseFromString(content, 'text/html');
+    doc.querySelectorAll('script,iframe,object,embed,form,input,button,textarea,select,base,meta[http-equiv]').forEach(node => node.remove());
+    doc.querySelectorAll<HTMLElement>('*').forEach(element => {
+      for (const attribute of Array.from(element.attributes)) {
+        const name = attribute.name.toLowerCase();
+        if (name.startsWith('on') || name === 'srcdoc') element.removeAttribute(attribute.name);
+      }
+    });
+    const basePath = _directoryName(filePath);
+    const rewrite = (selector: string, attribute: string) => {
+      doc.querySelectorAll<HTMLElement>(selector).forEach(element => {
+        const value = element.getAttribute(attribute);
+        if (!value || _isExternalOrEmbeddedUrl(value)) return;
+        element.setAttribute(attribute, this._rawFileUrl(_resolveWorkspaceRelative(basePath, value)));
+      });
+    };
+    rewrite('[src]', 'src');
+    rewrite('[poster]', 'poster');
+    rewrite('link[rel~="stylesheet"][href]', 'href');
+    doc.querySelectorAll<HTMLAnchorElement>('a[href]').forEach(anchor => {
+      const href = anchor.getAttribute('href') || '';
+      anchor.dataset.previewTarget = _isExternalOrEmbeddedUrl(href)
+        ? href
+        : _resolveWorkspaceRelative(basePath, href);
+      anchor.title = href;
+      anchor.removeAttribute('href');
+    });
+    const csp = doc.createElement('meta');
+    csp.httpEquiv = 'Content-Security-Policy';
+    csp.content = "default-src 'none'; img-src 'self' data: blob:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'";
+    doc.head.prepend(csp);
+    return `<!doctype html>${doc.documentElement.outerHTML}`;
+  }
+
+  private _showStructuredPreview(tab: OpenTab): void {
+    const body = this._createPreviewBody(tab, 'ws-preview-scroll ws-structured-preview');
+    try {
+      const value = _parseStructuredContent(tab.content || '', workspaceFileExtension(tab.name));
+      const budget = { remaining: 5000 };
+      body.appendChild(_structuredNode(value, '', 0, budget));
+      if (budget.remaining <= 0) {
+        const limited = document.createElement('div');
+        limited.className = 'ws-preview-limit';
+        limited.textContent = t('workspace.preview.structuredLimit');
+        body.appendChild(limited);
+      }
+    } catch {
+      const message = document.createElement('div');
+      message.className = 'ws-preview-empty';
+      message.textContent = t('workspace.preview.invalidStructured');
+      body.appendChild(message);
+    }
+  }
+
+  private _showConfigPreview(tab: OpenTab): void {
+    const body = this._createPreviewBody(tab, 'ws-preview-scroll ws-config-preview');
+    const parsed = parseWorkspaceConfig(tab.content || '');
+    const summary = document.createElement('div');
+    summary.className = 'ws-preview-summary';
+    summary.textContent = t('workspace.preview.configEntries', { count: parsed.entries.length });
+    body.appendChild(summary);
+
+    if (!parsed.entries.length) {
+      const empty = document.createElement('div');
+      empty.className = 'ws-preview-empty';
+      empty.textContent = t('workspace.preview.configEmpty');
+      body.appendChild(empty);
+      return;
+    }
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'ws-preview-table-wrap';
+    const table = document.createElement('table');
+    table.className = 'ws-preview-table ws-config-table';
+    const heading = document.createElement('tr');
+    for (const label of [
+      t('workspace.preview.configSection'),
+      t('workspace.preview.configKey'),
+      t('workspace.preview.configValue'),
+      t('workspace.preview.line'),
+    ]) {
+      const th = document.createElement('th');
+      th.textContent = label;
+      heading.appendChild(th);
+    }
+    const thead = document.createElement('thead');
+    thead.appendChild(heading);
+    table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    for (const entry of parsed.entries) {
+      const row = document.createElement('tr');
+      const section = document.createElement('td');
+      section.textContent = entry.section || t('workspace.preview.configRoot');
+      const key = document.createElement('td');
+      key.textContent = entry.key;
+      const value = document.createElement('td');
+      value.textContent = entry.value;
+      const line = document.createElement('td');
+      line.textContent = String(entry.line);
+      row.append(section, key, value, line);
+      tbody.appendChild(row);
+    }
+    table.appendChild(tbody);
+    wrapper.appendChild(table);
+    body.appendChild(wrapper);
+    if (parsed.truncated) {
+      const limited = document.createElement('div');
+      limited.className = 'ws-preview-limit';
+      limited.textContent = t('workspace.preview.configLimit');
+      body.appendChild(limited);
+    }
+  }
+
+  private _showPsdPreview(tab: OpenTab): void {
+    const body = this._createPreviewBody(tab, 'ws-preview-surface ws-psd-preview');
+    const note = document.createElement('div');
+    note.className = 'ws-psd-note';
+    note.textContent = t('workspace.preview.psdFlattened');
+    const image = document.createElement('img');
+    image.className = 'ws-preview-image';
+    image.src = `/api/v1/workspace/preview-psd?path=${encodeURIComponent(tab.path)}&sessionId=${encodeURIComponent(this._sessionId)}`;
+    image.alt = tab.name;
+    image.addEventListener('error', () => {
+      image.remove();
+      const message = document.createElement('div');
+      message.className = 'ws-preview-empty';
+      message.textContent = t('workspace.preview.psdUnavailable');
+      body.appendChild(message);
+    }, { once: true });
+    body.append(note, image);
+  }
+
+  private async _showNotebookPreview(tab: OpenTab, renderGeneration: number): Promise<void> {
+    const body = this._createPreviewBody(tab, 'ws-preview-scroll ws-notebook-preview');
+    try {
+      const notebook = JSON.parse((tab.content || '').replace(/^\uFEFF/, '')) as { cells?: unknown[] };
+      const cells = Array.isArray(notebook.cells) ? notebook.cells.slice(0, 200) : [];
+      const { renderMarkdown, sanitizeHtml } = await import('../../../MarkdownRenderer.js');
+      if (!this._isRenderCurrent(tab, renderGeneration)) return;
+      const summary = document.createElement('div');
+      summary.className = 'ws-preview-summary';
+      summary.textContent = t('workspace.preview.notebookCells', { count: cells.length });
+      body.appendChild(summary);
+      for (const [index, rawCell] of cells.entries()) {
+        const cell = (rawCell && typeof rawCell === 'object' ? rawCell : {}) as Record<string, unknown>;
+        const section = document.createElement('section');
+        section.className = `ws-notebook-cell ${cell.cell_type === 'markdown' ? 'markdown' : 'code'}`;
+        const label = document.createElement('div');
+        label.className = 'ws-notebook-cell-label';
+        label.textContent = `${cell.cell_type === 'markdown' ? 'Markdown' : 'Code'} ${index + 1}`;
+        section.appendChild(label);
+        const source = _notebookText(cell.source);
+        if (cell.cell_type === 'markdown') {
+          const markdown = document.createElement('div');
+          markdown.className = 'ws-preview-markdown';
+          markdown.innerHTML = renderMarkdown(source, { sessionId: this._sessionId, basePath: _directoryName(tab.path) });
+          section.appendChild(markdown);
+        } else {
+          const pre = document.createElement('pre');
+          pre.className = 'ws-notebook-code';
+          pre.textContent = source;
+          section.appendChild(pre);
+          const outputs = Array.isArray(cell.outputs) ? cell.outputs : [];
+          for (const rawOutput of outputs.slice(0, 50)) {
+            const output = (rawOutput && typeof rawOutput === 'object' ? rawOutput : {}) as Record<string, unknown>;
+            const data = (output.data && typeof output.data === 'object' ? output.data : {}) as Record<string, unknown>;
+            const outputEl = document.createElement('div');
+            outputEl.className = 'ws-notebook-output';
+            const image = _notebookText(data['image/png'] || data['image/jpeg']);
+            if (image && image.length <= 2_500_000) {
+              const img = document.createElement('img');
+              img.alt = t('workspace.preview.notebookOutput');
+              img.src = `data:${data['image/png'] ? 'image/png' : 'image/jpeg'};base64,${image.replace(/\s+/g, '')}`;
+              outputEl.appendChild(img);
+            } else if (data['text/html']) {
+              outputEl.innerHTML = sanitizeHtml(_notebookText(data['text/html']));
+            } else {
+              const pre = document.createElement('pre');
+              pre.textContent = _notebookText(data['text/plain'] || output.text || output.traceback);
+              outputEl.appendChild(pre);
+            }
+            if (outputEl.textContent || outputEl.childElementCount) section.appendChild(outputEl);
+          }
+        }
+        body.appendChild(section);
+      }
+    } catch {
+      body.textContent = t('workspace.preview.invalidStructured');
+    }
+  }
+
+  private async _showArchivePreview(tab: OpenTab, renderGeneration: number): Promise<void> {
+    const body = this._createPreviewBody(tab, 'ws-preview-scroll ws-archive-preview');
+    body.textContent = t('workspace.preview.loading');
+    try {
+      const resp = await fetch(`/api/v1/workspace/inspect-archive?path=${encodeURIComponent(tab.path)}&sessionId=${encodeURIComponent(this._sessionId)}`);
+      if (!resp.ok) throw new Error('Archive inspection failed');
+      const data = await resp.json() as { entries?: Array<{ path?:string; size?:number; compressedSize?:number; isDirectory?:boolean }> };
+      if (!this._isRenderCurrent(tab, renderGeneration)) return;
+      const entries = Array.isArray(data.entries) ? data.entries : [];
+      body.innerHTML = '';
+      const summary = document.createElement('div');
+      summary.className = 'ws-preview-summary';
+      summary.textContent = t('workspace.preview.archiveEntries', { count: entries.length });
+      body.appendChild(summary);
+      const table = document.createElement('table');
+      table.className = 'ws-preview-table ws-archive-table';
+      const thead = document.createElement('thead');
+      const heading = document.createElement('tr');
+      for (const label of [t('workspace.preview.archivePath'), t('workspace.preview.archiveSize'), t('workspace.preview.archiveCompressed')]) {
+        const th = document.createElement('th'); th.textContent = label; heading.appendChild(th);
+      }
+      thead.appendChild(heading); table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      for (const entry of entries.slice(0, 10_000)) {
+        const row = document.createElement('tr');
+        const pathCell = document.createElement('td');
+        pathCell.textContent = `${entry.isDirectory ? '▸ ' : ''}${entry.path || ''}`;
+        const sizeCell = document.createElement('td'); sizeCell.textContent = entry.isDirectory ? '' : _formatBytes(Number(entry.size || 0));
+        const compressedCell = document.createElement('td'); compressedCell.textContent = entry.isDirectory ? '' : _formatBytes(Number(entry.compressedSize || 0));
+        row.append(pathCell, sizeCell, compressedCell); tbody.appendChild(row);
+      }
+      table.appendChild(tbody); body.appendChild(table);
+    } catch {
+      if (this._isRenderCurrent(tab, renderGeneration)) body.textContent = t('workspace.preview.unavailable');
+    }
+  }
+
+  private async _showFontPreview(tab: OpenTab, renderGeneration: number): Promise<void> {
+    const body = this._createPreviewBody(tab, 'ws-preview-scroll ws-font-preview');
+    try {
+      const family = `AnoClawPreview-${renderGeneration}-${Math.random().toString(36).slice(2)}`;
+      const face = new FontFace(family, `url("${this._rawFileUrl(tab.path)}")`);
+      await face.load();
+      if (!this._isRenderCurrent(tab, renderGeneration)) return;
+      document.fonts.add(face);
+      const samples = [
+        ['Aa', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'],
+        ['中文', '天地玄黄 宇宙洪荒 山川湖海 风雨雷电'],
+        ['123', '0123456789  !?@#$%&*()[]{}'],
+      ];
+      for (const [label, text] of samples) {
+        const section = document.createElement('section');
+        const badge = document.createElement('span'); badge.textContent = label;
+        const sample = document.createElement('div'); sample.textContent = text; sample.style.fontFamily = `"${family}", sans-serif`;
+        section.append(badge, sample); body.appendChild(section);
+      }
+    } catch {
+      if (this._isRenderCurrent(tab, renderGeneration)) body.textContent = t('workspace.preview.unavailable');
+    }
+  }
+
+  private async _showHexPreview(tab: OpenTab, renderGeneration: number): Promise<void> {
+    const body = this._createPreviewBody(tab, 'ws-preview-scroll ws-hex-preview');
+    body.textContent = t('workspace.preview.loading');
+    try {
+      const resp = await fetch(this._rawFileUrl(tab.path), { headers: { Range: 'bytes=0-65535' } });
+      if (!resp.ok && resp.status !== 206) throw new Error('Binary read failed');
+      const bytes = new Uint8Array(await resp.arrayBuffer());
+      if (!this._isRenderCurrent(tab, renderGeneration)) return;
+      body.innerHTML = '';
+      const summary = document.createElement('div');
+      summary.className = 'ws-preview-summary';
+      summary.textContent = t('workspace.preview.binarySummary', {
+        kind: detectWorkspaceBinarySignature(bytes, workspaceFileExtension(tab.name)),
+        size: _formatBytes(bytes.byteLength),
+      });
+      const pre = document.createElement('pre');
+      pre.className = 'ws-hex-dump';
+      pre.textContent = _hexDump(bytes);
+      body.append(summary, pre);
+    } catch {
+      if (this._isRenderCurrent(tab, renderGeneration)) body.textContent = t('workspace.preview.unavailable');
+    }
   }
 
   // ── Browser tab (WebContentsView) ──
@@ -1472,9 +1654,6 @@ export class WorkspaceTabGroup {
     else downloads.push(event);
     tab.downloads = downloads.slice(-12);
     if (tab.path === this._activePath) this._renderDownloads(tab);
-    if (event.state === 'completed' && event.relativePath) {
-      window.dispatchEvent(new CustomEvent('ws-workspace-download-complete', { detail: event }));
-    }
   }
 
   private _renderDownloads(tab: OpenTab): void {
@@ -1545,26 +1724,17 @@ export class WorkspaceTabGroup {
   }
 
   private _openDownload(item: BrowserDownloadEvent): void {
-    if (item.relativePath) {
-      this.onOpenFile?.(item.relativePath, item.filename || item.relativePath.split('/').pop() || 'download');
-      return;
-    }
     if (item.savePath) void this._api()?.openPath?.(item.savePath);
   }
 
   private _locateDownload(item: BrowserDownloadEvent): void {
-    const path = item.relativePath;
-    if (!path) {
-      if (item.savePath) void this._api()?.openPath?.(item.savePath);
-      return;
-    }
-    window.dispatchEvent(new CustomEvent('ws-reveal-workspace-path', { detail: { path, open: false } }));
+    if (item.savePath) void this._api()?.openPath?.(item.savePath);
   }
 
   private _sendDownloadToAgent(item: BrowserDownloadEvent): void {
     const lines = [
-      '[Workspace Download]',
-      `File: ${item.relativePath || item.filename}`,
+      '[Browser Download]',
+      `File: ${item.filename}`,
       item.url ? `Source: ${item.url}` : '',
       item.savePath ? `Saved: ${item.savePath}` : '',
     ].filter(Boolean);
@@ -2342,198 +2512,87 @@ export class WorkspaceTabGroup {
     fav.src = tab.browserFavicon;
   }
 
-  private _showBinaryNotice(tab: OpenTab): void { this._destroyContent(); this._contentArea.style.cssText = 'display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:var(--color-text-secondary,#9c9c9d);font-size:13px;'; this._contentArea.innerHTML = `<div>${_escHtml(tab.name)}</div><div style="font-size:11px;opacity:0.5;">${t('workspace.preview.binary')}</div>`; }
-
   // ── Office document preview ──
-
-  /**
-   * Render Office document preview via server-side conversion.
-   *
-   * Calls GET /api/v1/workspace/convert-office which:
-   * - .docx → mammoth library (HTML with tables, headings, images)
-   * - .xlsx/.xlsm → pure-JS ZIP parser extracts sheet text
-   * - .pptx/.pptm → slide text extraction from ppt/slides/slideN.xml
-   * - .odt/.ods/.odp → OpenDocument content.xml text
-   *
-   * Three response shapes handled:
-   * - `{type:'html'}` → rendered in a styled wrapper (tables, headings, images styled).
-   * - `{type:'text'}` → displayed in a monospace `<pre>` block.
-   * - `{type:'image'}` → shown as a full-size image (e.g. chart embedded in xlsx).
-   *
-   * Falls back to "Preview not available" on conversion error.
-   *
-   * @param tab - The OpenTab with fileType 'docx' / 'xlsx' / 'pptx'.
-   */
   private async _showOffice(tab: OpenTab, renderGeneration: number): Promise<void> {
-    this._destroyContent();
-    this._contentArea.style.cssText = 'display:flex;align-items:center;justify-content:center;';
-    this._contentArea.innerHTML = `<div style="color:var(--color-text-secondary,#9c9c9d);font-size:13px;">${t('workspace.preview.loading')}</div>`;
+    const body = this._createPreviewBody(tab, 'ws-preview-scroll ws-office-viewer');
+    body.textContent = t('workspace.preview.loading');
 
     try {
       const resp = await fetch(`/api/v1/workspace/convert-office?path=${encodeURIComponent(tab.path)}&sessionId=${encodeURIComponent(this._sessionId)}`);
       if (!resp.ok) throw new Error('Conversion failed');
       const data = await resp.json();
       if (!this._isRenderCurrent(tab, renderGeneration)) return;
+      body.innerHTML = '';
 
-      this._contentArea.innerHTML = '';
-      this._contentArea.style.cssText = 'overflow-y:auto;';
-
-      if (data.type === 'table' && Array.isArray(data.rows)) {
-        this._showTablePreview(data.rows, tab.name);
+      if (data.type === 'workbook' && Array.isArray(data.sheets)) {
+        const sheets = data.sheets as Array<{ name?: string; rows?: string[][] }>;
+        const controls = document.createElement('div');
+        controls.className = 'ws-workbook-controls';
+        const label = document.createElement('label');
+        label.textContent = t('workspace.preview.sheet');
+        const select = document.createElement('select');
+        for (const [index, sheet] of sheets.entries()) {
+          const option = document.createElement('option');
+          option.value = String(index);
+          option.textContent = sheet.name || `${t('workspace.preview.sheet')} ${index + 1}`;
+          select.appendChild(option);
+        }
+        label.appendChild(select); controls.appendChild(label); body.appendChild(controls);
+        const tableHost = document.createElement('div');
+        tableHost.className = 'ws-workbook-sheet';
+        body.appendChild(tableHost);
+        const renderSheet = () => {
+          const sheet = sheets[Number(select.value) || 0];
+          this._renderTableInto(tableHost, Array.isArray(sheet?.rows) ? sheet.rows : [], sheet?.name || tab.name);
+        };
+        select.addEventListener('change', renderSheet);
+        renderSheet();
+      } else if (data.type === 'slides' && Array.isArray(data.slides)) {
+        const slides = data.slides as Array<{ number?: number; text?: string }>;
+        const summary = document.createElement('div');
+        summary.className = 'ws-preview-summary';
+        summary.textContent = t('workspace.preview.slides', { count: slides.length });
+        body.appendChild(summary);
+        for (const [index, slide] of slides.entries()) {
+          const card = document.createElement('section');
+          card.className = 'ws-slide-card';
+          const heading = document.createElement('h3');
+          heading.textContent = `${t('workspace.preview.slide')} ${slide.number || index + 1}`;
+          const text = document.createElement('div');
+          text.textContent = slide.text || t('workspace.preview.noReadableContent');
+          card.append(heading, text); body.appendChild(card);
+        }
+      } else if (data.type === 'table' && Array.isArray(data.rows)) {
+        this._renderTableInto(body, data.rows, tab.name);
       } else if (data.type === 'html') {
         const { sanitizeHtml } = await import('../../../MarkdownRenderer.js');
         if (!this._isRenderCurrent(tab, renderGeneration)) return;
         const wrapper = document.createElement('div');
         wrapper.className = 'ws-preview-office';
-        wrapper.style.cssText = 'padding:20px 28px;font-size:13px;line-height:1.7;color:var(--color-text,#f4f4f6);max-width:860px;margin:0 auto;';
         wrapper.innerHTML = sanitizeHtml(String(data.html || ''));
-        // Style tables, headings, lists
-        wrapper.querySelectorAll('table').forEach(t => {
-          (t as HTMLElement).style.cssText = 'border-collapse:collapse;width:100%;margin:12px 0;';
-        });
-        wrapper.querySelectorAll('th,td').forEach(c => {
-          (c as HTMLElement).style.cssText = 'border:1px solid var(--color-hairline,#242728);padding:6px 10px;text-align:left;';
-        });
-        wrapper.querySelectorAll('th').forEach(c => {
-          (c as HTMLElement).style.background = 'var(--color-surface,#0d0d0d)';
-        });
-        wrapper.querySelectorAll('h1,h2,h3,h4').forEach(h => {
-          (h as HTMLElement).style.cssText = 'margin:16px 0 8px;';
-        });
-        wrapper.querySelectorAll('img').forEach(img => {
-          (img as HTMLElement).style.cssText = 'max-width:100%;border-radius:6px;';
-        });
-        this._contentArea.appendChild(wrapper);
+        body.appendChild(wrapper);
       } else if (data.type === 'text') {
         const pre = document.createElement('pre');
-        pre.style.cssText = 'padding:20px 28px;font-size:12px;line-height:1.6;color:var(--color-text,#f4f4f6);white-space:pre-wrap;word-break:break-word;font-family:var(--font-mono);';
+        pre.className = 'ws-office-text';
         pre.textContent = data.content || t('workspace.preview.noReadableContent');
-        this._contentArea.appendChild(pre);
+        body.appendChild(pre);
       } else if (data.type === 'image') {
         const img = document.createElement('img');
         img.className = 'ws-preview-image';
         img.src = data.dataUrl || this._rawFileUrl(tab.path);
-        img.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;';
-        this._contentArea.style.cssText = 'display:flex;align-items:center;justify-content:center;background:#0a0a0a;';
-        this._contentArea.appendChild(img);
+        img.alt = tab.name;
+        body.classList.add('ws-preview-surface');
+        body.appendChild(img);
+      } else {
+        throw new Error('Unsupported conversion result');
       }
     } catch {
       if (!this._isRenderCurrent(tab, renderGeneration)) return;
-      this._contentArea.innerHTML = `<div style="color:var(--color-text-secondary,#9c9c9d);font-size:13px;">${_escHtml(tab.name)}</div><div style="font-size:11px;opacity:0.5;margin-top:8px;">${t('workspace.preview.unavailable')}</div>`;
-      this._contentArea.style.cssText = 'display:flex;align-items:center;justify-content:center;flex-direction:column;';
-    }
-  }
-
-  // ── Save ──
-
-  async saveActiveFile(): Promise<boolean> {
-    const tab = this._tabs.find(t => t.path===this._activePath);
-    return tab ? this.saveFile(tab) : true;
-  }
-
-  async saveFile(tab: OpenTab): Promise<boolean> {
-    if (!tab.isDirty || tab.fileType!=='code') return true;
-    if (tab.readOnlyReason) {
-      ToastManager.getInstance().error(tab.readOnlyReason);
-      return false;
-    }
-    if (tab.savePromise) {
-      const previousSucceeded = await tab.savePromise;
-      if (!previousSucceeded || !tab.isDirty) return previousSucceeded;
-    }
-    const operation = this._saveFileSnapshot(tab);
-    tab.savePromise = operation;
-    try {
-      return await operation;
-    } finally {
-      if (tab.savePromise === operation) tab.savePromise = undefined;
-    }
-  }
-
-  private async _saveFileSnapshot(tab: OpenTab): Promise<boolean> {
-    try {
-      const content = tab.model.getValue();
-      const sentRevision = tab.editRevision || 0;
-      const resp = await fetch('/api/v1/workspace/write', {
-        method:'PUT',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-          sessionId:this._sessionId,
-          path:tab.path,
-          content,
-          ...(tab.diskSha256 ? { expectedSha256: tab.diskSha256 } : {}),
-        }),
-      });
-      if (!resp.ok) {
-        throw new Error(await _responseError(resp, t('workspace.saveFailedStatus', { status: resp.status })));
-      }
-      const result = await resp.json() as { sha256?: string };
-      if (result.sha256) tab.diskSha256 = result.sha256;
-      tab.originalContent = content;
-      tab.isDirty = !isSaveSnapshotCurrent(
-        sentRevision,
-        tab.editRevision || 0,
-        content,
-        tab.model.getValue(),
-      );
-      this._updateDirty(tab);
-      return true;
-    } catch (err) {
-      ToastManager.getInstance().error(
-        err instanceof Error ? err.message : t('workspace.saveNamedFailed', { name: tab.name }),
-      );
-      return false;
-    }
-  }
-
-  private _updateDirty(tab: OpenTab): void { const btn = this._tabBar.querySelector(`[data-tab-path="${_escAttr(tab.path)}"]`); if (btn) btn.classList.toggle('dirty', tab.isDirty); }
-
-  get hasDirtyTabs(): boolean { return this._tabs.some(tab => tab.isDirty); }
-
-  async prepareToDiscardAll(actionLabel: string): Promise<boolean> {
-    for (const tab of this._tabs.filter(item => item.isDirty)) {
-      const action = await this._promptDirtyAction(tab, actionLabel);
-      if (action === 'cancel') return false;
-      if (action === 'save' && !await this.saveFile(tab)) return false;
-    }
-    return true;
-  }
-
-  async prepareForPathRemoval(targetPath: string): Promise<boolean> {
-    const impacted = this._tabs.filter(tab => _pathMatches(tab.path, targetPath) && tab.isDirty);
-    for (const tab of impacted) {
-      const action = await this._promptDirtyAction(tab, t('workspace.action.deleting', { path: targetPath }));
-      if (action === 'cancel') return false;
-      if (action === 'save' && !await this.saveFile(tab)) return false;
-    }
-    return true;
-  }
-
-  handlePathRenamed(oldPath: string, newPath: string): void {
-    for (const tab of this._tabs) {
-      if (!_pathMatches(tab.path, oldPath)) continue;
-      const previousPath = tab.path;
-      const suffix = previousPath === oldPath ? '' : previousPath.slice(oldPath.length);
-      const nextPath = `${newPath}${suffix}`;
-      const btn = this._tabBar.querySelector(`[data-tab-path="${_escAttr(previousPath)}"]`) as HTMLElement | null;
-      tab.path = nextPath;
-      tab.name = _baseName(nextPath);
-      if (this._activePath === previousPath) this._activePath = nextPath;
-      if (btn) {
-        btn.setAttribute('data-tab-path', nextPath);
-        btn.title = nextPath;
-        const name = btn.querySelector('.ws-tab-name');
-        if (name) name.textContent = tab.name;
-      }
-    }
-    this._notifyContextChange();
-  }
-
-  handlePathDeleted(targetPath: string): void {
-    const impacted = this._tabs.filter(tab => _pathMatches(tab.path, targetPath));
-    for (const tab of impacted) {
-      const idx = this._tabs.indexOf(tab);
-      if (idx >= 0) this._doCloseTab(tab, idx);
+      body.innerHTML = '';
+      const title = document.createElement('strong'); title.textContent = tab.name;
+      const message = document.createElement('span'); message.textContent = t('workspace.preview.unavailable');
+      const empty = document.createElement('div'); empty.className = 'ws-preview-empty'; empty.append(title, message);
+      body.appendChild(empty);
     }
   }
 
@@ -2551,7 +2610,6 @@ export class WorkspaceTabGroup {
 
   private _agentActionsRegistered = false;
   private _agentActionDisposables: Array<{ dispose: () => void }> = [];
-  private _inlineCompletionRegistered = false;
 
   private _registerAgentActions(): void {
     if (this._agentActionsRegistered) return;
@@ -2589,16 +2647,6 @@ export class WorkspaceTabGroup {
       run: (ed: any) => { const sel = ed.getSelection(); const text = sel && !sel.isEmpty() ? ed.getModel()?.getValueInRange(sel) || '' : ''; this._dispatchAskAgent(text, 'FindBugs'); },
     });
 
-    const aiKeybindings = m.KeyCode?.Backslash ? [m.KeyMod.Alt | m.KeyCode.Backslash] : undefined;
-    register({
-      id: 'anoclaw-ai-complete',
-      label: t('workspace.editor.action.complete'),
-      keybindings: aiKeybindings,
-      contextMenuGroupId: 'anoclaw-agent',
-      contextMenuOrder: 0,
-      run: () => { void this._triggerInlineCompletion(true); },
-    });
-
     const goToDefinitionKey = m.KeyCode?.F12 ? [m.KeyCode.F12] : undefined;
     register({
       id: 'anoclaw-ls-definition',
@@ -2609,15 +2657,6 @@ export class WorkspaceTabGroup {
       run: () => { void this._goToDefinitionFromEditor(); },
     });
 
-    const organizeKey = m.KeyCode?.KeyO ? [m.KeyMod.Shift | m.KeyMod.Alt | m.KeyCode.KeyO] : undefined;
-    register({
-      id: 'anoclaw-ls-organize-imports',
-      label: t('workspace.editor.action.organizeImports'),
-      keybindings: organizeKey,
-      contextMenuGroupId: 'anoclaw-agent',
-      contextMenuOrder: 4,
-      run: () => { void this._organizeImports(); },
-    });
   }
 
   private _refreshAgentActions(): void {
@@ -2633,14 +2672,6 @@ export class WorkspaceTabGroup {
     WorkspaceTabGroup._languageFeaturesRegistered = true;
     const languages = ['typescript', 'javascript', 'python'];
     for (const language of languages) {
-      m.languages.registerCompletionItemProvider(language, {
-        triggerCharacters: ['.', '"', '\'', '/', '@', '<'],
-        provideCompletionItems: async (model: any, position: any) => {
-          const group = WorkspaceTabGroup._groupForModel(model);
-          if (!group) return { suggestions: [] };
-          return group._provideLanguageCompletions(model, position);
-        },
-      });
       m.languages.registerHoverProvider(language, {
         provideHover: async (model: any, position: any) => {
           const group = WorkspaceTabGroup._groupForModel(model);
@@ -2667,39 +2698,6 @@ export class WorkspaceTabGroup {
 
   private _tabForModel(model: any): OpenTab | null {
     return this._tabs.find(tab => tab.model === model) || null;
-  }
-
-  private async _provideLanguageCompletions(model: any, position: any): Promise<{ suggestions: any[] }> {
-    const m = (window as any).monaco;
-    const tab = this._tabForModel(model);
-    if (!tab) return { suggestions: [] };
-    try {
-      this._setLanguageStatus('working', 'workspace.editor.ls.completing');
-      const word = model.getWordUntilPosition(position);
-      const fallbackRange = new m.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn);
-      const data = await this._languageFetch('completions', model, position);
-      const suggestions = (data.items || []).map((item: any) => ({
-        label: item.label,
-        kind: this._monacoCompletionKind(item.kind),
-        detail: item.detail,
-        documentation: item.documentation ? { value: item.documentation } : undefined,
-        insertText: item.insertText || item.label,
-        sortText: item.sortText,
-        range: item.range ? this._monacoRange(item.range) : fallbackRange,
-        additionalTextEdits: (item.additionalTextEdits || [])
-          .filter((edit: any) => edit.path === tab.path)
-          .map((edit: any) => ({ range: this._monacoRange(edit.range), text: edit.text })),
-      }));
-      this._setLanguageStatus(
-        'ready',
-        suggestions.length ? 'workspace.editor.ls.suggestions' : 'workspace.editor.ls.ready',
-        suggestions.length ? { count: suggestions.length } : {},
-      );
-      return { suggestions };
-    } catch {
-      this._setLanguageStatus('error', 'workspace.editor.ls.error');
-      return { suggestions: [] };
-    }
   }
 
   private async _provideLanguageHover(model: any, position: any): Promise<any | null> {
@@ -2796,33 +2794,6 @@ export class WorkspaceTabGroup {
     }
   }
 
-  private async _organizeImports(): Promise<void> {
-    if (!this._editor) return;
-    const editor = this._editor;
-    const model = editor.getModel();
-    if (!model || !this._tabForModel(model)) return;
-    try {
-      this._setLanguageStatus('working', 'workspace.editor.ls.imports');
-      const data = await this._languageFetch('organize-imports', model);
-      if (this._editor !== editor || editor.getModel() !== model || !this._tabForModel(model)) return;
-      const edits = (data.edits || [])
-        .filter((edit: any) => edit.path === this._tabForModel(model)?.path)
-        .sort((a: any, b: any) => {
-          if (a.range.startLineNumber !== b.range.startLineNumber) return b.range.startLineNumber - a.range.startLineNumber;
-          return b.range.startColumn - a.range.startColumn;
-        })
-        .map((edit: any) => ({ range: this._monacoRange(edit.range), text: edit.text, forceMoveMarkers: true }));
-      if (edits.length) editor.executeEdits('anoclaw-organize-imports', edits);
-      this._setLanguageStatus(
-        'ready',
-        edits.length ? 'workspace.editor.ls.importsDone' : 'workspace.editor.ls.importsClean',
-      );
-      editor.focus();
-    } catch {
-      this._setLanguageStatus('error', 'workspace.editor.ls.error');
-    }
-  }
-
   private async _languageFetch(operation: string, model: any, position?: any): Promise<any> {
     const tab = this._tabForModel(model);
     if (!tab) throw new Error('No workspace tab for model');
@@ -2850,28 +2821,6 @@ export class WorkspaceTabGroup {
       );
     }
     return data;
-  }
-
-  private _monacoCompletionKind(kind: string): number {
-    const m = (window as any).monaco;
-    const K = m?.languages?.CompletionItemKind || {};
-    const key = String(kind || '').toLowerCase();
-    if (key.includes('method')) return K.Method;
-    if (key.includes('function')) return K.Function;
-    if (key.includes('constructor')) return K.Constructor;
-    if (key.includes('field')) return K.Field;
-    if (key.includes('property')) return K.Property;
-    if (key.includes('variable')) return K.Variable;
-    if (key.includes('class')) return K.Class;
-    if (key.includes('interface')) return K.Interface;
-    if (key.includes('module')) return K.Module;
-    if (key.includes('enum')) return K.Enum;
-    if (key.includes('keyword')) return K.Keyword;
-    if (key.includes('snippet')) return K.Snippet;
-    if (key.includes('file')) return K.File;
-    if (key.includes('constant')) return K.Constant;
-    if (key.includes('type')) return K.TypeParameter;
-    return K.Text;
   }
 
   private _monacoMarkerSeverity(severity: string): number {
@@ -2919,161 +2868,6 @@ export class WorkspaceTabGroup {
     el.textContent = t(this._languageStatusMessageKey, this._languageStatusMessageParams);
   }
 
-  private _registerInlineCompletion(): void {
-    if (this._inlineCompletionRegistered) return;
-    const m = (window as any).monaco; if (!m) return;
-    this._inlineCompletionRegistered = true;
-    if (WorkspaceTabGroup._inlineCompletionDisposable) return;
-
-    WorkspaceTabGroup._inlineCompletionDisposable = m.languages.registerInlineCompletionsProvider('*', {
-      provideInlineCompletions: async (model: any, position: any, _context: any, token: any) => {
-        const group = WorkspaceTabGroup._groupForModel(model);
-        if (!group) return { items: [] };
-        return group._provideInlineCompletion(model, position, token);
-      },
-      freeInlineCompletions: () => {},
-    } as any);
-  }
-
-  private async _provideInlineCompletion(model: any, position: any, token: any): Promise<{ items: any[] }> {
-    if (!this._tabForModel(model) || token?.isCancellationRequested) return { items: [] };
-    const lineContent = model.getLineContent(position.lineNumber);
-    const textBeforeCursor = lineContent.substring(0, position.column - 1);
-    if (textBeforeCursor.trim().length < 2) return { items: [] };
-
-    const key = `${model.uri.path}_${position.lineNumber}_${position.column}`;
-    this._lastInlineKey = key;
-    const requestId = ++this._inlineCompletionRequestId;
-    this._setInlineCompletionStatus('waiting', 'workspace.editor.ai.waiting');
-    await new Promise(r => setTimeout(r, 750));
-    if (this._lastInlineKey !== key || requestId !== this._inlineCompletionRequestId) return { items: [] };
-    if (!this._tabForModel(model) || token?.isCancellationRequested) return { items: [] };
-
-    try {
-      this._setInlineCompletionStatus('thinking', 'workspace.editor.ai.thinking');
-      const completion = await this._requestInlineCompletion(model, position);
-      if (requestId !== this._inlineCompletionRequestId || !this._tabForModel(model) || token?.isCancellationRequested) return { items: [] };
-      if (!completion) {
-        this._setInlineCompletionStatus('empty', 'workspace.editor.ai.noSuggestion');
-        return { items: [] };
-      }
-      this._setInlineCompletionStatus('ready', 'workspace.editor.ai.suggested');
-
-      return {
-        items: [{
-          insertText: completion,
-          range: { startLineNumber: position.lineNumber, startColumn: position.column, endLineNumber: position.lineNumber, endColumn: position.column },
-        }],
-      };
-    } catch (err) {
-      this._setInlineCompletionStatus('error', this._inlineCompletionErrorMessage(err));
-      return { items: [] };
-    }
-  }
-
-  private async _triggerInlineCompletion(manual: boolean): Promise<void> {
-    if (!this._editor) return;
-    const editor = this._editor;
-    const model = editor.getModel();
-    const position = editor.getPosition();
-    if (!model || !position) return;
-
-    const lineContent = model.getLineContent(position.lineNumber);
-    const textBeforeCursor = lineContent.substring(0, position.column - 1);
-    if (textBeforeCursor.trim().length < 2) {
-      this._setInlineCompletionStatus('empty', 'workspace.editor.ai.typeMore');
-      return;
-    }
-
-    const requestId = ++this._inlineCompletionRequestId;
-    this._setInlineCompletionStatus(
-      'thinking',
-      manual ? 'workspace.editor.ai.completing' : 'workspace.editor.ai.thinking',
-    );
-    try {
-      const completion = await this._requestInlineCompletion(model, position);
-      if (requestId !== this._inlineCompletionRequestId) return;
-      if (this._editor !== editor || editor.getModel() !== model || !this._tabForModel(model)) return;
-      if (!completion) {
-        this._setInlineCompletionStatus('empty', 'workspace.editor.ai.noSuggestion');
-        return;
-      }
-      editor.executeEdits('anoclaw-ai-complete', [{
-        range: { startLineNumber: position.lineNumber, startColumn: position.column, endLineNumber: position.lineNumber, endColumn: position.column },
-        text: completion,
-        forceMoveMarkers: true,
-      }]);
-      this._setInlineCompletionStatus('ready', 'workspace.editor.ai.inserted');
-      editor.focus();
-    } catch (err) {
-      if (requestId !== this._inlineCompletionRequestId) return;
-      this._setInlineCompletionStatus('error', this._inlineCompletionErrorMessage(err));
-    }
-  }
-
-  private async _requestInlineCompletion(model: any, position: any): Promise<string> {
-    const prefix = model.getValueInRange({
-      startLineNumber: Math.max(1, position.lineNumber - 24),
-      startColumn: 1,
-      endLineNumber: position.lineNumber,
-      endColumn: position.column,
-    });
-    const totalLines = model.getLineCount();
-    const suffix = position.lineNumber < totalLines ? model.getValueInRange({
-      startLineNumber: position.lineNumber,
-      startColumn: position.column,
-      endLineNumber: Math.min(totalLines, position.lineNumber + 8),
-      endColumn: model.getLineMaxColumn(Math.min(totalLines, position.lineNumber + 8)),
-    }) : '';
-
-    const resp = await fetch('/api/v1/inline-suggest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prefix, suffix, language: model.getLanguageId(), sessionId: this._sessionId }),
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      throw new Error(
-        data.message || data.error || t('workspace.editor.ai.suggestFailed', { status: resp.status }),
-      );
-    }
-    return String(data.completion || '').replace(/^\r?\n/, '').replace(/[ \t\r\n]+$/, '');
-  }
-
-  private _setInlineCompletionStatus(
-    state: typeof this._inlineCompletionState,
-    messageKey: TranslationKey,
-    params: Record<string, string | number> = {},
-  ): void {
-    this._inlineCompletionState = state;
-    this._inlineCompletionMessageKey = messageKey;
-    this._inlineCompletionMessageParams = params;
-    const version = ++this._inlineCompletionStatusVersion;
-    this._renderInlineCompletionStatus();
-    if (state === 'ready' || state === 'empty') {
-      window.setTimeout(() => {
-        if (this._inlineCompletionStatusVersion === version) {
-          this._setInlineCompletionStatus('idle', 'workspace.editor.ai.ready');
-        }
-      }, 2200);
-    }
-  }
-
-  private _renderInlineCompletionStatus(): void {
-    const el = this._contentArea.querySelector('[data-role="inline-completion-status"]') as HTMLElement | null;
-    if (!el) return;
-    el.className = `ws-editor-ai-status ${this._inlineCompletionState}`;
-    el.textContent = t(this._inlineCompletionMessageKey, this._inlineCompletionMessageParams);
-  }
-
-  private _inlineCompletionErrorMessage(err: unknown): TranslationKey {
-    const raw = err instanceof Error ? err.message : String(err || 'error');
-    if (/api url|configured|missing/i.test(raw)) return 'workspace.editor.ai.notConfigured';
-    if (/401|403|api key|unauthorized/i.test(raw)) return 'workspace.editor.ai.authError';
-    if (/fetch|network|ECONN|ENOTFOUND|timeout/i.test(raw)) return 'workspace.editor.ai.offline';
-    return 'workspace.editor.ai.error';
-  }
-
   private _dispatchAskAgent(selectedText: string, action: string): void {
     const tab = this.activeTab;
     const ctx = {
@@ -3092,13 +2886,13 @@ export class WorkspaceTabGroup {
     this._ctxThrottle = window.setTimeout(() => { this._ctxThrottle = 0; this.onEditorContextChange?.(); }, 400);
   }
 
-  /** Collect current editor context for WS push. */
+  /** Collect current read-only viewer context for the legacy WS payload. */
   getEditorContext(): { openFiles: string[]; activeFile: string; cursorLine: number; cursorColumn: number; selectedText: string; selectedStartLine: number; selectedEndLine: number } | null {
-    const openFiles = this._tabs.filter(t => t.fileType === 'code' || t.fileType === 'markdown').map(t => t.path);
+    const openFiles = this._tabs.filter(tab => Boolean(tab.model)).map(tab => tab.path);
     const tab = this.activeTab;
     if (!tab) return null;
     const ec: NonNullable<ReturnType<typeof this.getEditorContext>> = { openFiles: openFiles.slice(0, 20), activeFile: tab.path, cursorLine: 1, cursorColumn: 1, selectedText: '', selectedStartLine: 0, selectedEndLine: 0 };
-    if (this._editor) {
+    if (this._editor && tab.model && this._editor.getModel?.() === tab.model) {
       const pos = this._editor.getPosition();
       if (pos) { ec.cursorLine = pos.lineNumber; ec.cursorColumn = pos.column; }
       const sel = this._editor.getSelection();
@@ -3115,164 +2909,41 @@ export class WorkspaceTabGroup {
   get activePath(): string|null { return this._activePath; }
   get hasTabs(): boolean { return this._tabs.length > 0; }
 
-  // ── External change detection (Agent edits) ──
+  // ── External change detection ──
 
-  private _diffBanner: HTMLElement | null = null;
-
-  /** Check if any open code file was modified externally (by Agent). If so, show diff banner. */
+  /** Refresh immutable viewer models after another process changes files on disk. */
   async checkForExternalChanges(): Promise<void> {
     for (const tab of this._tabs) {
-      if (tab.fileType !== 'code' || tab.isDirty) continue;
+      if (!tab.model) continue;
       try {
         const resp = await fetch(`/api/v1/workspace/read?path=${encodeURIComponent(tab.path)}&sessionId=${encodeURIComponent(this._sessionId)}`);
         if (!resp.ok) continue;
         const data = await resp.json();
-        const diskContent = data.content || '';
-        const editorContent = tab.model?.getValue() || '';
-        if (hasExternalContentChange(diskContent, editorContent)) {
-          if (data.truncated) {
-            tab.readOnlyReason = workspaceReadOnlyReason(data);
-            tab.model?.setValue(diskContent);
-            tab.originalContent = diskContent;
-            tab.diskSha256 = typeof data.sha256 === 'string' ? data.sha256 : tab.diskSha256;
-            tab.pendingExternalSha256 = undefined;
-            tab.isDirty = false;
-            this._updateDirty(tab);
-            if (tab.path === this._activePath) this._activate(tab);
-            return;
-          }
-          tab.pendingExternalSha256 = typeof data.sha256 === 'string' ? data.sha256 : undefined;
-          this._showDiffBanner(tab, editorContent, diskContent);
-          return; // Only show one banner at a time
+        const diskContent = String(data.content || '');
+        const diskSha256 = typeof data.sha256 === 'string' ? data.sha256 : undefined;
+        if (diskContent === tab.model.getValue() && (!diskSha256 || diskSha256 === tab.diskSha256)) continue;
+
+        tab.content = diskContent;
+        tab.size = Number(data.size || 0);
+        tab.encoding = String(data.encoding || 'UTF-8');
+        tab.truncated = Boolean(data.truncated);
+        tab.diskSha256 = diskSha256 || tab.diskSha256;
+        tab.readOnlyReason = workspaceReadOnlyReason(data);
+        if (tab.fileType === 'csv') {
+          tab.tableRows = _parseDelimitedRows(
+            diskContent,
+            workspaceFileExtension(tab.name) === 'tsv' ? '\t' : ',',
+          );
         }
-      } catch { console.debug('WorkspaceTabGroup: inline completion resolve failed'); }
-    }
-  }
-
-  private _showDiffBanner(tab: OpenTab, oldContent: string, newContent: string): void {
-    this._hideDiffBanner();
-    if (tab.path !== this._activePath) return; // Only show for active tab
-
-    const bar = document.createElement('div');
-    bar.className = 'ws-diff-banner';
-    bar.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 12px;background:rgba(255,197,51,0.1);border-bottom:1px solid rgba(255,197,51,0.25);font-size:12px;color:#ffc533;flex-shrink:0;';
-    bar.innerHTML = `<span>${t('workspace.review.modified')}</span><span style="flex:1;"></span>`;
-
-    const reviewBtn = document.createElement('button');
-    reviewBtn.textContent = t('workspace.review.reviewChanges');
-    reviewBtn.style.cssText = 'padding:3px 8px;border:1px solid rgba(255,197,51,0.4);border-radius:4px;background:transparent;color:#ffc533;cursor:pointer;font-size:11px;font-family:inherit;';
-    reviewBtn.addEventListener('click', () => { this._hideDiffBanner(); this._showInlineDiff(tab, oldContent, newContent); });
-    bar.appendChild(reviewBtn);
-
-    const acceptBtn = document.createElement('button');
-    acceptBtn.textContent = t('workspace.review.accept');
-    acceptBtn.style.cssText = 'padding:3px 8px;border:1px solid rgba(74,222,128,0.4);border-radius:4px;background:rgba(74,222,128,0.1);color:#4ade80;cursor:pointer;font-size:11px;font-family:inherit;';
-    acceptBtn.addEventListener('click', () => { this._acceptExternalChange(tab, newContent); });
-    bar.appendChild(acceptBtn);
-
-    const rejectBtn = document.createElement('button');
-    rejectBtn.textContent = t('workspace.review.revert');
-    rejectBtn.style.cssText = 'padding:3px 8px;border:1px solid rgba(248,113,113,0.4);border-radius:4px;background:rgba(248,113,113,0.1);color:#f87171;cursor:pointer;font-size:11px;font-family:inherit;';
-    rejectBtn.addEventListener('click', () => { this._revertExternalChange(tab, oldContent); });
-    bar.appendChild(rejectBtn);
-
-    this._contentArea.insertBefore(bar, this._contentArea.firstChild);
-    this._diffBanner = bar;
-  }
-
-  private _hideDiffBanner(): void {
-    if (this._diffBanner) { this._diffBanner.remove(); this._diffBanner = null; }
-  }
-
-  private _showInlineDiff(tab: OpenTab, oldContent: string, newContent: string): void {
-    const m = (window as any).monaco;
-    this._destroyContent();
-    this._contentArea.style.cssText = 'display:flex;flex-direction:column;';
-
-    const diffHost = document.createElement('div');
-    diffHost.style.cssText = 'flex:1;min-height:0;overflow:hidden;';
-    this._contentArea.appendChild(diffHost);
-
-    const oldModel = m.editor.createModel(oldContent, tab.language);
-    const newModel = m.editor.createModel(newContent, tab.language);
-    const diffEditor = m.editor.createDiffEditor(diffHost, {
-      theme: 'anoclaw-dark', fontSize: 13,
-      fontFamily: "'Cascadia Code','Fira Code',Consolas,'SF Mono',Monaco,monospace",
-      readOnly: true, automaticLayout: false, renderSideBySide: true,
-    });
-    diffEditor.setModel({ original: oldModel, modified: newModel });
-
-    // Action bar
-    const actionBar = document.createElement('div');
-    actionBar.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 12px;border-top:1px solid var(--color-hairline,#242728);flex-shrink:0;background:var(--color-surface,#0d0d0d);';
-    const revertBtn = document.createElement('button');
-    revertBtn.textContent = t('workspace.review.revertOriginal');
-    revertBtn.style.cssText = 'padding:4px 10px;border:1px solid rgba(248,113,113,0.3);border-radius:4px;background:transparent;color:#f87171;cursor:pointer;font-size:11px;font-family:inherit;';
-    revertBtn.addEventListener('click', () => {
-      oldModel.dispose(); newModel.dispose(); diffEditor.dispose();
-      this._revertExternalChange(tab, oldContent);
-    });
-    actionBar.appendChild(revertBtn);
-
-    const spacer = document.createElement('span'); spacer.style.cssText = 'flex:1;'; actionBar.appendChild(spacer);
-
-    const acceptBtn = document.createElement('button');
-    acceptBtn.textContent = t('workspace.review.acceptChanges');
-    acceptBtn.style.cssText = 'padding:4px 10px;border:1px solid rgba(74,222,128,0.4);border-radius:4px;background:rgba(74,222,128,0.1);color:#4ade80;cursor:pointer;font-size:11px;font-family:inherit;';
-    acceptBtn.addEventListener('click', () => {
-      oldModel.dispose(); newModel.dispose(); diffEditor.dispose();
-      this._acceptExternalChange(tab, newContent);
-    });
-    actionBar.appendChild(acceptBtn);
-
-    this._contentArea.appendChild(actionBar);
-  }
-
-  private async _acceptExternalChange(tab: OpenTab, newContent: string): Promise<void> {
-    this._hideDiffBanner();
-    tab.model.setValue(newContent);
-    tab.originalContent = newContent;
-    tab.diskSha256 = tab.pendingExternalSha256 || tab.diskSha256;
-    tab.pendingExternalSha256 = undefined;
-    tab.isDirty = false;
-    this._updateDirty(tab);
-    // Re-render active tab to restore normal editor view
-    if (tab.path === this._activePath) this._activate(tab);
-  }
-
-  private async _revertExternalChange(tab: OpenTab, originalContent: string): Promise<void> {
-    this._hideDiffBanner();
-    // Revert only the exact external revision that was reviewed. If another
-    // writer changed the file again, preserve the editor buffer as dirty.
-    try {
-      const resp = await fetch('/api/v1/workspace/write', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId:this._sessionId,
-          path: tab.path,
-          content: originalContent,
-          ...(tab.pendingExternalSha256 ? { expectedSha256: tab.pendingExternalSha256 } : {}),
-        }),
-      });
-      if (!resp.ok) {
-        throw new Error(await _responseError(resp, t('workspace.saveFailedStatus', { status: resp.status })));
+        tab.model.setValue(diskContent);
+        if (tab.path === this._activePath) this._activate(tab);
+      } catch {
+        console.debug('WorkspaceTabGroup: external read-only refresh failed');
       }
-      const result = await resp.json() as { sha256?: string };
-      tab.model.setValue(originalContent);
-      tab.originalContent = originalContent;
-      tab.diskSha256 = result.sha256 || tab.pendingExternalSha256 || tab.diskSha256;
-      tab.pendingExternalSha256 = undefined;
-      tab.isDirty = false;
-    } catch (err) {
-      tab.isDirty = true;
-      ToastManager.getInstance().error(err instanceof Error ? err.message : String(err));
     }
-    this._updateDirty(tab);
-    if (tab.path === this._activePath) this._activate(tab);
   }
 
-  private _destroyContent(): void { this._destroyBrowserView(); if (this._editorHost && this._editorHost.parentElement) this._editorHost.remove(); this._contentArea.innerHTML = ''; this._contentArea.style.cssText = ''; this._contentArea.classList.remove('ws-preview-surface'); }
+  private _destroyContent(): void { this._destroyBrowserView(); this._editor?.setModel?.(null); if (this._editorHost && this._editorHost.parentElement) this._editorHost.remove(); this._contentArea.innerHTML = ''; this._contentArea.style.cssText = ''; this._contentArea.classList.remove('ws-preview-surface'); }
 
   private _isRenderCurrent(tab: OpenTab, renderGeneration: number): boolean {
     return this._renderGeneration === renderGeneration && this._activePath === tab.path;
@@ -3283,14 +2954,14 @@ export class WorkspaceTabGroup {
         <div class="ws-editor-empty-panel">
           <div class="ws-editor-empty-mark"></div>
           <div class="ws-editor-empty-title">${t('workspace.noFileOpen')}</div>
-          <div class="ws-editor-empty-meta">${t('workspace.editorIdle')}</div>
+          <div class="ws-editor-empty-meta">${t('workspace.viewerIdle')}</div>
         </div>
       </div>`;
   }
 
   private _refreshLocale(): void {
     this._tabBar.setAttribute('aria-label', t('workspace.tabsAria'));
-    this._plusBtn.title = t('workspace.newFileOrBrowser');
+    this._plusBtn.title = t('workspace.newBrowser');
     this._closeAllMenus();
     this._refreshAgentActions();
 
@@ -3339,24 +3010,9 @@ export class WorkspaceTabGroup {
       const position = this._editor?.getPosition?.();
       const posEl = status.querySelector('[data-role="cursor-pos"]') as HTMLElement | null;
       if (posEl) posEl.textContent = t('workspace.editor.position', { line: position?.lineNumber || 1, column: position?.column || 1 });
-      const spaces = status.querySelector('[data-i18n-key="workspace.editor.spaces"]') as HTMLElement | null;
-      if (spaces) spaces.textContent = t('workspace.editor.spaces');
       const languageService = status.querySelector('[data-role="language-service-status"]') as HTMLElement | null;
       if (languageService) languageService.title = t('workspace.editor.languageServiceTitle');
-      const completion = status.querySelector('[data-role="inline-completion-status"]') as HTMLElement | null;
-      if (completion) completion.title = t('workspace.editor.aiCompletionTitle');
       this._renderLanguageStatus();
-      this._renderInlineCompletionStatus();
-    }
-
-    const diffBanner = this._contentArea.querySelector('.ws-diff-banner');
-    if (diffBanner) {
-      const texts = diffBanner.querySelectorAll<HTMLElement>('span, button');
-      if (texts[0]) texts[0].textContent = t('workspace.review.modified');
-      const buttons = diffBanner.querySelectorAll<HTMLButtonElement>('button');
-      if (buttons[0]) buttons[0].textContent = t('workspace.review.reviewChanges');
-      if (buttons[1]) buttons[1].textContent = t('workspace.review.accept');
-      if (buttons[2]) buttons[2].textContent = t('workspace.review.revert');
     }
   }
 
@@ -3376,10 +3032,6 @@ export class WorkspaceTabGroup {
       this._diagnosticsTimer = 0;
     }
     WorkspaceTabGroup._groups.delete(this);
-    if (WorkspaceTabGroup._groups.size === 0) {
-      WorkspaceTabGroup._inlineCompletionDisposable?.dispose();
-      WorkspaceTabGroup._inlineCompletionDisposable = null;
-    }
     for (const disposable of this._agentActionDisposables.splice(0)) disposable.dispose();
     this._agentActionsRegistered = false;
     this._stopLocaleListener?.();
@@ -3408,17 +3060,7 @@ export class WorkspaceTabGroup {
 }
 
 function _escAttr(s: string): string { return s.replace(/"/g,'\\"'); }
-function _escHtml(s: string): string { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function _baseName(filePath: string): string { return String(filePath || '').replace(/\\/g, '/').split('/').filter(Boolean).pop() || String(filePath || ''); }
-function _pathMatches(filePath: string, targetPath: string): boolean {
-  const file = String(filePath || '').replace(/\\/g, '/').replace(/\/$/, '');
-  const target = String(targetPath || '').replace(/\\/g, '/').replace(/\/$/, '');
-  return file === target || file.startsWith(`${target}/`);
-}
-async function _responseError(resp: Response, fallback: string): Promise<string> {
-  const body = await resp.json().catch(() => ({})) as { message?: string; error?: string };
-  return body.message || body.error || fallback;
-}
 function _safeFence(s: string): string { return String(s || '').replace(/```/g, '`` `'); }
 function _formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '';
@@ -3509,6 +3151,96 @@ function _parseDelimitedRows(content: string, delimiter: ',' | '\t'): string[][]
   return rows;
 }
 
+function _directoryName(filePath: string): string {
+  const parts = String(filePath || '').replace(/\\/g, '/').split('/');
+  parts.pop();
+  return parts.filter(Boolean).join('/');
+}
+
+function _isExternalOrEmbeddedUrl(value: string): boolean {
+  const normalized = value.trim();
+  return !normalized
+    || normalized.startsWith('#')
+    || normalized.startsWith('//')
+    || /^(?:[a-z][a-z0-9+.-]*:)/i.test(normalized);
+}
+
+function _resolveWorkspaceRelative(basePath: string, reference: string): string {
+  const cleanReference = reference.split(/[?#]/, 1)[0].replace(/\\/g, '/');
+  const parts = cleanReference.startsWith('/') ? [] : basePath.split('/').filter(Boolean);
+  for (const part of cleanReference.split('/')) {
+    if (!part || part === '.') continue;
+    if (part === '..') parts.pop();
+    else parts.push(part);
+  }
+  return parts.join('/');
+}
+
+function _structuredNode(
+  value: unknown,
+  key: string,
+  depth: number,
+  budget: { remaining: number },
+): HTMLElement {
+  const container = document.createElement('div');
+  container.className = 'ws-structured-node';
+  if (budget.remaining-- <= 0) {
+    container.textContent = '…';
+    return container;
+  }
+  const keyText = key ? `${key}: ` : '';
+  if (value === null || typeof value !== 'object') {
+    const keyEl = document.createElement('span');
+    keyEl.className = 'ws-structured-key';
+    keyEl.textContent = keyText;
+    const valueEl = document.createElement('span');
+    valueEl.className = `ws-structured-value ${typeof value}`;
+    valueEl.textContent = typeof value === 'string' ? JSON.stringify(value) : String(value);
+    container.append(keyEl, valueEl);
+    return container;
+  }
+
+  const entries = Array.isArray(value) ? value.map((item, index) => [String(index), item] as const) : Object.entries(value);
+  const details = document.createElement('details');
+  details.open = depth < 2;
+  const summary = document.createElement('summary');
+  summary.textContent = `${keyText}${Array.isArray(value) ? `Array(${entries.length})` : `Object(${entries.length})`}`;
+  details.appendChild(summary);
+  const children = document.createElement('div');
+  children.className = 'ws-structured-children';
+  for (const [childKey, childValue] of entries) {
+    if (budget.remaining <= 0) break;
+    children.appendChild(_structuredNode(childValue, childKey, depth + 1, budget));
+  }
+  details.appendChild(children);
+  container.appendChild(details);
+  return container;
+}
+
+function _notebookText(value: unknown): string {
+  if (Array.isArray(value)) return value.map(item => String(item ?? '')).join('');
+  return value === undefined || value === null ? '' : String(value);
+}
+
+function _parseStructuredContent(content: string, extension: string): unknown {
+  const normalized = content.replace(/^\uFEFF/, '');
+  if (extension === 'jsonl' || extension === 'ndjson') {
+    return normalized.split(/\r?\n/).filter(line => line.trim()).map(line => JSON.parse(line));
+  }
+  return JSON.parse(normalized);
+}
+
+function _hexDump(bytes: Uint8Array): string {
+  const lines: string[] = [];
+  for (let offset = 0; offset < bytes.length; offset += 16) {
+    const slice = bytes.slice(offset, offset + 16);
+    const hex = Array.from(slice, value => value.toString(16).padStart(2, '0')).join(' ').padEnd(47, ' ');
+    const ascii = Array.from(slice, value => value >= 32 && value <= 126 ? String.fromCharCode(value) : '.').join('');
+    lines.push(`${offset.toString(16).padStart(8, '0')}  ${hex}  |${ascii}|`);
+  }
+  return lines.join('\n');
+}
+
 const _SVG_BROWSER_BACK = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>`;
 const _SVG_BROWSER_FORWARD = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>`;
 const _SVG_BROWSER_RELOAD = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.4 6.4L3 16"/><path d="M3 16v5h5"/><path d="M3 12A9 9 0 0 1 18.4 5.6L21 8"/><path d="M21 8V3h-5"/></svg>`;
@@ -3545,9 +3277,7 @@ const BROWSER_VIEWPORT_PRESETS: BrowserViewportPreset[] = [
 ];
 
 const LANGUAGE_ENDPOINTS: Record<string, string> = {
-  completions: '/api/v1/workspace/language/completions',
   hover: '/api/v1/workspace/language/hover',
   definition: '/api/v1/workspace/language/definition',
   diagnostics: '/api/v1/workspace/language/diagnostics',
-  'organize-imports': '/api/v1/workspace/language/organize-imports',
 };

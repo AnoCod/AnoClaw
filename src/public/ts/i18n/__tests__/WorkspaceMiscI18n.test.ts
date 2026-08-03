@@ -46,13 +46,12 @@ describe('workspace and conversation runtime i18n', () => {
     expect(filterCommands('项目').map(command => command.name)).toEqual(['init']);
   });
 
-  it('re-registers Monaco editor actions with labels from the active locale', () => {
+  it('re-registers read-only Monaco viewer actions with labels from the active locale', () => {
     const descriptors: Array<{ id: string; label: string }> = [];
     const disposed: string[] = [];
     vi.stubGlobal('window', {
       monaco: {
-        KeyCode: { Backslash: 1, F12: 2, KeyO: 3 },
-        KeyMod: { Alt: 4, Shift: 8 },
+        KeyCode: { F12: 2 },
       },
     });
     const group = Object.create(WorkspaceTabGroup.prototype) as any;
@@ -71,21 +70,17 @@ describe('workspace and conversation runtime i18n', () => {
       'Ask Agent',
       'Agent: Explain This',
       'Agent: Find Bugs',
-      'AI: Complete at Cursor',
-      'IDE: Go to Definition',
-      'IDE: Organize Imports',
+      'Viewer: Go to Definition',
     ]);
 
     setLocale('zh-CN');
     group._refreshAgentActions();
-    expect(disposed).toHaveLength(6);
-    expect(descriptors.slice(-6).map(item => item.label)).toEqual([
+    expect(disposed).toHaveLength(4);
+    expect(descriptors.slice(-4).map(item => item.label)).toEqual([
       '询问智能体',
       '智能体：解释此处',
       '智能体：查找缺陷',
-      'AI：在光标处补全',
-      'IDE：转到定义',
-      'IDE：整理导入',
+      '浏览器：转到定义',
     ]);
   });
 
@@ -132,15 +127,18 @@ describe('workspace and conversation runtime i18n', () => {
     );
   });
 
-  it('provides translated device, status, path, and image labels', () => {
+  it('provides translated read-only viewer, device, path, and image labels', () => {
     setLocale('zh-CN');
     expect(t('workspace.browser.device.desktop')).toBe('桌面');
     expect(t('workspace.browser.device.small')).toBe('小屏');
-    expect(t('workspace.editor.ai.ready')).toBe('AI 就绪');
+    expect(t('workspace.viewerIdle')).toBe('只读文件浏览器空闲');
+    expect(t('workspace.readOnly')).toBe('只读');
+    expect(t('workspace.preview.archiveEntries', { count: 3 })).toBe('3 个归档条目');
+    expect(t('workspace.preview.configEntries', { count: 4 })).toBe('4 个配置项');
+    expect(t('workspace.preview.binarySummary', { kind: 'WebAssembly module', size: '64KB' })).toBe('类型：WebAssembly module · 显示前 64KB');
+    expect(t('workspace.preview.psdFlattened')).toContain('不解析或展示图层');
     expect(t('workspace.editor.ls.checking')).toBe('语言服务检查中');
-    expect(t('workspace.saveFailedStatus', { status: 500 })).toBe('保存失败（HTTP 500）');
     expect(t('workspace.editor.ls.requestFailed', { status: 503 })).toBe('语言服务请求失败（HTTP 503）');
-    expect(t('workspace.editor.ai.suggestFailed', { status: 429 })).toBe('AI 补全请求失败（HTTP 429）');
     expect(t('path.desktopRequired')).toBe('需要桌面应用才能打开文件。');
     expect(t('image.clickToPreview')).toBe('点击预览');
   });

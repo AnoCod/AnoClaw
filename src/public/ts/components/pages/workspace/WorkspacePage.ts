@@ -1,4 +1,4 @@
-// WorkspacePage.ts — Workspace page: file tree + tab container with Monaco + browser tabs.
+// WorkspacePage.ts — Read-only Workspace file browser + embedded web browser tabs.
 
 import type { Page } from '../../../types.js';
 import { App } from '../../../app.js';
@@ -107,7 +107,6 @@ export class WorkspacePage implements Page {
   private _onSessionChange: ((node: any) => void) | null = null;
   private _onSessionsRemoved: ((sessionIds: unknown) => void) | null = null;
   private _onRevealWorkspacePath: ((event: Event) => void) | null = null;
-  private _onWorkspaceDownloadComplete: ((event: Event) => void) | null = null;
   private _tabCache = new Map<string, WorkspaceSplitContainer>();
 
   /** Exposed for the global agent browser handler. */
@@ -153,9 +152,6 @@ export class WorkspacePage implements Page {
     const content = document.createElement('div');
     content.className = 'ws-content';
     this._fileTree = new WorkspaceFileTree((path, name) => this._openFile(path, name));
-    this._fileTree.beforePathDelete = async path => this._currentGroup?.prepareForPathRemoval(path) ?? true;
-    this._fileTree.onPathRenamed = (oldPath, newPath) => this._currentGroup?.handlePathRenamed(oldPath, newPath);
-    this._fileTree.onPathDeleted = path => this._currentGroup?.handlePathDeleted(path);
     content.appendChild(this._fileTree.element);
     this._treeGrip = document.createElement('div');
     this._treeGrip.className = 'ws-resize-grip';
@@ -171,7 +167,6 @@ export class WorkspacePage implements Page {
   onEnter(): void {
     this._unwireSessionEvents();
     if (this._onRevealWorkspacePath) { window.removeEventListener('ws-reveal-workspace-path', this._onRevealWorkspacePath); this._onRevealWorkspacePath = null; }
-    if (this._onWorkspaceDownloadComplete) { window.removeEventListener('ws-workspace-download-complete', this._onWorkspaceDownloadComplete); this._onWorkspaceDownloadComplete = null; }
     this._onSessionChange = () => { void this._onSessionSwitched(); };
     const sessionVM = App.getInstance().sessionVM;
     sessionVM?.on('sessionSelected', this._onSessionChange);
@@ -185,12 +180,7 @@ export class WorkspacePage implements Page {
       const detail = (event as CustomEvent).detail || {};
       void this._revealWorkspacePath(String(detail.path || ''), Boolean(detail.open));
     };
-    this._onWorkspaceDownloadComplete = (event: Event) => {
-      const detail = (event as CustomEvent).detail || {};
-      void this._revealWorkspacePath(String(detail.relativePath || detail.path || ''), false);
-    };
     window.addEventListener('ws-reveal-workspace-path', this._onRevealWorkspacePath);
-    window.addEventListener('ws-workspace-download-complete', this._onWorkspaceDownloadComplete);
     this._pruneStaleSessionCaches();
     const sid = sessionVM?.activeSessionId || '';
     if (sid) { void this._loadWorkspaceForSession(sid); }
@@ -201,7 +191,6 @@ export class WorkspacePage implements Page {
     try {
       this._unwireSessionEvents();
       if (this._onRevealWorkspacePath) { window.removeEventListener('ws-reveal-workspace-path', this._onRevealWorkspacePath); this._onRevealWorkspacePath = null; }
-      if (this._onWorkspaceDownloadComplete) { window.removeEventListener('ws-workspace-download-complete', this._onWorkspaceDownloadComplete); this._onWorkspaceDownloadComplete = null; }
       if (this._extChangeTimer) { clearInterval(this._extChangeTimer); this._extChangeTimer = 0; }
       this._loadGeneration++;
       this._loadAbortController?.abort();
@@ -303,11 +292,11 @@ export class WorkspacePage implements Page {
       this._tabMount.innerHTML = '';
       this._tabMount.appendChild(this._currentGroup.element);
       this._currentGroup.resume();
-      // Wire editor context push
+      // Push read-only viewer context so the agent can reason about visible files.
       this._currentGroup.onEditorContextChange = () => this._pushEditorContext();
       // Push initial context
       setTimeout(() => this._pushEditorContext(), 500);
-      // Start polling for external changes (Agent edits)
+      // Observe filesystem changes made outside the read-only Workspace surface.
       this._startExternalChangePolling();
     } catch (err) {
       if (!(err instanceof DOMException && err.name === 'AbortError')) {
@@ -339,7 +328,7 @@ export class WorkspacePage implements Page {
     }, 3000);
   }
 
-  /** Push current editor state to server for prompt injection. */
+  /** Push current read-only viewer state to server for prompt injection. */
   private _pushEditorContext(): void {
     if (!this._currentGroup || !this._sessionId) return;
     const ec = this._currentGroup.getEditorContext();
@@ -354,8 +343,6 @@ export class WorkspacePage implements Page {
     const dlg = new WorkspaceBindingDialog();
     const result = await dlg.show(workspacePath);
     if (!result || !sessionId || this._sessionId !== sessionId || App.getInstance().sessionVM?.activeSessionId !== sessionId) return;
-    if (this._currentGroup && !await this._currentGroup.prepareToDiscardAll(t('workspace.action.switching'))) return;
-    if (this._sessionId !== sessionId || App.getInstance().sessionVM?.activeSessionId !== sessionId) return;
     try {
       const resp = await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/bind-workspace`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: result.path }) });
       if (!resp.ok) throw new Error(t('workspace.bindingFailed', { status: resp.status }));
@@ -421,7 +408,7 @@ export class WorkspacePage implements Page {
         <div class="ws-editor-empty-panel">
           <div class="ws-editor-empty-mark"></div>
           <div class="ws-editor-empty-title">${t('workspace.noFileOpen')}</div>
-          <div class="ws-editor-empty-meta">${t('workspace.editorIdle')}</div>
+          <div class="ws-editor-empty-meta">${t('workspace.viewerIdle')}</div>
         </div>
       </div>`;
   }

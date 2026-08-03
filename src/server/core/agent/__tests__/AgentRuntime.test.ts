@@ -562,7 +562,7 @@ describe('AgentRuntime', () => {
       expect(routingContext?.content).toContain('Suggested tool parameters: {}');
     });
 
-    it('injects workspace IDE guidance for coding routes', async () => {
+    it('injects read-only Workspace viewer guidance for coding routes', async () => {
       CapabilityRegistry.getInstance().setCatalogCapabilities([
         {
           id: 'code.implement',
@@ -609,8 +609,8 @@ describe('AgentRuntime', () => {
         parameters: { file_path: 'src/app.ts' },
       });
       const routingContext = capturedHistory.find((msg) => msg.id.startsWith('task-resolution-'));
-      expect(routingContext?.content).toContain('Coding route: use the existing workspace/IDE context');
-      expect(routingContext?.content).toContain('Editor Context');
+      expect(routingContext?.content).toContain('Coding route: use the existing read-only Workspace viewer context');
+      expect(routingContext?.content).toContain('Workspace Viewer Context');
       expect(routingContext?.content).toContain('Suggested first tool call: Read');
       expect(routingContext?.content).toContain('Suggested tool parameters: {"file_path":"src/app.ts"}');
     });
@@ -807,7 +807,7 @@ describe('AgentRuntime', () => {
             toolName: 'Glob',
             parameters: { pattern: '**/*.{ts,tsx,js}' },
             confidence: 0.55,
-            notes: ['Start from the current IDE/editor context when available.'],
+            notes: ['Start from the current read-only Workspace viewer context when available.'],
           },
           assumptions: [],
           reason: 'Resolved to code.implement (available).',
@@ -821,7 +821,7 @@ describe('AgentRuntime', () => {
       expect(content).toContain('Permission mode: Plan');
       expect(content).toContain('Resolved capability: code.implement');
       expect(content).toContain('Suggested first tool call: Glob');
-      expect(content).toContain('Coding task: start from the current IDE/workspace context');
+      expect(content).toContain('Coding task: start from the current read-only Workspace viewer context');
       expect(content).toContain('Plan mode is active');
     });
   });

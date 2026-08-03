@@ -181,4 +181,36 @@ describe('BrowserViewManager', () => {
     expect(manager.isOwnedBySession(agentA, 'session-a', 'agent')).toBe(true);
     expect(manager.isOwnedBySession(agentA, 'session-b', 'agent')).toBe(false);
   });
+
+  it('never redirects browser downloads into the bound Workspace', () => {
+    BrowserViewManager.init(() => mainWindow as any);
+    const manager = BrowserViewManager.getInstance();
+    const viewId = manager.create('https://example.com/file.zip', {
+      sessionId: 'session-download',
+      workspacePath: 'F:\\projects\\read-only-workspace',
+    });
+    const fakeView = electronMock.views.at(-1);
+    const willDownload = fakeView.webContents.session.on.mock.calls
+      .find((call: unknown[]) => call[0] === 'will-download')?.[1] as ((event: unknown, item: any, webContents: any) => void) | undefined;
+    const setSavePath = vi.fn();
+    const item = {
+      getFilename: () => 'report.zip',
+      getSavePath: () => 'C:\\Users\\test\\Downloads\\report.zip',
+      getURL: () => 'https://example.com/file.zip',
+      getReceivedBytes: () => 0,
+      getTotalBytes: () => 100,
+      setSavePath,
+      on: vi.fn(),
+      once: vi.fn(),
+    };
+
+    expect(willDownload).toBeTypeOf('function');
+    willDownload?.({}, item, fakeView.webContents);
+
+    expect(setSavePath).not.toHaveBeenCalled();
+    expect(mainWindow.webContents.send).toHaveBeenCalledWith(
+      'wv-download',
+      expect.objectContaining({ viewId, filename: 'report.zip', relativePath: '' }),
+    );
+  });
 });

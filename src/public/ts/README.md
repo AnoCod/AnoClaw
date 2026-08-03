@@ -87,7 +87,7 @@ class ToastManager {
 
 ### ClickablePathHandler
 
-Delegated click handler for file paths and external URLs. Files inside the active session workspace open in the built-in Workspace IDE (including line/column navigation when provided); external files fall back to `window.electronAPI.openPath()`, and web links use `openExternal()`.
+Delegated click handler for file paths and external URLs. Files inside the active session workspace open in the built-in read-only Workspace browser (including line/column navigation when provided); external files fall back to `window.electronAPI.openPath()`, and web links use `openExternal()`.
 
 ---
 
@@ -356,7 +356,8 @@ One TS file per message type in `components/conversation/delegates/`:
 - `components/conversation/` — Chat UI (input, message list, mode selector, session tree, slash commands)
 - `components/conversation/delegates/` — One file per message type
 - `components/pages/` — Full-page views (Sessions, Workspace, Agents, Settings, Skills, Memory, Plugins)
-- `components/pages/workspace/` — Workspace file tree, tabs, split view
+- `components/pages/workspace/` — Read-only Workspace file tree, rich previews, source viewer, tabs, and split view
+  - Preview routing covers source/text, config tables, media/documents/archives, binary signatures plus hex, and flattened PSD/PSB images; none of these paths can write to the Workspace.
 - `components/tabs/` — Shared tab helpers (FilePreview, Overview, Plan)
 - `components/ui/` — Reusable UI kit (Button, Card, Dialog, Toggle, Input, Select, Badge, Toast, etc.)
 - `handlers/` — WS event → SessionAgent dispatch

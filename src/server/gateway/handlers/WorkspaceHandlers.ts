@@ -1,5 +1,4 @@
-// WorkspaceHandlers — workspace file-browsing and binding HTTP handlers extracted from ApiServer
-// Handles: browse workspace, read workspace file, create directory, bind workspace
+// WorkspaceHandlers — read-only workspace browsing, binding, and preview handlers.
 // Part of the AnoClaw v2.0 rewrite: Gateway system (SA-10)
 
 import * as fs from 'fs';
@@ -10,9 +9,9 @@ import { createHash } from 'node:crypto';
 import micromatch from 'micromatch';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { SessionManager } from '../../core/session/SessionManager.js';
-import { requireWs, requireWsAny } from '../WsRequired.js';
+import { requireWs } from '../WsRequired.js';
 import type { SendJson, ReadBody } from '../RouteHelpers.js';
-import { atomicWriteFile } from '../../core/tools/builtin/FileUtils.js';
+import { createPsdPreview, PsdPreviewError } from './WorkspacePsdPreview.js';
 
 async function fileSha256(filePath: string): Promise<string> {
   const hash = createHash('sha256');
@@ -23,22 +22,6 @@ async function fileSha256(filePath: string): Promise<string> {
     stream.once('end', resolve);
   });
   return hash.digest('hex');
-}
-
-const workspaceWriteQueues = new Map<string, Promise<void>>();
-
-async function serializeWorkspaceWrite<T>(filePath: string, action: () => Promise<T>): Promise<T> {
-  const resolved = path.resolve(filePath);
-  const key = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
-  const previous = workspaceWriteQueues.get(key) || Promise.resolve();
-  const operation = previous.catch(() => undefined).then(action);
-  const tail = operation.then(() => undefined, () => undefined);
-  workspaceWriteQueues.set(key, tail);
-  try {
-    return await operation;
-  } finally {
-    if (workspaceWriteQueues.get(key) === tail) workspaceWriteQueues.delete(key);
-  }
 }
 
 async function mapWithConcurrency<T, R>(
@@ -141,20 +124,6 @@ function workspaceRootForSession(sessionId: string): string {
   return path.resolve(session.workspace || process.cwd());
 }
 
-function resolveToAbs(filePath: string, sessionId = ''): string {
-  return resolveWorkspacePath(workspaceRootForSession(sessionId), filePath);
-}
-
-function isWorkspaceRootPath(absPath: string, sessionId: string): boolean {
-  return path.relative(workspaceRootForSession(sessionId), absPath) === '';
-}
-
-function validateWorkspaceMutationTarget(absPath: string, sessionId: string): void {
-  if (isWorkspaceRootPath(absPath, sessionId)) {
-    throw new Error('Workspace root cannot be modified');
-  }
-}
-
 function sendWorkspaceError(err: unknown, res: ServerResponse, sendJson: SendJson, fallback: string): void {
   if (err instanceof Error && err.message === 'Path escapes workspace root') {
     sendJson(res, 403, { error: 'Forbidden', message: err.message });
@@ -164,16 +133,8 @@ function sendWorkspaceError(err: unknown, res: ServerResponse, sendJson: SendJso
     sendJson(res, 404, { error: 'Not Found', message: err.message });
     return;
   }
-  if (err instanceof Error && err.message === 'Workspace root cannot be modified') {
-    sendJson(res, 400, { error: 'Bad Request', message: err.message });
-    return;
-  }
   const message = err instanceof Error ? err.message : String(err);
   sendJson(res, 500, { error: fallback, message });
-}
-
-function isPlainFileName(name: string): boolean {
-  return !!name && name !== '.' && name !== '..' && !name.includes('/') && !name.includes('\\');
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -185,38 +146,94 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 
 const RAW_MIME_TYPES: Record<string, string> = {
   '.aac': 'audio/aac',
+  '.apk': 'application/vnd.android.package-archive',
   '.apng': 'image/apng',
   '.avif': 'image/avif',
   '.bmp': 'image/bmp',
   '.css': 'text/css; charset=utf-8',
   '.csv': 'text/csv; charset=utf-8',
+  '.doc': 'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.ear': 'application/java-archive',
+  '.epub': 'application/epub+zip',
+  '.flac': 'audio/flac',
   '.gif': 'image/gif',
+  '.geojson': 'application/geo+json; charset=utf-8',
+  '.topojson': 'application/json; charset=utf-8',
+  '.heic': 'image/heic',
+  '.heif': 'image/heif',
   '.htm': 'text/html; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
   '.ico': 'image/x-icon',
+  '.jar': 'application/java-archive',
+  '.jpe': 'image/jpeg',
+  '.jfif': 'image/jpeg',
   '.jpeg': 'image/jpeg',
+  '.jxl': 'image/jxl',
   '.jpg': 'image/jpeg',
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.jsonl': 'application/x-ndjson; charset=utf-8',
   '.m4a': 'audio/mp4',
   '.m4v': 'video/mp4',
   '.md': 'text/markdown; charset=utf-8',
   '.mov': 'video/quicktime',
+  '.map': 'application/json; charset=utf-8',
   '.mp3': 'audio/mpeg',
   '.mp4': 'video/mp4',
+  '.nupkg': 'application/zip',
+  '.ndjson': 'application/x-ndjson; charset=utf-8',
   '.oga': 'audio/ogg',
   '.ogg': 'audio/ogg',
   '.ogv': 'video/ogg',
+  '.opus': 'audio/opus',
+  '.otf': 'font/otf',
   '.pdf': 'application/pdf',
+  '.pjp': 'image/jpeg',
+  '.pjpeg': 'image/jpeg',
   '.png': 'image/png',
+  '.ppt': 'application/vnd.ms-powerpoint',
+  '.pptm': 'application/vnd.ms-powerpoint.presentation.macroEnabled.12',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.psb': 'image/vnd.adobe.photoshop',
+  '.psd': 'image/vnd.adobe.photoshop',
+  '.srt': 'application/x-subrip; charset=utf-8',
   '.svg': 'image/svg+xml; charset=utf-8',
+  '.tif': 'image/tiff',
+  '.tiff': 'image/tiff',
+  '.ttf': 'font/ttf',
   '.tsv': 'text/tab-separated-values; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
+  '.vtt': 'text/vtt; charset=utf-8',
+  '.vsix': 'application/zip',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.wav': 'audio/wav',
+  '.war': 'application/java-archive',
   '.webm': 'video/webm',
   '.webp': 'image/webp',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.xls': 'application/vnd.ms-excel',
+  '.xlsm': 'application/vnd.ms-excel.sheet.macroEnabled.12',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   '.xml': 'application/xml; charset=utf-8',
+  '.zip': 'application/zip',
 };
+
+const MAX_TEXT_PREVIEW_BYTES = 1024 * 1024;
+
+function decodeWorkspaceText(buffer: Buffer): { content: string; encoding: string } {
+  if (buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf) {
+    return { content: buffer.subarray(3).toString('utf8'), encoding: 'UTF-8' };
+  }
+  if (buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) {
+    return { content: new TextDecoder('utf-16le').decode(buffer.subarray(2)), encoding: 'UTF-16 LE' };
+  }
+  if (buffer.length >= 2 && buffer[0] === 0xfe && buffer[1] === 0xff) {
+    return { content: new TextDecoder('utf-16be').decode(buffer.subarray(2)), encoding: 'UTF-16 BE' };
+  }
+  return { content: buffer.toString('utf8'), encoding: 'UTF-8' };
+}
 
 function mimeTypeForFile(filePath: string): string {
   return RAW_MIME_TYPES[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
@@ -491,21 +508,18 @@ export async function handleReadWorkspaceFile(
       return;
     }
 
-    const maxSize = 100 * 1024; // 100KB
-    let content: string;
-    let truncated = false;
-
-    if (stat.size > maxSize) {
-      // Large file: read first ~2000 lines (approximate via maxSize bytes)
-      const fd = fs.openSync(absPath, 'r');
-      const buf = Buffer.alloc(maxSize);
-      const bytesRead = fs.readSync(fd, buf, 0, maxSize, 0);
+    const previewBytes = Math.min(stat.size, MAX_TEXT_PREVIEW_BYTES);
+    const fd = fs.openSync(absPath, 'r');
+    const buffer = Buffer.alloc(previewBytes);
+    let bytesRead = 0;
+    try {
+      bytesRead = previewBytes > 0 ? fs.readSync(fd, buffer, 0, previewBytes, 0) : 0;
+    } finally {
       fs.closeSync(fd);
-      content = buf.toString('utf-8', 0, bytesRead);
-      truncated = true;
-    } else {
-      content = fs.readFileSync(absPath, 'utf-8');
     }
+    const decoded = decodeWorkspaceText(buffer.subarray(0, bytesRead));
+    const content = decoded.content;
+    const truncated = stat.size > MAX_TEXT_PREVIEW_BYTES;
 
     // Detect language from extension
     const ext = path.extname(absPath).toLowerCase();
@@ -524,6 +538,8 @@ export async function handleReadWorkspaceFile(
       content,
       size: stat.size,
       truncated,
+      previewBytes: bytesRead,
+      encoding: decoded.encoding,
       language: langMap[ext] || 'text',
       modifiedAt: stat.mtime.toISOString(),
       sha256: await fileSha256(absPath),
@@ -533,47 +549,24 @@ export async function handleReadWorkspaceFile(
   }
 }
 
-/** POST /api/v1/workspace/create-dir — Create directory */
+const WORKSPACE_READ_ONLY_RESPONSE = Object.freeze({
+  error: 'Method Not Allowed',
+  code: 'WORKSPACE_READ_ONLY',
+  message: 'Workspace is a read-only file browser. Files and directories cannot be modified from this API.',
+});
+
+function rejectWorkspaceMutation(res: ServerResponse, sendJson: SendJson): void {
+  sendJson(res, 405, WORKSPACE_READ_ONLY_RESPONSE);
+}
+
+/** Legacy mutation endpoint retained only to return a stable read-only response. */
 export async function handleCreateWorkspaceDir(
-  req: IncomingMessage,
+  _req: IncomingMessage,
   res: ServerResponse,
   sendJson: SendJson,
-  readBody: ReadBody,
+  _readBody: ReadBody,
 ): Promise<void> {
-  if (!requireWsAny(res, sendJson)) return;
-  try {
-    const body = await readBody(req);
-    const sessionId = String(body.sessionId || '');
-    const parentPath = String(body.path || '/');
-
-    const dirName = typeof body.name === 'string' && body.name.trim()
-      ? body.name.trim()
-      : null;
-
-    if (dirName && !isPlainFileName(dirName)) {
-      sendJson(res, 400, { error: 'Bad Request', message: 'Invalid directory name' });
-      return;
-    }
-
-    const absParentPath = resolveToAbs(parentPath, sessionId);
-    const absPath = dirName
-      ? path.join(absParentPath, dirName)
-      : absParentPath;
-
-    if (fs.existsSync(absPath)) {
-      sendJson(res, 409, { error: 'Conflict', message: `Directory already exists` });
-      return;
-    }
-
-    fs.mkdirSync(absPath, { recursive: true });
-
-    const relPath = dirName
-      ? (parentPath === '/' ? dirName : `${parentPath.replace(/\/$/, '')}/${dirName}`)
-      : parentPath;
-    sendJson(res, 200, { path: relPath, created: true });
-  } catch (err) {
-    sendWorkspaceError(err, res, sendJson, 'Create directory failed');
-  }
+  rejectWorkspaceMutation(res, sendJson);
 }
 
 /** PATCH /api/v1/sessions/:id/bind-workspace — Bind workspace path */
@@ -604,19 +597,22 @@ export async function handleBindWorkspace(
       }
     }
 
-    // Async fs with timeout to prevent blocking on inaccessible drives
+    // Binding is metadata-only. Never create a directory from the Workspace surface.
     let stat: fs.Stats;
     try { stat = await withTimeout(fsp.stat(absPath), 5000, 'bind-stat'); }
-    catch {
-      try { await withTimeout(fsp.mkdir(absPath, { recursive: true }), 5000, 'bind-mkdir'); stat = await withTimeout(fsp.stat(absPath), 5000, 'bind-stat2'); }
-      catch (err2: any) {
-        sendJson(res, 400, { error: 'Bad Request', message: `Cannot access or create directory: ${err2.message || err2}` });
-        return;
-      }
+    catch (err2: any) {
+      sendJson(res, 400, { error: 'Bad Request', message: `Directory must already exist and be readable: ${err2.message || err2}` });
+      return;
     }
 
     if (!stat.isDirectory()) {
       sendJson(res, 400, { error: 'Bad Request', message: 'Path is not a directory' });
+      return;
+    }
+    try {
+      await withTimeout(fsp.access(absPath, fs.constants.R_OK), 5000, 'bind-access');
+    } catch (err2: any) {
+      sendJson(res, 400, { error: 'Bad Request', message: `Directory is not readable: ${err2.message || err2}` });
       return;
     }
 
@@ -637,219 +633,48 @@ export async function handleBindWorkspace(
 }
 
 // ---------------------------------------------------------------------------
-// Mutation handlers
+// Disabled mutation handlers
 // ---------------------------------------------------------------------------
 
-/** DELETE /api/v1/workspace/file — Delete a file or directory */
+/** Disabled legacy delete endpoint. */
 export async function handleDeleteWorkspaceFile(
-  req: IncomingMessage,
+  _req: IncomingMessage,
   res: ServerResponse,
   sendJson: SendJson,
-  host: string,
-  port: number,
+  _host: string,
+  _port: number,
 ): Promise<void> {
-  if (!requireWsAny(res, sendJson)) return;
-  try {
-    const baseUrl = 'http://' + host + ':' + port;
-    const url = new URL(req.url || '/', baseUrl);
-    const sessionId = url.searchParams.get('sessionId') || '';
-    const filePath = url.searchParams.get('path') || '';
-
-    if (!filePath) {
-      sendJson(res, 400, { error: 'Bad Request', message: 'Missing "path" query param' });
-      return;
-    }
-
-    const absPath = resolveToAbs(filePath, sessionId);
-    validateWorkspaceMutationTarget(absPath, sessionId);
-
-    if (!fs.existsSync(absPath)) {
-      sendJson(res, 404, { error: 'Not Found', message: `Path '${filePath}' not found` });
-      return;
-    }
-
-    const stat = fs.statSync(absPath);
-    if (stat.isDirectory()) {
-      fs.rmSync(absPath, { recursive: true, force: true });
-    } else {
-      fs.unlinkSync(absPath);
-    }
-
-    const fileName = path.basename(absPath);
-    sendJson(res, 200, { path: filePath, deleted: true, name: fileName });
-  } catch (err) {
-    sendWorkspaceError(err, res, sendJson, 'Delete failed');
-  }
+  rejectWorkspaceMutation(res, sendJson);
 }
 
-/** PATCH /api/v1/workspace/rename — Rename a file or directory */
+/** Disabled legacy rename endpoint. */
 export async function handleRenameWorkspaceFile(
-  req: IncomingMessage,
+  _req: IncomingMessage,
   res: ServerResponse,
   sendJson: SendJson,
-  readBody: ReadBody,
+  _readBody: ReadBody,
 ): Promise<void> {
-  if (!requireWsAny(res, sendJson)) return;
-  try {
-    const body = await readBody(req);
-    const sessionId = String(body.sessionId || '');
-    const oldPath = String(body.path || '');
-    const newName = String(body.newName || '');
-
-    if (!oldPath) {
-      sendJson(res, 400, { error: 'Bad Request', message: 'Missing "path" field' });
-      return;
-    }
-    if (!isPlainFileName(newName)) {
-      sendJson(res, 400, { error: 'Bad Request', message: 'Invalid new name — must be a plain file/dir name with no slashes' });
-      return;
-    }
-
-    const absPath = resolveToAbs(oldPath, sessionId);
-    validateWorkspaceMutationTarget(absPath, sessionId);
-
-    if (!fs.existsSync(absPath)) {
-      sendJson(res, 404, { error: 'Not Found', message: `Path '${oldPath}' not found` });
-      return;
-    }
-
-    const dir = path.dirname(absPath);
-    const newAbsPath = resolveWorkspacePath(workspaceRootForSession(sessionId), path.join(dir, newName));
-
-    if (fs.existsSync(newAbsPath)) {
-      sendJson(res, 409, { error: 'Conflict', message: `'${newName}' already exists` });
-      return;
-    }
-
-    fs.renameSync(absPath, newAbsPath);
-
-    // Compute new relative path
-    const newRelPath = oldPath.includes('/')
-      ? path.join(path.dirname(oldPath), newName).replace(/\\/g, '/')
-      : newName;
-
-    sendJson(res, 200, { oldPath, newPath: newRelPath, newName, renamed: true });
-  } catch (err) {
-    sendWorkspaceError(err, res, sendJson, 'Rename failed');
-  }
+  rejectWorkspaceMutation(res, sendJson);
 }
 
-/** POST /api/v1/workspace/create-file — Create a new empty file */
+/** Disabled legacy file-creation endpoint. */
 export async function handleCreateWorkspaceFile(
-  req: IncomingMessage,
+  _req: IncomingMessage,
   res: ServerResponse,
   sendJson: SendJson,
-  readBody: ReadBody,
+  _readBody: ReadBody,
 ): Promise<void> {
-  if (!requireWsAny(res, sendJson)) return;
-  try {
-    const body = await readBody(req);
-    const sessionId = String(body.sessionId || '');
-    const parentPath = String(body.path || '/');
-    const fileName = String(body.name || '');
-
-    if (!isPlainFileName(fileName)) {
-      sendJson(res, 400, { error: 'Bad Request', message: 'Invalid file name' });
-      return;
-    }
-
-    const absParentPath = resolveToAbs(parentPath, sessionId);
-
-    const absPath = path.join(absParentPath, fileName);
-
-    if (fs.existsSync(absPath)) {
-      sendJson(res, 409, { error: 'Conflict', message: `'${fileName}' already exists` });
-      return;
-    }
-
-    // Ensure parent exists
-    if (!fs.existsSync(absParentPath)) {
-      fs.mkdirSync(absParentPath, { recursive: true });
-    }
-
-    fs.writeFileSync(absPath, '', 'utf-8');
-
-    const stat = fs.statSync(absPath);
-    const relPath = parentPath === '/' ? fileName : `${parentPath.replace(/\/$/, '')}/${fileName}`;
-    sendJson(res, 200, {
-      path: relPath,
-      name: fileName,
-      created: true,
-      size: stat.size,
-      modifiedAt: stat.mtime.toISOString(),
-    });
-  } catch (err) {
-    sendWorkspaceError(err, res, sendJson, 'Create file failed');
-  }
+  rejectWorkspaceMutation(res, sendJson);
 }
 
-/** POST /api/v1/workspace/move — Move/rename a file or directory (cut-paste or drag-drop) */
+/** Disabled legacy move endpoint. */
 export async function handleMoveWorkspaceFile(
-  req: IncomingMessage,
+  _req: IncomingMessage,
   res: ServerResponse,
   sendJson: SendJson,
-  readBody: ReadBody,
+  _readBody: ReadBody,
 ): Promise<void> {
-  if (!requireWsAny(res, sendJson)) return;
-  try {
-    const body = await readBody(req);
-    const sessionId = String(body.sessionId || '');
-    const sourcePath = String(body.source || '');
-    const destDir = String(body.destDir || '');
-
-    if (!sourcePath) {
-      sendJson(res, 400, { error: 'Bad Request', message: 'Missing "source" field' });
-      return;
-    }
-    if (!destDir) {
-      sendJson(res, 400, { error: 'Bad Request', message: 'Missing "destDir" field' });
-      return;
-    }
-
-    const srcAbsPath = resolveToAbs(sourcePath, sessionId);
-    const dstAbsDir = resolveToAbs(destDir, sessionId);
-    validateWorkspaceMutationTarget(srcAbsPath, sessionId);
-
-    if (!fs.existsSync(srcAbsPath)) {
-      sendJson(res, 404, { error: 'Not Found', message: `Source '${sourcePath}' not found` });
-      return;
-    }
-
-    if (!fs.existsSync(dstAbsDir) || !fs.statSync(dstAbsDir).isDirectory()) {
-      sendJson(res, 400, { error: 'Bad Request', message: 'Destination must be an existing directory' });
-      return;
-    }
-
-    const name = path.basename(srcAbsPath);
-    const destAbsPath = resolveWorkspacePath(workspaceRootForSession(sessionId), path.join(dstAbsDir, name));
-
-    if (fs.existsSync(destAbsPath)) {
-      sendJson(res, 409, { error: 'Conflict', message: `'${name}' already exists in destination` });
-      return;
-    }
-
-    // Don't allow moving a directory into itself
-    const moveRelative = path.relative(srcAbsPath, destAbsPath);
-    if (moveRelative && !moveRelative.startsWith('..') && !path.isAbsolute(moveRelative)) {
-      sendJson(res, 400, { error: 'Bad Request', message: 'Cannot move a directory into itself' });
-      return;
-    }
-
-    fs.renameSync(srcAbsPath, destAbsPath);
-
-    const newRelPath = destDir === '/'
-      ? name
-      : `${destDir.replace(/\/$/, '')}/${name}`;
-
-    sendJson(res, 200, {
-      source: sourcePath,
-      destPath: newRelPath,
-      name,
-      moved: true,
-    });
-  } catch (err) {
-    sendWorkspaceError(err, res, sendJson, 'Move failed');
-  }
+  rejectWorkspaceMutation(res, sendJson);
 }
 
 /** GET /api/v1/sessions/:id/workspace — Get current workspace path */
@@ -870,70 +695,14 @@ export function handleGetWorkspace(
   });
 }
 
-/** PUT /api/v1/workspace/write — Write content to a file (create or overwrite) */
+/** Disabled legacy file-write endpoint. */
 export async function handleWriteWorkspaceFile(
-  req: IncomingMessage,
+  _req: IncomingMessage,
   res: ServerResponse,
   sendJson: SendJson,
-  readBody: ReadBody,
+  _readBody: ReadBody,
 ): Promise<void> {
-  if (!requireWsAny(res, sendJson)) return;
-  try {
-    const body = await readBody(req);
-    const sessionId = String(body.sessionId || '');
-    const filePath = String(body.path || '');
-    const content = String(body.content || '');
-    const expectedSha256 = typeof body.expectedSha256 === 'string'
-      ? body.expectedSha256.trim().toLowerCase()
-      : undefined;
-
-    if (!filePath) {
-      sendJson(res, 400, { error: 'Bad Request', message: 'Missing "path"' });
-      return;
-    }
-    if (expectedSha256 !== undefined && !/^[a-f0-9]{64}$/.test(expectedSha256)) {
-      sendJson(res, 400, { error: 'Bad Request', message: 'expectedSha256 must be a SHA-256 hex digest' });
-      return;
-    }
-
-    const absPath = resolveToAbs(filePath, sessionId);
-    const outcome = await serializeWorkspaceWrite(absPath, async () => {
-      if (expectedSha256 !== undefined) {
-        if (!fs.existsSync(absPath)) {
-          return { status: 409, body: { error: 'Conflict', message: 'File no longer exists on disk' } };
-        }
-        const currentSha256 = await fileSha256(absPath);
-        if (currentSha256 !== expectedSha256) {
-          const currentStat = fs.statSync(absPath);
-          return {
-            status: 409,
-            body: {
-              error: 'Conflict',
-              message: 'File changed on disk since it was opened',
-              currentSha256,
-              modifiedAt: currentStat.mtime.toISOString(),
-            },
-          };
-        }
-      }
-
-      await atomicWriteFile(absPath, content, 'utf-8');
-      const stat = fs.statSync(absPath);
-      return {
-        status: 200,
-        body: {
-          path: filePath,
-          written: true,
-          size: stat.size,
-          modifiedAt: stat.mtime.toISOString(),
-          sha256: await fileSha256(absPath),
-        },
-      };
-    });
-    sendJson(res, outcome.status, outcome.body);
-  } catch (err) {
-    sendWorkspaceError(err, res, sendJson, 'Write failed');
-  }
+  rejectWorkspaceMutation(res, sendJson);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -988,7 +757,7 @@ function parseZipCD(buf: Buffer): Map<string, ZipEntry> {
 
   const declaredEntryCount = buf.readUint16LE(eocdOff + 10);
   if (declaredEntryCount > MAX_OFFICE_ZIP_ENTRIES) {
-    throw new OfficePreviewLimitError(`Office archive exceeds ${MAX_OFFICE_ZIP_ENTRIES} entries`);
+    throw new OfficePreviewLimitError(`ZIP archive exceeds ${MAX_OFFICE_ZIP_ENTRIES} entries`);
   }
   const stCdSize = buf.readUint32LE(eocdOff + 12);
   const stCdOff = buf.readUint32LE(eocdOff + 16);
@@ -1010,17 +779,17 @@ function parseZipCD(buf: Buffer): Map<string, ZipEntry> {
     if (pos + 46 + nameLen + extraLen + commentLen > end) return new Map();
     const name = buf.toString('utf-8', pos + 46, pos + 46 + nameLen).replace(/\\/g, '/');
     if (entries.size >= MAX_OFFICE_ZIP_ENTRIES) {
-      throw new OfficePreviewLimitError(`Office archive exceeds ${MAX_OFFICE_ZIP_ENTRIES} entries`);
+      throw new OfficePreviewLimitError(`ZIP archive exceeds ${MAX_OFFICE_ZIP_ENTRIES} entries`);
     }
     if (uncompSize > MAX_OFFICE_ENTRY_BYTES) {
-      throw new OfficePreviewLimitError(`Office archive entry is too large: ${name}`);
+      throw new OfficePreviewLimitError(`ZIP archive entry is too large: ${name}`);
     }
     totalUncompressed += uncompSize;
     if (totalUncompressed > MAX_OFFICE_TOTAL_UNCOMPRESSED_BYTES) {
-      throw new OfficePreviewLimitError('Office archive expands beyond the preview limit');
+      throw new OfficePreviewLimitError('ZIP archive expands beyond the preview limit');
     }
     if (compSize > 0 && uncompSize / compSize > MAX_OFFICE_COMPRESSION_RATIO) {
-      throw new OfficePreviewLimitError(`Office archive compression ratio is unsafe: ${name}`);
+      throw new OfficePreviewLimitError(`ZIP archive compression ratio is unsafe: ${name}`);
     }
     entries.set(name.toLowerCase(), { name, offset: localOff, compSize, uncompSize, method });
     pos += 46 + nameLen + extraLen + commentLen;
@@ -1060,7 +829,7 @@ function readZipEntry(buf: Buffer, entry: ZipEntry): Buffer | null {
       output = zlib.inflateRawSync(raw, { maxOutputLength: MAX_OFFICE_ENTRY_BYTES });
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ERR_BUFFER_TOO_LARGE') {
-        throw new OfficePreviewLimitError(`Office archive entry expands beyond the preview limit: ${entry.name}`);
+        throw new OfficePreviewLimitError(`ZIP archive entry expands beyond the preview limit: ${entry.name}`);
       }
       return null;
     }
@@ -1071,28 +840,172 @@ function readZipEntry(buf: Buffer, entry: ZipEntry): Buffer | null {
   return null;
 }
 
-/** Validate ZIP metadata before any Office converter is allowed to decompress it. */
-export function validateOfficeArchiveBuffer(buf: Buffer): Map<string, ZipEntry> {
+/** Validate ZIP metadata without extracting entry contents. */
+function validateZipArchiveMetadata(buf: Buffer): Map<string, ZipEntry> {
   if (buf.length > MAX_OFFICE_FILE_BYTES) {
-    throw new OfficePreviewLimitError(`Office file exceeds ${MAX_OFFICE_FILE_BYTES} bytes`);
+    throw new OfficePreviewLimitError(`Preview archive exceeds ${MAX_OFFICE_FILE_BYTES} bytes`);
   }
   const entries = parseZipCD(buf);
-  if (entries.size === 0) throw new Error('Invalid or empty Office archive');
+  if (entries.size === 0) throw new Error('Invalid or empty ZIP archive');
+  for (const entry of entries.values()) {
+    const headerOffset = entry.offset;
+    if (headerOffset + 30 > buf.length || buf.readUint32LE(headerOffset) !== 0x04034b50) {
+      throw new Error(`ZIP archive entry has an invalid local header: ${entry.name}`);
+    }
+    const nameLength = buf.readUint16LE(headerOffset + 26);
+    const extraLength = buf.readUint16LE(headerOffset + 28);
+    const dataOffset = headerOffset + 30 + nameLength + extraLength;
+    if (dataOffset + entry.compSize > buf.length) {
+      throw new Error(`ZIP archive entry exceeds the file boundary: ${entry.name}`);
+    }
+  }
+  return entries;
+}
+
+/** Validate ZIP metadata and contents before an Office converter decompresses it. */
+export function validateOfficeArchiveBuffer(buf: Buffer): Map<string, ZipEntry> {
+  const entries = validateZipArchiveMetadata(buf);
   let actualUncompressedBytes = 0;
   for (const entry of entries.values()) {
     const content = readZipEntry(buf, entry);
     if (content === null) {
-      throw new Error(`Office archive entry cannot be safely decompressed: ${entry.name}`);
+      throw new Error(`ZIP archive entry cannot be safely decompressed: ${entry.name}`);
     }
     actualUncompressedBytes += content.length;
     if (actualUncompressedBytes > MAX_OFFICE_TOTAL_UNCOMPRESSED_BYTES) {
-      throw new OfficePreviewLimitError('Office archive expands beyond the preview limit');
+      throw new OfficePreviewLimitError('ZIP archive expands beyond the preview limit');
     }
     if (entry.compSize > 0 && content.length / entry.compSize > MAX_OFFICE_COMPRESSION_RATIO) {
-      throw new OfficePreviewLimitError(`Office archive compression ratio is unsafe: ${entry.name}`);
+      throw new OfficePreviewLimitError(`ZIP archive compression ratio is unsafe: ${entry.name}`);
     }
   }
   return entries;
+}
+
+const BROWSABLE_ARCHIVE_EXTENSIONS = new Set(['.zip', '.jar', '.war', '.ear', '.epub', '.apk', '.vsix', '.nupkg']);
+
+const PSD_PREVIEW_EXTENSIONS = new Set(['.psd', '.psb']);
+
+/** GET /api/v1/workspace/preview-psd — Render only a saved merged PSD/PSB preview. */
+export async function handlePreviewWorkspacePsd(
+  req: IncomingMessage,
+  res: ServerResponse,
+  sendJson: SendJson,
+  host: string,
+  port: number,
+): Promise<void> {
+  try {
+    const url = new URL(req.url || '/', `http://${host}:${port}`);
+    const sessionId = url.searchParams.get('sessionId') || '';
+    const filePath = url.searchParams.get('path') || '';
+    if (!filePath) {
+      sendJson(res, 400, { error: 'Bad Request', message: 'Missing "path" query param' });
+      return;
+    }
+
+    const extension = path.extname(filePath).toLowerCase();
+    if (!PSD_PREVIEW_EXTENSIONS.has(extension)) {
+      sendJson(res, 400, { error: 'Bad Request', message: `Unsupported Photoshop format: ${extension || '(none)'}` });
+      return;
+    }
+
+    const absPath = resolveWorkspacePath(workspaceRootForSession(sessionId), filePath);
+    const stat = await fsp.stat(absPath);
+    if (!stat.isFile()) {
+      sendJson(res, 400, { error: 'Bad Request', message: 'Photoshop preview path is not a file' });
+      return;
+    }
+
+    const preview = await createPsdPreview(absPath, stat.size);
+    res.writeHead(200, {
+      'Cache-Control': 'no-store',
+      'Content-Type': preview.mimeType,
+      'Content-Length': preview.data.length,
+      'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(`${path.basename(filePath, extension)}-preview${preview.mimeType === 'image/png' ? '.png' : '.jpg'}`)}`,
+      'X-Content-Type-Options': 'nosniff',
+      'X-AnoClaw-Psd-Source': preview.source,
+      'X-AnoClaw-Image-Width': preview.width,
+      'X-AnoClaw-Image-Height': preview.height,
+    });
+    res.end(preview.data);
+  } catch (err) {
+    if (err instanceof PsdPreviewError) {
+      sendJson(res, err.statusCode, { error: 'Photoshop preview failed', message: err.message });
+      return;
+    }
+    if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      sendJson(res, 404, { error: 'Not Found', message: 'Photoshop document not found' });
+      return;
+    }
+    sendWorkspaceError(err, res, sendJson, 'Photoshop preview failed');
+  }
+}
+
+/** GET /api/v1/workspace/inspect-archive — Safely list a ZIP-family archive. */
+export async function handleInspectWorkspaceArchive(
+  req: IncomingMessage,
+  res: ServerResponse,
+  sendJson: SendJson,
+  host: string,
+  port: number,
+): Promise<void> {
+  try {
+    const url = new URL(req.url || '/', `http://${host}:${port}`);
+    const sessionId = url.searchParams.get('sessionId') || '';
+    const filePath = url.searchParams.get('path') || '';
+    if (!filePath) {
+      sendJson(res, 400, { error: 'Bad Request', message: 'Missing "path" query param' });
+      return;
+    }
+
+    const ext = path.extname(filePath).toLowerCase();
+    if (!BROWSABLE_ARCHIVE_EXTENSIONS.has(ext)) {
+      sendJson(res, 400, { error: 'Bad Request', message: `Unsupported archive format: ${ext || '(none)'}` });
+      return;
+    }
+
+    const absPath = resolveWorkspacePath(workspaceRootForSession(sessionId), filePath);
+    const stat = await fsp.stat(absPath);
+    if (!stat.isFile()) {
+      sendJson(res, 400, { error: 'Bad Request', message: 'Archive path is not a file' });
+      return;
+    }
+    if (stat.size > MAX_OFFICE_FILE_BYTES) {
+      throw new OfficePreviewLimitError(`Archive exceeds ${MAX_OFFICE_FILE_BYTES} bytes`);
+    }
+
+    const buffer = await fsp.readFile(absPath);
+    const parsed = validateZipArchiveMetadata(buffer);
+    const entries = [...parsed.values()]
+      .map(entry => ({
+        path: entry.name,
+        size: entry.uncompSize,
+        compressedSize: entry.compSize,
+        compression: entry.method === 0 ? 'stored' : entry.method === 8 ? 'deflate' : `method-${entry.method}`,
+        isDirectory: entry.name.endsWith('/'),
+      }))
+      .sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true, sensitivity: 'base' }));
+
+    sendJson(res, 200, {
+      type: 'archive',
+      path: filePath,
+      size: stat.size,
+      entryCount: entries.length,
+      entries,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message === 'Path escapes workspace root') {
+      sendJson(res, 403, { error: 'Forbidden', message: err.message });
+      return;
+    }
+    if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      sendJson(res, 404, { error: 'Not Found', message: 'Archive not found' });
+      return;
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    const status = err instanceof OfficePreviewLimitError ? 413 : 500;
+    sendJson(res, status, { error: 'Archive preview failed', message });
+  }
 }
 
 /**
@@ -1261,31 +1174,24 @@ export async function handleConvertOffice(
         }
       }
 
-      // Try sheet data — prefer sheet1.xml
-      const sheetEntry = entries.get('xl/worksheets/sheet1.xml')
-        || [...entries.values()].find(e => e.name.startsWith('xl/worksheets/sheet') && e.name.endsWith('.xml'));
-      if (sheetEntry) {
+      const sheetEntries = [...entries.values()]
+        .filter(entry => /^xl\/worksheets\/sheet\d+\.xml$/i.test(entry.name))
+        .sort((a, b) => {
+          const aNumber = Number(a.name.match(/sheet(\d+)\.xml$/i)?.[1] || 0);
+          const bNumber = Number(b.name.match(/sheet(\d+)\.xml$/i)?.[1] || 0);
+          return aNumber - bNumber;
+        })
+        .slice(0, 20);
+      const sheets: Array<{ name: string; rows: string[][] }> = [];
+      for (const [index, sheetEntry] of sheetEntries.entries()) {
         const raw = readZipEntry(buf, sheetEntry);
-        if (raw) {
-          const xml = raw.toString('utf-8');
-          const rows = parseXlsxRows(xml, sharedStrings);
-          if (rows.length > 0) {
-            const content = rows.map(row => row.join('\t')).join('\n');
-            sendJson(res, 200, { type: 'table', rows, content });
-            return;
-          }
-          // Replace shared string refs with actual strings
-          let text = xml;
-          if (sharedStrings.length > 0) {
-            text = text.replace(/<c[^>]*t="s"[^>]*><v>(\d+)<\/v><\/c>/g, (_, idx) => {
-              const i = Number(idx);
-              return sharedStrings[i] || '';
-            });
-          }
-          const extracted = extractXmlText(Buffer.from(text, 'utf-8'));
-          sendJson(res, 200, { type: 'text', content: extracted || '(empty spreadsheet)' });
-          return;
-        }
+        if (!raw) continue;
+        const rows = parseXlsxRows(raw.toString('utf-8'), sharedStrings);
+        sheets.push({ name: `Sheet ${index + 1}`, rows });
+      }
+      if (sheets.length > 0) {
+        sendJson(res, 200, { type: 'workbook', sheets });
+        return;
       }
       sendJson(res, 200, { type: 'text', content: sharedStrings.join(' ') || '(no readable content)' });
       return;
@@ -1295,7 +1201,11 @@ export async function handleConvertOffice(
     if (ext === '.pptx' || ext === '.pptm') {
       const slideEntries = [...entries.values()]
         .filter(e => e.name.match(/^ppt\/slides\/slide\d+\.xml$/))
-        .sort((a, b) => a.name.localeCompare(b.name));
+        .sort((a, b) => {
+          const aNumber = Number(a.name.match(/slide(\d+)\.xml$/)?.[1] || 0);
+          const bNumber = Number(b.name.match(/slide(\d+)\.xml$/)?.[1] || 0);
+          return aNumber - bNumber;
+        });
 
       if (slideEntries.length > 0) {
         const slides: string[] = [];
@@ -1307,8 +1217,7 @@ export async function handleConvertOffice(
           }
         }
         if (slides.length > 0) {
-          const content = slides.map((s, i) => `── Slide ${i + 1} ──\n${s}`).join('\n\n');
-          sendJson(res, 200, { type: 'text', content });
+          sendJson(res, 200, { type: 'slides', slides: slides.map((text, index) => ({ number: index + 1, text })) });
           return;
         }
       }

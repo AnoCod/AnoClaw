@@ -26,6 +26,7 @@
 | 普通用户上手 | [user-guide.md](user-guide.md) | AnoClaw 能做什么、怎么组织任务、怎么和 agent 配合 |
 | 多 agent 协作 | [agent-collaboration.md](agent-collaboration.md) | MainAgent、Manager、Member、SubAgent 如何分工 |
 | 系统架构 | [architecture-overview.md](architecture-overview.md) | Electron、HTTP/WS、AgentLoop、JSONL、插件隔离 |
+| Workspace 只读浏览 | [workspace-read-only-browser.md](workspace-read-only-browser.md) | 只读边界、支持格式、预览限制、扩展新格式 |
 | 插件开发 | [plugin-dev.md](plugin-dev.md) | 创建插件、热重载、工具、页面、路由、调试 |
 | 插件 API | [plugin-api.md](plugin-api.md) | `api.tools`、`api.llm`、`api.fs`、events、UI、扩展点 |
 | 插件 UI / 品牌设计 | [plugin-ui-guide.md](plugin-ui-guide.md) | iframe 页面、tokens、组件、设计预设、布局约束 |

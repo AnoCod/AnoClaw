@@ -2,9 +2,9 @@
 
 ## Overview
 
-Imperative handler functions for HTTP API endpoints. These are called from `ApiServer`'s legacy if-else routing chain (the declarative routes in `routes/` are the newer approach). Handles sessions, agents, tools, system utilities, inline code suggestions, and workspace file operations.
+Imperative handler functions for HTTP API endpoints. These are called from `ApiServer`'s legacy if-else routing chain (the declarative routes in `routes/` are the newer approach). Handles sessions, agents, tools, system utilities, inline code suggestions, and read-only Workspace browsing/previews.
 
-## Handler Catalog (23 endpoints)
+## Handler Catalog (24 endpoints)
 
 ### SessionHandlers
 
@@ -65,16 +65,18 @@ Imperative handler functions for HTTP API endpoints. These are called from `ApiS
 | Handler | Method | Path | WS Required | Description |
 |---------|--------|------|-------------|-------------|
 | `handleBrowseWorkspace` | GET | `/api/v1/workspace/browse` | No | Browse directory (`?path=`, `?sessionId=`) |
-| `handleReadWorkspaceFile` | GET | `/api/v1/workspace/read` | No | Read file content (`?path=`, trims at 100KB) |
-| `handleCreateWorkspaceDir` | POST | `/api/v1/workspace/create-dir` | Yes | Create directory |
-| `handleCreateWorkspaceFile` | POST | `/api/v1/workspace/create-file` | Yes | Create empty file |
-| `handleWriteWorkspaceFile` | PUT | `/api/v1/workspace/write` | Yes | Write/create file (`{ path, content }`) |
-| `handleDeleteWorkspaceFile` | DELETE | `/api/v1/workspace/file` | Yes | Delete file/directory (`?path=`) |
-| `handleRenameWorkspaceFile` | PATCH | `/api/v1/workspace/rename` | Yes | Rename (`{ path, newName }`) |
-| `handleMoveWorkspaceFile` | POST | `/api/v1/workspace/move` | Yes | Move/rename (`{ source, destDir }`) |
-| `handleBindWorkspace` | PATCH | `/api/v1/sessions/:id/bind-workspace` | Yes | Bind workspace path to session (`{ path }`) |
+| `handleReadWorkspaceFile` | GET | `/api/v1/workspace/read` | No | Read/stream file; text preview is capped at 1 MiB and reports encoding/truncation |
+| `handleCreateWorkspaceDir` | POST | `/api/v1/workspace/create-dir` | No | Disabled compatibility route: always HTTP 405 `WORKSPACE_READ_ONLY` |
+| `handleCreateWorkspaceFile` | POST | `/api/v1/workspace/create-file` | No | Disabled compatibility route: always HTTP 405 `WORKSPACE_READ_ONLY` |
+| `handleWriteWorkspaceFile` | PUT | `/api/v1/workspace/write` | No | Disabled compatibility route: always HTTP 405 `WORKSPACE_READ_ONLY` |
+| `handleDeleteWorkspaceFile` | DELETE | `/api/v1/workspace/file` | No | Disabled compatibility route: always HTTP 405 `WORKSPACE_READ_ONLY` |
+| `handleRenameWorkspaceFile` | PATCH | `/api/v1/workspace/rename` | No | Disabled compatibility route: always HTTP 405 `WORKSPACE_READ_ONLY` |
+| `handleMoveWorkspaceFile` | POST | `/api/v1/workspace/move` | No | Disabled compatibility route: always HTTP 405 `WORKSPACE_READ_ONLY` |
+| `handleBindWorkspace` | PATCH | `/api/v1/sessions/:id/bind-workspace` | Yes | Bind an existing directory; never creates one |
 | `handleGetWorkspace` | GET | `/api/v1/sessions/:id/workspace` | No | Get session workspace path |
-| `handleConvertOffice` | GET | `/api/v1/workspace/convert-office` | No | Convert .docx/.xlsx/.pptx/.odt to text/HTML |
+| `handleConvertOffice` | GET | `/api/v1/workspace/convert-office` | No | Read-only DOCX/workbook/slides/OpenDocument conversion |
+| `handleInspectWorkspaceArchive` | GET | `/api/v1/workspace/inspect-archive` | No | Safely list ZIP-family entries without extracting to disk |
+| `handlePreviewWorkspacePsd` | GET | `/api/v1/workspace/preview-psd` | No | Return an embedded thumbnail or safely decoded flattened PSD/PSB composite; skips layer data without parsing it |
 
 ---
 
@@ -104,7 +106,7 @@ AgentHandlers    → AgentRegistry, AgentConfig, TypedEventBus, WsRequired
 ToolHandlers     → ToolRegistry, CommandRegistry, SessionManager
 SystemHandlers   → AgentRuntime, AgentRegistry, SessionManager, LogManager
 InlineSuggestHandler → createLLMProvider, AgentRegistry, SessionManager
-WorkspaceHandlers → SessionManager, WsRequired, fs/promises, zlib
+WorkspaceHandlers → SessionManager, WsRequired, fs/promises, zlib, WorkspacePsdPreview
 ```
 
 ## Usage

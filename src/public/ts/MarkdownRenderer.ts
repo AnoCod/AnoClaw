@@ -26,6 +26,8 @@ import {
 
 export interface MarkdownRenderOptions {
   sessionId?: string;
+  /** Workspace-relative directory containing the Markdown file. */
+  basePath?: string;
 }
 
 function esc(s: string): string {
@@ -215,13 +217,14 @@ function renderImage(escapedAlt: string, escapedTarget: string, options: Markdow
   let src = '';
   let fileAttr = '';
   if (fileRef && sessionId) {
+    const resolvedPath = resolveWorkspaceMarkdownPath(fileRef.path, options.basePath || '');
     const params = new URLSearchParams({
-      path: fileRef.path,
+      path: resolvedPath,
       sessionId,
       raw: '1',
     });
     src = `/api/v1/workspace/read?${params.toString()}`;
-    fileAttr = ` data-file-path="${esc(fileRef.path)}"`;
+    fileAttr = ` data-file-path="${esc(resolvedPath)}"`;
   } else if (/^https?:\/\//i.test(target)) {
     src = target;
   } else if (/^data:image\/(?:png|jpe?g|gif|webp|bmp|avif);base64,/i.test(target)) {
@@ -238,6 +241,24 @@ function renderImage(escapedAlt: string, escapedTarget: string, options: Markdow
     + `onerror="this.style.display='none';this.nextElementSibling.style.display='block'">`
     + `<span class="md-image-fallback" style="display:none">${esc(t('image.unavailable', { label: fallbackLabel }))}</span>`
     + `</span>`;
+}
+
+function resolveWorkspaceMarkdownPath(target: string, basePath: string): string {
+  const normalizedTarget = String(target || '').replace(/\\/g, '/');
+  if (/^[a-zA-Z]:\//.test(normalizedTarget)) return normalizedTarget;
+  const rooted = normalizedTarget.startsWith('/');
+  const segments = rooted
+    ? []
+    : String(basePath || '').replace(/\\/g, '/').split('/').filter(Boolean);
+  for (const segment of normalizedTarget.replace(/^\/+/, '').split('/')) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..') {
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+  return segments.join('/');
 }
 
 onLocaleChange(() => {

@@ -9,7 +9,7 @@ AnoClaw 是一个本地桌面 AI 平台。你可以和主 agent 对话，也可�
 核心能力：
 
 - 多 agent 协作：MainAgent、Manager、Member、SubAgent。
-- 本地工作区操作：读文件、写文件、搜索、运行命令。
+- 智能体文件工具：按独立权限读写文件、搜索和运行命令；Workspace 页面本身始终只读。
 - 插件系统：给 agent 增加工具、页面、API 路由和专用能力。
 - Skills：把复杂工作流封装成可调用能力。
 - Memory：保存用户偏好、项目事实和长期团队经验。
@@ -74,6 +74,10 @@ AnoClaw 是一个本地桌面 AI 平台。你可以和主 agent 对话，也可�
 | Docs | “查 AnoClaw 的插件/API/设计/排障资料” |
 
 如果你说“记住这个”，agent 应使用 memory。如果你说“把这套通用规则写进知识库”，agent 应更新 docs。如果你说“以后遇到这类任务按这个流程做”，更适合创建或更新 skill。
+
+## Workspace 浏览器
+
+Workspace 页面是只读文件浏览器，不是编辑器或 IDE。你可以在这里搜索、筛选、打开和预览代码、INI/Properties/环境配置、BIN 与其他二进制、PSD/PSB 合成图、文档、表格、媒体和归档，但不能新建、保存、重命名、移动或删除文件。智能体和插件文件工具的权限独立管理；它们若改变磁盘文件，Workspace 只会刷新显示，不会替你接受、撤销或写回更改。完整格式列表和限制见 `docs/workspace-read-only-browser.md`。
 
 ## 插件能做什么
 

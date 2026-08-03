@@ -30,14 +30,21 @@ export class ConfirmationRegistry {
     ConfirmationRegistry._instance = undefined as unknown as ConfirmationRegistry;
   }
 
-  waitForConfirmation(toolCallId: string, timeoutMs: number = 60000, signal?: AbortSignal): Promise<boolean> {
-    if (this._pending.has(toolCallId)) {
-      return this._pending.get(toolCallId)!.resolve as unknown as Promise<boolean>;
-    }
+  waitForConfirmation(
+    sessionId: string,
+    toolCallId: string,
+    timeoutMs: number = 60000,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const key = confirmationKey(sessionId, toolCallId);
+    // A duplicated provider tool-call ID must never share or inherit another
+    // pending approval. Reject the duplicate safely and leave the original
+    // request untouched.
+    if (this._pending.has(key)) return Promise.resolve(false);
 
     return new Promise<boolean>((resolve) => {
       const onAbort = () => {
-        this.resolve(toolCallId, false);
+        this.resolve(sessionId, toolCallId, false);
       };
 
       if (signal) {
@@ -45,10 +52,10 @@ export class ConfirmationRegistry {
       }
 
       const timer = setTimeout(() => {
-        this.resolve(toolCallId, false);
+        this.resolve(sessionId, toolCallId, false);
       }, timeoutMs);
 
-      this._pending.set(toolCallId, {
+      this._pending.set(key, {
         resolve,
         timer,
         signalAbort: signal ? () => signal.removeEventListener('abort', onAbort) : undefined,
@@ -56,13 +63,19 @@ export class ConfirmationRegistry {
     });
   }
 
-  resolve(toolCallId: string, approved: boolean): void {
-    const entry = this._pending.get(toolCallId);
-    if (!entry) return;
+  resolve(sessionId: string, toolCallId: string, approved: boolean): boolean {
+    const key = confirmationKey(sessionId, toolCallId);
+    const entry = this._pending.get(key);
+    if (!entry) return false;
 
     clearTimeout(entry.timer);
     if (entry.signalAbort) entry.signalAbort();
-    this._pending.delete(toolCallId);
+    this._pending.delete(key);
     entry.resolve(approved);
+    return true;
   }
+}
+
+function confirmationKey(sessionId: string, toolCallId: string): string {
+  return `${sessionId}\u0000${toolCallId}`;
 }

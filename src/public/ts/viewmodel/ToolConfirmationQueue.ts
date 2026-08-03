@@ -79,7 +79,7 @@ export class ToolConfirmationQueue {
     }
 
     this._queue.shift();
-    this._sendResponse(first.toolCallId, approved);
+    this._sendResponse(first, approved);
     this._notify();
     this._processNext();
     return true;
@@ -99,9 +99,9 @@ export class ToolConfirmationQueue {
         ToolConfirmDialog.show(request),
         externalResponse,
       ]);
-      this._sendResponse(request.toolCallId, approved);
+      this._sendResponse(request, approved);
     } catch {
-      this._sendResponse(request.toolCallId, false);
+      this._sendResponse(request, false);
     } finally {
       this._active = false;
       this._activeRequest = null;
@@ -111,12 +111,13 @@ export class ToolConfirmationQueue {
     }
   }
 
-  private _sendResponse(toolCallId: string, approved: boolean): void {
+  private _sendResponse(request: ToolConfirmRequest, approved: boolean): void {
     if (!this._sendFn) return;
     this._sendFn({
       type: 'tool_confirm_response',
-      toolCallId,
+      toolCallId: request.toolCallId,
       approved,
+      ...(request.sessionId ? { sessionId: request.sessionId } : {}),
     });
   }
 

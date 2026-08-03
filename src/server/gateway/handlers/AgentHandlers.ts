@@ -195,14 +195,18 @@ export async function handleUpdateAgent(
     }
     await saveAgentConfig(updated);
 
-    // Update agent in memory
+    // Update the live object in place so active AgentLoops retain session
+    // status/count state and observe the new model credentials next turn.
     const registry = AgentRegistry.getInstance();
     const existing = registry.agent(agentId);
+    let agent: Agent;
     if (existing) {
-      registry.unregisterAgent(agentId);
+      existing.updateFromConfig(updated);
+      agent = existing;
+    } else {
+      agent = new Agent(updated);
+      registry.registerAgent(agent);
     }
-    const agent = new Agent(updated);
-    registry.registerAgent(agent);
 
     TypedEventBus.emit('agent:config_updated', {
       agentId,

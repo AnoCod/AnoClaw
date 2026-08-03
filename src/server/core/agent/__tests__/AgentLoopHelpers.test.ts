@@ -9,6 +9,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
+  collectUnseenMessages,
   messageToApiMessage,
   estimateTokens,
   interruptibleSleep,
@@ -566,6 +567,23 @@ describe('selectHistoryForContext', () => {
 
     expect(large.length).toBeGreaterThan(small.length);
     expect(large.length).toBeLessThanOrEqual(history.length);
+  });
+});
+
+describe('collectUnseenMessages', () => {
+  it('uses durable message identity instead of a count delta', () => {
+    const history = [
+      makeMessage({ id: 'old-excluded', role: 'user', content: 'old context' }),
+      makeMessage({ id: 'new-assistant', role: 'assistant', content: 'not injected' }),
+      makeMessage({ id: 'new-user', role: 'user', content: 'fresh input' }),
+    ];
+    const knownIds = new Set(['old-excluded']);
+
+    const unseen = collectUnseenMessages(history, knownIds, ['user']);
+
+    expect(unseen.map(message => message.id)).toEqual(['new-user']);
+    expect(knownIds).toEqual(new Set(['old-excluded', 'new-assistant', 'new-user']));
+    expect(collectUnseenMessages(history, knownIds, ['user'])).toEqual([]);
   });
 });
 

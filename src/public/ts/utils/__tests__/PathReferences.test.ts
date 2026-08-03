@@ -28,7 +28,7 @@ describe('PathReferences', () => {
     expect(resolved).toBe('F:\\QoderSoft\\AnoClaw\\src\\server\\main.ts');
   });
 
-  it('converts links inside the bound workspace to IDE-relative paths', () => {
+  it('converts links inside the bound workspace to viewer-relative paths', () => {
     expect(resolveWorkspaceRelativePath(
       'src/server/main.ts:10',
       'F:\\QoderSoft\\AnoClaw',

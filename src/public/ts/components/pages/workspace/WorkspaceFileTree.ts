@@ -1,8 +1,8 @@
 // WorkspaceFileTree.ts — Recursive file tree component for Workspace page.
 
 import type { FileEntry } from '../../../types.js';
-import { ToastManager } from '../../../ToastManager.js';
 import { onLocaleChange, t, type TranslationKey } from '../../../i18n/index.js';
+import { workspaceFileCapability } from './WorkspaceFileCapabilities.js';
 
 /** Local alias using isDirectory for convenience; maps from FileEntry type field. */
 type FileNode = FileEntry & { isDirectory?: boolean; modifiedAt?: string };
@@ -20,7 +20,6 @@ export class WorkspaceFileTree {
   private _treeLabel: HTMLElement;
   private _refreshBtn: HTMLButtonElement;
   private _clearButton: HTMLButtonElement;
-  private _createButtons: HTMLButtonElement[] = [];
   private _filterButtons = new Map<TreeFilter, HTMLButtonElement>();
   private _rootNodes: FileNode[] = [];
   private _filterMode: TreeFilter = 'all';
@@ -34,9 +33,6 @@ export class WorkspaceFileTree {
   private _lastFileFingerprint = '';
   private _loadGeneration = 0;
   private _lastEmptyKeys: [TranslationKey, TranslationKey] | null = null;
-  beforePathDelete: ((path: string) => Promise<boolean>) | null = null;
-  onPathRenamed: ((oldPath: string, newPath: string) => void) | null = null;
-  onPathDeleted: ((path: string) => void) | null = null;
 
   constructor(onFileOpen: (path:string, name:string)=>void) {
     this.element = document.createElement('div'); this.element.className = 'ws-file-tree-pane';
@@ -53,24 +49,6 @@ export class WorkspaceFileTree {
     label.className = 'ws-tree-label';
     this._treeLabel = label;
     header.appendChild(label);
-
-    // New File button
-    const newFileBtn = document.createElement('button');
-    newFileBtn.className = 'ws-tree-action-btn ws-tree-create-btn';
-    newFileBtn.innerHTML = _SVG_FILE_PLUS;
-    newFileBtn.title = t('workspace.newFile');
-    this._createButtons.push(newFileBtn);
-    newFileBtn.addEventListener('click', (e) => { e.stopPropagation(); void this._createFile('/'); });
-    header.appendChild(newFileBtn);
-
-    // New Folder button
-    const newFolderBtn = document.createElement('button');
-    newFolderBtn.className = 'ws-tree-action-btn ws-tree-create-btn';
-    newFolderBtn.innerHTML = _SVG_FOLDER_PLUS;
-    newFolderBtn.title = t('workspace.newFolder');
-    this._createButtons.push(newFolderBtn);
-    newFolderBtn.addEventListener('click', (e) => { e.stopPropagation(); void this._createFolder('/'); });
-    header.appendChild(newFolderBtn);
 
     this._refreshBtn = document.createElement('button');
     this._refreshBtn.className = 'ws-tree-refresh-btn ws-tree-action-btn';
@@ -150,18 +128,6 @@ export class WorkspaceFileTree {
     this._treeBody.tabIndex = 0; // make focusable for keyboard events
     this.element.appendChild(this._treeBody);
 
-    // Keyboard shortcuts
-    this._treeBody.addEventListener('keydown', (e) => {
-      if (!this._selectedPath) return;
-      if (e.key === 'Delete') {
-        e.preventDefault();
-        const name = this._selectedPath.split('/').pop() || '';
-        if (name) { void this._deleteByName(this._selectedPath, name); }
-      } else if (e.key === 'F2') {
-        e.preventDefault();
-        void this._renameByPath(this._selectedPath);
-      }
-    });
     onLocaleChange(() => this._refreshLocale());
   }
 
@@ -360,7 +326,6 @@ export class WorkspaceFileTree {
   private _setUnavailable(disabled: boolean): void {
     this.element.classList.toggle('is-unavailable', disabled);
     this._searchInput.disabled = disabled;
-    for (const btn of this._createButtons) btn.disabled = disabled;
     this._filterButtons.forEach((btn) => { btn.disabled = disabled; });
   }
 
@@ -439,29 +404,6 @@ export class WorkspaceFileTree {
     row.addEventListener('dblclick', (e) => { e.stopPropagation(); if (!node.isDirectory) this._onFileOpen(node.path, node.name); });
     row.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); this._showContextMenu(e.clientX, e.clientY, node); });
 
-    // Drag & drop — only for files
-    if (!node.isDirectory) {
-      row.draggable = true;
-      row.addEventListener('dragstart', (e) => {
-        e.dataTransfer!.setData('text/plain', node.path);
-        e.dataTransfer!.effectAllowed = 'move';
-        row.style.opacity = '0.4';
-      });
-      row.addEventListener('dragend', () => { row.style.opacity = ''; });
-    }
-
-    // Drop target — only directories can receive drops
-    if (node.isDirectory && childContainer) {
-      row.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer!.dropEffect = 'move'; row.style.background = 'rgba(255,255,255,0.04)'; });
-      row.addEventListener('dragleave', () => { row.style.background = ''; });
-      row.addEventListener('drop', (e) => {
-        e.preventDefault(); row.style.background = '';
-        const srcPath = e.dataTransfer!.getData('text/plain');
-        if (!srcPath || srcPath === node.path) return;
-        void this._moveFile(srcPath, node.path);
-      });
-    }
-
     if (childContainer) {
       const wrapper = document.createElement('div'); wrapper.appendChild(row); wrapper.appendChild(childContainer);
       this._nodeMap.set(node.path, wrapper);
@@ -486,13 +428,12 @@ export class WorkspaceFileTree {
     menu.style.left = x+'px'; menu.style.top = y+'px';
     const items: Array<{label:string;cls?:string;action:()=>void}> = [];
     if (!node.isDirectory) items.push({label:t('workspace.open'), action:()=>this._onFileOpen(node.path, node.name)});
-    if (node.isDirectory) { items.push({label:t('workspace.newFile'), action:()=>this._createFile(node.path)}); items.push({label:t('workspace.newFolder'), action:()=>this._createFolder(node.path)}); }
     if (!node.isDirectory) {
       items.push({label:t('workspace.agentReview'), action:()=>this._askAgent('Review', node)});
       items.push({label:t('workspace.agentFindBugs'), action:()=>this._askAgent('FindBugs', node)});
       items.push({label:t('workspace.agentExplain'), action:()=>this._askAgent('Explain', node)});
     }
-    items.push({label:t('workspace.rename'), action:()=>this._rename(node)}, {label:t('common.delete'), cls:'danger', action:()=>this._delete(node)});
+    if (items.length === 0) return;
     menu.innerHTML = items.map((it,i) => {
       const divider = i===1 && !node.isDirectory ? '<div class="ws-tree-context-divider"></div>' : '';
       return `${divider}<div class="ws-tree-context-item${it.cls?' '+it.cls:''}" data-action="${i}">${it.label}</div>`;
@@ -512,142 +453,8 @@ export class WorkspaceFileTree {
     }));
   }
 
-  private async _createFile(parentPath:string): Promise<void> {
-    const sessionId = this._sessionId;
-    const name = await this._prompt(t('workspace.fileNamePrompt'), 'new-file.txt'); if (!name) return;
-    if (!sessionId || this._sessionId !== sessionId) return;
-    try {
-      const resp = await fetch('/api/v1/workspace/create-file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,path:parentPath,name})});
-      if (!resp.ok) throw new Error(await this._responseError(resp, t('workspace.createFileFailed')));
-      if (this._sessionId === sessionId) await this.refreshDirectory(parentPath);
-    } catch (err) { if (this._sessionId === sessionId) this._showMutationError(err, t('workspace.createFileFailed')); }
-  }
-  private async _createFolder(parentPath:string): Promise<void> {
-    const sessionId = this._sessionId;
-    const name = await this._prompt(t('workspace.folderNamePrompt'), 'new-folder'); if (!name) return;
-    if (!sessionId || this._sessionId !== sessionId) return;
-    try {
-      const resp = await fetch('/api/v1/workspace/create-dir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,path:parentPath,name})});
-      if (!resp.ok) throw new Error(await this._responseError(resp, t('workspace.createFolderFailed')));
-      if (this._sessionId === sessionId) await this.refreshDirectory(parentPath);
-    } catch (err) { if (this._sessionId === sessionId) this._showMutationError(err, t('workspace.createFolderFailed')); }
-  }
-  private async _rename(node:FileNode): Promise<void> {
-    const sessionId = this._sessionId;
-    const newName = await this._prompt(t('workspace.newNamePrompt'), node.name); if (!newName||newName===node.name) return;
-    if (!sessionId || this._sessionId !== sessionId) return;
-    try {
-      const resp = await fetch('/api/v1/workspace/rename',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,path:node.path,newName})});
-      if (!resp.ok) throw new Error(await this._responseError(resp, t('workspace.renameFailed')));
-      const payload = await resp.json() as { newPath?: string };
-      const newPath = payload.newPath || _joinTreePath(node.path.substring(0,node.path.lastIndexOf('/'))||'/', newName);
-      const parentPath = node.path.substring(0,node.path.lastIndexOf('/'))||'/';
-      if (this._sessionId === sessionId) {
-        this.onPathRenamed?.(node.path, newPath);
-        await this.refreshDirectory(parentPath);
-      }
-    } catch (err) { if (this._sessionId === sessionId) this._showMutationError(err, t('workspace.renameFailed')); }
-  }
-  private async _delete(node:FileNode): Promise<void> {
-    await this._deleteByName(node.path, node.name);
-  }
-
-  private async _deleteByName(filePath: string, name: string): Promise<void> {
-    const sessionId = this._sessionId;
-    const confirmed = await this._confirm(t('workspace.deleteConfirm', { name })); if (!confirmed) return;
-    if (!sessionId || this._sessionId !== sessionId) return;
-    if (this.beforePathDelete && !await this.beforePathDelete(filePath)) return;
-    if (this._sessionId !== sessionId) return;
-    try {
-      const resp = await fetch(`/api/v1/workspace/file?path=${encodeURIComponent(filePath)}&sessionId=${encodeURIComponent(sessionId)}`,{method:'DELETE'});
-      if (!resp.ok) throw new Error(await this._responseError(resp, t('workspace.deleteFailed')));
-      const parentPath = filePath.substring(0,filePath.lastIndexOf('/'))||'/';
-      if (this._sessionId === sessionId) {
-        this.onPathDeleted?.(filePath);
-        await this.refreshDirectory(parentPath);
-        if (this._selectedPath === filePath) this._selectedPath = '';
-      }
-    } catch (err) { if (this._sessionId === sessionId) this._showMutationError(err, t('workspace.deleteFailed')); }
-  }
-
-  private async _renameByPath(filePath: string): Promise<void> {
-    const sessionId = this._sessionId;
-    const name = filePath.split('/').pop() || '';
-    const newName = await this._prompt(t('workspace.newNamePrompt'), name); if (!newName||newName===name) return;
-    if (!sessionId || this._sessionId !== sessionId) return;
-    try {
-      const resp = await fetch('/api/v1/workspace/rename',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,path:filePath,newName})});
-      if (!resp.ok) throw new Error(await this._responseError(resp, t('workspace.renameFailed')));
-      const payload = await resp.json() as { newPath?: string };
-      const parentPath = filePath.substring(0,filePath.lastIndexOf('/'))||'/';
-      const nextPath = payload.newPath || _joinTreePath(parentPath, newName);
-      if (this._sessionId === sessionId) {
-        this.onPathRenamed?.(filePath, nextPath);
-        if (this._selectedPath === filePath) this._selectedPath = nextPath;
-        await this.refreshDirectory(parentPath);
-      }
-    } catch (err) { if (this._sessionId === sessionId) this._showMutationError(err, t('workspace.renameFailed')); }
-  }
-
-  private async _moveFile(srcPath: string, destDir: string): Promise<void> {
-    const sessionId = this._sessionId;
-    if (!sessionId) return;
-    try {
-      const resp = await fetch('/api/v1/workspace/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,source:srcPath,destDir})});
-      if (!resp.ok) throw new Error(await this._responseError(resp, t('workspace.moveFailed')));
-      const payload = await resp.json() as { destPath?: string };
-      const nextPath = payload.destPath || _joinTreePath(destDir, srcPath.split('/').pop() || '');
-      if (this._sessionId === sessionId) {
-        this.onPathRenamed?.(srcPath, nextPath);
-        this.refreshAll();
-      }
-    } catch (err) { if (this._sessionId === sessionId) this._showMutationError(err, t('workspace.moveFailed')); }
-  }
-
-  private async _responseError(resp: Response, fallback: string): Promise<string> {
-    const body = await resp.json().catch(() => ({})) as { message?: string; error?: string };
-    return body.message || body.error || fallback;
-  }
-
-  private _showMutationError(err: unknown, fallback: string): void {
-    ToastManager.getInstance().error(err instanceof Error ? err.message : fallback);
-  }
-
-  private _prompt(title: string, defaultValue: string): Promise<string> {
-    return new Promise((resolve) => {
-      const overlay = document.createElement('div');
-      overlay.className = 'dialog-overlay';
-      overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); resolve(''); } });
-      const card = document.createElement('div');
-      card.className = 'dialog';
-      card.innerHTML = `<h2 class="dialog-title">${_esc(title)}</h2><input id="ws-ftp" type="text" class="dialog-input" value="${_esc(defaultValue)}" autofocus style="width:100%;padding:6px 10px;background:var(--color-bg);border:1px solid var(--color-hairline);border-radius:6px;color:var(--color-text);font-size:13px;font-family:inherit;outline:none;margin:8px 0;box-sizing:border-box;"><div class="dialog-actions"><button class="btn-dialog-cancel">${t('common.cancel')}</button><button class="btn-dialog-confirm">${t('workspace.ok')}</button></div>`;
-      overlay.appendChild(card); document.body.appendChild(overlay);
-      const field = card.querySelector('#ws-ftp') as HTMLInputElement;
-      field.focus(); field.select();
-      field.addEventListener('keydown', (e) => { if (e.key === 'Enter') { overlay.remove(); resolve(field.value); } });
-      card.querySelector('.btn-dialog-confirm')?.addEventListener('click', () => { overlay.remove(); resolve(field.value); });
-      card.querySelector('.btn-dialog-cancel')?.addEventListener('click', () => { overlay.remove(); resolve(''); });
-    });
-  }
-
-  private _confirm(message: string): Promise<boolean> {
-    return new Promise((resolve) => {
-      const overlay = document.createElement('div');
-      overlay.className = 'dialog-overlay';
-      overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); resolve(false); } });
-      const card = document.createElement('div');
-      card.className = 'dialog';
-      card.innerHTML = `<h2 class="dialog-title">${t('common.confirmTitle')}</h2><p class="dialog-message">${_esc(message)}</p><div class="dialog-actions"><button class="btn-dialog-cancel">${t('common.cancel')}</button><button class="btn-dialog-confirm">${t('common.delete')}</button></div>`;
-      overlay.appendChild(card); document.body.appendChild(overlay);
-      card.querySelector('.btn-dialog-confirm')?.addEventListener('click', () => { overlay.remove(); resolve(true); });
-      card.querySelector('.btn-dialog-cancel')?.addEventListener('click', () => { overlay.remove(); resolve(false); });
-    });
-  }
-
   private _refreshLocale(): void {
     this._treeLabel.textContent = t('workspace.files');
-    this._createButtons[0].title = t('workspace.newFile');
-    this._createButtons[1].title = t('workspace.newFolder');
     this._refreshBtn.title = t('workspace.refreshTree');
     this._searchInput.placeholder = t('workspace.searchFiles');
     this._clearButton.title = t('workspace.clearSearch');
@@ -658,10 +465,13 @@ export class WorkspaceFileTree {
   }
 }
 
-const _IMG_EXTS = new Set(['png','jpg','jpeg','gif','webp','svg','bmp','ico']);
 function _fileIcon(name: string): string {
   const ext = name.split('.').pop()?.toLowerCase()||'';
-  if (_IMG_EXTS.has(ext)) return _SVG_IMAGE;
+  const fileType = workspaceFileCapability(name).type;
+  if (fileType === 'image' || fileType === 'svg') return _SVG_IMAGE;
+  if (fileType === 'structured' || fileType === 'notebook') return _SVG_JSON;
+  if (fileType === 'markdown') return _SVG_MD;
+  if (fileType === 'html') return _SVG_HTML;
   if (ext==='ts'||ext==='tsx') return _SVG_TS; if (ext==='js'||ext==='jsx') return _SVG_JS;
   if (ext==='json') return _SVG_JSON; if (ext==='css') return _SVG_CSS;
   if (ext==='html') return _SVG_HTML; if (ext==='md') return _SVG_MD; if (ext==='py') return _SVG_PY;
@@ -669,18 +479,12 @@ function _fileIcon(name: string): string {
 }
 function _fmtSize(bytes:number):string { if (bytes<1024) return `${bytes}B`; if (bytes<1048576) return `${(bytes/1024).toFixed(1)}KB`; return `${(bytes/1048576).toFixed(1)}MB`; }
 function _esc(s:string):string { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function _joinTreePath(parentPath: string, name: string): string {
-  return parentPath === '/' ? name : `${parentPath.replace(/\/$/, '')}/${name}`;
-}
-
 const _SVG_FOLDER = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2.5h7.5A2.5 2.5 0 0 1 21 9v8.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5Z"/></svg>`;
 const _SVG_FILE = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 3.5H7A2 2 0 0 0 5 5.5v13A2 2 0 0 0 7 20.5h10a2 2 0 0 0 2-2V8Z"/><path d="M14.5 3.5V8H19"/></svg>`;
 const _SVG_CODE = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m10 8-4 4 4 4"/><path d="m14 16 4-4-4-4"/></svg>`;
 const _SVG_BRACES = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H7a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2 2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1"/><path d="M16 3h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2 2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-1"/></svg>`;
 const _SVG_MARKDOWN = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15V9l3 3 3-3v6"/><path d="M17 9v6"/><path d="m15 13 2 2 2-2"/></svg>`;
 const _SVG_IMAGE = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4" width="17" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.4"/><path d="m20.5 15-4.2-4.2L6 20"/></svg>`;
-const _SVG_FILE_PLUS = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 3.5H7A2 2 0 0 0 5 5.5v13A2 2 0 0 0 7 20.5h10a2 2 0 0 0 2-2V8Z"/><path d="M14.5 3.5V8H19"/><path d="M12 12v5"/><path d="M9.5 14.5h5"/></svg>`;
-const _SVG_FOLDER_PLUS = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2.5h7.5A2.5 2.5 0 0 1 21 9v8.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5Z"/><path d="M12 11v5"/><path d="M9.5 13.5h5"/></svg>`;
 const _SVG_REFRESH = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 16v5h5"/><path d="M3 12A9 9 0 0 1 18.5 5.7L21 8"/><path d="M21 8V3h-5"/></svg>`;
 const _SVG_SEARCH = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>`;
 const _SVG_X = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>`;

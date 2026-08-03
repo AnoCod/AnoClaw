@@ -1,12 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  hasExternalContentChange,
-  isSaveSnapshotCurrent,
   workspaceModelUri,
   workspaceReadOnlyReason,
-} from '../WorkspaceIdeUtils.js';
+} from '../WorkspaceViewerUtils.js';
 
-describe('Workspace IDE safety helpers', () => {
+describe('Workspace read-only viewer helpers', () => {
   it('creates distinct Monaco model URIs for identical paths in different sessions', () => {
     const first = workspaceModelUri('session-a', 'C:\\work-a', 'primary', 'src/index.ts');
     const second = workspaceModelUri('session-b', 'C:\\work-b', 'primary', 'src/index.ts');
@@ -16,17 +14,8 @@ describe('Workspace IDE safety helpers', () => {
   });
 
   it('marks truncated workspace reads as read-only previews', () => {
-    expect(workspaceReadOnlyReason({ truncated: true, size: 150 * 1024 })).toContain('Read-only preview');
+    expect(workspaceReadOnlyReason({ truncated: true, size: 2 * 1024 * 1024, previewBytes: 1024 * 1024 }))
+      .toContain('first 1.0 MB');
     expect(workspaceReadOnlyReason({ truncated: false, size: 150 * 1024 })).toBeUndefined();
-  });
-
-  it('detects an external change that clears a file', () => {
-    expect(hasExternalContentChange('', 'previous content')).toBe(true);
-    expect(hasExternalContentChange('', '')).toBe(false);
-  });
-
-  it('keeps a tab dirty when the editor changes while an older save is in flight', () => {
-    expect(isSaveSnapshotCurrent(4, 5, 'sent', 'newer')).toBe(false);
-    expect(isSaveSnapshotCurrent(4, 4, 'sent', 'sent')).toBe(true);
   });
 });

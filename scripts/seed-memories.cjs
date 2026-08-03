@@ -548,7 +548,7 @@ Retry 逻辑通过 AgentLoopLLM.ts 处理，速率限制通过 APIScheduler.ts �
 | layout-delegate-cards.css | Think/todo/plan/system/delegation cards |
 | layout-log-panel.css | Sub-session cards + floating log panel |
 | layout-motion.css | Page transitions, keycap, shimmer |
-| layout-page-ide.css | Workspace file tree, tabs, editor and preview surfaces |`,
+| layout-page-workspace.css | Workspace read-only file tree, tabs, source viewer and preview surfaces |`,
   },
   {
     dir: 'team', name: 'memory-system-internals', type: 'reference', scope: 'team',

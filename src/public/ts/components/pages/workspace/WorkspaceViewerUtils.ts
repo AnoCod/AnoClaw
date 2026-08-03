@@ -1,6 +1,8 @@
+// Pure helpers for immutable Workspace source-viewer models.
 export interface WorkspaceReadResult {
   truncated?: boolean;
   size?: number;
+  previewBytes?: number;
 }
 
 export function workspaceModelUri(
@@ -29,21 +31,9 @@ export function workspaceModelUri(
 export function workspaceReadOnlyReason(result: WorkspaceReadResult): string | undefined {
   if (!result.truncated) return undefined;
   const size = Number(result.size || 0);
+  const previewBytes = Number(result.previewBytes || 1024 * 1024);
   const label = size > 0 ? ` (${formatBytes(size)})` : '';
-  return `Read-only preview${label}: only the first 100 KB was loaded.`;
-}
-
-export function hasExternalContentChange(diskContent: string, editorContent: string): boolean {
-  return diskContent !== editorContent;
-}
-
-export function isSaveSnapshotCurrent(
-  sentRevision: number,
-  currentRevision: number,
-  sentContent: string,
-  currentContent: string,
-): boolean {
-  return sentRevision === currentRevision && sentContent === currentContent;
+  return `Read-only preview${label}: only the first ${formatBytes(previewBytes)} was loaded.`;
 }
 
 function formatBytes(bytes: number): string {

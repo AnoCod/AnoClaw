@@ -28,7 +28,6 @@ export class WorkspaceSplitContainer {
     if (this._secondary) return;
     const tab = this._primary.activeTab;
     if (!tab) return;
-    if (tab.isDirty) return;
 
     this._secondary = new WorkspaceTabGroup();
     this._secondary.element.classList.add('ws-split-secondary');
@@ -122,35 +121,6 @@ export class WorkspaceSplitContainer {
 
   getEditorContext() {
     return this._primary.getEditorContext();
-  }
-
-  async saveActiveFile(): Promise<boolean> {
-    if (!await this._primary.saveActiveFile()) return false;
-    return this._secondary ? this._secondary.saveActiveFile() : true;
-  }
-
-  get hasDirtyTabs(): boolean {
-    return this._primary.hasDirtyTabs || (this._secondary?.hasDirtyTabs ?? false);
-  }
-
-  async prepareToDiscardAll(actionLabel: string): Promise<boolean> {
-    if (!await this._primary.prepareToDiscardAll(actionLabel)) return false;
-    return this._secondary ? this._secondary.prepareToDiscardAll(actionLabel) : true;
-  }
-
-  async prepareForPathRemoval(path: string): Promise<boolean> {
-    if (!await this._primary.prepareForPathRemoval(path)) return false;
-    return this._secondary ? this._secondary.prepareForPathRemoval(path) : true;
-  }
-
-  handlePathRenamed(oldPath: string, newPath: string): void {
-    this._primary.handlePathRenamed(oldPath, newPath);
-    this._secondary?.handlePathRenamed(oldPath, newPath);
-  }
-
-  handlePathDeleted(path: string): void {
-    this._primary.handlePathDeleted(path);
-    this._secondary?.handlePathDeleted(path);
   }
 
   suspend(): void {

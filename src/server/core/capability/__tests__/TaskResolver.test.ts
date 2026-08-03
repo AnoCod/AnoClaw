@@ -96,7 +96,7 @@ describe('TaskResolver', () => {
       toolName: 'Read',
       parameters: { file_path: 'src/server/core/foo.ts' },
     });
-    expect(result.suggestedToolCall?.notes.join(' ')).toContain('IDE/editor context');
+    expect(result.suggestedToolCall?.notes.join(' ')).toContain('Workspace viewer context');
   });
 
   it('suggests a read-only git diff command for code review tasks', async () => {

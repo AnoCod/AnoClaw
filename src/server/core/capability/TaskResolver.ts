@@ -305,7 +305,7 @@ function buildCodingSuggestedToolCall(
       },
       confidence: 0.72,
       notes: [
-        'Use the current IDE/editor context alongside git diff; prioritize changed files and selected code.',
+        'Use the current read-only Workspace viewer context alongside git diff; prioritize changed files and selected code.',
         'Return findings first, with file and line references when possible.',
       ],
     };
@@ -320,7 +320,7 @@ function buildCodingSuggestedToolCall(
       parameters: { file_path: filePath },
       confidence: 0.78,
       notes: [
-        'Use the current IDE/editor context first; if the active file or selection matches the request, inspect that target before broad search.',
+        'Use the current read-only Workspace viewer context first; if the active file or selection matches the request, inspect that target before broad search.',
         'After editing, run focused tests or the relevant build command.',
       ],
     };
@@ -337,7 +337,7 @@ function buildCodingSuggestedToolCall(
       },
       confidence: 0.66,
       notes: [
-        'Use the current IDE/editor context first; search the workspace only when the active file or selection is not enough.',
+        'Use the current read-only Workspace viewer context first; search the workspace only when the active file or selection is not enough.',
         'Prefer Read/Grep/Glob/Edit for code work and Bash for tests, builds, or git inspection.',
       ],
     };
@@ -348,7 +348,7 @@ function buildCodingSuggestedToolCall(
     parameters: { pattern: CODE_GLOB_PATTERN },
     confidence: 0.55,
     notes: [
-      'Start from the current IDE/editor context when available; if the request says this, here, or current file, treat the active file/selection as the target.',
+      'Start from the current read-only Workspace viewer context when available; if the request says this, here, or current file, treat the active file/selection as the target, not as edit authorization.',
       'If no active file is relevant, inspect likely code entry points before editing and run focused tests afterward.',
     ],
   };

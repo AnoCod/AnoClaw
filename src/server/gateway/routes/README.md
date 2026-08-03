@@ -84,7 +84,7 @@
 
 **Legacy:** `MemoryRoutes.ts` — class-style handler (not `RouteHandler`), registered directly in `ApiServer`.
 
-### Workspace (12 routes)
+### Workspace (13 routes)
 | File | Route(s) | Path |
 |------|----------|------|
 | `WorkspaceRoute.ts` | `WorkspaceInfoRoute` | `GET /api/v1/workspace` |
@@ -92,13 +92,14 @@
 | | `BindWorkspaceRoute` | `PATCH /api/v1/sessions/:id/bind-workspace` |
 | | `BrowseWorkspaceRoute` | `GET /api/v1/workspace/browse` |
 | | `ReadWorkspaceFileRoute` | `GET /api/v1/workspace/read` |
-| | `CreateWorkspaceDirRoute` | `POST /api/v1/workspace/create-dir` |
-| | `CreateWorkspaceFileRoute` | `POST /api/v1/workspace/create-file` |
-| | `DeleteWorkspaceFileRoute` | `DELETE /api/v1/workspace/file` |
-| | `RenameWorkspaceFileRoute` | `PATCH /api/v1/workspace/rename` |
-| | `MoveWorkspaceFileRoute` | `POST /api/v1/workspace/move` |
-| | `WriteWorkspaceFileRoute` | `PUT /api/v1/workspace/write` |
+| | `CreateWorkspaceDirRoute` | `POST /api/v1/workspace/create-dir` (disabled: 405) |
+| | `CreateWorkspaceFileRoute` | `POST /api/v1/workspace/create-file` (disabled: 405) |
+| | `DeleteWorkspaceFileRoute` | `DELETE /api/v1/workspace/file` (disabled: 405) |
+| | `RenameWorkspaceFileRoute` | `PATCH /api/v1/workspace/rename` (disabled: 405) |
+| | `MoveWorkspaceFileRoute` | `POST /api/v1/workspace/move` (disabled: 405) |
+| | `WriteWorkspaceFileRoute` | `PUT /api/v1/workspace/write` (disabled: 405) |
 | | `ConvertOfficeRoute` | `GET /api/v1/workspace/convert-office` |
+| | `InspectWorkspaceArchiveRoute` | `GET /api/v1/workspace/inspect-archive` |
 
 ### Settings (2 routes — separate from SettingsRoutes)
 | File | Route(s) | Path |

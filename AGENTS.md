@@ -458,6 +458,10 @@ Factory: `createLLMProvider(config)` in `provider-factory.ts` selects based on `
 - Plugin pages loaded dynamically from plugin manifests via `PluginViewModel` → iframe sandbox + postMessage bridge
 - Streaming: `StreamingMessageDelegate` renders tokens in real-time from WS events
 
+### Workspace Read-Only Contract
+
+Workspace is a read-only filesystem browser, not an editor or IDE. Its UI and `/api/v1/workspace/*` surface must never create, write, rename, move, or delete files/directories. Legacy mutation routes remain only to return HTTP 405 with `WORKSPACE_READ_ONLY`; binding accepts existing directories and never creates them. Monaco may be used only as a read-only source viewer. Browser downloads must stay outside the bound Workspace. External agent tools and other processes have separately governed permissions; when they change files, Workspace may refresh its view but must never accept, revert, or write those changes. See `docs/workspace-read-only-browser.md` before changing Workspace behavior.
+
 ## MCP Integration
 
 `MCPClientManager` (singleton) manages connections to external MCP servers. Supports 4 transports: Stdio, SSE, WebSocket, Streamable HTTP. External MCP tools are dynamically proxied via `MCPToolProxy` and registered as `mcp_<server>_<tool>` in ToolRegistry. `MCPServer` class exposes AnoClaw itself as an MCP server.

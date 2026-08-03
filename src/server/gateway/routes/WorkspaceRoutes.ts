@@ -1,4 +1,4 @@
-// WorkspaceRoutes — declarative route handlers for workspace file-browsing, binding, and mutation
+// WorkspaceRoutes — declarative routes for read-only file browsing and previews.
 // Migrated from legacy if-else routing in ApiServer.ts (Phase: SA-10 declarative routes)
 
 import type { RouteHandler, RouteMatch } from '../RouteHandler.js';
@@ -18,6 +18,7 @@ import {
   handleMoveWorkspaceFile,
   handleWriteWorkspaceFile,
   handleConvertOffice,
+  handleInspectWorkspaceArchive,
 } from '../handlers/WorkspaceHandlers.js';
 
 // ── Session-scoped workspace ──
@@ -80,15 +81,15 @@ export class ReadWorkspaceFileRoute implements RouteHandler {
   }
 }
 
-// ── Workspace mutations (body-based) ──
+// ── Disabled legacy mutations (stable WORKSPACE_READ_ONLY response) ──
 
-/** POST /api/v1/workspace/create-dir — Create workspace directory */
+/** Disabled legacy POST /api/v1/workspace/create-dir route. */
 export class CreateWorkspaceDirRoute implements RouteHandler {
   readonly method = 'POST';
   readonly path = '/api/v1/workspace/create-dir';
   readonly category = 'Workspace';
-  readonly description = 'Create workspace directory';
-  readonly permission = 'workspace:write';
+  readonly description = 'Disabled: Workspace is read-only';
+  readonly permission = 'workspace:read';
 
   async handle(_match: RouteMatch, req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): Promise<boolean> {
     await handleCreateWorkspaceDir(req, res, sendJson, readBody);
@@ -96,13 +97,13 @@ export class CreateWorkspaceDirRoute implements RouteHandler {
   }
 }
 
-/** POST /api/v1/workspace/create-file — Create empty file */
+/** Disabled legacy POST /api/v1/workspace/create-file route. */
 export class CreateWorkspaceFileRoute implements RouteHandler {
   readonly method = 'POST';
   readonly path = '/api/v1/workspace/create-file';
   readonly category = 'Workspace';
-  readonly description = 'Create empty file';
-  readonly permission = 'workspace:write';
+  readonly description = 'Disabled: Workspace is read-only';
+  readonly permission = 'workspace:read';
 
   async handle(_match: RouteMatch, req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): Promise<boolean> {
     await handleCreateWorkspaceFile(req, res, sendJson, readBody);
@@ -110,13 +111,13 @@ export class CreateWorkspaceFileRoute implements RouteHandler {
   }
 }
 
-/** DELETE /api/v1/workspace/file — Delete file or directory */
+/** Disabled legacy DELETE /api/v1/workspace/file route. */
 export class DeleteWorkspaceFileRoute implements RouteHandler {
   readonly method = 'DELETE';
   readonly path = '/api/v1/workspace/file';
   readonly category = 'Workspace';
-  readonly description = 'Delete file or directory';
-  readonly permission = 'workspace:write';
+  readonly description = 'Disabled: Workspace is read-only';
+  readonly permission = 'workspace:read';
 
   async handle(_match: RouteMatch, req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): Promise<boolean> {
     await handleDeleteWorkspaceFile(req, res, sendJson, DEFAULT_HOST, API_PORT);
@@ -124,13 +125,13 @@ export class DeleteWorkspaceFileRoute implements RouteHandler {
   }
 }
 
-/** PATCH /api/v1/workspace/rename — Rename file or directory */
+/** Disabled legacy PATCH /api/v1/workspace/rename route. */
 export class RenameWorkspaceFileRoute implements RouteHandler {
   readonly method = 'PATCH';
   readonly path = '/api/v1/workspace/rename';
   readonly category = 'Workspace';
-  readonly description = 'Rename file or directory';
-  readonly permission = 'workspace:write';
+  readonly description = 'Disabled: Workspace is read-only';
+  readonly permission = 'workspace:read';
 
   async handle(_match: RouteMatch, req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): Promise<boolean> {
     await handleRenameWorkspaceFile(req, res, sendJson, readBody);
@@ -138,13 +139,13 @@ export class RenameWorkspaceFileRoute implements RouteHandler {
   }
 }
 
-/** POST /api/v1/workspace/move — Move file or directory */
+/** Disabled legacy POST /api/v1/workspace/move route. */
 export class MoveWorkspaceFileRoute implements RouteHandler {
   readonly method = 'POST';
   readonly path = '/api/v1/workspace/move';
   readonly category = 'Workspace';
-  readonly description = 'Move file or directory';
-  readonly permission = 'workspace:write';
+  readonly description = 'Disabled: Workspace is read-only';
+  readonly permission = 'workspace:read';
 
   async handle(_match: RouteMatch, req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): Promise<boolean> {
     await handleMoveWorkspaceFile(req, res, sendJson, readBody);
@@ -152,13 +153,13 @@ export class MoveWorkspaceFileRoute implements RouteHandler {
   }
 }
 
-/** PUT /api/v1/workspace/write — Write content to file */
+/** Disabled legacy PUT /api/v1/workspace/write route. */
 export class WriteWorkspaceFileRoute implements RouteHandler {
   readonly method = 'PUT';
   readonly path = '/api/v1/workspace/write';
   readonly category = 'Workspace';
-  readonly description = 'Write content to file';
-  readonly permission = 'workspace:write';
+  readonly description = 'Disabled: Workspace is read-only';
+  readonly permission = 'workspace:read';
 
   async handle(_match: RouteMatch, req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): Promise<boolean> {
     await handleWriteWorkspaceFile(req, res, sendJson, readBody);
@@ -178,6 +179,20 @@ export class ConvertOfficeRoute implements RouteHandler {
 
   async handle(_match: RouteMatch, req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): Promise<boolean> {
     await handleConvertOffice(req, res, sendJson, DEFAULT_HOST, API_PORT);
+    return true;
+  }
+}
+
+/** GET /api/v1/workspace/inspect-archive — List a safe ZIP-family archive */
+export class InspectWorkspaceArchiveRoute implements RouteHandler {
+  readonly method = 'GET';
+  readonly path = '/api/v1/workspace/inspect-archive';
+  readonly category = 'Workspace';
+  readonly description = 'List entries in a ZIP-family archive';
+  readonly permission = 'workspace:read';
+
+  async handle(_match: RouteMatch, req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): Promise<boolean> {
+    await handleInspectWorkspaceArchive(req, res, sendJson, DEFAULT_HOST, API_PORT);
     return true;
   }
 }

@@ -12,109 +12,23 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('WorkspaceTabGroup async safety', () => {
-  it('drops a manual AI completion after the editor switches models', async () => {
-    const completion = deferred<string>();
-    const modelA = {
-      getLineContent: () => 'const value = ',
-      getLineCount: () => 1,
-      getValueInRange: () => 'const value = ',
-      getLanguageId: () => 'typescript',
-    };
-    const modelB = {};
-    const editorA = {
-      getModel: () => modelA,
-      getPosition: () => ({ lineNumber: 1, column: 15 }),
-      executeEdits: vi.fn(),
-      focus: vi.fn(),
-    };
-    const editorB = { getModel: () => modelB };
-    const group = Object.create(WorkspaceTabGroup.prototype) as any;
-    group._editor = editorA;
-    group._tabs = [{ path: 'a.ts', model: modelA }];
-    group._inlineCompletionRequestId = 0;
-    group._setInlineCompletionStatus = vi.fn();
-    group._requestInlineCompletion = vi.fn(() => completion.promise);
+describe('WorkspaceTabGroup read-only safety', () => {
+  it('does not expose legacy edit, save, or external-revert operations', () => {
+    const prototype = WorkspaceTabGroup.prototype as any;
 
-    const pending = group._triggerInlineCompletion(true);
-    group._editor = editorB;
-    completion.resolve('42;');
-    await pending;
-
-    expect(editorA.executeEdits).not.toHaveBeenCalled();
+    expect(prototype.saveFile).toBeUndefined();
+    expect(prototype.saveActiveFile).toBeUndefined();
+    expect(prototype._triggerInlineCompletion).toBeUndefined();
+    expect(prototype._organizeImports).toBeUndefined();
+    expect(prototype._revertExternalChange).toBeUndefined();
   });
 
-  it('drops organize-import edits after the editor switches models', async () => {
-    const response = deferred<{ edits: Array<{ path: string; range: Record<string, number>; text: string }> }>();
-    const modelA = {};
-    const modelB = {};
-    const editorA = { getModel: () => modelA, executeEdits: vi.fn(), focus: vi.fn() };
-    const editorB = { getModel: () => modelB, focus: vi.fn() };
-    const group = Object.create(WorkspaceTabGroup.prototype) as any;
-    group._editor = editorA;
-    group._tabs = [{ path: 'a.ts', model: modelA }];
-    group._setLanguageStatus = vi.fn();
-    group._languageFetch = vi.fn(() => response.promise);
-    group._monacoRange = (range: unknown) => range;
-
-    const pending = group._organizeImports();
-    group._editor = editorB;
-    response.resolve({
-      edits: [{
-        path: 'a.ts',
-        range: { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
-        text: 'import x;\n',
-      }],
-    });
-    await pending;
-
-    expect(editorA.executeEdits).not.toHaveBeenCalled();
-    expect(editorB.focus).not.toHaveBeenCalled();
-  });
-
-  it('registers one global inline provider and routes by model ownership', async () => {
-    const providerDisposable = { dispose: vi.fn() };
-    const registerInlineCompletionsProvider = vi.fn((_selector: string, _provider: any) => providerDisposable);
-    vi.stubGlobal('window', { monaco: { languages: { registerInlineCompletionsProvider } } });
-
-    const modelA = {};
-    const first = Object.create(WorkspaceTabGroup.prototype) as any;
-    first._inlineCompletionRegistered = false;
-    first._tabs = [{ model: modelA }];
-    first._provideInlineCompletion = vi.fn(async () => ({ items: [{ insertText: 'owned' }] }));
-    const second = Object.create(WorkspaceTabGroup.prototype) as any;
-    second._inlineCompletionRegistered = false;
-    second._tabs = [{ model: {} }];
-    second._provideInlineCompletion = vi.fn();
-
-    const ctor = WorkspaceTabGroup as any;
-    const originalGroups = ctor._groups;
-    const originalDisposable = ctor._inlineCompletionDisposable;
-    ctor._groups = new Set([first, second]);
-    ctor._inlineCompletionDisposable = null;
-    try {
-      first._registerInlineCompletion();
-      second._registerInlineCompletion();
-
-      expect(registerInlineCompletionsProvider).toHaveBeenCalledTimes(1);
-      const provider = registerInlineCompletionsProvider.mock.calls[0]![1];
-      await expect(provider.provideInlineCompletions(modelA, {}, {}, {})).resolves.toEqual({ items: [{ insertText: 'owned' }] });
-      expect(first._provideInlineCompletion).toHaveBeenCalledTimes(1);
-      expect(second._provideInlineCompletion).not.toHaveBeenCalled();
-    } finally {
-      providerDisposable.dispose();
-      ctor._groups = originalGroups;
-      ctor._inlineCompletionDisposable = originalDisposable;
-    }
-  });
-
-  it('registers editor actions on the owning editor instead of globally', () => {
+  it('registers only read-only Agent and navigation actions on the owning viewer', () => {
     const addEditorAction = vi.fn();
     vi.stubGlobal('window', {
       monaco: {
         editor: { addEditorAction },
-        KeyCode: { Backslash: 1, F12: 2, KeyO: 3 },
-        KeyMod: { Alt: 4, Shift: 8 },
+        KeyCode: { F12: 2 },
       },
     });
     const group = Object.create(WorkspaceTabGroup.prototype) as any;
@@ -124,8 +38,36 @@ describe('WorkspaceTabGroup async safety', () => {
 
     group._registerAgentActions();
 
-    expect(group._editor.addAction).toHaveBeenCalledTimes(6);
+    expect(group._editor.addAction).toHaveBeenCalledTimes(4);
+    expect(group._editor.addAction.mock.calls.map((call: any[]) => call[0].id)).toEqual([
+      'anoclaw-ask-agent',
+      'anoclaw-explain-code',
+      'anoclaw-find-bugs',
+      'anoclaw-ls-definition',
+    ]);
     expect(addEditorAction).not.toHaveBeenCalled();
+  });
+
+  it('registers hover and definition providers without completion providers', () => {
+    const registerCompletionItemProvider = vi.fn();
+    const registerHoverProvider = vi.fn();
+    const registerDefinitionProvider = vi.fn();
+    vi.stubGlobal('window', {
+      monaco: { languages: { registerCompletionItemProvider, registerHoverProvider, registerDefinitionProvider } },
+    });
+    const constructor = WorkspaceTabGroup as any;
+    const original = constructor._languageFeaturesRegistered;
+    constructor._languageFeaturesRegistered = false;
+    try {
+      const group = Object.create(WorkspaceTabGroup.prototype) as any;
+      group._registerLanguageFeatures();
+
+      expect(registerCompletionItemProvider).not.toHaveBeenCalled();
+      expect(registerHoverProvider).toHaveBeenCalledTimes(3);
+      expect(registerDefinitionProvider).toHaveBeenCalledTimes(3);
+    } finally {
+      constructor._languageFeaturesRegistered = original;
+    }
   });
 
   it('scrubs sensitive controls from page context before sharing it with an agent', async () => {
@@ -159,46 +101,72 @@ describe('WorkspaceTabGroup async safety', () => {
   it('does not let a stale Office preview overwrite the newly active tab', async () => {
     const response = deferred<{ ok: boolean; json: () => Promise<Record<string, unknown>> }>();
     vi.stubGlobal('fetch', vi.fn(() => response.promise));
-    const contentArea = { innerHTML: '', style: { cssText: '' }, appendChild: vi.fn() };
+    const body = { innerHTML: '', textContent: '', appendChild: vi.fn(), classList: { add: vi.fn() } };
     const tab = { path: 'report.docx', name: 'report.docx' };
     const group = Object.create(WorkspaceTabGroup.prototype) as any;
-    group._contentArea = contentArea;
     group._sessionId = 'session-a';
     group._activePath = tab.path;
     group._renderGeneration = 1;
-    group._destroyContent = vi.fn();
+    group._createPreviewBody = vi.fn(() => body);
 
     const pending = group._showOffice(tab, 1);
     group._activePath = 'new.ts';
     group._renderGeneration = 2;
-    contentArea.innerHTML = 'new tab content';
+    body.innerHTML = 'new tab content';
     response.resolve({ ok: true, json: async () => ({ type: 'text', content: 'old preview' }) });
     await pending;
 
-    expect(contentArea.innerHTML).toBe('new tab content');
-    expect(contentArea.appendChild).not.toHaveBeenCalled();
+    expect(body.innerHTML).toBe('new tab content');
+    expect(body.appendChild).not.toHaveBeenCalled();
   });
 
-  it('turns a truncated external update into a read-only preview', async () => {
+  it('automatically refreshes an immutable viewer after an external update', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
-      json: async () => ({ content: 'truncated prefix', truncated: true, size: 200_000, sha256: 'full-sha' }),
+      json: async () => ({
+        content: 'truncated prefix',
+        truncated: true,
+        previewBytes: 1_048_576,
+        size: 2_000_000,
+        encoding: 'UTF-8',
+        sha256: 'full-sha',
+      }),
     })));
     const model = { getValue: () => 'old content', setValue: vi.fn() };
-    const tab: any = { path: 'large.txt', fileType: 'code', isDirty: false, model };
+    const tab: any = { path: 'large.txt', name: 'large.txt', fileType: 'text', model };
     const group = Object.create(WorkspaceTabGroup.prototype) as any;
     group._tabs = [tab];
     group._sessionId = 'session-a';
     group._activePath = tab.path;
-    group._updateDirty = vi.fn();
     group._activate = vi.fn();
-    group._showDiffBanner = vi.fn();
 
     await group.checkForExternalChanges();
 
     expect(model.setValue).toHaveBeenCalledWith('truncated prefix');
     expect(tab.readOnlyReason).toContain('Read-only preview');
     expect(tab.diskSha256).toBe('full-sha');
-    expect(group._showDiffBanner).not.toHaveBeenCalled();
+    expect(tab.content).toBe('truncated prefix');
+    expect(group._activate).toHaveBeenCalledWith(tab);
+  });
+
+  it('does not report a stale Monaco selection while a rich preview is active', () => {
+    const activeModel = {};
+    const staleModel = { getValueInRange: vi.fn(() => 'stale selection') };
+    const group = Object.create(WorkspaceTabGroup.prototype) as any;
+    group._activePath = 'README.md';
+    group._tabs = [{ path: 'README.md', name: 'README.md', fileType: 'markdown', model: activeModel }];
+    group._editor = {
+      getModel: () => staleModel,
+      getPosition: () => ({ lineNumber: 99, column: 4 }),
+      getSelection: () => ({ isEmpty: () => false, startLineNumber: 90, endLineNumber: 99 }),
+    };
+
+    expect(group.getEditorContext()).toMatchObject({
+      activeFile: 'README.md',
+      cursorLine: 1,
+      cursorColumn: 1,
+      selectedText: '',
+    });
+    expect(staleModel.getValueInRange).not.toHaveBeenCalled();
   });
 });

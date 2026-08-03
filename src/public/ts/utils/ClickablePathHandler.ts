@@ -87,7 +87,7 @@ export function resolvePath(clickedPath: string, workspacePath: string): string 
  *
  * @param e          The click event
  * @param workspacePath  Current session's workspace root (empty string if none)
- * @param sessionId      Current session, used to open the matching Workspace IDE
+ * @param sessionId      Current session, used to open the matching read-only Workspace browser
  */
 export function handlePathClick(e: MouseEvent, workspacePath: string, sessionId?: string | null): void {
   let target = e.target as HTMLElement | null;
@@ -136,7 +136,7 @@ export function handlePathClick(e: MouseEvent, workspacePath: string, sessionId?
       }
 
       // Absolute paths outside the bound workspace cannot be read by the
-      // session-scoped IDE API. Preserve the desktop system-handler fallback.
+      // session-scoped read-only Workspace API. Preserve the desktop system-handler fallback.
       if (api?.openPath) {
         api.openPath(resolved).then((r) => {
           if (!r.ok && r.error) {

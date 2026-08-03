@@ -849,7 +849,7 @@ html[data-theme="dark"] .tool-result-card.is-error {
   --tool-accent: var(--comfy-coral) !important;
 }
 
-/* Workspace page: core ComfyUI-style IDE surface */
+/* Workspace page: core ComfyUI-style read-only browser surface */
 html[data-theme="dark"] [data-page="workspace"].ws-page {
   background:
     linear-gradient(var(--comfy-canvas-grid) 1px, transparent 1px),

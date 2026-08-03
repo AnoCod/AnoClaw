@@ -365,7 +365,7 @@ describe('ApiServer security boundaries', () => {
     const previousCwd = process.cwd();
     const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'anoclaw-large-read-'));
     try {
-      fs.writeFileSync(path.join(workspaceRoot, 'large.txt'), 'x'.repeat(110 * 1024));
+      fs.writeFileSync(path.join(workspaceRoot, 'large.txt'), 'x'.repeat(1024 * 1024 + 10 * 1024));
       process.chdir(workspaceRoot);
       const capture: Capture = { status: 0, headers: {}, body: {} };
       await handleReadWorkspaceFile(
@@ -381,7 +381,8 @@ describe('ApiServer security boundaries', () => {
 
       expect(capture.status).toBe(200);
       expect(capture.body.truncated).toBe(true);
-      expect(String(capture.body.content)).toHaveLength(100 * 1024);
+      expect(capture.body.previewBytes).toBe(1024 * 1024);
+      expect(String(capture.body.content)).toHaveLength(1024 * 1024);
     } finally {
       process.chdir(previousCwd);
       fs.rmSync(workspaceRoot, { recursive: true, force: true });

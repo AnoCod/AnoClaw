@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   activeSessionPath,
+  countSessionNodes,
   splitSessionChildren,
   summarizeSessionTree,
   visibleSessionNodes,
@@ -63,6 +64,16 @@ describe('SessionEdgeBar active ancestry', () => {
 });
 
 describe('SessionEdgeBar summaries', () => {
+  it('counts root and nested sessions for navigation orientation', () => {
+    const tree = [
+      node('root-a', [node('child-a', [node('grandchild-a')])]),
+      node('root-b'),
+    ];
+
+    expect(countSessionNodes(tree)).toBe(4);
+    expect(countSessionNodes([])).toBe(0);
+  });
+
   it('summarizes descendant activity for a root row', () => {
     const root = node('root', [
       node('working', [], { status: 'working' }),

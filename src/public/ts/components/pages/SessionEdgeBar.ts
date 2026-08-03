@@ -44,6 +44,10 @@ function flattenTree(nodes: SessionNode[]): SessionNode[] {
   return result;
 }
 
+export function countSessionNodes(tree: SessionNode[]): number {
+  return flattenTree(tree).length;
+}
+
 export function activeSessionPath(tree: SessionNode[], activeId: string | null): string[] {
   if (!activeId) return [];
   const visit = (nodes: SessionNode[], path: string[]): string[] | null => {
@@ -168,6 +172,7 @@ export class SessionEdgeBar {
   private _searchPanel!: HTMLElement;
   private _searchInput!: HTMLInputElement;
   private _searchButton!: HTMLButtonElement;
+  private _countBadge!: HTMLElement;
   private _collapseButton!: HTMLButtonElement;
   private _collapseLabel!: HTMLElement;
   private _searchQuery = '';
@@ -179,6 +184,7 @@ export class SessionEdgeBar {
   constructor(callbacks: EdgeBarCallbacks) {
     this._callbacks = callbacks;
     this.element = this._build();
+    this._updateCountBadge();
     this._applyCollapsedState(false);
     onLocaleChange(() => this._refreshLocale());
   }
@@ -191,10 +197,18 @@ export class SessionEdgeBar {
     const header = document.createElement('div');
     header.className = 'edge-sidebar-header';
 
+    const heading = document.createElement('div');
+    heading.className = 'edge-sidebar-heading';
+
     const title = document.createElement('div');
     title.className = 'edge-sidebar-title';
     title.textContent = t('session.sessions');
-    header.appendChild(title);
+    heading.appendChild(title);
+
+    this._countBadge = document.createElement('span');
+    this._countBadge.className = 'edge-sidebar-count';
+    heading.appendChild(this._countBadge);
+    header.appendChild(heading);
 
     const actions = document.createElement('div');
     actions.className = 'edge-sidebar-actions';
@@ -271,6 +285,7 @@ export class SessionEdgeBar {
     this.element.setAttribute('aria-label', t('session.navigation'));
     const title = this.element.querySelector<HTMLElement>('.edge-sidebar-title');
     if (title) title.textContent = t('session.sessions');
+    this._updateCountBadge();
     this._searchButton.title = t('session.search');
     this._searchButton.setAttribute('aria-label', t('session.search'));
     const newButton = this.element.querySelector<HTMLButtonElement>('.edge-new-btn');
@@ -295,6 +310,7 @@ export class SessionEdgeBar {
     this._tree = tree;
     this._activeId = activeId;
     this._activePathIds = new Set(activeSessionPath(tree, activeId));
+    this._updateCountBadge();
 
     const existingIds = new Set(flattenTree(tree).map(node => node.id));
     for (const id of [...this._expandedIds]) {
@@ -328,10 +344,10 @@ export class SessionEdgeBar {
 
     if (!this._tree.length) {
       if (!this._collapsed) {
-        const empty = document.createElement('div');
-        empty.className = 'edge-session-empty';
-        empty.textContent = t('session.none');
-        this._treeContainer.appendChild(empty);
+        this._treeContainer.appendChild(this._createEmptyState(
+          t('session.none'),
+          t('session.noneDescription'),
+        ));
       }
       return;
     }
@@ -739,14 +755,22 @@ export class SessionEdgeBar {
     }
 
     if (!results.length) {
-      const empty = document.createElement('div');
-      empty.className = 'edge-session-empty';
-      empty.textContent = t('session.noMatches');
-      this._treeContainer.appendChild(empty);
+      this._treeContainer.appendChild(this._createEmptyState(
+        t('session.noMatches'),
+        t('session.noMatchesDescription'),
+      ));
       return;
     }
 
-    for (const [index, result] of results.slice(0, 50).entries()) {
+    const visibleResults = results.slice(0, 50);
+    const summary = document.createElement('div');
+    summary.className = 'edge-search-summary';
+    summary.setAttribute('role', 'status');
+    summary.setAttribute('aria-live', 'polite');
+    summary.textContent = t('session.searchResults', { count: visibleResults.length });
+    this._treeContainer.appendChild(summary);
+
+    for (const [index, result] of visibleResults.entries()) {
       const node = nodeMap.get(result.sessionId);
       const row = document.createElement('div');
       row.className = 'session-search-result';
@@ -782,6 +806,31 @@ export class SessionEdgeBar {
       });
       this._treeContainer.appendChild(row);
     }
+  }
+
+  private _createEmptyState(titleText: string, descriptionText: string): HTMLElement {
+    const empty = document.createElement('div');
+    empty.className = 'edge-session-empty';
+
+    const title = document.createElement('strong');
+    title.className = 'edge-session-empty-title';
+    title.textContent = titleText;
+    empty.appendChild(title);
+
+    const description = document.createElement('span');
+    description.className = 'edge-session-empty-description';
+    description.textContent = descriptionText;
+    empty.appendChild(description);
+    return empty;
+  }
+
+  private _updateCountBadge(): void {
+    if (!this._countBadge) return;
+    const count = countSessionNodes(this._tree);
+    this._countBadge.textContent = count > 99 ? '99+' : String(count);
+    const label = t('session.totalCount', { count });
+    this._countBadge.title = label;
+    this._countBadge.setAttribute('aria-label', label);
   }
 
   private _coordinationGroupId(parentId: string): string {

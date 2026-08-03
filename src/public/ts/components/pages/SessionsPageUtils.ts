@@ -5,6 +5,15 @@
 
 import { getLocale, t } from '../../i18n/index.js';
 
+export function isNearConversationBottom(
+  scrollHeight: number,
+  scrollTop: number,
+  clientHeight: number,
+  threshold = 50,
+): boolean {
+  return scrollHeight - scrollTop - clientHeight <= threshold;
+}
+
 /** Escape HTML entities to prevent XSS. */
 export function escapeHtml(text: string): string {
   return text

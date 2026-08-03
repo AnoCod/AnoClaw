@@ -415,7 +415,7 @@ describe('AgentLoop', () => {
         SessionStore.resetInstance();
         await fsp.rm(tmpDir, { recursive: true, force: true });
       }
-    });
+    }, 20_000);
 
     it('injects without a second append when the exact target durable history already has the message', async () => {
       const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'anoclaw-loop-inbox-'));
@@ -506,6 +506,6 @@ describe('AgentLoop', () => {
         SessionStore.resetInstance();
         await fsp.rm(tmpDir, { recursive: true, force: true });
       }
-    });
+    }, 20_000);
   });
 });

@@ -13,9 +13,9 @@ export class Agent extends EventEmitter {
   // ── Identity (immutable) ──
   readonly id: string;
   readonly createdAt: string;
-  readonly teamName: string;
 
   // ── Identity (mutable via controlled methods) ──
+  teamName: string;
   private _level: number;
   private _parentAgentId: string | null;
 
@@ -255,6 +255,12 @@ export class Agent extends EventEmitter {
       this._state = config.state;
       this.emit(AgentEvents.ActiveStateChanged, config.state, old);
     }
+
+    // Hierarchy fields are updated in place as well. Keeping the Agent object
+    // stable preserves active session state while an Agents-page save occurs.
+    this._parentAgentId = config.parentAgentId;
+    this._level = config.level;
+    this.teamName = config.teamName;
 
     this._applySharedConfig(config);
 

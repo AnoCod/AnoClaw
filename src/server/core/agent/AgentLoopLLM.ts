@@ -132,6 +132,22 @@ export interface LLMCallConfig {
   summarizer?: SummarizerFn;
 }
 
+const MAX_OUTPUT_TOKENS = 16384;
+
+/** Keep the requested completion inside the active model context window. */
+export function calculateMaxOutputTokens(contextWindow: number, promptTokens: number): number {
+  if (!Number.isFinite(contextWindow) || contextWindow <= 0) return MAX_OUTPUT_TOKENS;
+
+  const normalizedWindow = Math.floor(contextWindow);
+  const normalizedPrompt = Number.isFinite(promptTokens)
+    ? Math.max(0, Math.ceil(promptTokens))
+    : 0;
+  const safetyMargin = Math.max(64, Math.min(1024, Math.floor(normalizedWindow * 0.02)));
+  const available = normalizedWindow - normalizedPrompt - safetyMargin;
+
+  return Math.max(1, Math.min(MAX_OUTPUT_TOKENS, available));
+}
+
 /**
  * Call the LLM provider with exponential-backoff retry.
  * Streams deltas (text, think, tool_use) as SSE events.
@@ -186,25 +202,28 @@ export async function* callLLMWithRetry(
       });
 
       const provider = createLLMProvider(config.provider, extensionPoints);
-      const llmOptions: LLMOptions = {
-        model: config.modelName,
-        maxTokens: 16384,
-        temperature: config.temperature,
-        contextWindow: config.agentContextWindow,
-        apiUrl: config.apiUrl || '',
-        apiKey: config.apiKey || '',
-      };
-
-      const estimatedInputTokens = estimateTokens(messages);
-      const estimatedTotalTokens = estimatedInputTokens + tools.length * 50 + llmOptions.maxTokens;
-      await APIScheduler.getInstance().acquireSlot(config.apiKey || '', estimatedTotalTokens);
-
       const chatMessages = prepareMessagesForLLM(messages, systemPrompt) as Array<{
         role: string;
         content: string;
         tool_calls?: unknown[];
         tool_call_id?: string;
       }>;
+      const estimatedInputTokens = estimateTokens([
+        { role: 'system', content: systemPrompt },
+        ...chatMessages as ApiMessage[],
+        { role: 'user', content: JSON.stringify(tools) },
+      ]);
+      const llmOptions: LLMOptions = {
+        model: config.modelName,
+        maxTokens: calculateMaxOutputTokens(config.agentContextWindow, estimatedInputTokens),
+        temperature: config.temperature,
+        contextWindow: config.agentContextWindow,
+        apiUrl: config.apiUrl || '',
+        apiKey: config.apiKey || '',
+      };
+
+      const estimatedTotalTokens = estimatedInputTokens + llmOptions.maxTokens;
+      await APIScheduler.getInstance().acquireSlot(config.apiKey || '', estimatedTotalTokens);
 
       const stream = provider.chat(
         chatMessages,
@@ -217,16 +236,17 @@ export async function* callLLMWithRetry(
       let assistantText = '';
       const toolCallMap = new Map<string, { toolName: string; toolInput: Record<string, unknown> }>();
       let hadThink = false;
+      const attemptEvents: SSEEvent[] = [];
 
       for await (const event of stream) {
         switch (event.type) {
           case 'text_delta':
             assistantText += event.content || '';
-            yield { type: SSEEventType.Text, content: event.content || '' };
+            attemptEvents.push({ type: SSEEventType.Text, content: event.content || '' });
             break;
           case 'think_delta':
             hadThink = true;
-            yield { type: SSEEventType.Think, content: event.content || '' };
+            attemptEvents.push({ type: SSEEventType.Think, content: event.content || '' });
             break;
           case 'token_usage':
             // Real token usage from API — emit to TypedEventBus for monitoring/audit
@@ -249,7 +269,7 @@ export async function* callLLMWithRetry(
             };
             toolCallMap.set(key, merged);
             if (merged.toolName) {
-              yield { type: SSEEventType.ToolCall, id: key, name: merged.toolName, input: merged.toolInput };
+              attemptEvents.push({ type: SSEEventType.ToolCall, id: key, name: merged.toolName, input: merged.toolInput });
             }
             break;
           }
@@ -298,6 +318,11 @@ export async function* callLLMWithRetry(
         });
       }
 
+      // An interrupted provider stream may already have produced deltas. Only
+      // expose an attempt after it completed successfully so retries cannot
+      // leak or persist a partial assistant response.
+      for (const event of attemptEvents) yield event;
+
       return { assistantMessage, hadThinkContent: hadThink, fatalError: false };
     } catch (e: unknown) {
       const err = e instanceof Error ? e : new Error(String(e));
@@ -310,10 +335,8 @@ export async function* callLLMWithRetry(
         error: errMsg.slice(0, 200), attempt: attempt + 1, turn: config.turn,
       });
 
-      yield { type: SSEEventType.Error, errorMessage: `[Attempt ${attempt + 1}] ${errMsg.slice(0, 200)}`, code: 'API_ERROR' };
-
       // 413 / context too long → compact and retry
-      if (errMsg.includes('413') || errMsg.includes('too long') || errMsg.includes('context')) {
+      if (/413|too long|context/i.test(errMsg) && attempt < RETRY_MAX) {
         yield { type: SSEEventType.Think, content: '(Context too long, compressing and retrying...)' };
         const compaction = await compactAndRebuildMessages(messages, config.contextWindow, config.sessionId, 15, config.summarizer);
         if (!compaction.wasCompacted) {
@@ -324,7 +347,6 @@ export async function* callLLMWithRetry(
 
       // Permanent errors — don't retry
       if (UNRETRYABLE.some((r) => r.test(errMsg))) {
-        yield { type: SSEEventType.Error, errorMessage: `API Error: ${errMsg.slice(0, 200)}` };
         return { assistantMessage: null, hadThinkContent: false, fatalError: true, errorMessage: errMsg };
       }
 
@@ -340,6 +362,9 @@ export async function* callLLMWithRetry(
         }
         continue;
       }
+
+      // Preserve the existing best-effort retry for unknown transient errors.
+      if (attempt < RETRY_MAX) continue;
 
       createLogger('anochat.llm').warn('Unknown API error', {
         sid: config.sessionId, aid: config.agentId, model: config.modelName,

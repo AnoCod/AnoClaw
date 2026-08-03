@@ -82,6 +82,31 @@ export function estimateTokens(messages: ApiMessage[]): number {
 }
 
 /**
+ * Return durable session messages that have not been observed by this loop.
+ *
+ * Identity, rather than a message-count delta, is the durable cursor. Every
+ * unseen ID is recorded even when its role is not injected so that an older
+ * message excluded from the model context cannot be mistaken for a new one
+ * after another process appends to the session.
+ */
+export function collectUnseenMessages(
+  history: readonly Message[],
+  knownMessageIds: Set<string>,
+  allowedRoles: readonly ApiMessage['role'][],
+): Message[] {
+  const allowed = new Set<ApiMessage['role']>(allowedRoles);
+  const unseen: Message[] = [];
+
+  for (const message of history) {
+    if (!message.id || knownMessageIds.has(message.id)) continue;
+    knownMessageIds.add(message.id);
+    if (allowed.has(message.role as ApiMessage['role'])) unseen.push(message);
+  }
+
+  return unseen;
+}
+
+/**
  * Fallback truncation: keep system message + tail N messages, drop everything in between.
  * Used when compactAndRebuildMessages() fails to compact, as a last resort to reduce
  * context size before retrying an API call. Modifies the array in place.

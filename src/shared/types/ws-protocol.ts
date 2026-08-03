@@ -40,6 +40,7 @@ export interface WsClientMessage {
   parentSessionId?: string; // send_message: parent session for sub-session creation
   command?: string;       // run_command: command name e.g. "init", "clear"
   args?: Record<string, string>; // run_command: command arguments
+  sessionId?: string;     // routes session-scoped responses such as tool confirmations
   // editor_context: real-time editor state for prompt injection
   openFiles?: string[];    // paths of open tabs (max 20)
   activeFile?: string;     // currently focused file path

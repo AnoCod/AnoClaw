@@ -8,7 +8,7 @@ export const toolConfirmHandler: WsMessageHandler = async (ctx) => {
   const data = ctx.data;
   const toolCallId = data.toolCallId as string;
   const approved = data.approved === true;
-  if (toolCallId) {
-    ConfirmationRegistry.getInstance().resolve(toolCallId, approved);
+  if (ctx.sessionId && toolCallId) {
+    ConfirmationRegistry.getInstance().resolve(ctx.sessionId, toolCallId, approved);
   }
 };

@@ -9,7 +9,7 @@ import { loadAgentConfig, saveAgentConfig } from './AgentConfig.js';
 import { migrateCoordinationToolAllowlist } from './DefaultAgentTemplate.js';
 import type { OrgNode } from '../../../shared/types/agent.js';
 import { AgentRole, OrgRole } from '../../../shared/types/agent.js';
-import { AgentRegistryEvents } from '../../../shared/types/events.js';
+import { AgentEvents, AgentRegistryEvents } from '../../../shared/types/events.js';
 import { PATHS } from '../../../shared/constants.js';
 import { createLogger } from '../logger.js';
 import type { ILogger } from '../interfaces/ILogger.js';
@@ -73,6 +73,9 @@ export class AgentRegistry extends EventEmitter {
         sessionId,
         status,
       });
+    });
+    agent.on(AgentEvents.ConfigUpdated, () => {
+      this.emit(AgentRegistryEvents.OrgTreeChanged);
     });
 
     this.emit(AgentRegistryEvents.OrgTreeChanged);

@@ -25,6 +25,7 @@ import type {
 import type { SSEEvent } from '../../../shared/types/events.js';
 import { SSEEventType } from '../../../shared/types/events.js';
 import { AgentRegistry } from './AgentRegistry.js';
+import type { Agent } from './Agent.js';
 import { AgentStatus } from '../../../shared/types/agent.js';
 import { ToolRegistry } from '../tools/index.js';
 import { SessionManager } from '../session/index.js';
@@ -45,6 +46,7 @@ import { StallDetector } from './StallDetector.js';
 import { CoordinationService } from '../coordination/CoordinationService.js';
 import type { StallResult } from './StallDetector.js';
 import {
+  collectUnseenMessages,
   messageToApiMessage,
   selectHistoryForContext,
   truncateMessagesPreservingTask,
@@ -82,6 +84,38 @@ export interface AgentLoopConfig {
   extraAllowedTools?: string[];
   workspace?: string;
   systemPromptOverride?: string;
+}
+
+interface AgentModelConfigSnapshot {
+  provider: string;
+  modelName: string;
+  apiUrl: string;
+  apiKey: string;
+  contextWindow: number;
+  temperature: number;
+}
+
+function captureAgentModelConfig(agent: Agent): AgentModelConfigSnapshot {
+  return {
+    provider: agent.provider,
+    modelName: agent.modelName,
+    apiUrl: agent.apiUrl,
+    apiKey: agent.apiKey,
+    contextWindow: agent.contextWindow,
+    temperature: agent.temperature,
+  };
+}
+
+function sameAgentModelConfig(
+  left: AgentModelConfigSnapshot,
+  right: AgentModelConfigSnapshot,
+): boolean {
+  return left.provider === right.provider
+    && left.modelName === right.modelName
+    && left.apiUrl === right.apiUrl
+    && left.apiKey === right.apiKey
+    && left.contextWindow === right.contextWindow
+    && left.temperature === right.temperature;
 }
 
 
@@ -143,7 +177,7 @@ export class AgentLoop {
     }
 
     const registry = AgentRegistry.getInstance();
-    const agent = registry.agent(this.agentId);
+    let agent = registry.agent(this.agentId);
     if (!agent) {
       createLogger('anochat.agent').warn('AgentLoop: agent not found', { aid: this.agentId, sid: this.sessionId });
       yield { type: SSEEventType.Error, errorMessage: `Agent not found: ${this.agentId}` };
@@ -164,6 +198,9 @@ export class AgentLoop {
       apiUrl: agent.apiUrl,
       apiKey: agent.apiKey,
     });
+    let agentModelConfig = captureAgentModelConfig(agent);
+    let activeContextWindow = this.contextWindow;
+    let activeTemperature = this.temperature;
 
     const promptAssembler = PromptAssembler.getInstance();
     const promptBuildContext = () => ({
@@ -202,7 +239,7 @@ export class AgentLoop {
     createLogger('anochat.agent').debug('AgentLoop tools loaded', { sid: this.sessionId, toolCount: tools.length, toolNames: agentTools.map(t => t.name()), autoMode: this._isAutoMode() });
 
     const selectedHistory = selectHistoryForContext(history, {
-      contextWindow: this.contextWindow,
+      contextWindow: activeContextWindow,
       reservedTokens: TokenCounter.estimate(systemPrompt)
         + TokenCounter.estimate(JSON.stringify(tools))
         + TokenCounter.estimate(userMessage.content || ''),
@@ -275,8 +312,6 @@ export class AgentLoop {
     let lastCompactionTokenCount = 0;
     let skillNudgeTurn = 0;
     let postWait = false;
-    let consecutiveFatalErrors = 0;
-    const MAX_CONSECUTIVE_FATAL = 3;
     let consecutiveCompactFailures = 0;
     let consecutiveEmptyResponses = 0;
     const MAX_CONSECUTIVE_EMPTY = 3;
@@ -297,10 +332,9 @@ export class AgentLoop {
       const newAllowedNames = mergeAllowedToolNames(currentAgent.allowedTools(), this.extraAllowedTools);
       const allowedChanged = newAllowedNames.length !== allowedNames.length
         || newAllowedNames.some((n, i) => n !== allowedNames[i]);
-      if (allowedChanged || currentAgent.modelName !== agent.modelName
-        || currentAgent.provider !== agent.provider
-        || currentAgent.apiUrl !== agent.apiUrl
-        || currentAgent.apiKey !== agent.apiKey) {
+      const nextModelConfig = captureAgentModelConfig(currentAgent);
+      const modelConfigChanged = !sameAgentModelConfig(agentModelConfig, nextModelConfig);
+      if (allowedChanged || modelConfigChanged) {
         createLogger('anochat.agent').info('Agent config changed mid-loop, reloading tools', {
           sid: this.sessionId, aid: this.agentId,
           oldToolCount: allowedNames.length, newToolCount: newAllowedNames.length,
@@ -322,6 +356,12 @@ export class AgentLoop {
           apiUrl: currentAgent.apiUrl,
           apiKey: currentAgent.apiKey,
         });
+      }
+      agent = currentAgent;
+      agentModelConfig = nextModelConfig;
+      if (modelConfigChanged) {
+        activeContextWindow = currentAgent.contextWindow;
+        activeTemperature = currentAgent.temperature;
       }
 
 
@@ -381,15 +421,15 @@ export class AgentLoop {
         } else {
           const breakdown = TokenCounter.breakdown(
             systemPrompt, tools, '', messages.filter(m => m.role !== 'system') as unknown as Message[],
-            this.contextWindow,
+            activeContextWindow,
           );
           const estimatedTokens = breakdown.total;
-          const threshold = Math.floor(this.contextWindow * this._compressionTriggerRatio());
+          const threshold = Math.floor(activeContextWindow * this._compressionTriggerRatio());
 
           if (estimatedTokens > threshold) {
             createLogger('anochat.agent').info('Context compaction triggered', { sid: this.sessionId, estimatedTokens, threshold, turn });
             yield { type: SSEEventType.StatusInfo, content: 'Compacting context...' };
-            const compaction = await compactAndRebuildMessages(messages, this.contextWindow, this.sessionId, 15, summarizer);
+            const compaction = await compactAndRebuildMessages(messages, activeContextWindow, this.sessionId, 15, summarizer);
             if (compaction.wasCompacted) {
               consecutiveCompactFailures = 0;
               lastCompactionTokenCount = TokenCounter.estimateMessages(
@@ -524,14 +564,15 @@ export class AgentLoop {
       if (currentMsgCount > lastKnownMsgCount) {
         try {
           const fullHistory = await sessionManager.getHistory(this.sessionId);
-          const existingIds = new Set(messages.map(m => (m as any).__msgId).filter(Boolean));
-          const newExternalMessages = fullHistory
-            .filter(m => (m.role === 'system' || m.role === 'user') && !existingIds.has(m.id))
-            .slice(-(currentMsgCount - lastKnownMsgCount));
+          const newExternalMessages = collectUnseenMessages(
+            fullHistory,
+            sessionHistoryMessageIds,
+            ['system', 'user'],
+          );
 
           for (const msg of newExternalMessages) {
-            (msg as any).__msgId = msg.id;
             const pushRole = msg.role === 'system' ? 'system' : 'user';
+            contextMessageIds.add(msg.id);
             messages.push({
               role: pushRole,
               content: msg.content,
@@ -549,13 +590,13 @@ export class AgentLoop {
               count: newExternalMessages.length,
             });
           }
+          lastKnownMsgCount = currentMsgCount;
         } catch (err) {
           createLogger('anochat.agent').warn('Failed to check for new messages', {
             sid: this.sessionId,
             error: (err as Error).message,
           });
         }
-        lastKnownMsgCount = currentMsgCount;
       }
 
 
@@ -571,8 +612,8 @@ export class AgentLoop {
             apiUrl: agent.apiUrl,
             apiKey: agent.apiKey,
             agentContextWindow: agent.contextWindow,
-            temperature: this.temperature,
-            contextWindow: this.contextWindow,
+            temperature: activeTemperature,
+            contextWindow: activeContextWindow,
             turn,
             postWait,
             summarizer,
@@ -585,38 +626,17 @@ export class AgentLoop {
 
         postWait = false;
 
-        if (llmResult.fatalError) {
+        if (llmResult.fatalError || !llmResult.assistantMessage) {
           yield {
             type: SSEEventType.Error,
-            errorMessage: `Fatal: ${llmResult.errorMessage?.slice(0, 300) || 'API Error'}`,
+            errorMessage: `Fatal: ${llmResult.errorMessage?.slice(0, 300) || 'No response from LLM'}`,
           };
           break;
         }
 
         assistantMessage = llmResult.assistantMessage;
         hadThinkContent = llmResult.hadThinkContent;
-
-
-        if (!assistantMessage) {
-          consecutiveFatalErrors++;
-          if (consecutiveFatalErrors >= MAX_CONSECUTIVE_FATAL) {
-            yield {
-              type: SSEEventType.Error,
-              errorMessage: `Fatal: ${MAX_CONSECUTIVE_FATAL} consecutive API failures. Last error: ${llmResult.errorMessage?.slice(0, 200) || 'unknown'}`,
-            };
-            break;
-          }
-          yield { type: SSEEventType.Think, content: '(API error after retries, compressing and retrying once more...)' };
-          const compaction = await compactAndRebuildMessages(messages, this.contextWindow, this.sessionId, 8, summarizer);
-          if (!compaction.wasCompacted) {
-            truncateMessagesToTail(messages, 8);
-          }
-          continue;
-        }
       }
-
-
-      consecutiveFatalErrors = 0;
 
       // If signal was aborted during the API call, check for soft interrupt
       if (signal?.aborted) {
@@ -635,12 +655,6 @@ export class AgentLoop {
         break;
       }
 
-      // If no assistant message was produced, break out
-      if (!assistantMessage) {
-        yield { type: SSEEventType.Error, errorMessage: 'No response from LLM after all retries' };
-        break;
-      }
-
       // Append assistant message to transcript
       messages.push(assistantMessage);
 
@@ -656,6 +670,15 @@ export class AgentLoop {
         const textContent = assistantMessage.content || '';
         const hasNoContent = textContent.trim().length === 0;
 
+        if (hasNoContent && hadThinkContent && turn < maxTurns) {
+          consecutiveEmptyResponses = 0;
+          yield { type: SSEEventType.Think, content: '(Reasoning complete - requesting final answer)' };
+          messages.push({
+            role: 'user',
+            content: 'Please provide your final answer based on your reasoning above. Do not repeat the reasoning.',
+          });
+          continue;
+        }
 
         if (hasNoContent) {
           consecutiveEmptyResponses++;
@@ -678,7 +701,7 @@ export class AgentLoop {
               continue;
             } else if (stallCheck.action === 'compact') {
               yield { type: SSEEventType.StatusInfo, content: '(Compacting context to reorient...)' };
-              const compaction = await compactAndRebuildMessages(messages, this.contextWindow, this.sessionId, 15, summarizer);
+              const compaction = await compactAndRebuildMessages(messages, activeContextWindow, this.sessionId, 15, summarizer);
               if (compaction.wasCompacted) {
                 this.stallDetector.reset();
                 consecutiveEmptyResponses = 0;
@@ -710,17 +733,6 @@ export class AgentLoop {
         }
 
         createLogger('anochat.agent').debug('AgentLoop: no tool calls, finishing', { sid: this.sessionId, turn, textLen: assistantMessage.content?.length || 0 });
-        if (hadThinkContent && !assistantMessage.content && turn < this.maxTurns - 1) {
-          yield { type: SSEEventType.Think, content: '(Reasoning complete - requesting final answer)' };
-          messages.push({
-            role: 'user',
-            content: 'Please provide your final answer based on your reasoning above. Do not repeat the reasoning.',
-          });
-          hadThinkContent = false;
-          continue;
-        }
-
-
         // If this agent dispatched blocking background work (Bash run_in_background,
         // delegated Task work), don't exit the loop. Detached program launches
         // remain trackable but do not hold the conversation open.
@@ -868,7 +880,12 @@ export class AgentLoop {
             riskLevel: tool.riskLevel(args),
             params: args,
           });
-          const approved = await ConfirmationRegistry.getInstance().waitForConfirmation(tc.id, 60000, signal);
+          const approved = await ConfirmationRegistry.getInstance().waitForConfirmation(
+            this.sessionId,
+            tc.id,
+            60000,
+            signal,
+          );
           if (!approved) {
             userRejected = true;
             const currentGoal = activeGoal ? sessionManager.getGoal(this.sessionId) : null;
@@ -1074,19 +1091,27 @@ export class AgentLoop {
 
           const currentCount = sessionManager.getMessageCount(this.sessionId);
           if (currentCount > lastKnownMsgCount) {
-            const fullHistory = await sessionManager.getHistory(this.sessionId);
-            const existingIds = new Set(messages.map(m => (m as any).__msgId).filter(Boolean));
-            const newMessages = fullHistory
-              .filter(m => m.role === 'user' && !existingIds.has(m.id))
-              .slice(-(currentCount - lastKnownMsgCount));
-            if (newMessages.length > 0) {
-              for (const msg of newMessages) {
-                (msg as any).__msgId = msg.id;
-                messages.push({ role: 'user', content: msg.content, __msgId: msg.id } as unknown as ApiMessage);
-              }
+            try {
+              const fullHistory = await sessionManager.getHistory(this.sessionId);
+              const newMessages = collectUnseenMessages(
+                fullHistory,
+                sessionHistoryMessageIds,
+                ['user'],
+              );
               lastKnownMsgCount = currentCount;
-              this.stallDetector.reset();
-              break;
+              if (newMessages.length > 0) {
+                for (const msg of newMessages) {
+                  contextMessageIds.add(msg.id);
+                  messages.push({ role: 'user', content: msg.content, __msgId: msg.id } as unknown as ApiMessage);
+                }
+                this.stallDetector.reset();
+                break;
+              }
+            } catch (err) {
+              createLogger('anochat.agent').warn('Failed to load user response history', {
+                sid: this.sessionId,
+                error: (err as Error).message,
+              });
             }
           }
 
@@ -1143,7 +1168,7 @@ export class AgentLoop {
           } as unknown as ApiMessage);
         } else if (stallCheck.action === 'compact') {
           yield { type: SSEEventType.StatusInfo, content: '(Compacting context to reorient...)' };
-          const compaction = await compactAndRebuildMessages(messages, this.contextWindow, this.sessionId, 15, summarizer);
+          const compaction = await compactAndRebuildMessages(messages, activeContextWindow, this.sessionId, 15, summarizer);
           if (compaction.wasCompacted) {
             this.stallDetector.reset();
           } else {
@@ -1171,7 +1196,7 @@ export class AgentLoop {
     const breakdown = TokenCounter.breakdown(
       systemPrompt, tools, skillsText,
       messages.filter(m => m.role !== 'system') as unknown as Message[],
-      this.contextWindow,
+      activeContextWindow,
     );
     createLogger('anochat.agent').info('AgentLoop finished', {
       sid: this.sessionId, totalTurns: turn, maxTurns: this.maxTurns,

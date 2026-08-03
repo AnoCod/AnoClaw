@@ -33,6 +33,7 @@ describe('ToolConfirmationQueue', () => {
       type: 'tool_confirm_response',
       toolCallId: 'tc-auto-approved-bash',
       approved: false,
+      sessionId: 'goal-session',
     });
   });
 
@@ -60,6 +61,7 @@ describe('ToolConfirmationQueue', () => {
       type: 'tool_confirm_response',
       toolCallId: 'tc-bash',
       approved: false,
+      sessionId: 'regular-session',
     });
   });
 
@@ -104,6 +106,7 @@ describe('ToolConfirmationQueue', () => {
       type: 'tool_confirm_response',
       toolCallId: 'tc-bash',
       approved: true,
+      sessionId: 'regular-session',
     });
   });
 
@@ -132,6 +135,7 @@ describe('ToolConfirmationQueue', () => {
       type: 'tool_confirm_response',
       toolCallId: 'tc-edit',
       approved: true,
+      sessionId: 'regular-session',
     });
     expect(queue.snapshot).toEqual({ count: 0, first: null });
   });

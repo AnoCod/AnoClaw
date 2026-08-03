@@ -292,6 +292,10 @@ export class AgentRuntime extends EventEmitter {
       this._activeLoops.delete(sessionId);
       interruptController.removeController(sessionId);
       agent.clearSessionStatus(sessionId);
+      const currentAgent = registry.agent(agentId);
+      if (currentAgent && currentAgent !== agent) {
+        currentAgent.clearSessionStatus(sessionId);
+      }
       agent.adjustSessionCount(-1);
       SessionLeaseManager.getInstance().release(sessionId);
       await sessionManager.setRuntimeStatus(sessionId, 'Idle').catch(() => {});

@@ -14,6 +14,7 @@ import { ClientLogger } from '../../ClientLogger.js';
 import { ToastManager } from '../../ToastManager.js';
 import { handlePathClick } from '../../utils/ClickablePathHandler.js';
 import { getLocale, onLocaleChange, t } from '../../i18n/index.js';
+import { hasSendableComposerContent } from './InputPanelUtils.js';
 
 const SVG_ATTACH = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M9.5 4v7a3 3 0 1 1-6 0V4.5a2 2 0 0 1 4 0v6a1 1 0 0 1-2 0V4"/></svg>`;
 const SVG_ATTACHMENT_FILE = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>`;
@@ -109,6 +110,7 @@ export class InputPanel {
       this._renderGoalCard();
     });
     this._renderGoalCard();
+    this._syncSendAvailability();
 
     // Load slash command definitions from API, wire selection to textarea insertion
     loadCommandsFromApi().then(cmds => { this._commands = cmds; }).catch(() => {});
@@ -159,6 +161,7 @@ export class InputPanel {
         });
       }
       this._checkSlash();
+      this._syncSendAvailability();
     });
     ta.addEventListener('keydown', (e) => {
       if (this._slashPanel.isOpen) {
@@ -231,6 +234,7 @@ export class InputPanel {
     this._textarea.style.height = `${Math.min(this._textarea.scrollHeight, 200)}px`;
     this._textarea.focus();
     this._slashPanel.close();
+    this._syncSendAvailability();
   }
 
 
@@ -304,6 +308,7 @@ export class InputPanel {
     this._attachmentsBar.innerHTML = '';
     if (this._attachments.length === 0) {
       this._attachmentsBar.classList.remove('visible');
+      this._syncSendAvailability();
       return;
     }
     this._attachmentsBar.classList.add('visible');
@@ -341,6 +346,7 @@ export class InputPanel {
 
       this._attachmentsBar.appendChild(tag);
     }
+    this._syncSendAvailability();
   }
 
 
@@ -781,8 +787,10 @@ export class InputPanel {
 
   private _makeSendBtn(): HTMLButtonElement {
     const btn = document.createElement('button');
+    btn.type = 'button';
     btn.className = 'cinema-tool-btn is-primary';
     btn.textContent = t('composer.send');
+    btn.disabled = true;
     btn.addEventListener('click', () => this._fireSend());
     return btn;
   }
@@ -805,6 +813,7 @@ export class InputPanel {
     this._stopBtn.textContent = t('composer.stop');
     this._renderAttachments();
     this._renderGoalCard();
+    this._syncSendAvailability();
   }
 
 
@@ -819,6 +828,7 @@ export class InputPanel {
     this._modeSelector.element.style.display = v ? 'none' : '';
     // Subtle visual cue that agent is working, but keep input fully functional
     this._textarea.style.opacity = v ? '0.7' : '';
+    this._syncSendAvailability();
   }
 
 
@@ -832,6 +842,7 @@ export class InputPanel {
       this._textarea.value = '';
       this._textarea.style.height = 'auto';
       this._slashPanel.close();
+      this._syncSendAvailability();
       return;
     }
     // Re-read in case _tryRunSlashCommand rewrote the textarea (e.g. /init)
@@ -858,6 +869,7 @@ export class InputPanel {
       this._textarea.value = '';
       this._textarea.style.height = 'auto';
       this._slashPanel.close();
+      this._syncSendAvailability();
       if (this.onSend) {
         this.onSend(INIT_PROTOCOL_PROMPT, this._effectiveSendMode(), []);
       }
@@ -874,14 +886,31 @@ export class InputPanel {
   }
 
   focus(): void { this._textarea.focus(); }
-  setValue(val: string): void { this._textarea.value = val; this._textarea.style.height = 'auto'; this._textarea.style.height = `${Math.min(this._textarea.scrollHeight, 200)}px`; }
+  setValue(val: string): void {
+    this._textarea.value = val;
+    this._textarea.style.height = 'auto';
+    this._textarea.style.height = `${Math.min(this._textarea.scrollHeight, 200)}px`;
+    this._syncSendAvailability();
+  }
   restoreDraft(content: string, attachments: Attachment[]): void {
     this.setValue(content);
     this._attachments = [...attachments];
     this._renderAttachments();
   }
-  clear(): void { this._textarea.value = ''; this._textarea.style.height = 'auto'; }
+  clear(): void {
+    this._textarea.value = '';
+    this._textarea.style.height = 'auto';
+    this._syncSendAvailability();
+  }
   clearAttachments(): void { this._attachments = []; this._renderAttachments(); }
+
+  private _syncSendAvailability(): void {
+    const canSend = hasSendableComposerContent(this._textarea.value, this._attachments.length);
+    this._sendBtn.disabled = !canSend;
+    const label = canSend ? t('composer.sendShortcut') : t('composer.sendEmptyHint');
+    this._sendBtn.title = label;
+    this._sendBtn.setAttribute('aria-label', label);
+  }
 
   private _effectiveSendMode(): string {
     if (this._goal?.status === 'active') {
@@ -890,5 +919,3 @@ export class InputPanel {
     return this._currentMode;
   }
 }
-
-

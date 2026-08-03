@@ -31,6 +31,7 @@ import type { ToolActivityState } from '../conversation/delegates/ToolActivityDe
 import { ToolResultDelegate } from '../conversation/delegates/ToolResultDelegate.js';
 import { toolCardRegistry } from '../../ToolCardRegistry.js';
 import { SessionsPageOverfly } from './SessionsPageOverfly.js';
+import { isNearConversationBottom } from './SessionsPageUtils.js';
 import type { SessionAgent } from '../../viewmodel/SessionAgent.js';
 import { handlePathClick } from '../../utils/ClickablePathHandler.js';
 import { ToastManager } from '../../ToastManager.js';
@@ -47,6 +48,7 @@ export class SessionsPage implements Page {
   private _centerEl: HTMLElement;
   private _flowEl: HTMLElement;
   private _flowInner: HTMLElement;
+  private _jumpLatestButton: HTMLButtonElement;
   private _inputPanel: InputPanel;
   private _welcomeEl: HTMLElement;
   private _streamingDelegate: StreamingMessageDelegate | null = null;
@@ -164,6 +166,15 @@ export class SessionsPage implements Page {
       if (this._activeAgent) this._activeAgent.stopGeneration().catch(() => {});
     };
 
+    this._jumpLatestButton = document.createElement('button');
+    this._jumpLatestButton.type = 'button';
+    this._jumpLatestButton.className = 'cinema-jump-latest';
+    this._jumpLatestButton.textContent = t('session.jumpToLatest');
+    this._jumpLatestButton.title = t('session.jumpToLatest');
+    this._jumpLatestButton.setAttribute('aria-label', t('session.jumpToLatest'));
+    this._jumpLatestButton.hidden = true;
+    this._jumpLatestButton.addEventListener('click', () => this._jumpToLatest());
+
     // Listen for workspace-to-agent bridge events (Monaco right-click, file tree right-click)
     window.addEventListener('ws-ask-agent', ((e: CustomEvent) => {
       this._handleAskAgent(e.detail);
@@ -184,13 +195,19 @@ export class SessionsPage implements Page {
     }) as EventListener);
 
     this._centerEl.appendChild(this._flowEl);
+    this._centerEl.appendChild(this._jumpLatestButton);
     this._centerEl.appendChild(this._inputPanel.element);
 
     // Track user scroll to disable auto-scroll when reading history
     this._flowEl.addEventListener('scroll', () => {
       const el = this._flowEl;
-      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-      this._autoScroll = distFromBottom < this._scrollThreshold;
+      this._autoScroll = isNearConversationBottom(
+        el.scrollHeight,
+        el.scrollTop,
+        el.clientHeight,
+        this._scrollThreshold,
+      );
+      this._updateJumpLatestVisibility();
     });
 
     this.container.appendChild(this._leftBar.element);
@@ -350,6 +367,9 @@ export class SessionsPage implements Page {
 
   private _refreshLocale(): void {
     this._updateWelcome();
+    this._jumpLatestButton.textContent = t('session.jumpToLatest');
+    this._jumpLatestButton.title = t('session.jumpToLatest');
+    this._jumpLatestButton.setAttribute('aria-label', t('session.jumpToLatest'));
     refreshLocalizedElements(this._flowInner);
     AskUserQuestionCard.refreshLocale(this._flowInner);
     if (this._compactionOverlay) {
@@ -490,6 +510,7 @@ export class SessionsPage implements Page {
       if (this._streamStatusEl) { this._streamStatusEl.remove(); this._streamStatusEl = null; }
 
       this._answeredAskIds.clear();
+      this._resetAutoScroll();
       this._clearFlow();
       this._inputPanel.clear();
       this._inputPanel.clearAttachments?.();
@@ -599,6 +620,7 @@ export class SessionsPage implements Page {
     this._inputPanel.focus();
 
     if (activeId && this._activeSessionId !== activeId) {
+      this._resetAutoScroll();
       this._streamingDelegate = null;
       this._streamingEl = null;
       if (this._statusEl) { this._statusEl.remove(); this._statusEl = null; }
@@ -1208,6 +1230,7 @@ export class SessionsPage implements Page {
       cancelAnimationFrame(this._timelineRaf);
       this._timelineRaf = 0;
     }
+    this._jumpLatestButton.hidden = true;
     for (const child of Array.from(this._flowEl.children)) {
       if (child !== this._flowInner) child.remove();
     }
@@ -1279,12 +1302,28 @@ export class SessionsPage implements Page {
       this._scrollRaf = 0;
       if (!this._autoScroll) return; // re-check: user may have scrolled up since call
       this._flowEl.scrollTop = this._flowEl.scrollHeight;
+      this._updateJumpLatestVisibility();
     });
   }
 
   /** Force auto-scroll back on — called when user sends a new message. */
   private _resetAutoScroll(): void {
     this._autoScroll = true;
+    this._updateJumpLatestVisibility();
+  }
+
+  private _jumpToLatest(): void {
+    this._autoScroll = true;
+    if (this._scrollRaf) {
+      cancelAnimationFrame(this._scrollRaf);
+      this._scrollRaf = 0;
+    }
+    this._flowEl.scrollTop = this._flowEl.scrollHeight;
+    this._updateJumpLatestVisibility();
+  }
+
+  private _updateJumpLatestVisibility(): void {
+    this._jumpLatestButton.hidden = this._autoScroll;
   }
 }
 
@@ -1297,5 +1336,3 @@ function safeParseJson(value: unknown): any {
     return {};
   }
 }
-
-

@@ -83,6 +83,27 @@
   letter-spacing: 0.01em;
 }
 
+.edge-sidebar-heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.edge-sidebar-count {
+  min-width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  padding: 0 5px;
+  border: 1px solid var(--hairline-cinema);
+  border-radius: 999px;
+  color: var(--cinema-text-muted);
+  font-size: 9px;
+  line-height: 16px;
+  text-align: center;
+  flex: 0 0 auto;
+}
+
 .edge-sidebar-actions {
   display: flex;
   align-items: center;
@@ -171,11 +192,32 @@
 }
 
 .edge-session-empty {
-  padding: 28px 10px;
-  color: var(--cinema-text-muted);
+  padding: 30px 12px;
   font-size: 10px;
   line-height: 1.5;
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+
+.edge-session-empty-title {
+  color: var(--cinema-text-overlay);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.edge-session-empty-description {
+  max-width: 190px;
+  color: var(--cinema-text-muted);
+}
+
+.edge-search-summary {
+  padding: 2px 8px 7px;
+  color: var(--cinema-text-muted);
+  font-size: 9px;
+  line-height: 1.4;
 }
 
 .session-tree-node {
@@ -427,7 +469,7 @@
   flex-direction: column;
 }
 
-.cinema-edge-left.is-collapsed .edge-sidebar-title {
+.cinema-edge-left.is-collapsed .edge-sidebar-heading {
   display: none;
 }
 
@@ -463,6 +505,35 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+}
+
+.cinema-jump-latest {
+  align-self: center;
+  min-height: 30px;
+  margin: 0 auto 8px;
+  padding: 0 12px;
+  border: 1px solid var(--hairline-cinema-bar);
+  border-radius: 999px;
+  background: var(--cinema-bg-raised);
+  color: var(--cinema-text-btn);
+  font: 10px/1 var(--font-sans);
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+}
+
+.cinema-jump-latest:hover {
+  border-color: var(--cinema-text-muted);
+  background: var(--cinema-bg-hover);
+  color: var(--cinema-text-btn-hover);
+}
+
+.cinema-jump-latest:focus-visible {
+  outline: 2px solid var(--color-primary, #0b8ce9);
+  outline-offset: 2px;
+}
+
+.cinema-jump-latest[hidden] {
+  display: none;
 }
 
 /* ========================================

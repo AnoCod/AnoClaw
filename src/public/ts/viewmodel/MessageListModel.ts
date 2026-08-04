@@ -68,6 +68,12 @@ export class MessageListModel extends EventEmitter {
     }
   }
 
+  /** Atomically restore a previously captured list without replaying row events. */
+  replaceAll(messages: readonly Message[]): void {
+    this._messages = [...messages];
+    this.emit('modelReset');
+  }
+
   /** Find index of a message by id */
   indexOf(id: string): number {
     return this._messages.findIndex((m) => m.id === id);

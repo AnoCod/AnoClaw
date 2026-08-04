@@ -6,6 +6,16 @@
 import { MessageListModel } from './MessageListModel.js';
 import type { Message, TokenBreakdown } from '../types.js';
 
+export interface LlmAttemptSnapshot {
+  attemptId: string;
+  messages: Message[];
+  isStreaming: boolean;
+  currentStreamMessage: string;
+  streamMsgId: string | null;
+  thinkStartTime: number;
+  currentThinkMsgId: string | null;
+}
+
 export class SessionState {
   readonly sessionId: string;
   messages: MessageListModel = new MessageListModel();
@@ -17,6 +27,7 @@ export class SessionState {
   /** @internal */ thinkStartTime: number = 0;
   /** @internal */ currentThinkMsg: Message | null = null;
   /** @internal */ generationSeq: number = 0;
+  /** @internal */ llmAttemptSnapshot: LlmAttemptSnapshot | null = null;
 
   /** Abort controller for in-flight loadHistory. Cancel old when new load arrives. */
   loadAbortController: AbortController | null = null;

@@ -195,6 +195,7 @@ export async function* callLLMWithRetry(
       if (signal?.aborted) break;
     }
 
+    let activeAttemptId: string | null = null;
     try {
       apiStartMs = Date.now();
       createLogger('anochat.llm').debug('LLM API call starting', {
@@ -236,17 +237,18 @@ export async function* callLLMWithRetry(
       let assistantText = '';
       const toolCallMap = new Map<string, { toolName: string; toolInput: Record<string, unknown> }>();
       let hadThink = false;
-      const attemptEvents: SSEEvent[] = [];
+      activeAttemptId = `llm-${config.turn}-${attempt + 1}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      yield { type: SSEEventType.LlmAttemptStart, attemptId: activeAttemptId };
 
       for await (const event of stream) {
         switch (event.type) {
           case 'text_delta':
             assistantText += event.content || '';
-            attemptEvents.push({ type: SSEEventType.Text, content: event.content || '' });
+            yield { type: SSEEventType.Text, content: event.content || '', attemptId: activeAttemptId };
             break;
           case 'think_delta':
             hadThink = true;
-            attemptEvents.push({ type: SSEEventType.Think, content: event.content || '' });
+            yield { type: SSEEventType.Think, content: event.content || '', attemptId: activeAttemptId };
             break;
           case 'token_usage':
             // Real token usage from API — emit to TypedEventBus for monitoring/audit
@@ -269,7 +271,13 @@ export async function* callLLMWithRetry(
             };
             toolCallMap.set(key, merged);
             if (merged.toolName) {
-              attemptEvents.push({ type: SSEEventType.ToolCall, id: key, name: merged.toolName, input: merged.toolInput });
+              yield {
+                type: SSEEventType.ToolCall,
+                id: key,
+                name: merged.toolName,
+                input: merged.toolInput,
+                attemptId: activeAttemptId,
+              };
             }
             break;
           }
@@ -318,13 +326,15 @@ export async function* callLLMWithRetry(
         });
       }
 
-      // An interrupted provider stream may already have produced deltas. Only
-      // expose an attempt after it completed successfully so retries cannot
-      // leak or persist a partial assistant response.
-      for (const event of attemptEvents) yield event;
+      yield { type: SSEEventType.LlmAttemptCommit, attemptId: activeAttemptId };
+      activeAttemptId = null;
 
       return { assistantMessage, hadThinkContent: hadThink, fatalError: false };
     } catch (e: unknown) {
+      if (activeAttemptId) {
+        yield { type: SSEEventType.LlmAttemptRollback, attemptId: activeAttemptId };
+        activeAttemptId = null;
+      }
       const err = e instanceof Error ? e : new Error(String(e));
       const errMsg = err.message || '';
       lastErr = err;

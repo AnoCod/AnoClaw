@@ -57,6 +57,63 @@ export function findMessageById(agent: SessionAgent, id: string): Message | unde
   return agent.state.messages.messages.find(m => m.id === id);
 }
 
+function restoreAttemptSnapshot(agent: SessionAgent): boolean {
+  const s = agent.state;
+  const snapshot = s.llmAttemptSnapshot;
+  if (!snapshot) return false;
+  const restoredMessages = snapshot.messages.map(message => ({ ...message }));
+  s.messages.replaceAll(restoredMessages);
+  s.isStreaming = snapshot.isStreaming;
+  s.currentStreamMessage = snapshot.currentStreamMessage;
+  s.streamMsgId = snapshot.streamMsgId;
+  s.thinkStartTime = snapshot.thinkStartTime;
+  s.currentThinkMsg = snapshot.currentThinkMsgId
+    ? restoredMessages.find(message => message.id === snapshot.currentThinkMsgId) || null
+    : null;
+  s.llmAttemptSnapshot = null;
+  return true;
+}
+
+function captureAttemptSnapshot(agent: SessionAgent, attemptId: string): void {
+  const s = agent.state;
+  s.llmAttemptSnapshot = {
+    attemptId,
+    messages: s.messages.messages.map(message => ({ ...message })),
+    isStreaming: s.isStreaming,
+    currentStreamMessage: s.currentStreamMessage,
+    streamMsgId: s.streamMsgId,
+    thinkStartTime: s.thinkStartTime,
+    currentThinkMsgId: s.currentThinkMsg?.id || null,
+  };
+}
+
+/** Capture browser state before provisional provider output starts. */
+export function onLlmAttemptStart(agent: SessionAgent, attemptId: string): void {
+  if (!attemptId) return;
+  const s = agent.state;
+  if (s.llmAttemptSnapshot?.attemptId === attemptId) return;
+  restoreAttemptSnapshot(agent);
+  captureAttemptSnapshot(agent, attemptId);
+}
+
+/** Accept the live state once the provider stream completed successfully. */
+export function onLlmAttemptCommit(agent: SessionAgent, attemptId: string): void {
+  if (agent.state.llmAttemptSnapshot?.attemptId === attemptId) {
+    agent.state.llmAttemptSnapshot = null;
+  }
+}
+
+/** Restore the exact pre-attempt browser state and request a deterministic rerender. */
+export function onLlmAttemptRollback(agent: SessionAgent, attemptId: string): void {
+  if (agent.state.llmAttemptSnapshot?.attemptId !== attemptId) return;
+  const wasStreaming = agent.state.isStreaming;
+  if (restoreAttemptSnapshot(agent)) {
+    agent.emit('attemptRolledBack', { attemptId });
+    if (wasStreaming && !agent.state.isStreaming) agent.emit('streamingStopped');
+    if (!wasStreaming && agent.state.isStreaming) agent.emit('streamingStarted');
+  }
+}
+
 /** Remove the inline status indicator card from the message list. */
 export function removeStatusCard(agent: SessionAgent): void {
   const idx = agent.state.messages.indexOf('status-indicator');
@@ -165,6 +222,7 @@ export function onToolResult(agent: SessionAgent, id: string, name: string, cont
 /** Handle a 'done' event: stop streaming, finalize think/text, update token breakdown. */
 export function onDone(agent: SessionAgent, tokenUsage?: TokenBreakdown): void {
   const s = agent.state;
+  s.llmAttemptSnapshot = null;
   if (!s.isStreaming) return;
   s.isStreaming = false;
   finalizeThink(agent);
@@ -189,8 +247,14 @@ export function onError(agent: SessionAgent, data: { message?: string; code?: st
     ClientLogger.vm.debug('Ignoring non-fatal error', { code: data.code, message: message.slice(0, 80) });
     return;
   }
+  const wasStreamingBeforeRollback = agent.state.isStreaming;
+  const failedAttemptId = agent.state.llmAttemptSnapshot?.attemptId || '';
+  const restoredAttempt = restoreAttemptSnapshot(agent);
+  if (restoredAttempt) agent.emit('attemptRolledBack', { attemptId: failedAttemptId });
+  if (restoredAttempt && wasStreamingBeforeRollback && !agent.state.isStreaming) {
+    agent.emit('streamingStopped');
+  }
   if (!agent.state.isStreaming) {
-
     const fatalMsg: Message = {
       id: generateId(), sessionId: agent.sessionId, type: 'error',
       content: message || t('runtime.message.apiFailed'),
@@ -202,6 +266,7 @@ export function onError(agent: SessionAgent, data: { message?: string; code?: st
     return;
   }
   agent.state.isStreaming = false;
+  agent.state.llmAttemptSnapshot = null;
   agent.state.streamMsgId = null;
   finalizeThink(agent);
 
@@ -475,6 +540,9 @@ export class SessionAgent extends EventEmitter {
     this.state.generationSeq++;
     try {
       switch (eventType) {
+        case 'llm_attempt_start': onLlmAttemptStart(this, String(data.attemptId || '')); break;
+        case 'llm_attempt_commit': onLlmAttemptCommit(this, String(data.attemptId || '')); break;
+        case 'llm_attempt_rollback': onLlmAttemptRollback(this, String(data.attemptId || '')); break;
         case 'think': onThink(this, data.content as string, data.durationMs as number | undefined); break;
         case 'text': onText(this, data.content as string); break;
         case 'tool_call': onToolCall(
@@ -633,11 +701,15 @@ export class SessionAgent extends EventEmitter {
     ClientLogger.vm.debug('Stopping generation', { sid: this.sessionId });
     if (!this._sessionVM) return;
     this._sessionVM.getWSClient().stopGeneration(this.sessionId);
+    const stoppedAttemptId = this.state.llmAttemptSnapshot?.attemptId || '';
+    const restoredAttempt = restoreAttemptSnapshot(this);
     this.state.isStreaming = false;
     this.state.streamMsgId = null;
+    this.state.llmAttemptSnapshot = null;
     finalizeThink(this);
     this.state.generationSeq++;
     removeStatusCard(this);
+    if (restoredAttempt) this.emit('attemptRolledBack', { attemptId: stoppedAttemptId });
     this.emit('streamingStopped');
   }
 
@@ -670,6 +742,7 @@ export class SessionAgent extends EventEmitter {
       }
 
       const wasStreaming = s.isStreaming;
+      const activeAttemptId = s.llmAttemptSnapshot?.attemptId || null;
       // Apply the fetched snapshot atomically only after it is known to be current.
       s.messages.clear();
       s.isStreaming = data.isStreaming === true;
@@ -677,6 +750,7 @@ export class SessionAgent extends EventEmitter {
       s.tokenBreakdown = null;
       s.streamMsgId = null;
       s.currentThinkMsg = null;
+      s.llmAttemptSnapshot = null;
       this.emit('reset');
 
       // Ingest stored messages one by one, handling flat/structured formats.
@@ -692,6 +766,12 @@ export class SessionAgent extends EventEmitter {
             || (((data.tokenBreakdown.total as number) || 0) + ((data.tokenBreakdown.freeSpace as number) || 0)),
           freeSpace: (data.tokenBreakdown.freeSpace as number) || 0,
         };
+      }
+      // A session switch can refresh durable history while a provider attempt
+      // is paused between deltas. Rebase its rollback point onto that durable
+      // snapshot so a later failed delta cannot become permanent UI state.
+      if (s.isStreaming && activeAttemptId) {
+        captureAttemptSnapshot(this, activeAttemptId);
       }
       ClientLogger.vm.debug('Conversation history loaded', { sid: this.sessionId, messageCount: (data.messages || []).length });
       this.emit('historyLoaded', { sessionId: this.sessionId });
@@ -889,8 +969,11 @@ export class SessionAgent extends EventEmitter {
   /** Handle WS disconnection mid-stream: stop streaming, show error card. */
   onConnectionLost(): void {
     if (!this.state.isStreaming) return;
+    const disconnectedAttemptId = this.state.llmAttemptSnapshot?.attemptId || '';
+    const restoredAttempt = restoreAttemptSnapshot(this);
     this.state.isStreaming = false;
     this.state.streamMsgId = null;
+    this.state.llmAttemptSnapshot = null;
     finalizeThink(this);
     this._sendingLock = false;
     this.state.generationSeq++;
@@ -900,6 +983,7 @@ export class SessionAgent extends EventEmitter {
       content: t('runtime.ws.connectionLost'), timestamp: Date.now(),
       agentId: this.agentId,
     };
+    if (restoredAttempt) this.emit('attemptRolledBack', { attemptId: disconnectedAttemptId });
     this.state.messages.appendMessage(msg);
     this.emit('messageAdded', msg);
     this.emit('streamingStopped');
@@ -913,6 +997,7 @@ export class SessionAgent extends EventEmitter {
     s.currentStreamMessage = '';
     s.streamMsgId = null;
     s.currentThinkMsg = null;
+    s.llmAttemptSnapshot = null;
     s.tokenBreakdown = null;
     s.generationSeq++;
     this.emit('reset');

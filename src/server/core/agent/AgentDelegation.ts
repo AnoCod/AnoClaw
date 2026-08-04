@@ -20,6 +20,7 @@ import type { SSEEvent } from '../../../shared/types/events.js';
 import { SSEEventType } from '../../../shared/types/events.js';
 import { AgentRegistry } from './AgentRegistry.js';
 import { Agent } from './Agent.js';
+import { AttemptEventBuffer } from './AttemptEventBuffer.js';
 import { SessionManager } from '../session/index.js';
 import { createLogger } from '../logger.js';
 import { TypedEventBus } from '../events/index.js';
@@ -189,45 +190,48 @@ export async function handleSubAgentOutput(
   state: DelegationState,
 ): Promise<void> {
   let errorMessage = '';
+  const committedEvents = new AttemptEventBuffer();
 
-  for await (const event of eventStream) {
-    // ── 0. Detect errors ──
-    if (event.type === SSEEventType.Error) {
-      const raw = event as Record<string, unknown>;
-      errorMessage = String(raw.errorMessage || raw.message || 'Unknown error');
-      state.fullContent += `[ERROR] ${errorMessage}`;
+  for await (const rawEvent of eventStream) {
+    // ── 0. Per-event persistence to sub-session JSONL ──
+    await recorder.record(rawEvent, 'delegation');
+
+    // ── 1. Aggregate and bubble only committed attempt output ──
+    for (const event of committedEvents.consume(rawEvent)) {
+      if (event.type === SSEEventType.Error) {
+        const raw = event as Record<string, unknown>;
+        errorMessage = String(raw.errorMessage || raw.message || 'Unknown error');
+        state.fullContent += `[ERROR] ${errorMessage}`;
+      }
+
+      if (event.type === SSEEventType.Text) {
+        state.fullContent += (event.content as string) || '';
+      } else if (event.type === SSEEventType.ToolCall) {
+        state.currentTool = (event.toolName || event.name || '') as string;
+        state.turnCount++;
+        emitDelegationStatus(runtime, parentSessionId, subSessionId, subAgentId, {
+          phase: 'tool_executing',
+          taskSummary,
+          turnCount: state.turnCount,
+          currentTool: state.currentTool,
+          elapsedMs: Date.now() - startedAt,
+        });
+      } else if (event.type === SSEEventType.ToolResult) {
+        state.currentTool = undefined;
+      } else if (event.type === SSEEventType.Think) {
+        state.thinking += (event.content || '') as string;
+      }
+
+      bubbleEventToParent(runtime, parentSessionId, subSessionId, subAgentId, event);
     }
 
-    // ── 1. Collect results ──
-    if (event.type === SSEEventType.Text) {
-      state.fullContent += (event.content as string) || '';
-    } else if (event.type === 'tool_call') {
-      state.currentTool = (event.toolName || event.name || '') as string;
-      state.turnCount++;
-      // Emit tool_executing status
-      emitDelegationStatus(runtime, parentSessionId, subSessionId, subAgentId, {
-        phase: 'tool_executing',
-        taskSummary,
-        turnCount: state.turnCount,
-        currentTool: state.currentTool,
-        elapsedMs: Date.now() - startedAt,
-      });
-    } else if (event.type === 'tool_result') {
-      state.currentTool = undefined;
-    } else if (event.type === 'think') {
-      state.thinking += (event.content || '') as string;
-    }
-
-    // ── 2. Per-event persistence to sub-session JSONL ──
-    await recorder.record(event, 'delegation');
-
-    // ── 3. Bubble to parent WS ──
-    bubbleEventToParent(runtime, parentSessionId, subSessionId, subAgentId, event);
-
-    // ── 4. Forward to sub-session WS so user sees live streaming when viewing sub-session ──
-    const FORWARD_TYPES = new Set(['text', 'think', 'tool_call', 'tool_result', 'status_info', 'error']);
-    if (FORWARD_TYPES.has(event.type)) {
-      WsServer.getInstance().send(subSessionId, event as unknown as Record<string, unknown>);
+    // ── 2. Forward raw attempt events so sub-session viewing stays live ──
+    const FORWARD_TYPES = new Set([
+      'text', 'think', 'tool_call', 'tool_result', 'status_info', 'error',
+      'llm_attempt_start', 'llm_attempt_commit', 'llm_attempt_rollback',
+    ]);
+    if (FORWARD_TYPES.has(rawEvent.type)) {
+      WsServer.getInstance().send(subSessionId, rawEvent as unknown as Record<string, unknown>);
     }
   }
 }
@@ -489,6 +493,7 @@ export async function spawnSubAgent(
   let fullContent = '';
   let turnCount = 0;
   let tokenUsage = 0;
+  const committedEvents = new AttemptEventBuffer();
 
   try {
     for await (const event of runtime.processMessage(
@@ -502,22 +507,24 @@ export async function spawnSubAgent(
         ...(forkedSystemPrompt ? { systemPromptOverride: forkedSystemPrompt } : {}),
       },
     )) {
-      if (event.type === SSEEventType.Text) {
-        fullContent += (event.content as string) || '';
-      }
-      if (event.type === 'tool_call') {
-        turnCount++;
-      }
-      if (event.type === SSEEventType.Done) {
-        tokenUsage = Number((event.tokenUsage as { total?: number } | undefined)?.total || 0);
-      }
-      // ── Bubble progress to parent ──
-      if (parentSessionId && BUBBLE_TYPES.has(event.type)) {
-        bubbleEventToParent(runtime, parentSessionId, subSessionId, tempId, event);
-      }
       // ── Persist events to JSONL if session is real ──
       if (recorder) {
         await recorder.record(event, 'subagent');
+      }
+      for (const committedEvent of committedEvents.consume(event)) {
+        if (committedEvent.type === SSEEventType.Text) {
+          fullContent += (committedEvent.content as string) || '';
+        }
+        if (committedEvent.type === SSEEventType.ToolCall) {
+          turnCount++;
+        }
+        if (committedEvent.type === SSEEventType.Done) {
+          tokenUsage = Number((committedEvent.tokenUsage as { total?: number } | undefined)?.total || 0);
+        }
+        // ── Bubble committed progress to parent ──
+        if (parentSessionId && BUBBLE_TYPES.has(committedEvent.type)) {
+          bubbleEventToParent(runtime, parentSessionId, subSessionId, tempId, committedEvent);
+        }
       }
     }
     if (coordinationTimeoutError) throw new Error(coordinationTimeoutError);

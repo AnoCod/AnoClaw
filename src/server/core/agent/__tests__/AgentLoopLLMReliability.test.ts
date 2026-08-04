@@ -50,7 +50,7 @@ async function collect(
 }
 
 describe('callLLMWithRetry reliability', () => {
-  it('discards streamed deltas from a failed attempt before retrying', async () => {
+  it('streams a failed attempt live, rolls it back, and commits the retry', async () => {
     vi.useFakeTimers();
     let attempts = 0;
     extensionPoints.register('llmProvider', OWNER, () => ({
@@ -79,10 +79,70 @@ describe('callLLMWithRetry reliability', () => {
 
     expect(attempts).toBe(2);
     expect(events.filter(event => event.type === SSEEventType.Text).map(event => event.content))
-      .toEqual(['complete']);
+      .toEqual(['partial-', 'complete']);
+    const starts = events.filter(event => event.type === SSEEventType.LlmAttemptStart);
+    const rollbacks = events.filter(event => event.type === SSEEventType.LlmAttemptRollback);
+    const commits = events.filter(event => event.type === SSEEventType.LlmAttemptCommit);
+    expect(starts).toHaveLength(2);
+    expect(rollbacks).toEqual([
+      expect.objectContaining({ attemptId: starts[0]?.attemptId }),
+    ]);
+    expect(commits).toEqual([
+      expect.objectContaining({ attemptId: starts[1]?.attemptId }),
+    ]);
     expect(events.some(event => event.type === SSEEventType.Error)).toBe(false);
     expect(result.assistantMessage?.content).toBe('complete');
     expect(result.fatalError).toBe(false);
+  });
+
+  it('yields a text delta before the provider stream completes', async () => {
+    let releaseStream!: () => void;
+    const streamGate = new Promise<void>((resolve) => { releaseStream = resolve; });
+    extensionPoints.register('llmProvider', OWNER, () => ({
+      async *chat(): AsyncGenerator<LLMStreamEvent> {
+        yield { type: 'text_delta', content: 'live-now' };
+        await streamGate;
+        yield { type: 'done' };
+      },
+      cancel(): void {},
+      providerName(): string { return 'test'; },
+    }));
+
+    const generator = callLLMWithRetry(
+      makeConfig({ postWait: true }),
+      [{ role: 'system', content: 'system' }, { role: 'user', content: 'hello' }],
+      'system',
+      [],
+      undefined,
+    );
+
+    const start = await generator.next();
+    const liveDelta = await generator.next();
+    const startEvent = start.value as SSEEvent;
+    expect(startEvent).toEqual(expect.objectContaining({ type: SSEEventType.LlmAttemptStart }));
+    expect(liveDelta.value).toEqual(expect.objectContaining({
+      type: SSEEventType.Text,
+      content: 'live-now',
+      attemptId: startEvent.attemptId,
+    }));
+
+    let completedEarly = false;
+    const pendingCommit = generator.next().then((step) => {
+      completedEarly = true;
+      return step;
+    });
+    await Promise.resolve();
+    expect(completedEarly).toBe(false);
+
+    releaseStream();
+    const commit = await pendingCommit;
+    expect(commit.value).toEqual(expect.objectContaining({
+      type: SSEEventType.LlmAttemptCommit,
+      attemptId: startEvent.attemptId,
+    }));
+    const completed = await generator.next();
+    expect(completed.done).toBe(true);
+    expect((completed.value as LLMCallResult).assistantMessage?.content).toBe('live-now');
   });
 
   it('passes a completion budget bounded by the configured context window', async () => {

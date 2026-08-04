@@ -293,6 +293,15 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
 
     for await (const event of runtime.processMessage(effectiveSessionId, agentId, userMessage, fullHistory, loopOptions)) {
       switch (event.type) {
+        case WsMessageType.LlmAttemptStart:
+          await consumer.beginAttempt(event as unknown as Record<string, unknown>);
+          break;
+        case WsMessageType.LlmAttemptCommit:
+          await consumer.commitAttempt(event as unknown as Record<string, unknown>);
+          break;
+        case WsMessageType.LlmAttemptRollback:
+          await consumer.rollbackAttempt(event as unknown as Record<string, unknown>);
+          break;
         case 'text':
           consumer.onDelta('text', event.content as string);
           break;
@@ -334,6 +343,7 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
   } catch (err) {
     if (statusInterval) clearInterval(statusInterval);
     const errorMessage = `Agent error: ${(err as Error).message}`;
+    await consumer.rollbackActiveAttempt().catch(() => {});
     await recorder.recordError(errorMessage, 'send_message_handler').catch(() => {});
     await recorder.finalize().catch(() => {});
     ctx.ws.send(effectiveSessionId, {

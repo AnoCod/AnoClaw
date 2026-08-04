@@ -89,6 +89,18 @@ export class SessionsPage implements Page {
   private _onStreamingStarted = () => { this._hideWelcome(); this._resetAutoScroll(); this._inputPanel.setStreaming(true); this._startStreamingCard(); };
   private _onStreamToken = (token: string) => this._appendToken(token);
   private _onStreamingStopped = () => this._finalizeStreaming();
+  private _onAttemptRolledBack = () => {
+    const agent = this._activeAgent;
+    if (!agent) return;
+    this._renderHistory();
+    this._inputPanel.setStreaming(agent.state.isStreaming);
+    if (!agent.state.isStreaming) return;
+    if (agent.state.streamMsgId) this._removeCard(agent.state.streamMsgId);
+    this._startStreamingCard();
+    if (agent.state.currentStreamMessage) {
+      this._streamingDelegate?.setContent(agent.state.currentStreamMessage);
+    }
+  };
   private _onTextFinalized = (data: any) => { this._appendCard(data); if (this._streamingDelegate && this._streamingEl) this._streamingDelegate.setContent(''); };
   private _onMessageAdded = (data: any) => this._appendCard(data);
   private _onMessageUpdated = (data: any) => this._updateCard(data);
@@ -417,6 +429,7 @@ export class SessionsPage implements Page {
     agent.on('streamingStarted', this._onStreamingStarted);
     agent.on('streamToken', this._onStreamToken);
     agent.on('streamingStopped', this._onStreamingStopped);
+    agent.on('attemptRolledBack', this._onAttemptRolledBack);
     agent.on('textSegmentFinalized', this._onTextFinalized);
     agent.on('messageAdded', this._onMessageAdded);
     agent.on('messageUpdated', this._onMessageUpdated);
@@ -434,6 +447,7 @@ export class SessionsPage implements Page {
     this._activeAgent.off('streamingStarted', this._onStreamingStarted);
     this._activeAgent.off('streamToken', this._onStreamToken);
     this._activeAgent.off('streamingStopped', this._onStreamingStopped);
+    this._activeAgent.off('attemptRolledBack', this._onAttemptRolledBack);
     this._activeAgent.off('textSegmentFinalized', this._onTextFinalized);
     this._activeAgent.off('messageAdded', this._onMessageAdded);
     this._activeAgent.off('messageUpdated', this._onMessageUpdated);

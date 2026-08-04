@@ -15,27 +15,29 @@ export interface StreamConsumerOptions {
   freshFinalAfterMs?: number;
 }
 
+interface StreamPersisterLike {
+  bufferDelta: (type: 'text' | 'think', content: string) => void;
+  flushDeltas: () => Promise<void>;
+  finalize?: () => Promise<void>;
+  beginAttempt: (attemptId: string) => Promise<void>;
+  commitAttempt: (attemptId: string) => Promise<void>;
+  rollbackAttempt: (attemptId: string) => void | Promise<void>;
+}
+
 export class StreamConsumer {
   private _textBuffer = '';
   private _thinkBuffer = '';
   private _flushTimer: ReturnType<typeof setTimeout> | null = null;
   private _firstTokenAt = 0;
   private _freshFinalSent = false;
+  private _activeAttemptId: string | null = null;
   private _options: Required<StreamConsumerOptions>;
-  private _persister: {
-    bufferDelta: (type: 'text' | 'think', content: string) => void;
-    flushDeltas: () => Promise<void>;
-    finalize?: () => Promise<void>;
-  };
+  private _persister: StreamPersisterLike;
 
   constructor(
     private _transport: Transport,
     private _sessionId: string,
-    persister: {
-      bufferDelta: (type: 'text' | 'think', content: string) => void;
-      flushDeltas: () => Promise<void>;
-      finalize?: () => Promise<void>;
-    },
+    persister: StreamPersisterLike,
     options?: StreamConsumerOptions,
   ) {
     this._options = {
@@ -55,7 +57,7 @@ export class StreamConsumer {
     if (this._firstTokenAt === 0) this._firstTokenAt = Date.now();
 
     // Trigger flush: either buffer exceeded threshold, or schedule timer
-    if (this._textBuffer.length >= this._options.bufferThreshold) {
+    if (this._textBuffer.length + this._thinkBuffer.length >= this._options.bufferThreshold) {
       this._flush();
     } else if (!this._flushTimer) {
       this._flushTimer = setTimeout(() => this._flush(), this._options.editIntervalMs);
@@ -103,6 +105,44 @@ export class StreamConsumer {
     await this._persister.flushDeltas();
   }
 
+  /** Begin an LLM attempt while preserving all preceding committed output. */
+  async beginAttempt(event: Record<string, unknown>): Promise<void> {
+    const attemptId = String(event.attemptId || '');
+    if (!attemptId) return;
+    this._flush();
+    await this._persister.flushDeltas();
+    await this._persister.beginAttempt(attemptId);
+    this._activeAttemptId = attemptId;
+    this._transport.send(this._sessionId, event);
+  }
+
+  /** Commit provisional persistence before telling the browser it is final. */
+  async commitAttempt(event: Record<string, unknown>): Promise<void> {
+    const attemptId = String(event.attemptId || '');
+    if (!attemptId || this._activeAttemptId !== attemptId) return;
+    this._flush();
+    await this._persister.commitAttempt(attemptId);
+    this._activeAttemptId = null;
+    this._transport.send(this._sessionId, event);
+  }
+
+  /** Discard unsent and uncommitted fragments, then make the browser undo them. */
+  async rollbackAttempt(event: Record<string, unknown>): Promise<void> {
+    const attemptId = String(event.attemptId || '');
+    if (!attemptId || this._activeAttemptId !== attemptId) return;
+    this._discardBufferedDeltas();
+    await this._persister.rollbackAttempt(attemptId);
+    this._activeAttemptId = null;
+    this._transport.send(this._sessionId, event);
+  }
+
+  /** Defensive cleanup for transport/loop failures that bypass a boundary event. */
+  async rollbackActiveAttempt(): Promise<void> {
+    if (!this._activeAttemptId) return;
+    const attemptId = this._activeAttemptId;
+    await this.rollbackAttempt({ type: 'llm_attempt_rollback', attemptId });
+  }
+
   /** Send a non-delta event directly (tool_call, tool_result, done, error, etc.). */
   sendDirect(event: Record<string, unknown>): void {
     this._flush();
@@ -111,11 +151,21 @@ export class StreamConsumer {
 
   /** Flush everything on turn end and persist remaining deltas. */
   async flushAndFinalize(): Promise<void> {
+    await this.rollbackActiveAttempt();
     this._flush();
     if (this._persister.finalize) {
       await this._persister.finalize();
     } else {
       await this._persister.flushDeltas();
     }
+  }
+
+  private _discardBufferedDeltas(): void {
+    if (this._flushTimer) {
+      clearTimeout(this._flushTimer);
+      this._flushTimer = null;
+    }
+    this._textBuffer = '';
+    this._thinkBuffer = '';
   }
 }

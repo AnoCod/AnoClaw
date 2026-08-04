@@ -239,7 +239,11 @@ export class WsServer extends EventEmitter implements Transport {
       return;
     }
 
-    const isTerminal = type === 'done' || type === 'error';
+    const isTerminal = type === 'done'
+      || type === 'error'
+      || type === 'llm_attempt_start'
+      || type === 'llm_attempt_commit'
+      || type === 'llm_attempt_rollback';
     if (buf.length >= WsServer.MAX_BUFFERED_EVENTS) {
       if (!isTerminal) return;
       const replaceIndex = buf.findIndex((entry) => {

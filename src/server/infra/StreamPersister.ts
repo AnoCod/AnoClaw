@@ -1,6 +1,6 @@
-// StreamPersister — unified per-event immediate stream persistence
-// Writes text_delta / think / tool_call / tool_result events to JSONL
-// as independent events as soon as they arrive from the LLM.
+// StreamPersister — unified ordered stream persistence
+// Writes committed text_delta / think / tool_call / tool_result events to
+// JSONL. SessionTurnRecorder holds provider-attempt events until commit.
 // All events in a turn share a single turnMsgId so jsonlEventsToMessages
 // accumulates them back into one Message on read.
 

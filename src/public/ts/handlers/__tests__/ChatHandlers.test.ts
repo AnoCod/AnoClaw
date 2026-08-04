@@ -18,6 +18,24 @@ afterEach(() => {
 });
 
 describe('registerChatHandlers', () => {
+  it('routes LLM attempt boundaries to the session agent', () => {
+    const router = new WSMessageRouter();
+    const onServerEvent = vi.fn();
+    const getAgent = vi.fn(() => ({ onServerEvent }));
+    registerChatHandlers(router, { getAgent } as any, {} as any);
+
+    for (const type of ['llm_attempt_start', 'llm_attempt_commit', 'llm_attempt_rollback']) {
+      router.dispatch(type, { attemptId: 'attempt-1' }, 'session-1');
+    }
+
+    expect(getAgent).toHaveBeenCalledTimes(3);
+    expect(onServerEvent.mock.calls).toEqual([
+      ['llm_attempt_start', { attemptId: 'attempt-1' }],
+      ['llm_attempt_commit', { attemptId: 'attempt-1' }],
+      ['llm_attempt_rollback', { attemptId: 'attempt-1' }],
+    ]);
+  });
+
   it('shows a toast when plugin_load_failed is received', () => {
     const router = new WSMessageRouter();
     const showSpy = vi.spyOn(ToastManager.getInstance(), 'show').mockReturnValue(1);

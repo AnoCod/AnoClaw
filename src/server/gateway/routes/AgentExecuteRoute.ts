@@ -17,6 +17,7 @@ import { WsServer } from '../../infra/network/WsServer.js';
 import { selectRunnableAgent } from '../../core/agent/AgentSelection.js';
 import { resolveSessionEffort, resolveSessionPermissionMode } from '../../core/agent/PermissionModePolicy.js';
 import { SessionTurnRecorder } from '../../infra/SessionTurnRecorder.js';
+import { AttemptEventBuffer } from '../../core/agent/AttemptEventBuffer.js';
 
 /** Resolve root session ID for WebSocket routing */
 function resolveRootSessionId(sessionId: string): string {
@@ -94,6 +95,7 @@ export class AgentExecuteRoute implements RouteHandler {
       const rootId = resolveRootSessionId(sessionId);
 
       let fullContent = '';
+      const committedEvents = new AttemptEventBuffer();
       recorder = new SessionTurnRecorder(sessionId, agentId);
       const loopOptions = {
         permissionMode: resolveSessionPermissionMode(sm, sessionId, body.mode),
@@ -104,8 +106,10 @@ export class AgentExecuteRoute implements RouteHandler {
         if (ws.isConnected(rootId)) {
           ws.send(rootId, event as Record<string, unknown>);
         }
-        if (event.type === WsMessageType.Text) {
-          fullContent += (event.content as string) || '';
+        for (const committedEvent of committedEvents.consume(event)) {
+          if (committedEvent.type === WsMessageType.Text) {
+            fullContent += (committedEvent.content as string) || '';
+          }
         }
       }
       await recorder.finalize();

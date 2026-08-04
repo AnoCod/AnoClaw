@@ -19,6 +19,7 @@ export function registerChatHandlers(
 ): void {
   const chatTypes = [
     'think', 'text', 'tool_call', 'tool_result', 'done', 'error',
+    'llm_attempt_start', 'llm_attempt_commit', 'llm_attempt_rollback',
     'plan_enter', 'plan_exit', 'todo_write', 'delegation_progress',
     'status', 'sleep', 'wake', 'task_notification', 'task_resolution',
   ];

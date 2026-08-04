@@ -4,6 +4,7 @@ import { EventEmitter } from 'events';
 import { AgentRegistry } from './AgentRegistry.js';
 import { AgentLoop } from './AgentLoop.js';
 import type { AgentLoopConfig } from './AgentLoop.js';
+import { AttemptEventBuffer } from './AttemptEventBuffer.js';
 import type { Message, SessionGoal } from '../../../shared/types/session.js';
 import { MessageRole } from '../../../shared/types/session.js';
 import type { SubAgentConfig } from '../../../shared/types/agent.js';
@@ -847,6 +848,7 @@ export class AgentRuntime extends EventEmitter {
     let tokenUsage = 0;
     let currentTool: string | undefined;
     let requiresChildContinuation = false;
+    const committedEvents = new AttemptEventBuffer();
     const ttlMs = SettingsManager.getInstance().get<number>(
       'coordination.workspaceLeaseTtlMs',
       30_000,
@@ -875,21 +877,23 @@ export class AgentRuntime extends EventEmitter {
         effort: 'HIGH',
       })) {
         await recorder.record(event, 'coordination');
-        if (event.type === SSEEventType.Text) content += String(event.content || '');
-        if (event.type === SSEEventType.ToolCall) {
-          currentTool = String(event.toolName || '');
-          turnCount += 1;
-          await service.updateTask(task.rootSessionId, task.id, {
-            heartbeatAt: new Date().toISOString(),
-            currentTool,
-            progress: Math.min(95, Math.max(1, turnCount * 5)),
-          }, agent.id);
-        } else if (event.type === SSEEventType.ToolResult) {
-          currentTool = undefined;
-        } else if (event.type === SSEEventType.Error) {
-          failure = String(event.errorMessage || event.content || 'AgentLoop failed');
-        } else if (event.type === SSEEventType.Done) {
-          tokenUsage = Number((event.tokenUsage as { total?: number } | undefined)?.total || 0);
+        for (const committedEvent of committedEvents.consume(event)) {
+          if (committedEvent.type === SSEEventType.Text) content += String(committedEvent.content || '');
+          if (committedEvent.type === SSEEventType.ToolCall) {
+            currentTool = String(committedEvent.toolName || '');
+            turnCount += 1;
+            await service.updateTask(task.rootSessionId, task.id, {
+              heartbeatAt: new Date().toISOString(),
+              currentTool,
+              progress: Math.min(95, Math.max(1, turnCount * 5)),
+            }, agent.id);
+          } else if (committedEvent.type === SSEEventType.ToolResult) {
+            currentTool = undefined;
+          } else if (committedEvent.type === SSEEventType.Error) {
+            failure = String(committedEvent.errorMessage || committedEvent.content || 'AgentLoop failed');
+          } else if (committedEvent.type === SSEEventType.Done) {
+            tokenUsage = Number((committedEvent.tokenUsage as { total?: number } | undefined)?.total || 0);
+          }
         }
         WsServer.getInstance().send(session.id, event as unknown as Record<string, unknown>);
       }
@@ -1196,6 +1200,15 @@ export class AgentRuntime extends EventEmitter {
         history,
       )) {
         switch (event.type) {
+          case SSEEventType.LlmAttemptStart:
+            await consumer.beginAttempt(event as unknown as Record<string, unknown>);
+            break;
+          case SSEEventType.LlmAttemptCommit:
+            await consumer.commitAttempt(event as unknown as Record<string, unknown>);
+            break;
+          case SSEEventType.LlmAttemptRollback:
+            await consumer.rollbackAttempt(event as unknown as Record<string, unknown>);
+            break;
           case SSEEventType.Text:
             consumer.onDelta('text', String(event.content || ''));
             break;
@@ -1222,6 +1235,7 @@ export class AgentRuntime extends EventEmitter {
         source: request.source,
       });
     } catch (error) {
+      await consumer.rollbackActiveAttempt().catch(() => {});
       await recorder.recordError(
         error instanceof Error ? error.message : String(error),
         request.source,

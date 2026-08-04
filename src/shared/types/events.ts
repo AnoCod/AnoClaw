@@ -185,6 +185,10 @@ export enum WsMessageType {
   Text        = 'text',
   ToolCall    = 'tool_call',
   ToolResult  = 'tool_result',
+  // Text/think/tool_call events between these boundaries are live but provisional.
+  LlmAttemptStart = 'llm_attempt_start',
+  LlmAttemptCommit = 'llm_attempt_commit',
+  LlmAttemptRollback = 'llm_attempt_rollback',
   PlanEnter   = 'plan_enter',
   PlanExit    = 'plan_exit',
   TodoWrite   = 'todo_write',
@@ -260,6 +264,9 @@ export type WsTypedMessage =
   | { type: WsMessageType.Text; content: string; [key: string]: unknown }
   | { type: WsMessageType.ToolCall; toolName: string; toolInput?: Record<string, unknown>; [key: string]: unknown }
   | { type: WsMessageType.ToolResult; success?: boolean; content?: string; [key: string]: unknown }
+  | { type: WsMessageType.LlmAttemptStart; attemptId: string; [key: string]: unknown }
+  | { type: WsMessageType.LlmAttemptCommit; attemptId: string; [key: string]: unknown }
+  | { type: WsMessageType.LlmAttemptRollback; attemptId: string; [key: string]: unknown }
   | { type: WsMessageType.PlanEnter; [key: string]: unknown }
   | { type: WsMessageType.PlanExit; [key: string]: unknown }
   | { type: WsMessageType.TodoWrite; todos: Array<{ content: string; status: string }>; [key: string]: unknown }

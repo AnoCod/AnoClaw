@@ -90,6 +90,29 @@ describe('SessionAgent history reconciliation', () => {
     expect(started).toHaveBeenCalledTimes(1);
   });
 
+  it('rebases an active attempt rollback point after a durable history refresh', async () => {
+    const agent = makeAgent();
+    agent.state.isStreaming = true;
+    agent.state.messages.appendMessage({
+      id: 'user-local', sessionId: 'session-1', type: 'message', role: 'user', content: 'question', timestamp: 1,
+    });
+    agent.onServerEvent('llm_attempt_start', { attemptId: 'attempt-1' });
+    agent.onServerEvent('text', { content: 'old partial', attemptId: 'attempt-1' });
+    vi.stubGlobal('fetch', vi.fn(async () => response({
+      messages: [{ id: 'user-stored', role: 'user', content: 'question' }],
+      isStreaming: true,
+    })));
+
+    await expect(agent.loadHistory()).resolves.toBe(true);
+    expect(agent.state.llmAttemptSnapshot?.attemptId).toBe('attempt-1');
+
+    agent.onServerEvent('text', { content: 'new partial', attemptId: 'attempt-1' });
+    agent.onServerEvent('llm_attempt_rollback', { attemptId: 'attempt-1' });
+
+    expect(agent.state.messages.messages.map(message => message.id)).toEqual(['user-stored']);
+    expect(agent.state.messages.messages.some(message => message.content === 'new partial')).toBe(false);
+  });
+
   it('retries reconnect reconciliation until the persisted snapshot becomes idle', async () => {
     vi.useFakeTimers();
     const agent = makeAgent();

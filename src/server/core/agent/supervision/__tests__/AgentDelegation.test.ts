@@ -313,6 +313,25 @@ describe('handleSubAgentOutput', () => {
     expect(state.fullContent).toBe('Hello world!');
   });
 
+  it('excludes rolled-back provider text from delegated output', async () => {
+    async function* stream(): AsyncGenerator<SSEEvent> {
+      yield { type: SSEEventType.LlmAttemptStart, attemptId: 'attempt-1' };
+      yield { type: SSEEventType.Text, content: 'failed-partial', attemptId: 'attempt-1' };
+      yield { type: SSEEventType.LlmAttemptRollback, attemptId: 'attempt-1' };
+      yield { type: SSEEventType.LlmAttemptStart, attemptId: 'attempt-2' };
+      yield { type: SSEEventType.Text, content: 'complete', attemptId: 'attempt-2' };
+      yield { type: SSEEventType.LlmAttemptCommit, attemptId: 'attempt-2' };
+    }
+
+    const state: DelegationState = { fullContent: '', thinking: '', turnCount: 0, currentTool: undefined };
+    const recorder = createRecorderMock();
+
+    await handleSubAgentOutput(runtime, stream(), 'parent-1', 'sub-1', 'agent-1', 'task', Date.now(), recorder, state);
+
+    expect(state.fullContent).toBe('complete');
+    expect(recorder.record).toHaveBeenCalledTimes(6);
+  });
+
   it('accumulates think content into state.thinking', async () => {
     async function* stream(): AsyncGenerator<SSEEvent> {
       yield { type: SSEEventType.Think, content: 'Thinking step 1...' };

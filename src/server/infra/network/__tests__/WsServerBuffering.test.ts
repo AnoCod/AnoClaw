@@ -51,6 +51,17 @@ describe('WsServer disconnected buffering', () => {
     expect(buffer.some((entry) => entry.event.type === 'done')).toBe(true);
   });
 
+  it('retains attempt boundaries even when the buffer is full', () => {
+    for (let i = 0; i < 300; i++) {
+      server.send('session-1', { type: 'tool_call', id: `tool-${i}`, name: 'Read' });
+    }
+    server.send('session-1', { type: 'llm_attempt_rollback', attemptId: 'attempt-1' });
+
+    const buffer = internals(server)._eventBuffers.get('session-1') || [];
+    expect(buffer).toHaveLength(300);
+    expect(buffer.some((entry) => entry.event.type === 'llm_attempt_rollback')).toBe(true);
+  });
+
   it('does not clear reconnect buffers merely because a turn completed', () => {
     const root = join(import.meta.dirname, '..', '..', '..', '..', '..');
     const source = readFileSync(

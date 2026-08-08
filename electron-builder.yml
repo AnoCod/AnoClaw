@@ -1,5 +1,9 @@
 appId: com.anoclaw.app
 productName: AnoClaw
+# Use the locally cached/unpacked Electron build so packaging never
+# re-downloads electron from GitHub. Machine-specific: adjust the path on
+# other machines, or remove this line to let electron-builder fetch its own.
+electronDist: C:/Users/Administrator/AppData/Local/electron/Cache/electron-v42.4.0-win32-x64
 directories:
   output: release9
 files:

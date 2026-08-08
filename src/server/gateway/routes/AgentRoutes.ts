@@ -7,6 +7,7 @@ import type { ApiToken } from '../ApiAuth.js';
 import {
   handleListAgents, handleGetAgent, handleCreateAgent,
   handleUpdateAgent, handleDeleteAgent, handleAgentStatus, handleTestAgentConnection,
+  handleModelContext,
 } from '../handlers/AgentHandlers.js';
 import { sendJson, readBody } from '../RouteHelpers.js';
 
@@ -54,6 +55,18 @@ export class TestAgentConnectionRoute implements RouteHandler {
   permission = 'agents:write';
   async handle(_match: RouteMatch, req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): Promise<boolean> {
     await handleTestAgentConnection(req, res, sendJson, readBody);
+    return true;
+  }
+}
+
+export class ModelContextRoute implements RouteHandler {
+  method = 'POST' as const;
+  path = '/api/v1/agents/model-context';
+  description = 'Query a local Ollama model context window';
+  category = 'Agents';
+  permission = 'agents:read';
+  async handle(_match: RouteMatch, req: IncomingMessage, res: ServerResponse, _token: ApiToken | null): Promise<boolean> {
+    await handleModelContext(req, res, sendJson, readBody);
     return true;
   }
 }

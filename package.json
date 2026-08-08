@@ -34,6 +34,7 @@
     "pptxgenjs": "^4.0.1",
     "pyright": "^1.1.411",
     "rotating-file-stream": "^3.2.9",
+    "smol-toml": "^1.3.1",
     "typescript": "^5.9.3",
     "ws": "^8.21.0",
     "yaml": "^2.6.0",

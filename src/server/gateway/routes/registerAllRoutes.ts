@@ -57,6 +57,7 @@ import {
 import {
   ListAgentsRoute, GetAgentRoute, CreateAgentRoute,
   UpdateAgentRoute, DeleteAgentRoute, AgentStatusRoute, TestAgentConnectionRoute,
+  ModelContextRoute,
 } from './AgentRoutes.js';
 import {
   AssignCoordinationTaskRoute,
@@ -74,6 +75,14 @@ import {
   RetryCoordinationTaskRoute,
   StopCoordinationTaskRoute,
 } from './CoordinationRoutes.js';
+import {
+  EcosystemOverviewRoute, EcosystemScanRoute, EcosystemSyncRoute,
+  EcosystemEnableRoute, EcosystemDisableRoute, EcosystemTrustRoute, EcosystemForgetRoute,
+} from './EcosystemRoutes.js';
+import {
+  McpListServersRoute, McpGetServerRoute, McpCreateServerRoute, McpUpdateServerRoute,
+  McpDeleteServerRoute, McpReconnectServerRoute, McpGetLogsRoute,
+} from './McpRoutes.js';
 
 export function registerAllRoutes(api: ApiServer): void {
   // System
@@ -103,6 +112,7 @@ export function registerAllRoutes(api: ApiServer): void {
   api.registerRoute(new ListAgentsRoute());
   api.registerRoute(new CreateAgentRoute());
   api.registerRoute(new TestAgentConnectionRoute());
+  api.registerRoute(new ModelContextRoute());
   api.registerRoute(new GetAgentRoute());
   api.registerRoute(new UpdateAgentRoute());
   api.registerRoute(new DeleteAgentRoute());
@@ -200,6 +210,24 @@ export function registerAllRoutes(api: ApiServer): void {
   api.registerRoute(new CreateSkillRoute());
   api.registerRoute(new PatchSkillRoute());
   api.registerRoute(new DeleteSkillRoute());
+
+  // Ecosystem bridge
+  api.registerRoute(new EcosystemOverviewRoute());
+  api.registerRoute(new EcosystemScanRoute());
+  api.registerRoute(new EcosystemSyncRoute());
+  api.registerRoute(new EcosystemEnableRoute());
+  api.registerRoute(new EcosystemDisableRoute());
+  api.registerRoute(new EcosystemTrustRoute());
+  api.registerRoute(new EcosystemForgetRoute());
+
+  // Native MCP
+  api.registerRoute(new McpListServersRoute());
+  api.registerRoute(new McpGetServerRoute());
+  api.registerRoute(new McpCreateServerRoute());
+  api.registerRoute(new McpUpdateServerRoute());
+  api.registerRoute(new McpDeleteServerRoute());
+  api.registerRoute(new McpReconnectServerRoute());
+  api.registerRoute(new McpGetLogsRoute());
 
   // WebSocket
   api.registerRoute(new WsConnectionsRoute());

@@ -26,6 +26,7 @@ export class StreamConsumer {
     bufferDelta: (type: 'text' | 'think', content: string) => void;
     flushDeltas: () => Promise<void>;
     finalize?: () => Promise<void>;
+    resetDeltas?: () => void;
   };
 
   constructor(
@@ -117,5 +118,16 @@ export class StreamConsumer {
     } else {
       await this._persister.flushDeltas();
     }
+  }
+
+  /**
+   * Discard the current partial text/think segment (called when the LLM
+   * attempt fails mid-stream and the client receives replace_text).
+   */
+  resetDeltas(): void {
+    if (this._flushTimer) { clearTimeout(this._flushTimer); this._flushTimer = null; }
+    this._textBuffer = '';
+    this._thinkBuffer = '';
+    this._persister.resetDeltas?.();
   }
 }

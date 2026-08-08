@@ -299,6 +299,13 @@ export const sendMessageHandler: WsMessageHandler = async (ctx) => {
         case 'think':
           consumer.onDelta('think', event.content as string);
           break;
+        case 'replace_text':
+          // Failed LLM attempt with visible partial text — drop buffered
+          // deltas (so they never reach the transcript) and forward the
+          // signal so the frontend discards the partial segment.
+          consumer.resetDeltas();
+          consumer.sendDirect(event as unknown as Record<string, unknown>);
+          break;
         case 'tool_call':
           await consumer.beforeToolEvent();
           await recorder.record(event);

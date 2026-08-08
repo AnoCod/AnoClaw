@@ -3,7 +3,9 @@ node_modules/
 
 # TypeScript / frontend build output
 dist/
+dist.old-*/
 src/public/js/
+src/public/js.old-*/
 src/public/monaco/vs/
 src/public/vendor/jszip.min.js
 src/public/d3-force.min.js

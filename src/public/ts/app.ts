@@ -11,7 +11,7 @@ import { WSMessageRouter } from './viewmodel/WSMessageRouter.js';
 import { registerChatHandlers } from './handlers/ChatHandlers.js';
 import { SessionsPage } from './components/pages/SessionsPage.js';
 import { AgentsPage } from './components/pages/AgentsPage.js';
-import { SkillsPage } from './components/pages/SkillsPage.js';
+import { SkillHubPage } from './components/pages/SkillHubPage.js';
 import { MemoryPage } from './components/pages/MemoryPage.js';
 import { SettingsPage } from './components/pages/SettingsPage.js';
 import { WorkspacePage } from './components/pages/workspace/WorkspacePage.js';
@@ -470,7 +470,7 @@ class App {
     const pages = [
       new WorkspacePage(),
       new AgentsPage(),
-      new SkillsPage(),
+      new SkillHubPage(),
       new MemoryPage(),
       new SettingsPage(),
       new PluginsPage(this._pluginVM),

@@ -187,6 +187,38 @@ export class SkillManager extends EventEmitter {
   // ─── Loading (multi-source) ───────────────────────────────
 
   /**
+   * Register a skill directly (used by the ecosystem bridge for live-mounted
+   * external skills). Returns false when an equal-or-higher priority skill
+   * with the same name already exists and should win.
+   */
+  registerSkill(skill: Skill, source: SkillSource = SkillSource.Ecosystem): boolean {
+    const existing = this._skills.get(skill.name());
+    if (existing && sourceWeight(source) < sourceWeight(existing.source)) {
+      return false;
+    }
+    this._skills.set(skill.name(), { skill, source });
+    PromptAssembler.getInstance().clearAllCaches();
+    this.emit('skillLoaded', skill.name(), source);
+    TypedEventBus.emit('skill:changed', { action: 'updated', name: skill.name() });
+    return true;
+  }
+
+  /**
+   * Unregister a live-mounted ecosystem skill. Native/user/plugin skills are
+   * never removed through this path.
+   */
+  unregisterSkill(name: string): boolean {
+    const entry = this._skills.get(name);
+    if (!entry || entry.source !== SkillSource.Ecosystem) return false;
+    this._skills.delete(name);
+    this._disabledSkills.delete(name);
+    this.emit('skillUnloaded', name, entry.source);
+    PromptAssembler.getInstance().clearAllCaches();
+    TypedEventBus.emit('skill:changed', { action: 'deleted', name });
+    return true;
+  }
+
+  /**
    * Load skills from a directory recursively. Supports:
    *   - nested: dir/<name>/SKILL.md (standard)
    *   - flat: dir/<name>.md (deprecated, auto-migrate recommendation logged)

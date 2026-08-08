@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { testAgentConnection, validateAgentConnectionInput } from '../AgentConnectionTest.js';
+import { testAgentConnection, validateAgentConnectionInput, queryOllamaModelContext } from '../AgentConnectionTest.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -61,6 +61,65 @@ describe('AgentConnectionTest', () => {
     expect(result.ok).toBe(false);
     expect(result.message).toContain('OpenAI API error 401');
     expect(result.message).toContain('bad key');
+  });
+});
+
+describe('queryOllamaModelContext', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    globalThis.fetch = originalFetch;
+  });
+
+  it('extracts context_length from Ollama model_info', async () => {
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({
+      model: 'qwen3:8b',
+      model_info: { 'qwen3.context_length': 40960 },
+    }), { status: 200 })) as unknown as typeof fetch;
+
+    const result = await queryOllamaModelContext('http://127.0.0.1:11434', 'qwen3:8b');
+
+    expect(result).toEqual({ ok: true, contextWindow: 40960 });
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:11434/api/show',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('"model":"qwen3:8b"'),
+      }),
+    );
+  });
+
+  it('normalizes trailing slashes on the API URL', async () => {
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({
+      model: 'qwen3:8b',
+      model_info: { 'qwen3.context_length': 40960 },
+    }), { status: 200 })) as unknown as typeof fetch;
+
+    await queryOllamaModelContext('http://127.0.0.1:11434/', 'qwen3:8b');
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:11434/api/show',
+      expect.anything(),
+    );
+  });
+
+  it('returns ok:false with the status when the model does not exist', async () => {
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ error: 'model not found' }), { status: 404 })) as unknown as typeof fetch;
+
+    const result = await queryOllamaModelContext('http://127.0.0.1:11434', 'nope:latest');
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/404/);
+  });
+
+  it('returns ok:false when model_info has no context_length', async () => {
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({
+      model: 'some-model',
+      model_info: { 'some-model.embedding_length': 1024 },
+    }), { status: 200 })) as unknown as typeof fetch;
+
+    const result = await queryOllamaModelContext('http://127.0.0.1:11434', 'some-model');
+
+    expect(result.ok).toBe(false);
   });
 });
 

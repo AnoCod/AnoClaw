@@ -1,7 +1,7 @@
 export const coreSessionEnUS = {
   'nav.workspace': 'Workspace',
   'nav.agents': 'Agents',
-  'nav.skills': 'Skills',
+  'nav.skills': 'Skills & Tools',
   'nav.memory': 'Memory',
   'nav.settings': 'Settings',
   'nav.pages': 'Pages',
@@ -309,7 +309,7 @@ export const coreSessionEnUS = {
 export const coreSessionZhCN = {
   'nav.workspace': '工作区',
   'nav.agents': '智能体',
-  'nav.skills': '技能',
+  'nav.skills': '技能与工具',
   'nav.memory': '记忆',
   'nav.settings': '设置',
   'nav.pages': '页面',

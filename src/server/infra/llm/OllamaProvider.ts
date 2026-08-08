@@ -13,6 +13,10 @@ interface OllamaMessage {
   role: string;
   content: string;
   images?: string[];
+  /** qwen3-style thinking content (streamed separately from content) */
+  thinking?: string;
+  /** older qwen2.5-style reasoning content */
+  reasoning_content?: string;
   tool_calls?: Array<{
     function: {
       name: string;
@@ -168,21 +172,31 @@ export class OllamaProvider extends LLMProvider {
             };
           }
 
-          // On completion, emit tool calls if present
-          if (chunk.done) {
-            const msg = chunk.message;
+          // Handle thinking content — Ollama streams it as `thinking` (qwen3+)
+          // or `reasoning_content` (older models), separate from content.
+          const thinking = chunk.message?.thinking || chunk.message?.reasoning_content;
+          if (thinking && !chunk.done) {
+            yield {
+              type: 'think_delta',
+              content: thinking,
+            };
+          }
 
-            if (msg?.tool_calls && msg.tool_calls.length > 0) {
-              for (const tc of msg.tool_calls) {
-                yield {
-                  type: 'tool_use',
-                  toolId: `tc_${randomUUID()}`,
-                  toolName: tc.function.name,
-                  toolInput: tc.function.arguments,
-                };
-              }
+          // Handle tool calls — Ollama sends them on a mid-stream chunk (done:false),
+          // not necessarily on the final chunk.
+          const msg = chunk.message;
+          if (msg?.tool_calls && msg.tool_calls.length > 0) {
+            for (const tc of msg.tool_calls) {
+              yield {
+                type: 'tool_use',
+                toolId: `tc_${randomUUID()}`,
+                toolName: tc.function.name,
+                toolInput: tc.function.arguments,
+              };
             }
+          }
 
+          if (chunk.done) {
             yield { type: 'done' };
           }
         }
@@ -229,11 +243,17 @@ export class OllamaProvider extends LLMProvider {
 
           if (msg.tool_calls && msg.tool_calls.length > 0) {
             assistantMsg.tool_calls = (msg.tool_calls as Array<Record<string, unknown>>).map((tc) => {
-              if (tc.function) return tc;
+              const fn = (tc.function ?? {}) as Record<string, unknown>;
+              const rawArgs = (fn.arguments ?? tc.input) as unknown;
+              // Internal format stores arguments as a JSON string; Ollama needs an object.
+              const arguments_ = typeof rawArgs === 'string'
+                ? (() => { try { return JSON.parse(rawArgs); } catch { return {}; } })()
+                : (rawArgs ?? {});
               return {
+                ...(tc.id ? { id: tc.id } : {}),
                 function: {
-                  name: tc.name,
-                  arguments: tc.input || {},
+                  name: (fn.name ?? tc.name) as string,
+                  arguments: arguments_,
                 },
               };
             });

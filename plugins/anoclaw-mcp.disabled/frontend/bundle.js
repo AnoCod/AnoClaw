@@ -4,7 +4,7 @@
   var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
   var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
-  // plugins/anoclaw-mcp/frontend/src/i18n.ts
+  // plugins/anoclaw-mcp.disabled/frontend/src/i18n.ts
   var enUS = {
     "mcp.title": "MCP Servers",
     "mcp.subtitle": "Model Context Protocol \u2014 connect external tools and services",
@@ -151,7 +151,7 @@
     });
   }
 
-  // plugins/anoclaw-mcp/frontend/src/websocket-url.ts
+  // plugins/anoclaw-mcp.disabled/frontend/src/websocket-url.ts
   function resolvePluginWebSocketUrl(...baseCandidates) {
     for (const candidate of baseCandidates) {
       if (!candidate) continue;
@@ -167,7 +167,7 @@
     throw new Error("Unable to resolve the AnoClaw WebSocket URL");
   }
 
-  // plugins/anoclaw-mcp/frontend/src/main.ts
+  // plugins/anoclaw-mcp.disabled/frontend/src/main.ts
   var ui = window.anoclaw?.ui;
   if (!ui) throw new Error("anoclaw-ui.js not loaded - check iframe sandbox permissions");
   var T = {

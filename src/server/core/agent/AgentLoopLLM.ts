@@ -195,6 +195,10 @@ export async function* callLLMWithRetry(
       if (signal?.aborted) break;
     }
 
+    // Tracks whether this attempt already streamed text/think to the client.
+    // When true, a failed attempt must emit replace_text before retrying.
+    let yieldedContent = false;
+
     try {
       apiStartMs = Date.now();
       createLogger('anochat.llm').debug('LLM API call starting', {
@@ -235,18 +239,21 @@ export async function* callLLMWithRetry(
 
       let assistantText = '';
       const toolCallMap = new Map<string, { toolName: string; toolInput: Record<string, unknown> }>();
+      const attemptToolEvents: SSEEvent[] = [];
       let hadThink = false;
-      const attemptEvents: SSEEvent[] = [];
 
       for await (const event of stream) {
         switch (event.type) {
           case 'text_delta':
             assistantText += event.content || '';
-            attemptEvents.push({ type: SSEEventType.Text, content: event.content || '' });
+            yieldedContent = true;
+            // True token-by-token streaming: forward each delta immediately.
+            yield { type: SSEEventType.Text, content: event.content || '' };
             break;
           case 'think_delta':
             hadThink = true;
-            attemptEvents.push({ type: SSEEventType.Think, content: event.content || '' });
+            yieldedContent = true;
+            yield { type: SSEEventType.Think, content: event.content || '' };
             break;
           case 'token_usage':
             // Real token usage from API — emit to TypedEventBus for monitoring/audit
@@ -269,7 +276,9 @@ export async function* callLLMWithRetry(
             };
             toolCallMap.set(key, merged);
             if (merged.toolName) {
-              attemptEvents.push({ type: SSEEventType.ToolCall, id: key, name: merged.toolName, input: merged.toolInput });
+              // Tool calls stay deferred until the attempt completes so a
+              // mid-stream failure cannot leak half-built tool cards.
+              attemptToolEvents.push({ type: SSEEventType.ToolCall, id: key, name: merged.toolName, input: merged.toolInput });
             }
             break;
           }
@@ -318,16 +327,27 @@ export async function* callLLMWithRetry(
         });
       }
 
-      // An interrupted provider stream may already have produced deltas. Only
-      // expose an attempt after it completed successfully so retries cannot
-      // leak or persist a partial assistant response.
-      for (const event of attemptEvents) yield event;
+      // Tool events replay after a successful attempt (order: text/think
+      // already streamed, then tool call cards).
+      for (const event of attemptToolEvents) yield event;
 
       return { assistantMessage, hadThinkContent: hadThink, fatalError: false };
     } catch (e: unknown) {
       const err = e instanceof Error ? e : new Error(String(e));
       const errMsg = err.message || '';
       lastErr = err;
+
+      // User aborted: keep whatever text already streamed, never retry.
+      if (signal?.aborted) {
+        return { assistantMessage: null, hadThinkContent: false, fatalError: false, errorMessage: 'aborted' };
+      }
+
+      // The client may already be showing partial text from this attempt.
+      // Tell it to discard the segment before any silent retry (or the final
+      // error) so a successful retry starts from a clean card.
+      if (yieldedContent) {
+        yield { type: SSEEventType.ReplaceText };
+      }
 
       const errLog = createLogger('anochat.llm');
       errLog.error('API attempt failed', {

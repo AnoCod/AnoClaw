@@ -26,6 +26,12 @@ export interface AgentConnectionTestResult {
   durationMs?: number;
 }
 
+export interface ModelContextQueryResult {
+  ok: boolean;
+  contextWindow?: number;
+  message?: string;
+}
+
 export function agentRunnableProblem(agent: AgentConfig): string | null {
   if (agent.state && agent.state !== 'Active') {
     return t('runtime.agent.inactive', { agent: agent.id });
@@ -244,6 +250,25 @@ export class AgentViewModel extends EventEmitter {
       };
     } catch (e) {
       ClientLogger.vm.error('Failed to test agent connection', { error: (e as Error).message });
+      return { ok: false, message: (e as Error).message || t('runtime.connection.testFailed') };
+    }
+  }
+
+  /** Query a local Ollama model's native context window via the backend proxy. */
+  async queryModelContext(provider: string, apiUrl: string, model: string): Promise<ModelContextQueryResult> {
+    try {
+      const resp = await fetch('/api/v1/agents/model-context', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, apiUrl, model }),
+      });
+      const body = await resp.json().catch(() => ({})) as { ok?: boolean; contextWindow?: number; message?: string };
+      if (!resp.ok || body.ok === false) {
+        return { ok: false, message: body.message || t('runtime.connection.testHttpFailed', { status: resp.status }) };
+      }
+      return { ok: true, contextWindow: body.contextWindow };
+    } catch (e) {
+      ClientLogger.vm.error('Failed to query model context', { error: (e as Error).message });
       return { ok: false, message: (e as Error).message || t('runtime.connection.testFailed') };
     }
   }

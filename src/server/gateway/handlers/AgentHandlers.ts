@@ -9,7 +9,7 @@ import { AgentRegistry } from '../../core/agent/AgentRegistry.js';
 import { loadAgentConfig, saveAgentConfig, defaultConfig } from '../../core/agent/AgentConfig.js';
 import { Agent } from '../../core/agent/Agent.js';
 import { hasMainAgentConflict, hierarchyValidationMessage, normalizeAgentHierarchy } from '../../core/agent/AgentConstraints.js';
-import { testAgentConnection, validateAgentConnectionInput } from '../../core/agent/AgentConnectionTest.js';
+import { testAgentConnection, validateAgentConnectionInput, queryOllamaModelContext } from '../../core/agent/AgentConnectionTest.js';
 import { TypedEventBus } from '../../core/events/TypedEventBus.js';
 import { requireWsAny } from '../WsRequired.js';
 import type { AgentConfig } from '../../../shared/types/agent.js';
@@ -164,6 +164,31 @@ export async function handleTestAgentConnection(
       sendJson(res, 500, { ok: false, error: 'Connection Test Failed', message: (err as Error).message });
     }
   }
+}
+
+/** POST /api/v1/agents/model-context — query a local Ollama model's context window */
+export async function handleModelContext(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  sendJson: SendJson,
+  readBody: ReadBody,
+): Promise<void> {
+  const body = await readBody(req) as Record<string, unknown>;
+  const provider = String(body.provider || '');
+  const apiUrl = String(body.apiUrl || '').trim();
+  const model = String(body.model || '').trim();
+
+  if (provider !== 'ollama') {
+    sendJson(res, 400, { ok: false, error: 'Bad Request', message: 'Model context query is only supported for the ollama provider' });
+    return;
+  }
+  if (!apiUrl || !model) {
+    sendJson(res, 400, { ok: false, error: 'Bad Request', message: 'apiUrl and model are required' });
+    return;
+  }
+
+  const result = await queryOllamaModelContext(apiUrl, model);
+  sendJson(res, result.ok ? 200 : 502, result);
 }
 
 export async function handleUpdateAgent(

@@ -512,6 +512,17 @@ async function initialize(): Promise<void> {
   const { ApiServer: ApiServerClass } = await import('./gateway/ApiServer.js');
   registerAllRoutes(ApiServerClass.getInstance());
 
+  // 3.7 Initialize the native MCP service (retired the anoclaw-mcp plugin).
+  // Must run before the ecosystem bridge so imported MCP configs land in the
+  // native data/mcp-servers.json store.
+  try {
+    const { McpManager } = await import('./infra/mcp/McpManager.js');
+    await McpManager.getInstance().init();
+    logManager.logger('anochat.core').info('Native MCP service initialized');
+  } catch (err) {
+    logManager.logger('anochat.core').warn('Native MCP init failed', { error: (err as Error).message });
+  }
+
   // 4. Initialize SessionManager
   const sessionManager = SessionManager.getInstance();
   try {
@@ -578,6 +589,18 @@ async function initialize(): Promise<void> {
     logManager.logger('anochat.core').info('Skills loaded', { count: sm.count });
   } catch (err) {
     logManager.logger('anochat.core').warn('Skill loading failed', { error: (err as Error).message });
+  }
+
+  // 10.1 Start the ecosystem bridge (Codex / Claude Code / OpenClaw / OpenCode / Hermes)
+  // Must run before PluginHost starts so imported MCP configs are already in
+  // the anoclaw-mcp plugin storage when it activates.
+  try {
+    const { EcosystemRegistry } = await import('./core/ecosystem/EcosystemRegistry.js');
+    await EcosystemRegistry.getInstance().start();
+    const entryCount = EcosystemRegistry.getInstance().entries().length;
+    logManager.logger('anochat.core').info('Ecosystem bridge started', { discoveredEntries: entryCount });
+  } catch (err) {
+    logManager.logger('anochat.core').warn('Ecosystem bridge start failed', { error: (err as Error).message });
   }
 
   // 10.2 Initialize TalentPoolService

@@ -122,6 +122,30 @@ export function onText(agent: SessionAgent, content: string): void {
   agent.emit('streamToken', content);
 }
 
+/** Handle a 'replace_text' event: discard the partial streaming segment.
+ *  The failed LLM attempt's text/think cards are removed so the next attempt
+ *  starts from a clean card (the UI tears down the old streaming block on
+ *  streamingStopped and recreates it on the next streamingStarted). */
+export function onReplaceText(agent: SessionAgent): void {
+  const s = agent.state;
+  if (s.streamMsgId) {
+    const idx = s.messages.indexOf(s.streamMsgId);
+    if (idx !== -1) s.messages.removeMessage(idx);
+    s.streamMsgId = null;
+  }
+  if (s.currentThinkMsg) {
+    const idx = s.messages.indexOf(s.currentThinkMsg.id);
+    if (idx !== -1) s.messages.removeMessage(idx);
+    s.currentThinkMsg = null;
+  }
+  s.currentStreamMessage = '';
+  if (s.isStreaming) {
+    s.isStreaming = false;
+    agent.emit('streamingStopped');
+  }
+  agent.emit('textReplaced');
+}
+
 
 export function onToolCall(agent: SessionAgent, id: string, name: string, input: Record<string, unknown>): void {
   finalizeThink(agent);
@@ -477,6 +501,7 @@ export class SessionAgent extends EventEmitter {
       switch (eventType) {
         case 'think': onThink(this, data.content as string, data.durationMs as number | undefined); break;
         case 'text': onText(this, data.content as string); break;
+        case 'replace_text': onReplaceText(this); break;
         case 'tool_call': onToolCall(
           this,
           (data.id || data.toolCallId || data.toolId || '') as string,

@@ -626,6 +626,25 @@ export class AgentLoop {
 
         postWait = false;
 
+        // If signal was aborted during the API call, check for soft interrupt.
+        // This must run before the fatal-error check: an aborted attempt keeps
+        // whatever text already streamed and never surfaces as "Fatal".
+        if (signal?.aborted) {
+          const ic = InterruptController.getInstance();
+          const pending = ic.takePendingUserMessage(this.sessionId);
+          if (pending) {
+            yield { type: SSEEventType.StatusInfo, content: '(Processing your new message...)' };
+            messages.push({ role: 'user', content: INTERRUPT_MESSAGE_PREFIX + pending });
+            signal = ic.createController(this.sessionId).signal;
+            this.stallDetector.reset();
+            // Sync message count to prevent duplicate injection via inter-turn check
+            lastKnownMsgCount = sessionManager.getMessageCount(this.sessionId);
+            continue;
+          }
+          yield { type: SSEEventType.Text, content: '(User aborted during API call)' };
+          break;
+        }
+
         if (llmResult.fatalError || !llmResult.assistantMessage) {
           yield {
             type: SSEEventType.Error,
@@ -636,23 +655,6 @@ export class AgentLoop {
 
         assistantMessage = llmResult.assistantMessage;
         hadThinkContent = llmResult.hadThinkContent;
-      }
-
-      // If signal was aborted during the API call, check for soft interrupt
-      if (signal?.aborted) {
-        const ic = InterruptController.getInstance();
-        const pending = ic.takePendingUserMessage(this.sessionId);
-        if (pending) {
-          yield { type: SSEEventType.StatusInfo, content: '(Processing your new message...)' };
-          messages.push({ role: 'user', content: INTERRUPT_MESSAGE_PREFIX + pending });
-          signal = ic.createController(this.sessionId).signal;
-          this.stallDetector.reset();
-          // Sync message count to prevent duplicate injection via inter-turn check
-          lastKnownMsgCount = sessionManager.getMessageCount(this.sessionId);
-          continue;
-        }
-        yield { type: SSEEventType.Text, content: '(User aborted during API call)' };
-        break;
       }
 
       // Append assistant message to transcript

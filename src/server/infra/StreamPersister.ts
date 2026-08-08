@@ -177,6 +177,13 @@ export class StreamPersister {
     }
   }
 
+  /** Discard unflushed think/text deltas (used when an LLM attempt is retried). */
+  resetDeltas(): void {
+    if (this._flushTimer) { clearTimeout(this._flushTimer); this._flushTimer = null; }
+    this._textBuffer = '';
+    this._thinkBuffer = '';
+  }
+
   /** Flush buffered think/text deltas to JSONL. Called before tool events and on turn end. */
   async flushDeltas(): Promise<void> {
     if (this._flushTimer) { clearTimeout(this._flushTimer); this._flushTimer = null; }

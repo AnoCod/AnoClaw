@@ -1,19 +1,6 @@
 {
   "plugins": [
     {
-      "name": "anoclaw-mcp",
-      "displayName": "MCP Manager",
-      "version": "2.0.0",
-      "description": "Model Context Protocol server management — connect external MCP servers",
-      "publisher": "anoclaw",
-      "author": "AnoClaw Team",
-      "rating": 4.5,
-      "downloads": 0,
-      "tags": ["mcp", "official"],
-      "installUrl": "https://github.com/AnoCod/AnoClaw/tree/main/plugins/anoclaw-mcp",
-      "category": "Integration"
-    },
-    {
       "name": "anoclaw-meeting",
       "displayName": "Meeting",
       "version": "2.0.0",

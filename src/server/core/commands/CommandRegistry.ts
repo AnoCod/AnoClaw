@@ -49,6 +49,13 @@ export class CommandRegistry extends EventEmitter {
     this.emit('commandRegistered', name);
   }
 
+  /** Remove a previously registered command. Returns true when found. */
+  unregisterCommand(name: string): boolean {
+    const existed = this._commands.delete(name);
+    if (existed) this.emit('commandUnregistered', name);
+    return existed;
+  }
+
   // ── Lookup ──
 
   command(name: string): Command | undefined {

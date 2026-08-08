@@ -2,10 +2,12 @@
 
 This file provides guidance to AI coding assistants when working with code in this repository.
 
-## Codex Source of Truth
+## AI Assistant Instructions
 
-AnoClaw is now developed with Codex. `AGENTS.md` is the canonical repository instruction file for AI coding work. Do not create or maintain Claude Code instruction files (`CLAUDE.md` / `CLAUDE.*.md`); migrate any still-useful guidance into this file or task-specific docs under `docs/`.
-`DESIGN.md` is retired and must not be recreated or maintained. Project, architecture, product, and design guidance belongs in `AGENTS.md` or focused docs under `docs/`.
+AnoClaw is developed with Claude Code. `CLAUDE.md` is the canonical instruction file for AI coding work; it carries the engineering rules and gates. `AGENTS.md` remains the reference for architecture, commands, and GitHub collaboration. Keep both in sync when guidance changes.
+`DESIGN.md` is retired and must not be recreated or maintained. Project, architecture, product, and design guidance belongs in `CLAUDE.md`, `AGENTS.md`, or focused docs under `docs/`.
+
+Git and GitHub operations are owned by the user. The AI coding assistant does NOT run git commands — it does not stage, commit, push, branch, open PRs, or merge. It reports completed work and changed files, and the user handles version control.
 
 ## Project Overview
 
@@ -62,7 +64,7 @@ GitHub is AnoClaw's durable collaboration and review plane; the local checkout r
 
 - Non-trivial features, bugs, refactors, migrations, and security work start from a GitHub Issue with context, scope, acceptance criteria, risk, and validation expectations. Tiny typo or comment-only fixes may skip an Issue.
 - Fetch the intended base before branching. Never develop directly on `main`. Use one short-lived branch per logical change.
-- Codex-authored branches use `codex/<issue-number>-<short-slug>` or `codex/<short-slug>` for an approved issue-less maintenance task. Human branches use `feat/`, `fix/`, `docs/`, `refactor/`, `test/`, `chore/`, or `hotfix/` with the same optional Issue prefix.
+- Claude-assisted branches use `claude/<issue-number>-<short-slug>` or `claude/<short-slug>` for an approved issue-less maintenance task. Human branches use `feat/`, `fix/`, `docs/`, `refactor/`, `test/`, `chore/`, or `hotfix/` with the same optional Issue prefix.
 - Commit only intentional files. Use an imperative Conventional Commit subject such as `feat(scope): add capability`, `fix(scope): correct behavior`, or `docs(github): define workflow`. Keep generated artifacts, secrets, runtime data, and unrelated user work out of commits.
 - Never force-push, rewrite shared history, delete branches, or bypass `main` protections merely to make synchronization easier. The history-safety rules below always apply.
 
@@ -83,29 +85,15 @@ GitHub is AnoClaw's durable collaboration and review plane; the local checkout r
 
 ## Completion Workflow
 
-AnoClaw uses Git as the durable completion record. Do not write Obsidian/vault work logs for coding sessions.
+AnoClaw uses Git as the durable completion record, managed entirely by the user. Do not write Obsidian/vault work logs for coding sessions.
 Treat removal of retired guidance files such as `DESIGN.md` as an intentional cleanup when it is part of the current task; do not restore them just to keep the worktree unchanged.
 
-After verified code, docs, config, or skill changes:
-1. Inspect `git status --short --branch` and review the relevant diff.
-2. Run the scope-appropriate checks and record any check that could not run with the reason.
-3. Stage only intentional files; never include unrelated user changes, secrets, local data, or build caches.
-4. Create a concise Conventional Commit describing the completed outcome.
-5. Push the current non-default branch to `origin`; if no upstream exists, use `git push -u origin HEAD`. Do not push directly to `main` except for an explicitly approved emergency procedure.
-6. Create or update the corresponding PR when the work is intended for review or merge. A branch-only checkpoint is allowed only when the work is still intentionally incomplete or the user requested no PR; report that state explicitly.
-7. Report verification, commit hash, branch, push status, and Issue or PR link when one exists.
+After verified code, docs, config, or skill changes, the AI coding assistant:
+1. Runs the scope-appropriate checks and records any check that could not run with the reason.
+2. Reports what changed and the verification results in plain language.
+3. Does NOT stage, commit, push, branch, open PRs, or run any history-rewriting git command — version control is the user's action.
 
-### Push Failure and History Safety
-
-- A failed `git push` is a remote synchronization failure. By itself it does not alter the local worktree, index, branch, or commits, no matter how many retries fail.
-- After a network-related push failure, preserve the local state, report the failure, and retry later. Do not use `git reset` (especially `--hard`), `git clean`, destructive `git checkout`/`git restore`, branch deletion, rebase, amend, or force-push merely to make a push succeed.
-- Keep verified work committed locally. Committed work remains available while its branch or another backup reference is retained; uncommitted work is easier to overwrite accidentally.
-- A large number of local commits can normally be pushed together. Commit count does not cause merge conflicts; conflicts arise when local and remote history have diverged.
-- Squashing is optional history cleanup, not a network repair. Use it only when the selected commits are local, unpushed, and not shared with or based upon by anyone else.
-- Before any squash or other history rewrite, fetch remote state, inspect the exact base and commit range, create a clearly named backup branch or tag at the current `HEAD`, and obtain explicit user approval. Keep the backup until the rewritten branch is verified and successfully pushed.
-- If the remote branch advanced, stop and report the divergence. Resolve it through an explicitly chosen merge or rebase; never discard local commits or force-push as a shortcut.
-- Before a destructive or history-rewriting Git command, show the current branch/status and a short decorated commit graph, state exactly which refs and commits will change, and verify that no unrelated or uncommitted work is at risk.
-- If a destructive command is run accidentally, stop making further history or cleanup changes and inspect `git reflog` first. Recovery tools are a last resort, not a substitute for preserving a backup reference.
+The GitHub collaboration rules above still describe how the repository should be maintained; the user executes those steps. When asked, the assistant may advise on commits, history safety, or rollback options, but the user runs them.
 
 ## Architecture
 
@@ -147,7 +135,7 @@ graph TB
         LLP["LLMProvider<br/>(OpenAICompat / Ollama)"]
         APS["APIScheduler<br/>(Rate Limits)"]
         JSL["JsonlStore<br/>(Append-Only)"]
-        MCPM["MCPClientManager<br/>(4 Transports)"]
+        MCPM["McpManager<br/>(stdio/SSE/HTTP)"]
         IC["InterruptController"]
         LM["LogManager<br/>(pino)"]
     end
@@ -367,7 +355,7 @@ Built-in tools are registered in `registerAllTools()` via directory scan of `bui
 ### Singleton Pattern
 
 Most core services use `getInstance()` + `resetInstance()` (for testing):
-`AgentRuntime`, `AgentRegistry`, `ToolRegistry`, `SessionManager`, `WsServer`, `ApiServer`, `SkillManager`, `MCPClientManager`, `LogManager`, `MemoryManager`
+`AgentRuntime`, `AgentRegistry`, `ToolRegistry`, `SessionManager`, `WsServer`, `ApiServer`, `SkillManager`, `McpManager`, `LogManager`, `MemoryManager`
 
 ## Key Conventions
 
@@ -464,11 +452,15 @@ Workspace is a read-only filesystem browser, not an editor or IDE. Its UI and `/
 
 ## MCP Integration
 
-`MCPClientManager` (singleton) manages connections to external MCP servers. Supports 4 transports: Stdio, SSE, WebSocket, Streamable HTTP. External MCP tools are dynamically proxied via `MCPToolProxy` and registered as `mcp_<server>_<tool>` in ToolRegistry. `MCPServer` class exposes AnoClaw itself as an MCP server.
+`McpManager` (kernel singleton, retired the `anoclaw-mcp` plugin) manages connections to external MCP servers. Supports 3 transports: Stdio, SSE, and Streamable HTTP. Configs live in `data/mcp-servers.json` (migrated from the retired plugin's storage on first run). Six agent-facing tools (`MCPListTools`, `MCPExecute`, `MCPListResources`, `MCPReadResource`, `MCPListPrompts`, `MCPGetPrompt`) are registered into ToolRegistry, with per-server `toolFilter.include/exclude` support from imported ecosystem configs. CRUD is exposed via `/api/v1/mcp/*`, and the “Skills & Tools” kernel page (skills + MCP + ecosystem) replaces the former Skills/MCP/Ecosystem pages.
 
 ## Skills System
 
 Skills are markdown files with YAML frontmatter in `skills/` directory. Loaded by `SkillManager`, injected into system prompt via `SkillsSection` in PromptAssembler. Agents have per-agent `enabledSkills` whitelist. Built-in skills include: `anoclaw-tester`, `browser-automation`, `code-review`, `dispatching-parallel-agents`, `executing-plans`, `systematic-debugging`, `test-driven-development`, `verification-before-completion`, `writing-plans`.
+
+## Ecosystem Bridge
+
+`src/server/core/ecosystem/` live-mounts skills, MCP servers, commands, agents, and plugin bridges from Codex, Claude Code, OpenClaw, OpenCode, and Hermes without copying files. It starts after the native MCP service (`src/server/infra/mcp/McpManager.ts`, retired the `anoclaw-mcp` plugin) so imported MCP configs land in `data/mcp-servers.json`, persists per-entry state in `data/ecosystem.json`, and is exposed through `/api/v1/ecosystem/*` plus the merged “Skills & Tools” kernel page. Support levels are `native | bridge | partial | unsupported`; code plugins require a trust review before enablement. See `docs/ecosystem-compatibility.md`.
 
 ## Configuration
 

@@ -45,6 +45,11 @@ export class SessionTurnRecorder {
     await this.persister.flushDeltas();
   }
 
+  /** Discard unflushed deltas from a failed LLM attempt before a retry. */
+  resetDeltas(): void {
+    this.persister.resetDeltas();
+  }
+
   async record(event: SSEEvent, errorSource = 'agent_runtime'): Promise<void> {
     const raw = event as Record<string, unknown>;
     switch (event.type) {

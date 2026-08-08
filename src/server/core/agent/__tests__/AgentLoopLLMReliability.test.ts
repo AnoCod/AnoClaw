@@ -50,7 +50,7 @@ async function collect(
 }
 
 describe('callLLMWithRetry reliability', () => {
-  it('discards streamed deltas from a failed attempt before retrying', async () => {
+  it('streams deltas immediately and replaces partial text before retrying', async () => {
     vi.useFakeTimers();
     let attempts = 0;
     extensionPoints.register('llmProvider', OWNER, () => ({
@@ -79,10 +79,80 @@ describe('callLLMWithRetry reliability', () => {
 
     expect(attempts).toBe(2);
     expect(events.filter(event => event.type === SSEEventType.Text).map(event => event.content))
-      .toEqual(['complete']);
+      .toEqual(['partial-', 'complete']);
+    expect(events.filter(event => event.type === SSEEventType.ReplaceText)).toHaveLength(1);
     expect(events.some(event => event.type === SSEEventType.Error)).toBe(false);
     expect(result.assistantMessage?.content).toBe('complete');
     expect(result.fatalError).toBe(false);
+  });
+
+  it('keeps streamed text and never retries when the user aborts', async () => {
+    let attempts = 0;
+    const controller = new AbortController();
+    extensionPoints.register('llmProvider', OWNER, () => ({
+      async *chat(): AsyncGenerator<LLMStreamEvent> {
+        attempts++;
+        yield { type: 'text_delta', content: 'kept-' };
+        controller.abort();
+        throw new Error('The operation was aborted');
+      },
+      cancel(): void {},
+      providerName(): string { return 'test'; },
+    }));
+
+    const { events, result } = await collect(callLLMWithRetry(
+      makeConfig(),
+      [{ role: 'system', content: 'system' }, { role: 'user', content: 'hello' }],
+      'system',
+      [],
+      controller.signal,
+    ));
+
+    expect(attempts).toBe(1);
+    expect(events.filter(event => event.type === SSEEventType.Text).map(event => event.content)).toEqual(['kept-']);
+    expect(events.some(event => event.type === SSEEventType.ReplaceText)).toBe(false);
+    expect(result.assistantMessage).toBeNull();
+    expect(result.fatalError).toBe(false);
+  });
+
+  it('defers tool events until an attempt completes', async () => {
+    vi.useFakeTimers();
+    let attempts = 0;
+    extensionPoints.register('llmProvider', OWNER, () => ({
+      async *chat(): AsyncGenerator<LLMStreamEvent> {
+        attempts++;
+        if (attempts === 1) {
+          yield { type: 'text_delta', content: 'intro-' };
+          yield { type: 'tool_use', toolName: 'search', toolId: 't1', toolInput: { q: 'x' } };
+          throw new Error('ECONNRESET while streaming');
+        }
+        yield { type: 'text_delta', content: 'final' };
+        yield { type: 'tool_use', toolName: 'search', toolId: 't1', toolInput: { q: 'x' } };
+        yield { type: 'done' };
+      },
+      cancel(): void {},
+      providerName(): string { return 'test'; },
+    }));
+
+    const running = collect(callLLMWithRetry(
+      makeConfig(),
+      [{ role: 'system', content: 'system' }, { role: 'user', content: 'hello' }],
+      'system',
+      [],
+      undefined,
+    ));
+    await vi.advanceTimersByTimeAsync(30_000);
+    const { events, result } = await running;
+
+    expect(attempts).toBe(2);
+    const texts = events.filter(event => event.type === SSEEventType.Text).map(event => event.content);
+    expect(texts).toEqual(['intro-', 'final']);
+    const replaceIndex = events.findIndex(event => event.type === SSEEventType.ReplaceText);
+    const toolIndex = events.findIndex(event => event.type === SSEEventType.ToolCall);
+    // Attempt 1's tool call must not leak; the only ToolCall arrives after the replace.
+    expect(replaceIndex).toBeGreaterThan(-1);
+    expect(toolIndex).toBeGreaterThan(replaceIndex);
+    expect(result.assistantMessage?.tool_calls).toHaveLength(1);
   });
 
   it('passes a completion budget bounded by the configured context window', async () => {

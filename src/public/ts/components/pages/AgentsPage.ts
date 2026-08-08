@@ -915,7 +915,22 @@ export class AgentsPage implements Page {
     const providerEl = panel.querySelector<HTMLSelectElement>('#ag-edit-provider');
     const apiUrlEl = panel.querySelector<HTMLInputElement>('#ag-edit-api-url');
     const modelEl = panel.querySelector<HTMLInputElement>('#ag-edit-model');
+    const contextEl = panel.querySelector<HTMLInputElement>('#ag-edit-context');
     if (!providerEl || !apiUrlEl || !modelEl) return;
+
+    const autoFillContext = () => {
+      if (providerEl.value !== 'ollama' || !apiUrlEl.value || !modelEl.value || !contextEl) return;
+      const vm = App.getInstance().agentVM;
+      void vm.queryModelContext(providerEl.value, apiUrlEl.value.trim(), modelEl.value.trim()).then((result) => {
+        if (!panel.isConnected) return; // panel closed while querying
+        if (result.ok && typeof result.contextWindow === 'number' && result.contextWindow > 0) {
+          contextEl.value = String(result.contextWindow);
+          ToastManager.getInstance().success(t('agents.toast.contextAutoFilled', { context: result.contextWindow }));
+        } else if (result.message) {
+          ToastManager.getInstance().error(t('agents.toast.contextQueryFailed', { message: result.message }));
+        }
+      });
+    };
 
     providerEl.addEventListener('change', () => {
       if (providerEl.value === 'ollama') {
@@ -924,7 +939,10 @@ export class AgentsPage implements Page {
       } else if (!apiUrlEl.value || apiUrlEl.value === 'http://localhost:11434') {
         apiUrlEl.value = 'https://api.openai.com';
       }
+      // When switching to Ollama with a model already set, fill the context.
+      if (providerEl.value === 'ollama' && modelEl.value) autoFillContext();
     });
+    modelEl.addEventListener('change', autoFillContext);
   }
 
   private _childDraft(parent: AgentConfig, role: string): any {

@@ -20,6 +20,16 @@ export enum SkillSource {
   Plugin = 'plugin',
   /** Built-in skills (lowest priority, overridable by any other source) */
   Builtin = 'builtin',
+  /** Skills live-mounted from external ecosystems (Codex/Claude/OpenClaw/OpenCode/Hermes) */
+  Ecosystem = 'ecosystem',
+}
+
+/** Origin metadata for skills imported from an external ecosystem. */
+export interface SkillOrigin {
+  kind: string;
+  sourcePath: string;
+  supportLevel?: string;
+  displayName?: string;
 }
 
 export interface SkillOptions {
@@ -38,6 +48,8 @@ export interface SkillOptions {
   shell?: 'bash' | 'powershell';
   userInvocable?: boolean;
   hasEmbeddedShell?: boolean;
+  rawFrontmatter?: Record<string, unknown>;
+  origin?: SkillOrigin;
 }
 
 export class Skill extends EventEmitter {
@@ -59,6 +71,8 @@ export class Skill extends EventEmitter {
   private _shell: 'bash' | 'powershell' | '';
   private _userInvocable: boolean;
   private _hasEmbeddedShell: boolean;
+  private _rawFrontmatter: Record<string, unknown>;
+  private _origin: SkillOrigin | null;
 
   constructor(
     name: string,
@@ -85,6 +99,8 @@ export class Skill extends EventEmitter {
     this._shell = (options.shell ?? '') as 'bash' | 'powershell' | '';
     this._userInvocable = options.userInvocable ?? true;
     this._hasEmbeddedShell = options.hasEmbeddedShell ?? false;
+    this._rawFrontmatter = options.rawFrontmatter ?? {};
+    this._origin = options.origin ?? null;
   }
 
   name(): string { return this._name; }
@@ -102,6 +118,10 @@ export class Skill extends EventEmitter {
   shell(): string { return this._shell; }
   userInvocable(): boolean { return this._userInvocable; }
   hasEmbeddedShell(): boolean { return this._hasEmbeddedShell; }
+  /** Full raw YAML frontmatter as parsed (unknown fields preserved). */
+  rawFrontmatter(): Record<string, unknown> { return { ...this._rawFrontmatter }; }
+  /** Ecosystem origin metadata when the skill was live-mounted from another ecosystem. */
+  origin(): SkillOrigin | null { return this._origin; }
 
   /** Full Markdown body — may contain !`cmd` blocks executed at invoke time */
   body(): string { return this._body; }
@@ -197,13 +217,14 @@ export class Skill extends EventEmitter {
     content: string,
     virtualPath: string,
     source: SkillSource = SkillSource.Project,
+    extra: { rawFrontmatter?: Record<string, unknown>; origin?: SkillOrigin } = {},
   ): Skill {
     const { frontmatter, body } = parseSkillMarkdown(content, virtualPath);
     const errors = validateSkillFrontmatter(frontmatter);
     if (errors.length > 0) {
       throw new Error(`Invalid skill content for "${virtualPath}":\n  - ${errors.join('\n  - ')}`);
     }
-    return Skill._fromParsed(frontmatter, body, source, virtualPath);
+    return Skill._fromParsed(frontmatter, body, source, virtualPath, extra);
   }
 
   private static _fromParsed(
@@ -211,6 +232,7 @@ export class Skill extends EventEmitter {
     body: string,
     source: SkillSource,
     filePath: string,
+    extra: { rawFrontmatter?: Record<string, unknown>; origin?: SkillOrigin } = {},
   ): Skill {
     const hasShell = /!`[^`]+`/.test(body) || /```!\s*\n/.test(body);
 
@@ -236,6 +258,8 @@ export class Skill extends EventEmitter {
         shell: fm.shell as 'bash' | 'powershell' | undefined,
         userInvocable: (fm.user_invocable ?? fm.userInvocable ?? true) as boolean,
         hasEmbeddedShell: hasShell,
+        rawFrontmatter: extra.rawFrontmatter ?? fm,
+        origin: extra.origin,
       },
     );
   }
@@ -248,5 +272,6 @@ export function sourceWeight(source: SkillSource): number {
     case SkillSource.User: return 3;
     case SkillSource.Plugin: return 2;
     case SkillSource.Builtin: return 1;
+    case SkillSource.Ecosystem: return 0;
   }
 }

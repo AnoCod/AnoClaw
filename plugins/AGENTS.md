@@ -289,9 +289,12 @@ window.addEventListener('message', (e) => {
 
 | Plugin | Purpose | Key Patterns |
 |--------|---------|--------------|
-| `anoclaw-mcp` | MCP protocol | JSON-RPC engine, multi-transport (stdio/SSE/HTTP), auto-reconnect, health monitoring |
 | `anoclaw-gateway` | Messaging gateway | Multi-adapter (Telegram, Feishu, WeChat), WebSocket |
 | `anoclaw-meeting` | Multi-agent meetings | Round-robin discussion, summaries, action plans |
+
+> MCP is a kernel feature since v2.1 (`src/server/infra/mcp/`). The retired
+> `anoclaw-mcp` plugin remains on disk as `plugins/anoclaw-mcp.disabled` only
+> so its plugin-owned data can be migrated on first launch.
 
 ---
 

@@ -128,7 +128,7 @@ class FakePageElement {
   set innerHTML(value: string) {
     this._html = value;
     this.children.splice(0);
-    const wrapper = value.match(/id="(skills-inner|memory-inner)"/);
+    const wrapper = value.match(/id="(skills-inner|memory-inner|hub-inner)"/);
     if (wrapper) {
       const inner = new FakePageElement('div');
       inner.id = wrapper[1];
@@ -212,39 +212,40 @@ describe('localized core pages', () => {
     setLocale('zh-CN');
   });
 
-  it('replaces Skills and Memory static, empty, and status text at runtime', async () => {
-    const [{ SkillsPage }, { MemoryPage }] = await Promise.all([
-      import('../SkillsPage.js'),
+  it('replaces Skills & Tools and Memory static, empty, and status text at runtime', async () => {
+    const [{ SkillHubPage }, { MemoryPage }] = await Promise.all([
+      import('../SkillHubPage.js'),
       import('../MemoryPage.js'),
     ]);
-    const skills = new SkillsPage();
+    const hub = new SkillHubPage();
     const memory = new MemoryPage();
 
-    (skills as unknown as { _skills: unknown[]; _renderGrid(): void })._skills = [{
+    (hub as unknown as { _skills: unknown[]; _renderAll(): void })._skills = [{
       id: 'test-skill',
       name: 'test-skill',
       description: '',
       content: '',
+      source: 'project',
       enabled: false,
     }];
-    (skills as unknown as { _renderGrid(): void })._renderGrid();
+    (hub as unknown as { _renderAll(): void })._renderAll();
     (memory as unknown as { _renderGrid(): void })._renderGrid();
 
-    const skillsRoot = skills.container as unknown as FakePageElement;
+    const hubRoot = hub.container as unknown as FakePageElement;
     const memoryRoot = memory.container as unknown as FakePageElement;
-    expect(skillsRoot.querySelector('.skills-kicker')?.textContent).toBe('技能');
-    expect(skillsRoot.querySelector('.skill-row-status')?.textContent).toBe('已禁用');
-    expect(skillsRoot.querySelector('.skills-map-status')?.textContent).toBe('1 个已禁用');
+    expect(hubRoot.querySelector('.hub-kicker')?.textContent).toBe('技能 · MCP · 生态');
+    expect(hubRoot.querySelector('.hub-name')?.textContent).toBe('test-skill');
+    expect(hubRoot.querySelector('.hub-meta')?.children[0]?.textContent).toBe('project');
+    expect(hubRoot.querySelector('.hub-summary')?.textContent).toContain('1');
     expect(memoryRoot.querySelector('.mem-header-title')?.textContent).toBe('记忆');
     expect(memoryRoot.querySelector('.ui-empty-title')?.textContent).toBe('没有找到记忆条目。');
     expect(memoryRoot.querySelectorAll('.mem-type-tab').map((tab) => tab.textContent)).toContain('全部');
 
     setLocale('en-US');
 
-    expect(skillsRoot.querySelector('.skills-kicker')?.textContent).toBe('Skills');
-    expect(skillsRoot.querySelector('.skill-row-status')?.textContent).toBe('Disabled');
-    expect(skillsRoot.querySelector('.skills-map-status')?.textContent).toBe('1 disabled');
-    expect(skillsRoot.querySelector('.skills-kicker')?.textContent).not.toBe('技能');
+    expect(hubRoot.querySelector('.hub-kicker')?.textContent).toBe('Skills · MCP · Ecosystem');
+    expect(hubRoot.querySelector('.hub-kicker')?.textContent).not.toBe('技能 · MCP · 生态');
+    expect(hubRoot.querySelector('.hub-meta')?.children[0]?.textContent).toBe('project');
     expect(memoryRoot.querySelector('.mem-header-title')?.textContent).toBe('Memory');
     expect(memoryRoot.querySelector('.ui-empty-title')?.textContent).toBe('No memory entries found.');
     expect(memoryRoot.querySelectorAll('.mem-type-tab').map((tab) => tab.textContent)).toContain('All');

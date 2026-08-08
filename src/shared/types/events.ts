@@ -125,6 +125,14 @@ export interface CoreEventMap {
   'skill:loaded': { agentId: string; skillNames: string[] };
   'skill:changed': { action: 'created' | 'updated' | 'deleted' | 'reloaded'; name: string };
 
+  // ecosystem bridge
+  'ecosystem:state-change': { action: 'synced' | 'enabled' | 'disabled' | 'trusted' | 'forgotten'; entryId?: string; total?: number };
+  'ecosystem:entry-updated': { entryId: string; status: string; enabled: boolean };
+
+  // native MCP
+  'mcp:state-change': { server: string; status: string; detail?: string; timestamp: number };
+  'mcp:log': { level: 'info' | 'warn' | 'error'; server: string; message: string; timestamp: number };
+
   // talent pool
   'talent_pool:changed': { action: 'group_created' | 'group_updated' | 'group_deleted' | 'template_created' | 'template_deleted' | 'hired'; entityId: string };
 
@@ -191,6 +199,8 @@ export enum WsMessageType {
   SubsessionCreated = 'subsession_created',
   Error       = 'error',
   Done        = 'done',
+  /** Server → Client: discard the current partial streaming segment and restart. */
+  ReplaceText = 'replace_text',
   Sleep       = 'sleep',
   Wake        = 'wake',
   Pong        = 'pong',

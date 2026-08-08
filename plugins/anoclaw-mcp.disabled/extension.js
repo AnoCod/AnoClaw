@@ -279,13 +279,13 @@ class MCPClient {
           name: t.name,
           description: t.description || '',
           inputSchema: t.inputSchema || {},
-        }));
+        })).filter(t => this._toolAllowed(t.name));
       } catch (err) {
         this._plugin.log(`tools/list failed for "${this.name}": ${err.message}`);
       }
     }
     // Resources
-    if (this._capabilities?.resources !== undefined || true) {
+    if ((this._capabilities?.resources !== undefined || true) && this._toolFilterAllows('resources')) {
       try {
         const result = await this._rpc.request(sendFn, 'resources/list', {});
         this._resources = (result?.resources || []).map(r => ({
@@ -297,7 +297,7 @@ class MCPClient {
       }
     }
     // Prompts
-    if (this._capabilities?.prompts !== undefined || true) {
+    if ((this._capabilities?.prompts !== undefined || true) && this._toolFilterAllows('prompts')) {
       try {
         const result = await this._rpc.request(sendFn, 'prompts/list', {});
         this._prompts = (result?.prompts || []).map(p => ({
@@ -308,6 +308,42 @@ class MCPClient {
         // prompts/list is optional
       }
     }
+  }
+
+  /**
+   * Apply per-server toolFilter from imported ecosystem configs:
+   *   toolFilter: { include?: string[], exclude?: string[] }
+   * Patterns support exact names and fnmatch-style globs (* and ?).
+   */
+  _toolAllowed(name) {
+    const filter = this._cfg.toolFilter;
+    if (!filter) return true;
+    const include = Array.isArray(filter.include) && filter.include.length > 0 ? filter.include : null;
+    const exclude = Array.isArray(filter.exclude) && filter.exclude.length > 0 ? filter.exclude : null;
+    if (!include && !exclude) return true;
+    if (include && !include.some(p => this._globMatch(name, p))) return false;
+    if (exclude && exclude.some(p => this._globMatch(name, p))) return false;
+    return true;
+  }
+
+  _toolFilterAllows(kind) {
+    const filter = this._cfg.toolFilter;
+    if (!filter) return true;
+    if (kind === 'resources') return filter.resources !== false;
+    if (kind === 'prompts') return filter.prompts !== false;
+    return true;
+  }
+
+  _globMatch(name, pattern) {
+    const regex = new RegExp(
+      '^' + String(pattern)
+        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*\*/g, '§§')
+        .replace(/\*/g, '[^/]*')
+        .replace(/\?/g, '.')
+        .replace(/§§/g, '.*') + '$',
+    );
+    return regex.test(name);
   }
 
   // ── Transport: stdio ──

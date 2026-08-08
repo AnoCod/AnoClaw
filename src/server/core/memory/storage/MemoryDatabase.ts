@@ -220,11 +220,12 @@ export class MemoryDatabase {
       // File doesn't exist — will create fresh
     }
 
-    // Dynamic import of sql.js (CJS module, default export)
+    // 'sql.js' is aliased to fts5-sql-bundle in package.json —
+    // the stock sql.js build does not include the FTS5 module.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const initSqlJsModule: any = await import('sql.js');
     const initFn: (config?: object) => Promise<SqlJsStatic> =
-      initSqlJsModule.default || initSqlJsModule;
+      initSqlJsModule.initSqlJs ?? initSqlJsModule.default ?? initSqlJsModule;
     this._SQL = await initFn();
 
     // Open or create the database

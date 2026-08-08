@@ -12,10 +12,12 @@ vi.mock('sql.js', () => {
   const Database = vi.fn(function MockDatabase() {
     return mockDB;
   });
+  const initMock = vi.fn().mockResolvedValue({
+    Database,
+  });
   return {
-    default: vi.fn().mockResolvedValue({
-      Database,
-    }),
+    default: initMock,
+    initSqlJs: initMock,
   };
 });
 
